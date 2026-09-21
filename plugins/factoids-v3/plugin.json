@@ -1,0 +1,41 @@
+{
+  "api": 3,
+  "name": "factoids-v3",
+  "version": "1.0.0",
+  "description": "A reversible API v3 home for side-effect-free factoid detail and listing commands.",
+  "runtime": {
+    "api": 3,
+    "kind": "perl",
+    "entrypoint": "lib/Factoids.pm",
+    "class": "Mediabot::Plugin::Factoids"
+  },
+  "compatibility": {
+    "mediabot": ">=3.6dev"
+  },
+  "activation": {
+    "default": "off"
+  },
+  "capabilities": [
+    "data.factoids.read",
+    "irc.notice"
+  ],
+  "commands": {
+    "factoid": {
+      "source": "public",
+      "help": "Show one factoid with its author, dates and recall count.",
+      "level": 0,
+      "handler": "command_factoid",
+      "migration": "legacy-public-fallback"
+    },
+    "factoids": {
+      "source": "public",
+      "help": "List channel factoids or show the most recalled entries.",
+      "level": 0,
+      "handler": "command_factoids",
+      "migration": "legacy-public-fallback"
+    }
+  },
+  "events": [],
+  "jobs": {},
+  "config_schema": {}
+}

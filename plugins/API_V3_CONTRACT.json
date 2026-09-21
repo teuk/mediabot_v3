@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB758",
+  "milestone": "MB759",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -126,9 +126,24 @@
     "channel_source": "invocation policy",
     "observe_reads": "allowed",
     "recall_counter_writes": "unavailable",
-    "plugin_adoption": "none",
+    "plugin_adoption": "factoids-v3 factoid and factoids, inactive by default",
     "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable"
+  },
+  "factoid_read_migration": {
+    "package": "factoids-v3",
+    "commands": [
+      "factoid",
+      "factoids"
+    ],
+    "excluded_commands": [
+      "whatis",
+      "learn",
+      "forget",
+      "?keyword"
+    ],
+    "read_side_effects": "none",
+    "activation": "explicit package plus channel policy"
   },
   "quote_read_limits": {
     "capability": "data.quotes.read",

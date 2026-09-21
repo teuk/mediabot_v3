@@ -10,9 +10,10 @@ built-in dispatch, MB750's read-only operator diagnostics, MB751's bounded
 runtime failure history, MB752's explicit per-resource/channel quarantine,
 MB753's quote-write authority, MB754's reversible `q`/`quote` adoption and
 MB755's nullable anonymous-author repair, MB756's supervised short-content
-pilot, MB757's namespace-safe API v3 repository cleanup and MB758's second
-approved domain facade for bounded factoid reads. It does not enable a plugin
-or grant a capability automatically.
+pilot, MB757's namespace-safe API v3 repository cleanup, MB758's second
+approved domain facade for bounded factoid reads and MB759's reversible pure
+factoid-command adoption. It does not enable a plugin or grant a capability
+automatically.
 
 ## Current baseline
 
@@ -148,6 +149,10 @@ MB758 leaves the Quote Vault and opens `data.factoids.read`. Exact lookup,
 bounded keyword listing and top-recall ranking cross a core-owned service;
 plugins receive detached values rather than SQL or a database handle. Recall
 counting and every factoid mutation remain outside this read-only milestone.
+MB759 adds `factoids-v3`, still unloaded, disabled and channel-off by default.
+Only `factoid` and `factoids` cross the saved-handler bridge; observation is
+silent, activation is channel-scoped and unload restores the exact prior
+registry entries. `whatis`, `learn`, `forget` and `?keyword` do not move.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -261,12 +266,16 @@ Planned capability families include:
     `data.factoids.read` capability provides exact lookup, a 60-key bounded
     list and a 10-entry top view through the invocation channel. Reads work in
     `observe`, never increment `hits`, expose no SQL and adopt no command.
+20. **MB759 — pure factoid command adoption:** complete in source. The inert
+    `factoids-v3` package adopts only `factoid` and `factoids`; `off`, disable
+    and unload preserve the saved built-ins, while `observe` shadows without a
+    second visible answer or recall mutation.
 
 The quote path is stabilized and receives no further expansion here. After
-MB758, a separate reviewed milestone may build an inert `factoids-v3` package
-and adopt only the pure `factoid`/`factoids` readers behind the reversible
-fallback bridge. `whatis` must wait for a distinct recall-counter authority;
-`learn` and `forget` require a separately reviewed write capability.
+MB759, `whatis` must wait for a distinct recall-counter authority; `learn` and
+`forget` require a separately reviewed write capability. Until then, a live
+pilot may promote only the two pure readers on one development channel and
+must retain immediate policy rollback.
 
 ## Extraction order
 
@@ -276,8 +285,8 @@ The first migration candidates are deliberately low-risk:
 2. short external content through the MB746 shared HTTP proof;
 3. pure quote reads through the MB747 facade and MB748 bridge, then writes as a
    separate gate.
-4. pure factoid reads through the MB758 facade before any separately authorized
-   recall counter, learn or forget mutation.
+4. pure factoid reads through the MB758 facade and MB759 reversible package
+   before any separately authorized recall counter, learn or forget mutation.
 
 AI conversation, radio, central moderation, authentication, updater and IRC
 transport are not first-wave extraction candidates.

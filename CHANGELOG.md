@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb759 — appoint a quiet librarian for the factoid shelves
+
+- Add the inert `factoids-v3` package with only `data.factoids.read` and
+  `irc.notice`, adopting the pure `factoid` and `factoids` commands through the
+  exact saved-handler bridge. No package is loaded, enabled or opted in by
+  installing the code. 📚🕯️
+- Preserve historical rendering for detail, filtered lists and top-recall
+  views while keeping every v3 read side-effect-free. `observe` stays silent
+  and leaves the old handler as the only visible answer; `on` is authoritative
+  only on the selected channel.
+- Keep `whatis`, `learn`, `forget`, `?keyword` and recall-counter writes behind
+  the old portrait. `off`, disable and unload restore the two original registry
+  entries without touching factoid data. 🖼️🗝️
+
 ### mb758 — open the Restricted Section to factoid readers
 
 - Add the distinct `data.factoids.read` capability and a core-owned service

@@ -207,3 +207,11 @@ Exact results are immutable detached records; list/top results are copied
 scalars. Reads may run in `observe` but never update `hits`. No package requests
 the capability yet, no command moves, and `learn`, `forget` and recall
 accounting remain unavailable until separate write authority is reviewed.
+
+MB759 adopts only the two operations already proven physically read-only.
+`factoids-v3` mounts `factoid` and `factoids` through the same exact saved-entry
+bridge used by Quotes. It requests only `data.factoids.read` and `irc.notice`,
+remains unloaded/disabled/off by default, shadows silently in `observe`, and is
+authoritative only for an explicitly selected `on` channel. `whatis` is
+excluded because it increments `hits`; `learn`, `forget` and `?keyword` remain
+historical. Lifecycle rollback restores the exact two prior registry entries.

@@ -27,7 +27,7 @@ return sub {
 
     my $api_contract = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_CONTRACT.json'));
-    $assert->is($api_contract->{milestone}, 'MB758',
+    $assert->is($api_contract->{milestone}, 'MB759',
         'API v3 machine contract records the current platform milestone');
     $assert->is(join(',', @{ $api_contract->{implemented_capabilities} }),
         'data.factoids.read,data.quotes.read,data.quotes.write,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
@@ -56,6 +56,9 @@ return sub {
     $assert->is($api_contract->{quote_write_limits}{plugin_adoption},
         'quotes-v3 q and quote, inactive by default',
         'machine contract keeps quote adoption operator-controlled');
+    $assert->is($api_contract->{factoid_read_limits}{plugin_adoption},
+        'factoids-v3 factoid and factoids, inactive by default',
+        'machine contract keeps factoid adoption operator-controlled');
 
     my $published = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_EVENTS.json'));

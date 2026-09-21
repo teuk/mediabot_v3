@@ -62,6 +62,17 @@ return sub {
     $assert->ok(!'Mediabot::Plugin::V3::Hello'->can('new'),
         'discovery does not load plugin Perl code');
 
+    my @factoids = grep { $_->{name} eq 'factoids-v3' } @packages;
+    $assert->is(scalar @factoids, 1,
+        'discovery finds the inert factoid adoption package');
+    $assert->is($factoids[0]{activation}, 'off',
+        'factoid package discovery preserves default-off activation');
+    $assert->is(join(',', @{ $factoids[0]{capabilities} }),
+        'data.factoids.read,irc.notice',
+        'discovery exposes only the two factoid package capabilities');
+    $assert->ok(!'Mediabot::Plugin::Factoids'->can('new'),
+        'factoid discovery does not execute its entrypoint');
+
     my %unknown = (%$manifest, surprise => 1);
     my $ok = eval { Mediabot::Plugin::ManifestV3->validate(\%unknown); 1 };
     $assert->like($@ // '', qr/unknown manifest field 'surprise'/,

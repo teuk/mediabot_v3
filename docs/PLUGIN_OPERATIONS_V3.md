@@ -8,8 +8,10 @@ mutation: its quote-command adoption uses the existing lifecycle, permission
 and per-channel policy controls and remains inactive by default. MB757 adds an
 explicit, namespace-safe repository cleanup action after the supervised
 `short-content-v3` pilot proved that the legacy cleanup verb cannot address
-API v3 state. MB758 adds a read-only factoid data capability but no package,
-Partyline mutation or automatic activation.
+API v3 state. MB758 adds a read-only factoid data capability. MB759 places only
+the pure `factoid` and `factoids` readers in an inert package behind the
+existing lifecycle and per-channel policy controls; it adds no Partyline
+mutation or automatic activation.
 
 ## Is the package operationally ready?
 

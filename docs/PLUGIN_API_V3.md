@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB758. Packages are discoverable and
+Plugin API v3 remains experimental in MB759. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. It adds no automatic remediation and exposes no exception text,
@@ -24,6 +24,8 @@ package, [`../plugins/playful-v3`](../plugins/playful-v3) for the first pilot,
 [`../plugins/short-content-v3`](../plugins/short-content-v3) for the HTTP/data
 proof,
 [`../plugins/quotes-v3`](../plugins/quotes-v3) for the first database-backed
+command migration,
+[`../plugins/factoids-v3`](../plugins/factoids-v3) for the read-only factoid
 command migration,
 [`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json)
 for the machine-readable boundary and
@@ -312,9 +314,19 @@ characters; `_` remains literal, while `*` and `?` are translated by the core
 after SQL wildcard escaping.
 
 Reads are allowed in `observe` and fail closed in `off`. They never increment
-the recall counter. `learn`, `forget` and recall accounting remain outside the
-capability, and MB758 ships no factoid package or command migration. Service
-errors become a neutral `unavailable` result after bounded logging and metrics.
+the recall counter. Service errors become a neutral `unavailable` result after
+bounded logging and metrics.
+
+MB759 adds the inert `factoids-v3` package and adopts only `factoid` and
+`factoids` through the saved-handler migration bridge. Disabled and `off` use
+the exact historical handlers. `observe` runs the new readers silently before
+the historical handler supplies the only visible answer. `on` makes the package
+authoritative only for that selected channel, while unload restores both saved
+registry entries. `whatis`, `learn`, `forget`, `?keyword` and all recall-counter
+writes remain historical and outside the package.
+
+The supervised activation and rollback sequence is documented in
+[`FACTOID_COMMAND_V3_PILOT.md`](FACTOID_COMMAND_V3_PILOT.md).
 
 ## Approved quote reads
 

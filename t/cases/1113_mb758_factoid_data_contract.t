@@ -24,8 +24,8 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1113('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB758',
-        'machine contract records the factoid authority milestone');
+    $assert->is($contract->{milestone}, 'MB759',
+        'machine contract records the current factoid platform milestone');
     $assert->ok(grep($_ eq 'data.factoids.read',
         @{ $contract->{implemented_capabilities} }),
         'machine contract implements the exact factoid read capability');
@@ -43,8 +43,9 @@ return sub {
     $assert->is($contract->{factoid_read_limits}{recall_counter_writes},
         'unavailable',
         'read capability cannot alter recall accounting');
-    $assert->is($contract->{factoid_read_limits}{plugin_adoption}, 'none',
-        'authority ships before any command migration');
+    $assert->is($contract->{factoid_read_limits}{plugin_adoption},
+        'factoids-v3 factoid and factoids, inactive by default',
+        'read authority now has an inert operator-controlled package');
     $assert->ok(grep($_ eq 'Mediabot::Plugin::FactoidRecordV3',
         @{ $contract->{plugin_receives} }),
         'machine contract names the detached factoid record');
@@ -63,14 +64,14 @@ return sub {
         'manager allowlists the three factoid operations');
     $assert->ok($service !~ /\b(?:INSERT|UPDATE|DELETE)\b/i,
         'factoid read service source contains no mutating SQL verb');
-    $assert->ok(!-d 'plugins/factoids-v3',
-        'MB758 introduces authority without a plugin adoption package');
+    $assert->ok(-f 'plugins/factoids-v3/plugin.json',
+        'factoid adoption package is present without weakening the facade');
 
     my $guide = slurp_1113('docs/PLUGIN_API_V3.md');
     $assert->like($guide,
         qr/They never increment\s+the recall counter/,
         'author guide records the side-effect-free read guarantee');
     $assert->like($guide,
-        qr/MB758 ships no factoid package or command migration/,
-        'author guide records the no-adoption boundary');
+        qr/MB759 adds the inert `factoids-v3` package/,
+        'author guide records the separately reviewed adoption boundary');
 };
