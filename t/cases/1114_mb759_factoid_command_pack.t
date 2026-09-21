@@ -33,17 +33,17 @@ return sub {
     $assert->is($manifest->{activation}{default}, 'off',
         'factoid package is inert by default');
     $assert->is(join(',', @{ $manifest->{capabilities} }),
-        'data.factoids.read,irc.notice',
-        'factoid package requests only read data and private notices');
+        'data.factoids.read,data.factoids.write,irc.notice',
+        'factoid package requests bounded read/write data and private notices');
     $assert->is(join(',', sort keys %{ $manifest->{commands} }),
-        'factoid,factoids',
-        'package adopts only the two side-effect-free commands');
+        'factoid,factoids,forget,learn',
+        'package contains the two readers and two authorized writers');
 
     my (@reads, @notices, @replies);
     my $authority = Mediabot::PluginContext->new(
         plugin => 'factoids-v3',
-        requested => [qw(data.factoids.read irc.notice)],
-        granted => [qw(data.factoids.read irc.notice)],
+        requested => [qw(data.factoids.read data.factoids.write irc.notice)],
+        granted => [qw(data.factoids.read data.factoids.write irc.notice)],
         factoids_read_sink => sub {
             my ($invocation, $operation, $args) = @_;
             push @reads, [$operation, { %$args }];

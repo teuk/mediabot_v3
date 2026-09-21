@@ -8,12 +8,13 @@ mutation: its quote-command adoption uses the existing lifecycle, permission
 and per-channel policy controls and remains inactive by default. MB757 adds an
 explicit, namespace-safe repository cleanup action after the supervised
 `short-content-v3` pilot proved that the legacy cleanup verb cannot address
-API v3 state. MB758 adds a read-only factoid data capability. MB759 places only
-the pure `factoid` and `factoids` readers in an inert package behind the
-existing lifecycle and per-channel policy controls; it adds no Partyline
-mutation or automatic activation. MB760 adds an on-only factoid write facade,
-but no package requests it and no operational command, policy or activation
-changes.
+API v3 state. MB758 adds a read-only factoid data capability. MB759 places the
+pure `factoid` and `factoids` readers in an inert package behind the existing
+lifecycle and per-channel policy controls. MB760 adds an on-only factoid write
+facade. MB761 lets the same package request that facade for `learn` and
+`forget`, still with no new Partyline mutation, automatic activation or policy
+change. `observe` suppresses the shadow write and leaves the historical handler
+as the only mutating path.
 
 ## Is the package operationally ready?
 

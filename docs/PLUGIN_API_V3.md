@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB759. Packages are discoverable and
+Plugin API v3 remains experimental in MB761. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. It adds no automatic remediation and exposes no exception text,
@@ -25,8 +25,8 @@ package, [`../plugins/playful-v3`](../plugins/playful-v3) for the first pilot,
 proof,
 [`../plugins/quotes-v3`](../plugins/quotes-v3) for the first database-backed
 command migration,
-[`../plugins/factoids-v3`](../plugins/factoids-v3) for the read-only factoid
-command migration,
+[`../plugins/factoids-v3`](../plugins/factoids-v3) for reversible factoid read
+and authorized-write command migration,
 [`../plugins/API_V3_CONTRACT.json`](../plugins/API_V3_CONTRACT.json)
 for the machine-readable boundary and
 [`../plugins/API_V3_EVENTS.json`](../plugins/API_V3_EVENTS.json) for the event
@@ -317,13 +317,13 @@ Reads are allowed in `observe` and fail closed in `off`. They never increment
 the recall counter. Service errors become a neutral `unavailable` result after
 bounded logging and metrics.
 
-MB759 adds the inert `factoids-v3` package and adopts only `factoid` and
+MB759 adds the inert `factoids-v3` package and first adopts `factoid` and
 `factoids` through the saved-handler migration bridge. Disabled and `off` use
 the exact historical handlers. `observe` runs the new readers silently before
 the historical handler supplies the only visible answer. `on` makes the package
-authoritative only for that selected channel, while unload restores both saved
-registry entries. `whatis`, `learn`, `forget`, `?keyword` and all recall-counter
-writes remain historical and outside the package.
+authoritative only for that selected channel, while unload restores the saved
+registry entries. MB761 adds `learn` and `forget`; `whatis`, `?keyword` and all
+recall-counter writes remain historical and outside the package.
 
 The supervised activation and rollback sequence is documented in
 [`FACTOID_COMMAND_V3_PILOT.md`](FACTOID_COMMAND_V3_PILOT.md).
@@ -358,9 +358,15 @@ resolved factoid id and channel id. Missing factoids return an idempotent
 
 All factoid writes require current policy `on`. `observe` returns a suppressed
 result before the mutation service, and `off` remains inert. Recall-counter
-mutation is not exposed. No package requests this capability in MB760;
-`factoids-v3`, `learn`, `forget`, `whatis` and `?keyword` remain unchanged and
-historical.
+mutation is not exposed.
+
+MB761 grants `data.factoids.write` to `factoids-v3` and mounts only `learn` and
+`forget` through the saved-handler bridge. In `observe`, plugin parsing runs
+silently, the v3 mutation is suppressed before database access, and the exact
+historical handler remains the sole visible and mutating path. In `on`, one
+core-authorized upsert or delete becomes authoritative for the selected
+channel. Disable, `off` and unload restore the saved handlers. `whatis` and
+`?keyword` remain historical until a distinct recall-counter authority exists.
 
 ## Approved quote reads
 
@@ -488,7 +494,7 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB760 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB761 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
 `data.quotes.read`, `data.quotes.write`, `data.factoids.read` and
 `data.factoids.write`. Other capability names remain reserved for later

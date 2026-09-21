@@ -225,3 +225,12 @@ Delete trusts an authenticated numeric author, Administrator or channel level
 400, never nickname text alone. Writes require `on`, are suppressed before the
 service in `observe`, and expose no recall mutation. No package requests this
 capability, no command moves and no factoid data changes in MB760.
+
+MB761 adopts only the two commands covered by that authority. `factoids-v3`
+requests `data.factoids.write` and mounts `learn` plus `forget` through the
+saved-entry bridge. `observe` executes parsing but the core suppresses the v3
+write before the service; the historical fallback then remains the single
+visible mutation. `on` performs exactly one bounded core-authorized write.
+`whatis` and `?keyword` remain historical because their recall increment still
+has no dedicated capability. The package remains unloaded, disabled and off by
+default, and rollback restores all four saved command entries.

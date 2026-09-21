@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb761 — issue reversible quills to the factoid desk
+
+- Extend the inert `factoids-v3` package to request the already bounded
+  `data.factoids.write` capability and adopt only `learn` and `forget` through
+  the saved-handler migration bridge. Installing the source still loads,
+  enables and configures nothing. ✒️🗝️
+- Preserve one-mutation shadow semantics: `observe` suppresses the v3 write
+  before the service and then invokes the historical handler exactly once;
+  `on` uses one core-authorized upsert or delete, while `off`, disable and
+  unload restore the exact historical registry entries.
+- Keep `whatis` and `?keyword` behind the old portrait because their visible
+  recall increments still lack a distinct authority. Factoid writes remain
+  channel-scoped, bounded and attributable by core-derived numeric identity;
+  nickname text alone cannot authorize deletion. 🖼️🛡️
+
 ### mb760 — seal factoid writes behind a Ministry authorization desk
 
 - Add the distinct `data.factoids.write` capability and a core-owned service

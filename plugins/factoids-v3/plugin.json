@@ -1,8 +1,8 @@
 {
   "api": 3,
   "name": "factoids-v3",
-  "version": "1.0.0",
-  "description": "A reversible API v3 home for side-effect-free factoid detail and listing commands.",
+  "version": "1.1.0",
+  "description": "A reversible API v3 home for bounded factoid reads and authorized channel-scoped writes.",
   "runtime": {
     "api": 3,
     "kind": "perl",
@@ -17,6 +17,7 @@
   },
   "capabilities": [
     "data.factoids.read",
+    "data.factoids.write",
     "irc.notice"
   ],
   "commands": {
@@ -32,6 +33,20 @@
       "help": "List channel factoids or show the most recalled entries.",
       "level": 0,
       "handler": "command_factoids",
+      "migration": "legacy-public-fallback"
+    },
+    "forget": {
+      "source": "public",
+      "help": "Delete an authored channel factoid or use operator authority.",
+      "level": 0,
+      "handler": "command_forget",
+      "migration": "legacy-public-fallback"
+    },
+    "learn": {
+      "source": "public",
+      "help": "Store or update a bounded channel factoid.",
+      "level": 0,
+      "handler": "command_learn",
       "migration": "legacy-public-fallback"
     }
   },

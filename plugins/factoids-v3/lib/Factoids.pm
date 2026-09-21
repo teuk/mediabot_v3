@@ -44,6 +44,21 @@ sub _keyword {
     return $keyword;
 }
 
+sub _truncate_wire {
+    my ($text, $max) = @_;
+    $text = '' unless defined $text;
+    return $text if _wire_length($text) <= $max && length($text) <= $max;
+    my ($out, $used, $characters) = ('', 0, 0);
+    for my $character (split //, $text) {
+        my $size = _wire_length($character);
+        last if $used + $size > $max || $characters >= $max;
+        $out .= $character;
+        $used += $size;
+        $characters++;
+    }
+    return $out;
+}
+
 sub _date {
     my ($value) = @_;
     return '?' unless defined($value) && !ref($value) && length($value);
@@ -136,6 +151,65 @@ sub command_factoids {
     }
     return _notice_items($context, $invocation,
         scalar(@$keywords) . " factoid(s) on $channel: ", $keywords);
+}
+
+sub command_learn {
+    my ($self, $context, $invocation) = @_;
+    return $context->notice($invocation,
+        'Syntax: learn <keyword> = <value>  (use it in a channel)')
+        unless _channel_ok($invocation);
+
+    my $raw = join ' ', @{ $invocation->args };
+    $raw =~ s/^\s+|\s+$//g;
+    return $context->notice($invocation,
+        'Syntax: learn <keyword> = <value>')
+        unless $raw =~ /^(.+?)\s*=\s*(.+)$/;
+
+    my ($keyword, $value) = (lc($1), $2);
+    $keyword =~ s/^\s+|\s+$//g;
+    $value =~ s/[\r\n\0]+/ /g;
+    $value =~ s/^\s+|\s+$//g;
+    return $context->notice($invocation,
+        'learn: keyword must be 1-64 chars of letters/digits/_.- (no spaces).')
+        unless $keyword =~ /\A[a-z0-9_.-]{1,64}\z/;
+    return $context->notice($invocation, 'learn: value cannot be empty.')
+        unless length $value;
+    $value = _truncate_wire($value, 400);
+
+    my $result = $context->factoid_upsert(
+        $invocation, $keyword, $value);
+    return 1 if ($result->{error} // '') eq 'observe';
+    return $context->notice($invocation,
+        'learn: channel not known to the bot.')
+        if ($result->{error} // '') eq 'channel_unavailable';
+    return $context->notice($invocation,
+        'learn: could not store the factoid.') unless $result->{ok};
+    return $context->notice($invocation,
+        "Learned '$keyword' for " . $invocation->channel . '.');
+}
+
+sub command_forget {
+    my ($self, $context, $invocation) = @_;
+    return $context->notice($invocation,
+        'Syntax: forget <keyword>  (use it in a channel)')
+        unless _channel_ok($invocation);
+
+    my $keyword = _keyword($invocation);
+    return $context->notice($invocation, 'Syntax: forget <keyword>')
+        unless $keyword =~ /\A[a-z0-9_.-]{1,64}\z/;
+
+    my $result = $context->factoid_delete($invocation, $keyword);
+    return 1 if ($result->{error} // '') eq 'observe';
+    if (($result->{error} // '') =~ /\A(?:unauthorized|forbidden)\z/) {
+        return $context->notice($invocation,
+            "forget: only the author or a channel op can forget '$keyword'.");
+    }
+    return $context->notice($invocation, "I don't know '$keyword'.")
+        if $result->{ok} && ($result->{status} // '') eq 'not_found';
+    return $context->notice($invocation, 'forget: delete failed.')
+        unless $result->{ok};
+    return $context->notice($invocation,
+        "Forgot '$keyword' on " . $invocation->channel . '.');
 }
 
 1;

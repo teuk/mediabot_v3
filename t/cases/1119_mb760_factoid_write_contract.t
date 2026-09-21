@@ -21,7 +21,7 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1119('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB760',
+    $assert->is($contract->{milestone}, 'MB761',
         'machine contract records the current platform milestone');
     $assert->ok(grep($_ eq 'data.factoids.write',
         @{ $contract->{implemented_capabilities} }),
@@ -30,8 +30,9 @@ return sub {
         'upsert,delete', 'only the two approved mutations are exposed');
     $assert->is($contract->{factoid_write_limits}{activation}, 'on only',
         'observe can never mutate factoid data');
-    $assert->is($contract->{factoid_write_limits}{plugin_adoption}, 'none',
-        'no package or command adopts factoid writes in MB760');
+    $assert->is($contract->{factoid_write_limits}{plugin_adoption},
+        'factoids-v3 learn and forget, inactive by default',
+        'write adoption remains explicit and operator-controlled');
     $assert->is($contract->{factoid_write_limits}{channel_source},
         'core invocation policy', 'plugin cannot select a write channel');
     $assert->is($contract->{factoid_write_limits}{principal_source},
@@ -61,17 +62,17 @@ return sub {
 
     my $manifest = JSON::PP->new->decode(
         slurp_1119('plugins/factoids-v3/plugin.json'));
-    $assert->ok(!grep($_ eq 'data.factoids.write',
+    $assert->ok(grep($_ eq 'data.factoids.write',
         @{ $manifest->{capabilities} }),
-        'official factoid package does not request write authority yet');
-    $assert->ok(!exists($manifest->{commands}{learn})
-        && !exists($manifest->{commands}{forget})
+        'official factoid package requests the reviewed write authority');
+    $assert->ok(exists($manifest->{commands}{learn})
+        && exists($manifest->{commands}{forget})
         && !exists($manifest->{commands}{whatis}),
-        'mixed and mutating factoid commands remain historical');
+        'learn and forget move while recall mutation remains historical');
 
     my $api = slurp_1119('docs/PLUGIN_API_V3.md');
     $assert->like($api, qr/## Authorized factoid writes/,
         'author guide documents the separate write boundary');
-    $assert->like($api, qr/no package requests this capability/i,
-        'author guide records deliberate non-adoption');
+    $assert->like($api, qr/MB761 grants `data\.factoids\.write`/,
+        'author guide records the separately reviewed adoption');
 };
