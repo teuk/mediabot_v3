@@ -199,3 +199,11 @@ slug and derives the private short-or-hashed v3 key inside `PluginManager`. It
 is idempotent, works independently of package lifecycle or installation, never
 reveals a path, and cannot delete legacy same-slug storage. It adds no startup
 activation, automatic cleanup or plugin-visible filesystem authority.
+
+MB758 deliberately moves to a new product domain instead of extending Quotes.
+`data.factoids.read` offers only exact lookup, bounded keyword listing and a
+bounded top-recall view through the channel selected by the invocation policy.
+Exact results are immutable detached records; list/top results are copied
+scalars. Reads may run in `observe` but never update `hits`. No package requests
+the capability yet, no command moves, and `learn`, `forget` and recall
+accounting remain unavailable until separate write authority is reviewed.

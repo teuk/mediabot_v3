@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB757",
+  "milestone": "MB758",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -46,6 +46,7 @@
     "storage.kv"
   ],
   "implemented_capabilities": [
+    "data.factoids.read",
     "data.quotes.read",
     "data.quotes.write",
     "events.subscribe",
@@ -63,6 +64,7 @@
     "Mediabot::Plugin::EventEnvelopeV3",
     "Mediabot::Plugin::JobInvocationV3",
     "Mediabot::Plugin::HTTPResponseV3",
+    "Mediabot::Plugin::FactoidRecordV3",
     "Mediabot::Plugin::QuoteRecordV3"
   ],
   "plugin_never_receives": [
@@ -107,6 +109,25 @@
     "operator_cleanup": "Owner-only clearv3data with core-derived namespace",
     "cleanup_loaded_or_unloaded": true,
     "plugin_paths": "unavailable",
+    "plugin_database_handles": "unavailable"
+  },
+  "factoid_read_limits": {
+    "capability": "data.factoids.read",
+    "operations": [
+      "by_keyword",
+      "list",
+      "top"
+    ],
+    "maximum_keyword_characters": 64,
+    "maximum_pattern_characters": 64,
+    "maximum_list_results": 60,
+    "maximum_top_results": 10,
+    "pattern_mode": "validated glob with literal SQL wildcard escaping",
+    "channel_source": "invocation policy",
+    "observe_reads": "allowed",
+    "recall_counter_writes": "unavailable",
+    "plugin_adoption": "none",
+    "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable"
   },
   "quote_read_limits": {

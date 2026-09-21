@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb758 — open the Restricted Section to factoid readers
+
+- Add the distinct `data.factoids.read` capability and a core-owned service
+  for exact lookup, bounded keyword lists and top-recall views. The invocation
+  policy chooses the channel; plugins receive no SQL, database handle or
+  cross-channel selector. 📚
+- Return exact results as immutable detached `FactoidRecordV3` objects, cap
+  lists at 60 and rankings at 10, and translate validated glob patterns only
+  after escaping literal SQL wildcards.
+- Keep every read side-effect-free, including in `observe`: recall counters do
+  not move. No package requests the capability, no command is migrated, and
+  `learn`/`forget` remain behind the old portrait until separate write
+  authority is reviewed. 🖼️🪄
+
 ### mb757 — give each v3 grimoire its own vanishing cabinet
 
 - Add Owner-only `.plugins clearv3data <package>` for exact API v3 repository

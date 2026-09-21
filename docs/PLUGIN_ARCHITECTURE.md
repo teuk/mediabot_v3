@@ -10,9 +10,9 @@ built-in dispatch, MB750's read-only operator diagnostics, MB751's bounded
 runtime failure history, MB752's explicit per-resource/channel quarantine,
 MB753's quote-write authority, MB754's reversible `q`/`quote` adoption and
 MB755's nullable anonymous-author repair, MB756's supervised short-content
-pilot and MB757's namespace-safe API v3 repository cleanup. It
-does not enable a plugin or
-grant a capability automatically.
+pilot, MB757's namespace-safe API v3 repository cleanup and MB758's second
+approved domain facade for bounded factoid reads. It does not enable a plugin
+or grant a capability automatically.
 
 ## Current baseline
 
@@ -144,6 +144,10 @@ fetches, neutral error paths stayed bounded, and rollback restored the prior
 state. MB757 makes the cleanup portion explicit: an Owner command derives the
 private v3 namespace in the core, remains idempotent and cannot collide with
 legacy same-slug storage.
+MB758 leaves the Quote Vault and opens `data.factoids.read`. Exact lookup,
+bounded keyword listing and top-recall ranking cross a core-owned service;
+plugins receive detached values rather than SQL or a database handle. Recall
+counting and every factoid mutation remain outside this read-only milestone.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -164,8 +168,9 @@ Planned capability families include:
 | `scheduler.jobs` | ownership, quotas, cancellation and reload cleanup |
 | `http.fetch` | TLS, timeout, size, redirect, private-address and quota policy |
 | `secrets.read:<name>` | reference-based access without manifest or log disclosure |
-| `data.quotes.read` | six bounded channel-scoped reads returning detached records |
+| `data.quotes.read` | eight bounded channel-scoped reads returning detached records |
 | `data.quotes.write` | on-only bounded add/delete/recall with a core-derived principal |
+| `data.factoids.read` | exact lookup plus bounded list/top views without recall mutation |
 | `data.<domain>` | future approved repository methods instead of arbitrary SQL |
 
 ## Dependency boundary matrix
@@ -179,7 +184,7 @@ Planned capability families include:
 | Scheduler | core tasks plus route-v1 timers | shared owned jobs with quotas and lifecycle cancellation | core scheduler |
 | Storage | v2 last-write-wins JSON document | MB746 namespaced KV with compare-and-swap/short transactions | data service |
 | HTTP | per-feature clients outside v3 | MB746 bounded async client with cache and circuit breaker | HTTP service |
-| Database | possible through full in-process bot | approved quote reads plus MB754's separately authorized add/delete/recall service; MB755 nullable anonymous attribution | data layer |
+| Database | possible through full in-process bot | approved quote and factoid reads plus the separately authorized quote write service | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
 | Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
 | Health | lifecycle and metrics fragments | Doctor, reason, permissions, bounded failure history and explicit scoped quarantine | plugin runtime |
@@ -252,12 +257,16 @@ Planned capability families include:
 18. **MB757 — API v3 repository cleanup:** complete in source. Owner-only
     `clearv3data` derives the exact private key for short and hashed package
     names, is idempotent and preserves legacy same-slug storage.
+19. **MB758 — factoid read authority:** complete in source. The distinct
+    `data.factoids.read` capability provides exact lookup, a 60-key bounded
+    list and a 10-entry top view through the invocation channel. Reads work in
+    `observe`, never increment `hits`, expose no SQL and adopt no command.
 
 The quote path is stabilized and receives no further expansion here. After
-MB757 deployment evidence, the next reviewed milestone should select a new
-domain facade outside Quotes rather than exposing SQL or broad bot internals.
-Automatic remediation remains a separate decision; manual containment stays
-reversible and exact.
+MB758, a separate reviewed milestone may build an inert `factoids-v3` package
+and adopt only the pure `factoid`/`factoids` readers behind the reversible
+fallback bridge. `whatis` must wait for a distinct recall-counter authority;
+`learn` and `forget` require a separately reviewed write capability.
 
 ## Extraction order
 
@@ -267,6 +276,8 @@ The first migration candidates are deliberately low-risk:
 2. short external content through the MB746 shared HTTP proof;
 3. pure quote reads through the MB747 facade and MB748 bridge, then writes as a
    separate gate.
+4. pure factoid reads through the MB758 facade before any separately authorized
+   recall counter, learn or forget mutation.
 
 AI conversation, radio, central moderation, authentication, updater and IRC
 transport are not first-wave extraction candidates.

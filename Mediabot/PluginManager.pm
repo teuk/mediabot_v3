@@ -50,6 +50,7 @@ sub new {
         v3_repositories => {},
         v3_quote_service => $args{v3_quote_service},
         v3_quote_write_service => $args{v3_quote_write_service},
+        v3_factoid_service => $args{v3_factoid_service},
         v3_invocation_authority => $invocation_authority,
         v3_failure_ledgers => {},
         v3_quarantines => {},
@@ -404,6 +405,54 @@ sub _v3_quotes_read {
     }
     _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
         plugin => $name, domain => 'quotes', operation => $operation,
+        outcome => 'read',
+    });
+    return $result;
+}
+
+# MB758: factoid reads are the second approved domain facade. The invocation
+# policy remains the only channel authority and observe mode stays read-only.
+sub v3_factoid_service {
+    my ($self) = @_;
+    return $self->{v3_factoid_service} if $self->{v3_factoid_service};
+    require Mediabot::Plugin::FactoidServiceV3;
+    $self->{v3_factoid_service} = Mediabot::Plugin::FactoidServiceV3->new(
+        dbh_provider => sub { eval { $self->{bot}{dbh} } },
+    );
+    return $self->{v3_factoid_service};
+}
+
+sub _v3_factoids_read {
+    my ($self, $name, $invocation, $operation, $args) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: API v3 plugin '$name' is not registered\n";
+    return { ok => 0, error => 'disabled' } unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    return { ok => 0, error => 'channel_off' }
+        if $policy->{mode} eq 'off';
+    die "PluginManager: factoid data operation requires an object\n"
+        unless ref($args) eq 'HASH';
+    my %methods = (
+        by_keyword => 'by_keyword', list => 'list', top => 'top',
+    );
+    my $method = $methods{$operation // ''}
+        or die "PluginManager: unsupported factoid data operation\n";
+    my $result = eval {
+        $self->v3_factoid_service->$method(
+            %$args, channel => $policy->{channel});
+    };
+    unless ($result) {
+        my $error = _plugin_error_text($@, 'factoid data read failed');
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+            plugin => $name, domain => 'factoids', operation => $operation,
+            outcome => 'error',
+        });
+        eval { $self->{bot}{logger}->log(
+            1, "plugin '$name' API v3 factoid read failed: $error") };
+        return { ok => 0, error => 'unavailable' };
+    }
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+        plugin => $name, domain => 'factoids', operation => $operation,
         outcome => 'read',
     });
     return $result;

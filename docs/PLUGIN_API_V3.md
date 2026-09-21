@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB757. Packages are discoverable and
+Plugin API v3 remains experimental in MB758. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. It adds no automatic remediation and exposes no exception text,
@@ -296,14 +296,35 @@ package is loaded or unloaded, never prints the path, and cannot remove legacy
 v1/v2 storage with the same package slug. Historical `.plugins cleardata`
 keeps its legacy namespace and semantics.
 
+## Approved factoid reads
+
+MB758 opens the second core-owned domain facade with the distinct
+`data.factoids.read` capability. It exposes only three operations:
+`factoid_by_keyword`, `factoid_list` and `top_factoids`. The current invocation
+policy supplies the channel; a plugin cannot select another channel, submit
+SQL or receive a database handle.
+
+Exact lookup returns one immutable `FactoidRecordV3` containing only `id`,
+`keyword`, `value`, copied author identity, timestamps and `hits`. Lists expose
+at most 60 validated keywords. Top results expose at most 10 detached
+`keyword`/`hits` pairs. Keywords and optional glob patterns are limited to 64
+characters; `_` remains literal, while `*` and `?` are translated by the core
+after SQL wildcard escaping.
+
+Reads are allowed in `observe` and fail closed in `off`. They never increment
+the recall counter. `learn`, `forget` and recall accounting remain outside the
+capability, and MB758 ships no factoid package or command migration. Service
+errors become a neutral `unavailable` result after bounded logging and metrics.
+
 ## Approved quote reads
 
-A package requesting and receiving `data.quotes.read` may use six explicit
+A package requesting and receiving `data.quotes.read` may use eight explicit
 `PluginContext` methods: `quote_by_id`, `quote_random`, `quote_search`,
-`quotes_by_author`, `quote_count` and `top_quotes`. Every method also receives
-the current invocation. The core derives the database scope exclusively from
-that invocation's current channel policy; the plugin cannot name another
-channel, submit SQL or receive a database handle.
+`quotes_by_author`, `quote_random_by_author`, `quote_stats`, `quote_count` and
+`top_quotes`. Every method also receives the current invocation. The core
+derives the database scope exclusively from that invocation's current channel
+policy; the plugin cannot name another channel, submit SQL or receive a
+database handle.
 The service resolves the core's current handle for each operation, so a normal
 database reconnect does not leave plugins attached to an obsolete connection.
 

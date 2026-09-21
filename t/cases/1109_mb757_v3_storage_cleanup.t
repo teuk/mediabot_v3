@@ -118,8 +118,8 @@ return sub {
     local $/;
     my $contract = JSON::PP->new->decode(<$contract_fh>);
     close $contract_fh;
-    $assert->is($contract->{milestone}, 'MB757',
-        'machine contract records the v3 cleanup milestone');
+    $assert->is($contract->{milestone}, 'MB758',
+        'machine contract records the current platform milestone');
     $assert->like($contract->{storage_limits}{operator_cleanup},
         qr/Owner-only clearv3data/,
         'machine contract makes the cleanup gate explicit');

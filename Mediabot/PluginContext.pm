@@ -39,6 +39,7 @@ sub new {
         storage_commit_sink => $args{storage_commit_sink},
         quotes_read_sink => $args{quotes_read_sink},
         quotes_write_sink => $args{quotes_write_sink},
+        factoids_read_sink => $args{factoids_read_sink},
     };
     return $self;
 }
@@ -213,6 +214,37 @@ sub top_quotes {
     my ($self, $invocation, %args) = @_;
     return $self->_quotes_read($invocation, 'top',
         { limit => $args{limit} });
+}
+
+sub _factoids_read {
+    my ($self, $invocation, $operation, $args) = @_;
+    $self->require_capability('data.factoids.read');
+    _invocation($invocation);
+    die "PluginContext: factoid arguments must be an object\n"
+        unless ref($args) eq 'HASH';
+    my $sink = _state($self)->{factoids_read_sink};
+    die "PluginContext: factoid data service is unavailable\n"
+        unless ref($sink) eq 'CODE';
+    return $sink->($invocation, $operation, { %$args });
+}
+
+sub factoid_by_keyword {
+    my ($self, $invocation, $keyword) = @_;
+    return $self->_factoids_read(
+        $invocation, 'by_keyword', { keyword => $keyword });
+}
+
+sub factoid_list {
+    my ($self, $invocation, %args) = @_;
+    return $self->_factoids_read($invocation, 'list', {
+        pattern => $args{pattern}, limit => $args{limit},
+    });
+}
+
+sub top_factoids {
+    my ($self, $invocation, %args) = @_;
+    return $self->_factoids_read(
+        $invocation, 'top', { limit => $args{limit} });
 }
 
 sub _quotes_write {
