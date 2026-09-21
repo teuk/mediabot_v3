@@ -131,7 +131,10 @@ sub add {
             && "$channel_row->{id}" =~ /\A[1-9][0-9]*\z/;
 
     my $channel_id = 0 + $channel_row->{id};
-    my $author_id = $principal->authenticated ? $principal->user_id : 0;
+    # MB755: the canonical SQL representation of an anonymous quote author is
+    # NULL.  A numeric zero is not a USER identity and violates the FK on a
+    # fresh database.
+    my $author_id = $principal->authenticated ? $principal->user_id : undef;
     my $sth = $self->_statement($dbh, q{
         INSERT INTO QUOTES (id_channel, id_user, quotetext)
         VALUES (?, ?, ?)}, $channel_id, $author_id, $text);

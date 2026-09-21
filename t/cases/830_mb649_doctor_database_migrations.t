@@ -197,6 +197,24 @@ return sub {
         } @{ $quote_capacity->{effects} }),
         'mb649-830: MODIFY COLUMN quote-capacity effect is observable');
 
+    my $anonymous_author = main::_migration_observables(
+        File::Spec->catfile($mdir, '20260921_quotes_anonymous_author.sql')
+    );
+    $assert->ok((grep {
+            $_->{type} eq 'quote_author_integrity'
+                && $_->{table} eq 'QUOTES'
+                && $_->{column} eq 'id_user'
+        } @{ $anonymous_author->{effects} }),
+        'mb649-830: MB755 anonymous-author repair has a bounded observable');
+    $assert->ok(!$anonymous_author->{unsupported_mutation},
+        'mb649-830: audited MB755 repair is fully modelled');
+    $assert->like(
+        $source,
+        qr/quote_author_integrity.*?IS_NULLABLE\s*=\s*'YES'.*?
+           DELETE_RULE\s*=\s*'SET\s+NULL'.*?NOT\s+EXISTS.*?
+           q[.]id_user\s*=\s*0\s+OR\s+u[.]id_user\s+IS\s+NULL/sx,
+        'mb649-830: MB755 observation checks schema, FK policy and row integrity');
+
     my $lang = main::_migration_observables(File::Spec->catfile($mdir, '20260724_lang_chansets.sql'));
     $assert->ok((grep { $_->{type} eq 'chanset' && $_->{chanset} eq 'LangFR' } @{ $lang->{effects} }),
         'mb649-830: data-only LangFR chanset is observable');

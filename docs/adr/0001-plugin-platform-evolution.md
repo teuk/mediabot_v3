@@ -177,3 +177,11 @@ single channel-scoped recall-counter operation. In `observe`, every v3 write
 is suppressed before DB access and the historical handler remains visible; in
 `on`, the package becomes authoritative only for an explicitly selected
 channel. Loading, grants, enablement and channel policy remain manual.
+
+MB755 repairs the anonymous-author representation exposed by that first live
+pilot. Both the saved historical handler and the v3 write service bind SQL
+`NULL` instead of the invalid `id_user=0` sentinel. The fresh schema and an
+idempotent migration make `QUOTES.id_user` nullable, convert zero or orphaned
+references and use `ON DELETE SET NULL` so quote history survives account
+removal. The `on` promotion remains paused until this migration and an
+anonymous live write pass; MB755 does not promote any channel automatically.

@@ -159,16 +159,16 @@ return sub {
         'archivist,master_archivist,lorekeeper,curator',
         'mb668-850: only thresholds actually reached are unlocked');
 
-    # An anonymous/legacy caller cannot claim the pooled id_user=0 quote corpus.
+    # An anonymous/legacy caller cannot claim the pooled id_user=NULL quote corpus.
     # Factoids remain attributable by created_by_nick when created_by is NULL.
     my $dbh2 = DBH850->new({ quote_count => 0, factoid_count => 65 });
     my $B = Ach850->new(path => "$DIR/b.json", logger => Log850->new);
     $B->{bot} = { dbh => $dbh2 };
     $B->{_channel_ids}{'#c'} = 7;
 
-    my $r2 = $B->check_community_contributions('guest', '#c', 0);
+    my $r2 = $B->check_community_contributions('guest', '#c', undef);
     $assert->is($r2->{quotes}, 0,
-        'mb668-850: id_user=0 is not treated as an attributable quote owner');
+        'mb668-850: id_user=NULL is not treated as an attributable quote owner');
     $assert->is($r2->{factoids}, 65,
         'mb668-850: nick-attributed legacy factoids remain measurable');
     my @unlock2 = map { $_->[2] } @{ $B->{unlock_calls} || [] };

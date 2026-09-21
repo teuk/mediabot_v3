@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb755 — give anonymous memories a lawful place in the vault
+
+- Repair the live pilot failure where an unauthenticated `q add` tried to store
+  the impossible foreign-key sentinel `id_user=0`. Both the historical quote
+  handler and the API v3 write service now bind SQL `NULL` for an anonymous
+  author while authenticated attribution remains unchanged.
+- Make fresh `QUOTES.id_user` nullable and preserve quotes when an account is
+  removed by changing `fk_quotes_user` to `ON DELETE SET NULL`. The replayable
+  migration converts legacy zero/orphan attribution to `NULL`, rejects
+  unexpected foreign-key shapes and verifies the final contract.
+- Teach Doctor to model that migration through a bounded read-only observable:
+  nullable unsigned identity, preserving foreign-key rules and no remaining
+  zero/orphan attribution. Other unrecognised data updates stay indeterminate.
+- Keep the MB754 rollout paused at `observe` until the migration, code and live
+  anonymous-write evidence pass. No channel is promoted to `on` automatically.
+
 ### mb754 — let the quote vault change keepers without changing its locks
 
 - Extend the first-party `quotes-v3` package to own `q` and `quote` through the
@@ -44,7 +60,8 @@ release. The current development line is `3.6dev`.
 - Preserve historical authorization deliberately: authenticated authors may
   delete their own quote, Administrators and above may delete, and the existing
   configured channel-level threshold remains authoritative. Anonymous adds
-  retain the historical zero attribution; duplicate adds are idempotent.
+  retain anonymous attribution (stored as SQL `NULL` from MB755); duplicate
+  adds are idempotent.
 - Make mutations `on`-only. `observe` can execute plugin code but every write is
   suppressed by the core. No package requests the capability yet, `q` and
   `quote` remain core-owned, and MB753 activates no plugin or channel, changes

@@ -31,7 +31,7 @@ use File::Spec;
 # Reproduction EXACTE de la décision mb342 (doit rester synchrone avec mbQuoteDel).
 #   $is_admin  : 1 si l'appelant est Administrator+
 #   $caller_uid: id de l'appelant (ou undef/'' si inconnu)
-#   $author_id : id_user de la quote (0 = anonyme)
+#   $author_id : id_user de la quote (undef = anonyme)
 #   $chan_ok   : 1 si checkUserChannelLevel(...,100) passerait
 sub _allow {
     my ($is_admin, $caller_uid, $author_id, $chan_ok) = @_;
@@ -65,9 +65,9 @@ return sub {
         [ 0, 7,   7, 0, 1, 'auteur supprime sa propre quote (chan < 100)' ],
         [ 0, 5,   9, 1, 1, 'non-auteur avec niveau-canal >= 100' ],
         [ 0, 5,   9, 0, 0, 'non-auteur, niveau-canal < 100 -> refus' ],
-        [ 0, 5,   0, 0, 0, 'quote anonyme (author 0), bas niveau -> refus' ],
-        [ 1, 5,   0, 0, 1, 'Administrator supprime une quote anonyme' ],
-        [ 0, 5,   0, 1, 1, 'quote anonyme + niveau-canal >= 100 -> ok' ],
+        [ 0, 5, undef, 0, 0, 'quote anonyme (author NULL), bas niveau -> refus' ],
+        [ 1, 5, undef, 0, 1, 'Administrator supprime une quote anonyme' ],
+        [ 0, 5, undef, 1, 1, 'quote anonyme + niveau-canal >= 100 -> ok' ],
         [ 0, '',  9, 1, 0, 'uid inconnu -> refus même si chan_ok' ],
     );
 

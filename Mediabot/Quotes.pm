@@ -251,7 +251,11 @@ sub mbQuoteAdd {
         return;
     }
 
-    my $id_user = ($iMatchingUserId && $iMatchingUserId =~ /^\d+$/) ? $iMatchingUserId : 0;
+    # MB755: anonymous quotes use SQL NULL.  The canonical QUOTES foreign key
+    # points at USER.id_user, so the historical numeric sentinel 0 can never
+    # satisfy referential integrity on a fresh database.
+    my $id_user = ($iMatchingUserId && $iMatchingUserId =~ /^\d+$/)
+        ? $iMatchingUserId : undef;
 
     unless ($sth && $sth->execute($id_channel, $id_user, $sQuoteText)) {
         $self->{logger}->log(1, "mbQuoteAdd() SQL insert execute error: $DBI::errstr | Query: $sQuery")
@@ -271,9 +275,9 @@ sub mbQuoteAdd {
     $id_inserted //= $self->{dbh}->{mysql_insertid};
     $id_inserted //= '?';
 
-    # mb668: achievements are derived from the real QUOTES/FACTOID state after
-    # the insert succeeds. Anonymous quotes have id_user=0 and are deliberately
-    # not attributed to a registered-user quote total.
+    # mb668 / MB755: achievements are derived from the real QUOTES/FACTOID
+    # state after the insert succeeds. Anonymous quotes have id_user=NULL and
+    # are deliberately not attributed to a registered-user quote total.
     if ($self->{achievements}) {
         my $ok = eval {
             $self->{achievements}->check_community_contributions(
@@ -350,7 +354,7 @@ sub mbQuoteDel {
     #   - l'AUTEUR de la quote (id_user), OU
     #   - Administrator+ au niveau global, OU
     #   - de niveau-canal >= seuil configuré (défaut 100) sur ce canal.
-    # Sinon : refus. Les quotes anonymes (id_user = 0) ne matchent aucun auteur
+    # Sinon : refus. Les quotes anonymes (id_user = NULL) ne matchent aucun auteur
     # et requièrent donc un Admin+ ou le niveau-canal configuré.
     my $author_id = $exists->{id_user};
     my $quote_delete_level = eval {

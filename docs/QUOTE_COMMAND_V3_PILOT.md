@@ -5,6 +5,13 @@ preserving the exact saved built-in fallback. The package remains unloaded,
 disabled and channel-off by default. No schema, private configuration or live
 quote row changes merely by installing MB754.
 
+MB755 is a required rollout repair discovered by the first `#test` observation:
+anonymous additions used the historical `id_user=0` sentinel even though the
+canonical schema enforces a foreign key to `USER`. Apply
+`install/migrations/20260921_quotes_anonymous_author.sql` and deploy the MB755
+code before resuming the write pilot. Anonymous attribution is SQL `NULL` in
+both the saved handler and API v3 service.
+
 ## Safety contract
 
 - `off` and disabled use the saved historical handler;
@@ -17,6 +24,8 @@ quote row changes merely by installing MB754.
 - unload restores the exact five registry entries captured at load time;
 - the plugin receives no SQL, DBI handle, mutable user, raw message, password
   or hostmask.
+- anonymous quote authors use nullable attribution; account deletion preserves
+  quote text and clears only its attribution.
 
 ## Supervised development-channel pilot
 
@@ -48,6 +57,9 @@ Only historical answers must be visible. The v3 path must report suppressed
 writes, with no duplicate add and no extra `hits` increment from the shadow.
 Do not test deletion in `observe` unless the selected quote is explicitly
 disposable: the visible historical handler remains authoritative there.
+
+If an anonymous `add` returns `Database error while adding quote.`, stop before
+promotion: the MB755 schema/code pair is missing or incomplete.
 
 After comparing logs, counters and output, an operator may choose `on` for the
 same channel:

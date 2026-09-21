@@ -23,7 +23,7 @@ sub slurp {
 return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(slurp('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB754',
+    $assert->is($contract->{milestone}, 'MB755',
         'machine contract names the quote command adoption milestone');
     $assert->ok(grep($_ eq 'data.quotes.read',
         @{ $contract->{implemented_capabilities} }),

@@ -1,7 +1,7 @@
 {
   "api": 3,
   "name": "quotes-v3",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A reversible API v3 home for quote reads and authorized channel-scoped writes.",
   "runtime": {
     "api": 3,

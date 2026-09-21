@@ -93,6 +93,7 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260905_quotes_512_contrac
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260909_quip_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260911_radio_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260916_channel_timezone.sql;
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20260921_quotes_anonymous_author.sql;
 ```
 
 Then run the checker again:
@@ -141,6 +142,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260909_quip_chanset.sql
 20260911_radio_chanset.sql
 20260916_channel_timezone.sql
+20260921_quotes_anonymous_author.sql
 ```
 
 A fresh install uses `install/mediabot.sql` directly and must NOT apply this
@@ -172,6 +174,24 @@ The migration preserves every row, safely widens known 255- and 360-character
 legacy columns, and is safe to replay. It refuses an unexpected table or column
 shape, `NULL` data, text longer than the application contract, and any existing
 capacity above 512 that would otherwise be narrowed.
+
+## Anonymous quote attribution (20260921)
+
+Anonymous quote additions cannot use `id_user=0`: zero is not a valid
+`USER.id_user` and is rejected by the canonical foreign key. Fresh databases
+store an anonymous author as SQL `NULL`. Existing databases converge through
+`20260921_quotes_anonymous_author.sql`, which:
+
+- accepts only an integer `QUOTES.id_user` shape and rejects unexpected foreign
+  keys before changing it;
+- widens the column to nullable `BIGINT UNSIGNED`;
+- converts historical zero or orphan attribution to `NULL` without changing
+  quote text;
+- rebuilds `fk_quotes_user` with `ON DELETE SET NULL ON UPDATE CASCADE` so
+  account removal does not erase quotations.
+
+Apply this migration together with the MB755 code before repeating anonymous
+write tests or promoting `quotes-v3` from `observe` to `on`.
 
 ## Native RSS persistence (20260822)
 

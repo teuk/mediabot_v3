@@ -21,8 +21,8 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1103('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB754',
-        'machine contract records reversible quote command adoption');
+    $assert->is($contract->{milestone}, 'MB755',
+        'machine contract records the anonymous quote identity repair');
     $assert->ok(grep($_ eq 'data.quotes.write',
         @{ $contract->{implemented_capabilities} }),
         'write capability is distinct from quote reads');
@@ -40,6 +40,9 @@ return sub {
     $assert->is($contract->{quote_write_limits}{invocation_origin},
         'opaque runtime authority required',
         'plugin-created invocation lookalikes cannot reach writes');
+    $assert->is($contract->{quote_write_limits}{add_attribution},
+        'authenticated user id or SQL NULL for anonymous',
+        'anonymous write attribution uses the nullable foreign-key value');
 
     my $read = slurp_1103('Mediabot/Plugin/QuoteServiceV3.pm');
     my $write = slurp_1103('Mediabot/Plugin/QuoteWriteServiceV3.pm');

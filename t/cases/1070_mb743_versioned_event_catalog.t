@@ -27,7 +27,7 @@ return sub {
 
     my $api_contract = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_CONTRACT.json'));
-    $assert->is($api_contract->{milestone}, 'MB754',
+    $assert->is($api_contract->{milestone}, 'MB755',
         'API v3 machine contract records reversible quote adoption');
     $assert->is(join(',', @{ $api_contract->{implemented_capabilities} }),
         'data.quotes.read,data.quotes.write,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',

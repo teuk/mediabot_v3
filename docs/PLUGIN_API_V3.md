@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB754. Packages are discoverable and
+Plugin API v3 remains experimental in MB755. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. It adds no automatic remediation and exposes no exception text,
@@ -331,8 +331,12 @@ The sink also rejects any invocation that lacks the runtime's private origin.
 
 Quote text is a single non-empty line capped at 512 characters and 2048 UTF-8
 bytes. Add checks for an existing identical quote on the same channel before a
-prepared insert. An authenticated add uses the principal's numeric user id;
-anonymous adds retain the historical zero attribution.
+prepared insert. An authenticated add uses the principal's numeric user id.
+An anonymous add binds SQL `NULL`: `0` cannot represent a user while the
+column is protected by the `USER` foreign key. Existing installations must
+apply `install/migrations/20260921_quotes_anonymous_author.sql` with the MB755
+code; fresh installs use the same nullable contract and preserve a quote if
+its registered author account is later removed.
 
 Delete first resolves the numeric quote id inside the invocation channel. It
 then requires an authenticated principal who is the recorded author, has a
@@ -345,7 +349,8 @@ never reaches the mutation service; `off` remains inert. MB753 deliberately
 created the boundary without adoption. MB754 grants no capability at startup,
 but the `quotes-v3` manifest now requests `data.quotes.write` and declares
 `q`/`quote`; actual load, grant, enablement and channel policy remain explicit
-operator actions. Neither milestone changes the schema or live quote data.
+operator actions. MB755 changes only the attribution representation required
+by that write boundary; it activates no package or channel.
 
 ## Reversible quote-read migration
 

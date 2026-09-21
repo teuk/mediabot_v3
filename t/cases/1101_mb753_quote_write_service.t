@@ -83,6 +83,20 @@ return sub {
     $assert->is($duplicate->{status}, 'duplicate',
         'duplicate add is idempotent and performs no insert');
 
+    $dbh->{last_id} = 78;
+    $dbh->plan({ rows => [] });
+    $dbh->plan({ rows => [ { id => 4 } ] });
+    $dbh->plan({ rows => [] });
+    my $anonymous_add = $service->add(
+        channel => '#test', principal => $anonymous,
+        text => 'Anonymous Patronus');
+    $assert->is($anonymous_add->{status}, 'created',
+        'anonymous add stays supported through the bounded service');
+    $assert->ok(!defined($dbh->{binds}[-1][1]),
+        'anonymous insert binds SQL NULL instead of a fake USER id zero');
+    $assert->ok(!defined($created[-1]{author_id}),
+        'post-create attribution preserves the anonymous NULL identity');
+
     $dbh->plan({ rows => [
         { id => 77, author_id => 5, channel_id => 4 } ] });
     $dbh->plan({ rows => [] });

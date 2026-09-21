@@ -3,7 +3,10 @@
 `quotes-v3` is the reversible API v3 home for the public quote commands
 `q`, `quote`, `quotecount`, `topquote` and `halloffame`.
 
-MB754 keeps the package unloaded, disabled and channel-off by default. In
+MB754 keeps the package unloaded, disabled and channel-off by default. MB755
+repairs anonymous additions in both the saved handler and the v3 write service:
+an unauthenticated author is stored as SQL `NULL`, never as a fake user id.
+In
 `off`, the saved built-in handlers remain authoritative. In `observe`, the v3
 path performs bounded reads but the core suppresses every add, delete and
 recall-counter write; the historical handler alone remains visible and is the
@@ -15,3 +18,7 @@ principal. It has no SQL, database handle, mutable user object, credentials or
 raw IRC message. The core chooses the channel and enforces the existing quote
 deletion rules. Disabling or unloading restores the exact registry entries
 captured at load time.
+
+Existing databases must apply
+`install/migrations/20260921_quotes_anonymous_author.sql` before repeating the
+write pilot or promoting a channel to `on`.

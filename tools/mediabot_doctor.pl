@@ -510,10 +510,34 @@ sub _migration_observables {
         }
     }
 
+    # MB755's bounded quote-author repair is a data mutation with a durable,
+    # read-only observable: the column is nullable, its canonical foreign key
+    # preserves rows on account deletion, and no non-NULL attribution is zero
+    # or orphaned. Recognise only that complete audited UPDATE shape; every
+    # other UPDATE remains indeterminate.
+    my $unsupported_update = 0;
+    while ($sql =~ /(^\s*UPDATE\b[\s\S]*?;)/img) {
+        my $stmt = $1;
+        my $quote_author_repair =
+               $stmt =~ /^\s*UPDATE\s+`?QUOTES`?\s+q\b/i
+            && $stmt =~ /\bLEFT\s+JOIN\s+`?USER`?\s+u\s+ON\s+u\.`?id_user`?\s*=\s*q\.`?id_user`?/i
+            && $stmt =~ /\bSET\s+q\.`?id_user`?\s*=\s*NULL\b/i
+            && $stmt =~ /q\.`?id_user`?\s+IS\s+NOT\s+NULL\b/i
+            && $stmt =~ /q\.`?id_user`?\s*=\s*0\b/i
+            && $stmt =~ /u\.`?id_user`?\s+IS\s+NULL\b/i;
+        if ($quote_author_repair) {
+            $add->('quote_author_integrity',
+                table => 'QUOTES', column => 'id_user');
+        }
+        else {
+            $unsupported_update = 1;
+        }
+    }
+
     # Unsupported mutation forms make historical inference indeterminate even
     # if some other durable effects were recognised.
-    my $unsupported = $unsupported_channel_set;
-    $unsupported = 1 if $sql =~ /^\s*(?:UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\b/im;
+    my $unsupported = $unsupported_channel_set || $unsupported_update;
+    $unsupported = 1 if $sql =~ /^\s*(?:DELETE\s+FROM|REPLACE\s+INTO)\b/im;
     $unsupported = 1 if $sql =~ /^\s*INSERT\s+(?:IGNORE\s+)?INTO\s+(?!`?(?:CHANSET_LIST|CHANNEL_SET)`?(?:\s|\())/im;
 
     return {
@@ -2404,6 +2428,39 @@ sub _conf_from_argv {
                          LIMIT 1
                     }, $effect->{target_chanset}, $effect->{source_chanset});
                 }
+                elsif ($effect->{type} eq 'quote_author_integrity') {
+                    ($row, $err) = _db_select_one($dbh, q{
+                        SELECT 1 AS present
+                          FROM information_schema.COLUMNS AS col
+                          JOIN information_schema.KEY_COLUMN_USAGE AS kcu
+                            ON kcu.CONSTRAINT_SCHEMA = col.TABLE_SCHEMA
+                           AND kcu.TABLE_NAME = col.TABLE_NAME
+                           AND kcu.COLUMN_NAME = col.COLUMN_NAME
+                           AND kcu.REFERENCED_TABLE_NAME = 'USER'
+                           AND kcu.REFERENCED_COLUMN_NAME = 'id_user'
+                          JOIN information_schema.REFERENTIAL_CONSTRAINTS AS ref
+                            ON ref.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+                           AND ref.TABLE_NAME = kcu.TABLE_NAME
+                           AND ref.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                         WHERE col.TABLE_SCHEMA = DATABASE()
+                           AND col.TABLE_NAME = ?
+                           AND col.COLUMN_NAME = ?
+                           AND col.DATA_TYPE = 'bigint'
+                           AND col.COLUMN_TYPE LIKE '%unsigned%'
+                           AND col.IS_NULLABLE = 'YES'
+                           AND ref.DELETE_RULE = 'SET NULL'
+                           AND ref.UPDATE_RULE = 'CASCADE'
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM `QUOTES` AS q
+                                 LEFT JOIN `USER` AS u
+                                   ON u.id_user = q.id_user
+                                WHERE q.id_user IS NOT NULL
+                                  AND (q.id_user = 0 OR u.id_user IS NULL)
+                           )
+                         LIMIT 1
+                    }, $effect->{table}, $effect->{column});
+                }
                 push @observed, { %$effect,
                     state => ($err ? 'indeterminate' : ($row ? 'present' : 'missing')),
                     (defined $err ? (error => $err) : ()),
@@ -2460,6 +2517,9 @@ sub _conf_from_argv {
             return 'chanset inheritance ' . ($e->{source_chanset} // '?')
                 . ' -> ' . ($e->{target_chanset} // '?')
                 if ($e->{type} // '') eq 'chanset_inheritance';
+            return 'quote author integrity ' . ($e->{table} // '?')
+                . '.' . ($e->{column} // '?')
+                if ($e->{type} // '') eq 'quote_author_integrity';
             return ($e->{type} // 'effect');
         };
         for my $mig (@migrations) {
