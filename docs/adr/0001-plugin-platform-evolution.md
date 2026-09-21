@@ -215,3 +215,13 @@ remains unloaded/disabled/off by default, shadows silently in `observe`, and is
 authoritative only for an explicitly selected `on` channel. `whatis` is
 excluded because it increments `hits`; `learn`, `forget` and `?keyword` remain
 historical. Lifecycle rollback restores the exact two prior registry entries.
+
+MB760 establishes factoid write authority before any mutating command moves.
+The distinct `data.factoids.write` service exposes only bounded upsert and
+delete operations. A runtime-issued invocation supplies the policy channel,
+detached principal and bounded IRC nickname; plugin-created invocation
+lookalikes are rejected. Upsert preserves the existing creator on update.
+Delete trusts an authenticated numeric author, Administrator or channel level
+400, never nickname text alone. Writes require `on`, are suppressed before the
+service in `observe`, and expose no recall mutation. No package requests this
+capability, no command moves and no factoid data changes in MB760.

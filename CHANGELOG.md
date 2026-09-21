@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb760 — seal factoid writes behind a Ministry authorization desk
+
+- Add the distinct `data.factoids.write` capability and a core-owned service
+  for bounded upsert and delete operations. The invocation policy supplies the
+  channel, while an opaque runtime origin and detached principal prevent a
+  plugin from forging write scope or identity. 📜🔏
+- Preserve historical learn storage semantics: keywords are normalized,
+  values and nickname attribution are bounded, authenticated authors use their
+  numeric identity, anonymous authors use SQL `NULL`, and updates retain the
+  original creator while refreshing only value and timestamp.
+- Require authenticated numeric authorship, global Administrator authority or
+  channel level 400 for deletion; nickname text alone is never authorization.
+  Writes are `on`-only, `observe` is suppressed before database access, recall
+  counters remain unavailable, and no package or command adopts the capability
+  in this milestone. 🛡️🕯️
+
 ### mb759 — appoint a quiet librarian for the factoid shelves
 
 - Add the inert `factoids-v3` package with only `data.factoids.read` and

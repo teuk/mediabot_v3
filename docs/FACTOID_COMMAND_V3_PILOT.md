@@ -18,6 +18,10 @@ package, and it does not change a factoid row.
 - `whatis`, `learn`, `forget` and `?keyword` remain historical, including all
   recall-counter behavior.
 
+MB760 adds a separately authorized `data.factoids.write` facade, but
+`factoids-v3` does not request it and this read-only pilot does not exercise it.
+No factoid command or channel policy is promoted by that authority milestone.
+
 ## Supervised development-channel pilot
 
 Use an authenticated Owner Partyline session and one quiet development channel.

@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB759",
+  "milestone": "MB760",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -47,6 +47,7 @@
   ],
   "implemented_capabilities": [
     "data.factoids.read",
+    "data.factoids.write",
     "data.quotes.read",
     "data.quotes.write",
     "events.subscribe",
@@ -129,6 +130,30 @@
     "plugin_adoption": "factoids-v3 factoid and factoids, inactive by default",
     "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable"
+  },
+  "factoid_write_limits": {
+    "capability": "data.factoids.write",
+    "operations": [
+      "upsert",
+      "delete"
+    ],
+    "activation": "on only",
+    "observe_writes": "suppressed",
+    "maximum_keyword_characters": 64,
+    "maximum_value_characters": 400,
+    "maximum_value_bytes": 400,
+    "channel_source": "core invocation policy",
+    "principal_source": "core command context",
+    "actor_nick_source": "core command invocation",
+    "invocation_origin": "opaque runtime authority required",
+    "upsert_attribution": "authenticated user id or SQL NULL plus bounded current IRC nickname",
+    "existing_author_on_update": "preserved",
+    "delete_authorization": "authenticated numeric author, Administrator global level, or channel level 400",
+    "recall_counter_writes": "unavailable",
+    "plugin_sql": "unavailable",
+    "plugin_database_handles": "unavailable",
+    "schema_administration": "unavailable",
+    "plugin_adoption": "none"
   },
   "factoid_read_migration": {
     "package": "factoids-v3",

@@ -40,6 +40,7 @@ sub new {
         quotes_read_sink => $args{quotes_read_sink},
         quotes_write_sink => $args{quotes_write_sink},
         factoids_read_sink => $args{factoids_read_sink},
+        factoids_write_sink => $args{factoids_write_sink},
     };
     return $self;
 }
@@ -245,6 +246,31 @@ sub top_factoids {
     my ($self, $invocation, %args) = @_;
     return $self->_factoids_read(
         $invocation, 'top', { limit => $args{limit} });
+}
+
+sub _factoids_write {
+    my ($self, $invocation, $operation, $args) = @_;
+    $self->require_capability('data.factoids.write');
+    _invocation($invocation);
+    die "PluginContext: factoid write arguments must be an object\n"
+        unless ref($args) eq 'HASH';
+    my $sink = _state($self)->{factoids_write_sink};
+    die "PluginContext: factoid write service is unavailable\n"
+        unless ref($sink) eq 'CODE';
+    return $sink->($invocation, $operation, { %$args });
+}
+
+sub factoid_upsert {
+    my ($self, $invocation, $keyword, $value) = @_;
+    return $self->_factoids_write($invocation, 'upsert', {
+        keyword => $keyword, value => $value,
+    });
+}
+
+sub factoid_delete {
+    my ($self, $invocation, $keyword) = @_;
+    return $self->_factoids_write(
+        $invocation, 'delete', { keyword => $keyword });
 }
 
 sub _quotes_write {

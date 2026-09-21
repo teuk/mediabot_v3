@@ -51,6 +51,7 @@ sub new {
         v3_quote_service => $args{v3_quote_service},
         v3_quote_write_service => $args{v3_quote_write_service},
         v3_factoid_service => $args{v3_factoid_service},
+        v3_factoid_write_service => $args{v3_factoid_write_service},
         v3_invocation_authority => $invocation_authority,
         v3_failure_ledgers => {},
         v3_quarantines => {},
@@ -454,6 +455,91 @@ sub _v3_factoids_read {
     _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
         plugin => $name, domain => 'factoids', operation => $operation,
         outcome => 'read',
+    });
+    return $result;
+}
+
+# MB760: factoid mutations use a separate core-owned service. As with quote
+# writes, only a runtime-issued invocation in explicit on mode may cross this
+# boundary; the policy owns the channel and the command context owns identity.
+sub v3_factoid_write_service {
+    my ($self) = @_;
+    return $self->{v3_factoid_write_service}
+        if $self->{v3_factoid_write_service};
+    require Mediabot::Plugin::FactoidWriteServiceV3;
+    my $bot = $self->{bot};
+    $self->{v3_factoid_write_service} =
+        Mediabot::Plugin::FactoidWriteServiceV3->new(
+            dbh_provider => sub { eval { $bot->{dbh} } },
+            on_stored => sub {
+                my (%stored) = @_;
+                return 1 unless $bot->{achievements};
+                my $ok = eval {
+                    $bot->{achievements}->check_community_contributions(
+                        ($stored{actor_nick} // ''), $stored{channel},
+                        $stored{actor_id});
+                    1;
+                };
+                unless ($ok) {
+                    my $error = _plugin_error_text(
+                        $@, 'factoid contribution check failed');
+                    eval { $bot->{logger}->log(1,
+                        "API v3 factoid contribution check failed: $error") };
+                }
+                return 1;
+            },
+        );
+    return $self->{v3_factoid_write_service};
+}
+
+sub _v3_factoids_write {
+    my ($self, $name, $invocation, $operation, $args) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: API v3 plugin '$name' is not registered\n";
+    return { ok => 0, error => 'disabled' } unless $entry->{enabled};
+    die "PluginManager: untrusted factoid write invocation\n"
+        unless ref($invocation)
+            && eval { $invocation->_authorized_by(
+                $self->{v3_invocation_authority}) };
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    if ($policy->{mode} ne 'on') {
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+            plugin => $name, domain => 'factoids', operation => $operation,
+            outcome => 'suppressed',
+        });
+        return { ok => 0, error => $policy->{mode} eq 'observe'
+            ? 'observe' : 'channel_off' };
+    }
+    die "PluginManager: factoid write operation requires an object\n"
+        unless ref($args) eq 'HASH';
+    my %methods = (upsert => 'upsert', delete => 'delete');
+    my $method = $methods{$operation // ''}
+        or die "PluginManager: unsupported factoid write operation\n";
+    my $principal = eval { $invocation->principal };
+    my $result = eval {
+        $self->v3_factoid_write_service->$method(
+            %$args,
+            channel => $policy->{channel},
+            principal => $principal,
+            actor_nick => scalar(eval { $invocation->nick }),
+            delete_level => 400,
+        );
+    };
+    unless ($result) {
+        my $error = _plugin_error_text($@, 'factoid data write failed');
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+            plugin => $name, domain => 'factoids', operation => $operation,
+            outcome => 'error',
+        });
+        eval { $self->{bot}{logger}->log(
+            1, "plugin '$name' API v3 factoid write failed: $error") };
+        return { ok => 0, error => 'unavailable' };
+    }
+    my $outcome = $result->{ok}
+        ? ($result->{status} // 'write') : ($result->{error} // 'error');
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+        plugin => $name, domain => 'factoids', operation => $operation,
+        outcome => $outcome,
     });
     return $result;
 }

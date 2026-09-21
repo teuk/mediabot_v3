@@ -11,7 +11,9 @@ explicit, namespace-safe repository cleanup action after the supervised
 API v3 state. MB758 adds a read-only factoid data capability. MB759 places only
 the pure `factoid` and `factoids` readers in an inert package behind the
 existing lifecycle and per-channel policy controls; it adds no Partyline
-mutation or automatic activation.
+mutation or automatic activation. MB760 adds an on-only factoid write facade,
+but no package requests it and no operational command, policy or activation
+changes.
 
 ## Is the package operationally ready?
 

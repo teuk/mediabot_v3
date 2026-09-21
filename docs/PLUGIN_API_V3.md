@@ -328,6 +328,40 @@ writes remain historical and outside the package.
 The supervised activation and rollback sequence is documented in
 [`FACTOID_COMMAND_V3_PILOT.md`](FACTOID_COMMAND_V3_PILOT.md).
 
+## Authorized factoid writes
+
+MB760 implements `data.factoids.write` as a capability and core-owned service
+distinct from `data.factoids.read`. It exposes only
+`factoid_upsert($invocation, $keyword, $value)` and
+`factoid_delete($invocation, $keyword)`. The current policy supplies the
+channel. The runtime-issued invocation supplies the detached principal and a
+bounded current IRC nickname for display attribution. Plugins cannot provide a
+channel, user id, authorization level, attribution nickname, SQL statement or
+database handle, and an invocation without the runtime's private origin is
+rejected.
+
+Keywords are normalized lowercase ASCII names of 1–64 characters using the
+historical `[a-z0-9_.-]` alphabet. Values are one non-empty line capped at 400
+characters and 400 UTF-8 bytes. Upsert resolves the channel inside the core,
+binds an authenticated principal's numeric user id or SQL `NULL` for an
+anonymous caller, and binds the invocation nickname separately. On duplicate
+channel/keyword, only value and `updated_at` change; the original author and
+creation time remain intact. The existing community-achievement check runs
+from persisted state after a successful store.
+
+Delete first resolves the factoid inside the invocation channel. It requires
+an authenticated principal who is the stored numeric author, has global
+Administrator level or higher, or has channel level 400. A matching nickname
+is deliberately not authorization. The final prepared delete binds both the
+resolved factoid id and channel id. Missing factoids return an idempotent
+`not_found` result.
+
+All factoid writes require current policy `on`. `observe` returns a suppressed
+result before the mutation service, and `off` remains inert. Recall-counter
+mutation is not exposed. No package requests this capability in MB760;
+`factoids-v3`, `learn`, `forget`, `whatis` and `?keyword` remain unchanged and
+historical.
+
 ## Approved quote reads
 
 A package requesting and receiving `data.quotes.read` may use eight explicit
@@ -454,10 +488,11 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB754 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB760 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
-`data.quotes.read` plus `data.quotes.write`. Other capability names remain
-reserved for later mediated services.
+`data.quotes.read`, `data.quotes.write`, `data.factoids.read` and
+`data.factoids.write`. Other capability names remain reserved for later
+mediated services.
 
 Discovery reads manifests only. Loading is explicit, leaves the package
 disabled and mounts silent commands. Enabling is a second explicit operation,

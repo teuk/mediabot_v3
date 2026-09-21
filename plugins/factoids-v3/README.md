@@ -18,5 +18,9 @@ increment `hits`.
 `whatis`, its recall counter, `learn`, `forget`, and the `?keyword` shortcut
 remain historical and outside this package.
 
+MB760 introduces a separate core-owned `data.factoids.write` boundary for
+future adoption work. This package deliberately does not request it: its
+manifest and current command set remain read-only and inert by default.
+
 The supervised development procedure lives in
 [`../../docs/FACTOID_COMMAND_V3_PILOT.md`](../../docs/FACTOID_COMMAND_V3_PILOT.md).

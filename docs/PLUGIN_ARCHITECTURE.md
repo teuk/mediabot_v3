@@ -12,8 +12,8 @@ MB753's quote-write authority, MB754's reversible `q`/`quote` adoption and
 MB755's nullable anonymous-author repair, MB756's supervised short-content
 pilot, MB757's namespace-safe API v3 repository cleanup, MB758's second
 approved domain facade for bounded factoid reads and MB759's reversible pure
-factoid-command adoption. It does not enable a plugin or grant a capability
-automatically.
+factoid-command adoption, followed by MB760's separate factoid-write authority.
+It does not enable a plugin or grant a capability automatically.
 
 ## Current baseline
 
@@ -153,6 +153,12 @@ MB759 adds `factoids-v3`, still unloaded, disabled and channel-off by default.
 Only `factoid` and `factoids` cross the saved-handler bridge; observation is
 silent, activation is channel-scoped and unload restores the exact prior
 registry entries. `whatis`, `learn`, `forget` and `?keyword` do not move.
+MB760 closes the next authority gap without moving them. The distinct
+`data.factoids.write` service exposes bounded upsert/delete operations only in
+explicit `on`, derives channel, principal and display attribution from the
+runtime invocation, and rejects forged invocations. Delete authorization uses
+numeric authorship or core levels rather than nickname text. Recall mutation
+remains unavailable, and no package requests the capability.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -176,6 +182,7 @@ Planned capability families include:
 | `data.quotes.read` | eight bounded channel-scoped reads returning detached records |
 | `data.quotes.write` | on-only bounded add/delete/recall with a core-derived principal |
 | `data.factoids.read` | exact lookup plus bounded list/top views without recall mutation |
+| `data.factoids.write` | on-only bounded upsert/delete with core-owned identity and no recall mutation |
 | `data.<domain>` | future approved repository methods instead of arbitrary SQL |
 
 ## Dependency boundary matrix
@@ -189,7 +196,7 @@ Planned capability families include:
 | Scheduler | core tasks plus route-v1 timers | shared owned jobs with quotas and lifecycle cancellation | core scheduler |
 | Storage | v2 last-write-wins JSON document | MB746 namespaced KV with compare-and-swap/short transactions | data service |
 | HTTP | per-feature clients outside v3 | MB746 bounded async client with cache and circuit breaker | HTTP service |
-| Database | possible through full in-process bot | approved quote and factoid reads plus the separately authorized quote write service | data layer |
+| Database | possible through full in-process bot | approved quote/factoid reads and distinct authorized quote/factoid write services | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
 | Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
 | Health | lifecycle and metrics fragments | Doctor, reason, permissions, bounded failure history and explicit scoped quarantine | plugin runtime |
@@ -270,12 +277,18 @@ Planned capability families include:
     `factoids-v3` package adopts only `factoid` and `factoids`; `off`, disable
     and unload preserve the saved built-ins, while `observe` shadows without a
     second visible answer or recall mutation.
+21. **MB760 — factoid-write authorization gate:** complete in source. The
+    distinct `data.factoids.write` service accepts only bounded upsert/delete
+    operations from runtime-issued invocations in policy `on`. Numeric author
+    identity and core levels authorize deletion; no package, command, recall
+    counter or live factoid adopts the capability.
 
 The quote path is stabilized and receives no further expansion here. After
-MB759, `whatis` must wait for a distinct recall-counter authority; `learn` and
-`forget` require a separately reviewed write capability. Until then, a live
-pilot may promote only the two pure readers on one development channel and
-must retain immediate policy rollback.
+MB760, `whatis` must still wait for distinct recall-counter authority. `learn`
+and `forget` may move only in a later reversible adoption milestone; MB760
+grants neither command nor package any write permission. A live pilot may
+still promote only the two pure readers on one development channel and must
+retain immediate policy rollback.
 
 ## Extraction order
 
@@ -285,8 +298,9 @@ The first migration candidates are deliberately low-risk:
 2. short external content through the MB746 shared HTTP proof;
 3. pure quote reads through the MB747 facade and MB748 bridge, then writes as a
    separate gate.
-4. pure factoid reads through the MB758 facade and MB759 reversible package
-   before any separately authorized recall counter, learn or forget mutation.
+4. pure factoid reads through the MB758 facade and MB759 reversible package,
+   followed by MB760's separate upsert/delete authority before any mutating
+   command or recall counter moves.
 
 AI conversation, radio, central moderation, authentication, updater and IRC
 transport are not first-wave extraction candidates.
