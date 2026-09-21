@@ -9,7 +9,8 @@ first reversible database-backed command migration, MB749's registry-native
 built-in dispatch, MB750's read-only operator diagnostics, MB751's bounded
 runtime failure history, MB752's explicit per-resource/channel quarantine,
 MB753's quote-write authority, MB754's reversible `q`/`quote` adoption and
-MB755's nullable anonymous-author repair. It
+MB755's nullable anonymous-author repair, MB756's supervised short-content
+pilot and MB757's namespace-safe API v3 repository cleanup. It
 does not enable a plugin or
 grant a capability automatically.
 
@@ -137,6 +138,12 @@ bounded recall-counter mutation and adopts the two mixed commands without
 changing the default-off lifecycle. MB755 aligns both write paths with the
 canonical foreign key: registered authors retain their `USER` id, anonymous
 authors use SQL `NULL`, and user deletion preserves quote text.
+MB756 supplies live development evidence for the MB746 proof: observe stayed
+silent without repository mutation, on exercised successful and repeated
+fetches, neutral error paths stayed bounded, and rollback restored the prior
+state. MB757 makes the cleanup portion explicit: an Owner command derives the
+private v3 namespace in the core, remains idempotent and cannot collide with
+legacy same-slug storage.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -236,14 +243,21 @@ Planned capability families include:
 16. **MB755 — anonymous quote identity repair:** complete in source. The saved
     handler and v3 write service bind SQL `NULL` for anonymous authors; fresh
     schema and an idempotent migration use a nullable FK with `ON DELETE SET
-    NULL`. Operational promotion remains paused until the migration and live
-    observe write are verified.
+    NULL`. Migration and a disposable anonymous live write were verified on
+    the development service without promoting the channel.
+17. **MB756 — supervised short-content pilot:** complete operationally.
+    `observe` was silent and write-free; `on` exercised bounded success,
+    repeated fetch, malformed-document and unavailable-endpoint paths. The
+    prior repository state was restored and temporary identities were removed.
+18. **MB757 — API v3 repository cleanup:** complete in source. Owner-only
+    `clearv3data` derives the exact private key for short and hashed package
+    names, is idempotent and preserves legacy same-slug storage.
 
-The next step is to deploy MB755, repeat supervised observe evidence on the
-same development channel,
-followed by an explicit promotion decision. Only if operational evidence
-justifies it should a distinct reviewed path consider automatic remediation;
-manual containment remains reversible and exact.
+The quote path is stabilized and receives no further expansion here. After
+MB757 deployment evidence, the next reviewed milestone should select a new
+domain facade outside Quotes rather than exposing SQL or broad bot internals.
+Automatic remediation remains a separate decision; manual containment stays
+reversible and exact.
 
 ## Extraction order
 

@@ -686,7 +686,7 @@ sub _cmd_plugins {
     my $legacy_lifecycle_verb =
         $verb =~ /\A(?:load|loadscript|unload|reload|enable|disable|cleardata)\z/;
     my $v3_lifecycle_verb =
-        $verb =~ /\A(?:loadv3|policy|resetpolicy|quarantine|unquarantine)\z/;
+        $verb =~ /\A(?:loadv3|policy|resetpolicy|quarantine|unquarantine|clearv3data)\z/;
     if ($legacy_lifecycle_verb || $v3_lifecycle_verb) {
         my $level = $self->{users}{$id}{level};
         my $need_owner = $v3_lifecycle_verb
@@ -806,6 +806,27 @@ sub _cmd_plugins {
             $stream->write($removed
                 ? "API v3 quarantine '$target': $kind $resource $channel released.\r\n"
                 : "API v3 quarantine '$target': $kind $resource $channel was already absent.\r\n");
+            return;
+        }
+
+        if ($verb eq 'clearv3data') {
+            my ($target, @extra) = @rest;
+            unless (defined($target) && length($target) && !@extra) {
+                $stream->write("Usage: .plugins clearv3data <package>\r\n");
+                return;
+            }
+            my ($ok, $removed, $clear_err) =
+                $pm->clear_v3_plugin_data($target);
+            unless ($ok) {
+                $stream->write("Could not clear API v3 data for '$target': "
+                    . _plugin_info_text($clear_err, 160) . "\r\n");
+                return;
+            }
+            unless ($removed) {
+                $stream->write("No stored API v3 data for package '$target'.\r\n");
+                return;
+            }
+            $stream->write("Stored API v3 data for package '$target' cleared.\r\n");
             return;
         }
         if (!$need_owner && !(defined $level && $level <= 1)) {
@@ -1243,6 +1264,7 @@ sub _cmd_plugins {
             . "|enable <name>|disable <name>|cleardata <name>|discoverv3"
             . "|loadv3 <package> [caps]|policy <name> <channel> <mode> [key=value ...]"
             . "|resetpolicy <name> <channel>"
+            . "|clearv3data <package>"
             . "|quarantine <name> <kind> <resource> <channel>"
             . "|unquarantine <name> <kind> <resource> <channel>|doctor <name>"
             . "|failures <name>|quarantines <name>"
@@ -1305,6 +1327,7 @@ sub _cmd_help {
       . "  .metrics            - dump Prometheus metrics\r\n"
       . "  .plugins [loaded|config|info|load|loadscript|unload|reload|enable|disable|cleardata] - plugin lifecycle (v2)\r\n"
       . "  .plugins [discoverv3|loadv3|policy|resetpolicy] - API v3 discovery and channel policy\r\n"
+      . "  .plugins [clearv3data] - Owner-only API v3 repository cleanup\r\n"
       . "  .plugins [quarantine|unquarantine] - Owner-only API v3 resource isolation\r\n"
       . "  .plugins [doctor|failures|quarantines|permissions|why] - API v3 read-only diagnostics\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"

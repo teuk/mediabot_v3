@@ -1644,6 +1644,19 @@ sub clear_plugin_data {
     return (0, 0, "cannot clear storage for '$key': $!");
 }
 
+sub clear_v3_plugin_data {
+    my ($self, $name) = @_;
+
+    return (0, 0, 'invalid API v3 package name')
+        unless defined($name) && !ref($name)
+            && $name =~ /\A[a-z0-9][a-z0-9-]{0,47}\z/;
+
+    # The repository boundary deliberately hides its on-disk namespace from
+    # plugins and operators. Derive the same bounded key used by RuntimeV3 so
+    # short and hashed package names are cleared through one exact path.
+    return $self->clear_plugin_data(_v3_storage_key($name));
+}
+
 # mb604-B1: un refus d'ecriture doit dire POURQUOI, en cardinalite bornee.
 # Les refus naissent a deux endroits : au PLAN (bornes du contrat, avant
 # toute application) et a l'APPLICATION (gate fermee, second store, panne

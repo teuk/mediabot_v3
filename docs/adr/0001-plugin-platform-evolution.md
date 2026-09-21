@@ -185,3 +185,17 @@ idempotent migration make `QUOTES.id_user` nullable, convert zero or orphaned
 references and use `ON DELETE SET NULL` so quote history survives account
 removal. The `on` promotion remains paused until this migration and an
 anonymous live write pass; MB755 does not promote any channel automatically.
+
+MB756 records the supervised live proof of the earlier HTTP/repository design.
+On the development channel, `short-content-v3` stayed silent and write-free in
+`observe`, delivered bounded success and neutral errors in `on`, and returned
+to its prior revisioned state after rollback. The exercise also exposed that
+the historical `.plugins cleardata` command addresses the v1/v2 namespace and
+therefore cannot be used as an API v3 repository cleanup contract.
+
+MB757 resolves that operational ambiguity without changing storage semantics.
+The Owner-only `.plugins clearv3data <package>` action validates the runtime
+slug and derives the private short-or-hashed v3 key inside `PluginManager`. It
+is idempotent, works independently of package lifecycle or installation, never
+reveals a path, and cannot delete legacy same-slug storage. It adds no startup
+activation, automatic cleanup or plugin-visible filesystem authority.

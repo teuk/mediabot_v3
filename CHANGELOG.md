@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb757 — give each v3 grimoire its own vanishing cabinet
+
+- Add Owner-only `.plugins clearv3data <package>` for exact API v3 repository
+  cleanup. The Ministry validates the package slug and derives the same short
+  or hashed private key used by `storage.kv`; Partyline receives no path or
+  internal namespace detail. 🗝️
+- Keep the spell idempotent and usable after disable or unload, while leaving
+  historical `.plugins cleardata` and legacy same-slug storage untouched.
+  Traversal, malformed slugs and symlink targets remain outside the cabinet.
+- Record the MB756 supervised `short-content-v3` flight: silent/write-free
+  `observe`, bounded success/cache and neutral error paths in `on`, then exact
+  repository restoration and temporary-account cleanup. No package or channel
+  is activated automatically. 🦉
+
 ### mb755 — give anonymous memories a lawful place in the vault
 
 - Repair the live pilot failure where an unauthenticated `q add` tried to store

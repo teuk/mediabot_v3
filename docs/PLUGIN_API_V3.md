@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB755. Packages are discoverable and
+Plugin API v3 remains experimental in MB757. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. It adds no automatic remediation and exposes no exception text,
@@ -287,6 +287,14 @@ Reads are allowed in `observe` so behavior can be compared, while commits are
 suppressed unless current policy is `on`. Repository errors are contained and
 counted. This generic state is intentionally small; later `data.<domain>`
 facades expose approved domain methods rather than SQL.
+
+An Owner may remove exactly that namespaced document with
+`.plugins clearv3data <package>`. The core validates the API v3 package slug
+and derives the same bounded internal key used by the repository, including
+the hashed form for long names. The action is idempotent, works whether the
+package is loaded or unloaded, never prints the path, and cannot remove legacy
+v1/v2 storage with the same package slug. Historical `.plugins cleardata`
+keeps its legacy namespace and semantics.
 
 ## Approved quote reads
 

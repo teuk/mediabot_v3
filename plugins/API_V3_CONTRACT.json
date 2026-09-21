@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB755",
+  "milestone": "MB757",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -104,6 +104,8 @@
     "maximum_value_bytes": 2048,
     "write_mode": "compare-and-swap",
     "observe_writes": "suppressed",
+    "operator_cleanup": "Owner-only clearv3data with core-derived namespace",
+    "cleanup_loaded_or_unloaded": true,
     "plugin_paths": "unavailable",
     "plugin_database_handles": "unavailable"
   },

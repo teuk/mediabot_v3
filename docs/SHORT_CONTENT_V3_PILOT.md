@@ -2,7 +2,9 @@
 
 MB746 introduces `short-content-v3` as a deliberately small proof of the API
 v3 HTTP and repository boundaries. It is not loaded at boot, it has no default
-endpoint and no channel is active automatically.
+endpoint and no channel is active automatically. The MB756 supervised pilot on
+the development `#test` channel completed the observe/on/error/rollback path;
+MB757 closes the operator cleanup namespace gap found during that exercise.
 
 ## What the proof does
 
@@ -59,13 +61,14 @@ filesystem detail. Repeated success may be served from cache.
 .plugins policy short-content-v3 #test off
 .plugins disable short-content-v3
 .plugins unload short-content-v3
+.plugins clearv3data short-content-v3
 ```
 
 `off` blocks new work. Disable cancels owned requests and revokes late
-callbacks. Unload removes the command and runtime entry. The namespaced state
-file is inert and may be cleared separately through the existing operator
-storage procedure if desired; rollback does not require a database migration or
-configuration edit.
+callbacks. Unload removes the command and runtime entry. The final Owner-only
+command clears exactly the namespaced API v3 state and is idempotent; it does
+not target legacy same-slug storage. Rollback does not require a database
+migration or configuration edit.
 
 ## Evidence expected before wider use
 
@@ -75,3 +78,13 @@ configuration edit.
 - timeout and circuit-open outcomes are neutral on IRC and visible in metrics;
 - switching to `off` or disabling during a request suppresses late delivery;
 - unload removes `short` and leaves historical commands unchanged.
+
+## MB756 supervised evidence
+
+The development pilot established that `observe` produced neither IRC output
+nor a repository revision, while `on` returned the configured bounded GitHub
+repository name twice and advanced the stored served counter. A missing JSON
+path and an unavailable endpoint each produced only the neutral localized IRC
+message. Doctor remained `ready`, the failure ledger remained empty, the prior
+revision-3 repository was restored exactly, and the temporary Partyline
+accounts were removed. No boot policy or production channel was changed.

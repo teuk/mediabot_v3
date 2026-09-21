@@ -5,7 +5,10 @@ decides runtime behavior. MB751 added bounded, in-memory failure evidence.
 MB752 adds a separate Owner-only action for exact resource/channel containment;
 it does not turn evidence into automatic remediation. MB754 adds no Partyline
 mutation: its quote-command adoption uses the existing lifecycle, permission
-and per-channel policy controls and remains inactive by default.
+and per-channel policy controls and remains inactive by default. MB757 adds an
+explicit, namespace-safe repository cleanup action after the supervised
+`short-content-v3` pilot proved that the legacy cleanup verb cannot address
+API v3 state.
 
 ## Is the package operationally ready?
 
@@ -129,3 +132,25 @@ and HTTP completion. It is scoped to the named resource/channel, not the whole
 package. Release never clears the separate MB751 failure history. There is no
 bulk clear, persistent quarantine, automatic threshold, restart or global
 disable in MB752.
+
+## How do I clear API v3 repository state?
+
+First stop visible work through the normal reversible lifecycle, then use the
+dedicated Owner command:
+
+```text
+.plugins policy short-content-v3 #test off
+.plugins disable short-content-v3
+.plugins unload short-content-v3
+.plugins clearv3data short-content-v3
+```
+
+`clearv3data` validates the package slug and asks `PluginManager` to derive the
+same private namespace used by `storage.kv`; Partyline never sees a pathname or
+internal key. It works for loaded, unloaded and no-longer-installed packages.
+Success and already-absent state have distinct bounded messages, and repeating
+the command is safe. It removes only the API v3 repository document.
+
+`.plugins cleardata <name>` remains the historical v1/v2 operation. It does
+not alias or guess the API v3 namespace, so an identical legacy plugin name
+cannot be erased accidentally.

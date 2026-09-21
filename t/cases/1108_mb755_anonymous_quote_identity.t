@@ -67,8 +67,8 @@ return sub {
 
     my $contract = JSON::PP->new->decode(
         slurp_1108('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB755',
-        'machine contract records the repair milestone');
+    $assert->is($contract->{milestone}, 'MB757',
+        'machine contract records the current platform milestone');
     $assert->is($contract->{quote_write_limits}{add_attribution},
         'authenticated user id or SQL NULL for anonymous',
         'machine contract exposes no fake anonymous user id');
