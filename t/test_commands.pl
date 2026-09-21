@@ -305,6 +305,7 @@ sub _run_isolated_tap_case {
     my ($file, $name, $assert) = @_;
 
     my $project_root = "$FindBin::Bin/..";
+    my $failed_before = $assert->failed;
 
     my $pid = open(my $child, '-|');
     unless (defined $pid) {
@@ -336,13 +337,7 @@ sub _run_isolated_tap_case {
     my $closed = close $child;
     my $status = $?;
 
-    if ($opt_verbose) {
-        print $output;
-    }
-    else {
-        my $compact = _compact_failure_output($name, $output);
-        print "$compact\n" if length $compact;
-    }
+    print $output if $opt_verbose;
 
     my $parser = TAP::Parser->new({ source => \$output });
     my ($tap_pass, $tap_fail, $tap_tests) = (0, 0, 0);
@@ -390,6 +385,15 @@ sub _run_isolated_tap_case {
         if ($tap_fail == 0 && !@fatal_parse_errors) {
             $assert->fail("$name: isolated process - exit status $exit");
         }
+    }
+
+    # Compact mode must stay silent for a successful isolated TAP case.  The
+    # previous unconditional formatter call labelled every passing standalone
+    # case as "failure detected", even though the final totals and exit status
+    # were successful.
+    if (!$opt_verbose && $assert->failed > $failed_before) {
+        my $compact = _compact_failure_output($name, $output);
+        print "$compact\n" if length $compact;
     }
 
     return 1;

@@ -40,9 +40,34 @@ return sub {
 
     $assert->like(
         $src,
-        qr/print\s+\$output\s*;\s*\}\s*else\s*\{\s*my\s+\$compact\s*=\s*_compact_failure_output/s,
-        "isolated TAP is compact outside verbose mode",
+        qr/if\s*\(\s*!\$opt_verbose\s*&&\s*\$assert->failed\s*>\s*\$failed_before\s*\).*?_compact_failure_output/s,
+        "isolated TAP is compact only after a real failure",
     );
+
+    my $pid = open(
+        my $probe,
+        '-|',
+        $^X,
+        $runner,
+        '--filter',
+        '1029_gemini_public_command',
+    );
+    if (!defined $pid) {
+        $assert->fail('compact runner success probe launches');
+    }
+    else {
+        local $/;
+        my $output = <$probe> // '';
+        close $probe;
+        my $rc = $? >> 8;
+
+        $assert->is($rc, 0,
+            'compact runner success probe exits successfully');
+        $assert->like($output, qr/PASSED\s*:\s*19\/19/,
+            'compact runner success probe retains its passing summary');
+        $assert->unlike($output, qr/failure detected/,
+            'passing isolated TAP is silent in compact mode');
+    }
 
     $assert->like(
         $src,

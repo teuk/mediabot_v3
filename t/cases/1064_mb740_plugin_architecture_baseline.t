@@ -79,10 +79,15 @@ return sub {
 
     my $tool = File::Spec->catfile('.', 'tools', 'mb_architecture_inventory.pl');
     my $inventory = File::Spec->catfile('docs', 'generated', 'COMMAND_INVENTORY.md');
-    my $rc = system($^X, $tool, '--check', $inventory);
-    $assert->is($rc, 0, 'generated command inventory matches source truth');
+    my $status = system($^X, $tool, '--check', $inventory);
+    my $exit = $status == -1 ? -1 : ($status >> 8);
+    $assert->is($exit, 0, 'generated command inventory matches source truth');
 
     my $generated = _slurp_1064(File::Spec->catfile('.', $inventory));
+    $assert->like($generated, qr/Source version line: `3\.6dev`/,
+        'development inventory records the stable version line');
+    $assert->unlike($generated, qr/Source version: `[^`]+-\d{8}_\d{6}`/,
+        'development inventory excludes volatile commit timestamps');
     $assert->like($generated, qr/\| Internal help entries \| 245 \|/,
         'MB740 records all 245 current built-in help entries');
     $assert->like($generated, qr/\| Help parser anomalies \| 0 \|/,
