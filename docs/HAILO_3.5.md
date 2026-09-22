@@ -109,6 +109,13 @@ turn. It is evaluated before the historical SQL exclusion cache, so a
 output into training: the live bot identity is excluded even when it is absent
 from both configuration lists and the SQL table.
 
+MB765 adds an earlier, per-channel boundary for shared automation. A sender in
+`conversation.CHANNEL_BOTS`, a direct leading address to that sender, or an
+exact command in `conversation.CHANNEL_COMMANDS` returns before Hailo context,
+activity, reply, chatter, learning or provider post-edit can run. Use this
+central boundary when the same traffic must also be invisible to Wit/Quip,
+Spark/SparkAction and the rest of the public interaction pipeline.
+
 The output contract is exactly one printable IRC-safe line. The following
 conditions force the original candidate fallback:
 

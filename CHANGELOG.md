@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb765 — place a Quietus ward before the shared conversation hall
+
+- Add one reloadable, per-channel exclusion barrier before every public
+  interaction hook. Declared bot senders and direct leading addresses to them
+  can no longer feed achievements, games, Wit/Quip, Spark/SparkAction, Hailo,
+  responders, commands or URL previews. 🪄🤫
+- Add exact external-bot command namespaces so pyDuckHunt traffic such as
+  `!bang`, `!shop` and `!duckstats` can be consumed on `#i/o` without hiding
+  unrelated Mediabot commands or ordinary discussion containing “coin”.
+- Keep ordinary IRC logging and aggregate observability, with a fixed three-
+  reason metric and payload-free diagnostics. The sample documents the dev
+  `#radiocapsule` trio and the production `Coin` boundary without enabling
+  either instance automatically. 🦆🛡️
+
 ### mb764 — convene the first v3 plugin council
 
 - Add Owner-readable `.plugins overviewv3`, a bounded detached portfolio that

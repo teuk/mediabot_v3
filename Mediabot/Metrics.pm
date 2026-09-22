@@ -74,6 +74,9 @@ sub new {
     $self->_declare('mediabot_channel_nick_count',     'gauge',   'Current nick count seen in a channel');
     $self->_declare('mediabot_channel_autojoin',       'gauge',   'Whether a channel is configured as auto_join');
     $self->_declare('mediabot_channel_lines_in_total', 'counter', 'Total incoming public channel lines');
+    # MB765: fixed reason vocabulary (declared_bot, bot_address, bot_command).
+    $self->_declare('mediabot_conversation_excluded_total', 'counter',
+        'Public channel lines excluded before interactive behavior, by bounded reason', ['reason']);
     $self->_declare('mediabot_channel_bans_active',        'gauge',   'Current active bans per channel', ['channel']);
     $self->_declare('mediabot_channel_bans_added_total',   'counter', 'Total bans added per channel',   ['channel']);
     $self->_declare('mediabot_channel_bans_expired_total', 'counter', 'Total bans expired',             []);

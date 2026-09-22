@@ -21,6 +21,7 @@ use Mediabot::Log;
 use Mediabot::Metrics;
 use Mediabot::Achievements;
 use Mediabot::AI::ConversationObserver ();
+use Mediabot::AI::ConversationExclusion ();
 use Mediabot::AI::ConversationDryRun ();
 use Mediabot::AI::ConversationEmission ();
 use Mediabot::AI::ConversationSender ();
@@ -3771,6 +3772,58 @@ sub _on_message_PRIVMSG_body {
     $mediabot->{metrics}->inc('mediabot_privmsg_in_total') if $mediabot->{metrics};
     if ($is_channel) {
         # Message on channel
+        # MB765: one channel-scoped exclusion barrier precedes every public
+        # interaction hook. Declared automation, direct addresses to it and
+        # exact external-bot commands therefore cannot feed achievements,
+        # games, Wit/Quip, Spark/SparkAction, Hailo, responders or URL hooks.
+        my $conversation_exclusion;
+        eval {
+            $mediabot->{conversation_exclusion} ||=
+                Mediabot::AI::ConversationExclusion->new(
+                    conf => $mediabot->{conf},
+                );
+            $conversation_exclusion =
+                $mediabot->{conversation_exclusion}->classify_public_line(
+                    channel  => $where,
+                    nick     => $who,
+                    bot_nick => $self->nick,
+                    message  => $what,
+                );
+        };
+        if ($@) {
+            my $error = $@;
+            $error =~ s/[\r\n\x00]+/ /g;
+            $error = substr($error, 0, 200);
+            $mediabot->{logger}->log(1,
+                'Conversation exclusion error: ' . $error);
+        }
+        if (ref($conversation_exclusion) eq 'HASH'
+            && $conversation_exclusion->{excluded}) {
+            my $reason = $conversation_exclusion->{reason} // 'unknown';
+            $reason = 'unknown'
+                unless $reason =~ /\A(?:declared_bot|bot_address|bot_command)\z/;
+            if ($mediabot->{metrics}) {
+                $mediabot->{metrics}->inc(
+                    'mediabot_channel_lines_in_total',
+                    { channel => $where },
+                );
+                $mediabot->{metrics}->inc(
+                    'mediabot_conversation_excluded_total',
+                    { reason => $reason },
+                );
+            }
+            if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE'))
+                && $mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1) {
+                $mediabot->{logger}->log(0,
+                    "[LIVE] $where: <$who> $what");
+            }
+            $mediabot->{logger}->log(3,
+                '[CONVERSATION_IGNORE] channel=' . $where
+                . ' action=drop reason=' . $reason
+                . ' nick=' . $who);
+            return undef;
+        }
+
         # Track last seen on public message
         # mb85-B1 / mb86-port: bloc updateUserSeen fermé avant deliverReminders
         {

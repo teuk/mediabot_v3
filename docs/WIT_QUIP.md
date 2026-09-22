@@ -41,6 +41,13 @@ context window. An upgraded instance whose private configuration does not yet
 contain the key also defaults to `Coin`; an explicit value may add or replace
 the configured names.
 
+For automation that must be absent from every interactive lane, use the central
+per-channel barrier in `conversation.CHANNEL_BOTS` instead. Its decision runs
+before Wit/Quip, Spark, Hailo, games, achievements, responders, commands and URL
+previews. `conversation.CHANNEL_COMMANDS` can additionally consume an exact
+external-bot command namespace without hiding unrelated Mediabot commands. See
+[`CONVERSATION_EXCLUSIONS.md`](CONVERSATION_EXCLUSIONS.md).
+
 Commands and known bot output leave a 30-second breathing space. Active local
 games, active Spark events and pending Spark AI work also block a Quip request
 and are checked again before delivery. Spark already sees the shared Wit/Quip

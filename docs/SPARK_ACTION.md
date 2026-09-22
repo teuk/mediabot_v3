@@ -76,6 +76,13 @@ human context or participant counts. They instead create bot pressure, which
 postpones unsolicited Spark work. The bot's own live nick is always classified
 as automation even when `BOT_NICKS` is empty.
 
+The stronger per-channel exclusions in `conversation.CHANNEL_BOTS` and
+`conversation.CHANNEL_COMMANDS` run before this observer. Those lines create
+neither human activity nor bot pressure and cannot start, advance, postpone or
+close Spark or SparkAction work. This distinction is intentional: `BOT_NICKS`
+models visible automation pressure, while the central barrier models traffic
+that the whole interactive runtime must ignore.
+
 Activity summaries expose human line rate, distinct-human count, a
 recency-weighted effective audience, dominant-speaker share, bot-pressure
 volume and quiet durations. Effective audience uses participation balance, so
