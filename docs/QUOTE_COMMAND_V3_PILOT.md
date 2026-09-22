@@ -93,3 +93,16 @@ After unload, `q`, `quote`, `quotecount`, `topquote` and `halloffame` must use
 the exact handler references saved before the pilot. Quote rows created during
 an intentional `on` test are application data and must be removed explicitly
 by their recorded ids; lifecycle rollback does not rewrite data.
+
+## MB767 accepted persistent development promotion
+
+MB767 promotes `quotes-v3` on `#test` only after an observe-first parity pass.
+The authoritative proof uses disposable text, verifies one add, one exact view,
+one recall increment and one authorized delete, then confirms that no probe row
+or temporary identity remains.
+
+The final accepted posture is `quotes-v3` enabled with exactly its four
+manifest capabilities and policy `on` for `#test`. A clean service restart must
+restore the package as ready with all five commands mounted and zero failures.
+This state is held by the core-owned API v3 boot ledger; source installation
+remains default-off and no production channel is promoted.

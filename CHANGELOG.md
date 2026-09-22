@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb767 — entrust the quote archive to the persistent v3 corridor
+
+- Promote `quotes-v3` on the single development channel `#test` only after an
+  observe-first parity pass. The package keeps exactly its four reviewed
+  capabilities and all five quote commands become authoritative together. 📚🗝️
+- Prove one disposable add, exact view, single recall increment and authorized
+  delete, leaving neither quote data nor temporary identity behind. The final
+  doctor posture is ready with zero failures.
+- Restart the development service and restore the exact enabled/`on` posture
+  from the MB766 core ledger. Source remains default-off, rollback stays
+  `policy off` → disable → unload, and production remains untouched. 🦉🔐
+
 ### mb766 — bind v3 operator intent into a sealed boot ledger
 
 - Persist the reviewed API v3 package set, exact granted capabilities, typed

@@ -269,3 +269,10 @@ loads nothing, while a package-specific runtime failure is isolated and
 logged. Partyline `off`, disable and unload remain immediate rollback and now
 survive restart. Manifests stay default-off and no package gains authority from
 installation alone.
+
+MB767 performs the first promotion that depends on that ledger. `quotes-v3`
+is loaded with exactly its four manifest capabilities, shadows on `#test`
+before becoming authoritative, and uses disposable add, view and delete
+evidence with one recall increment and exact cleanup. A clean restart must
+restore the enabled lifecycle and `on` policy. Source remains default-off,
+rollback is `off`, disable or unload, and production remains unchanged.

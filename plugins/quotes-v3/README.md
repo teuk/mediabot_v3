@@ -22,3 +22,8 @@ captured at load time.
 Existing databases must apply
 `install/migrations/20260921_quotes_anonymous_author.sql` before repeating the
 write pilot or promoting a channel to `on`.
+
+MB767 accepts the first persistent development promotion for this package on
+`#test`. The operator posture is observe-first, then authoritative `on`, and is
+restored from the core-owned API v3 boot ledger after a clean restart. Package
+source stays default-off; no production channel is part of the promotion.

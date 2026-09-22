@@ -28,8 +28,8 @@ return sub {
     my $contract = JSON::PP->new->decode(
         slurp_1137('plugins/API_V3_CONTRACT.json'));
 
-    $assert->is($contract->{milestone}, 'MB766',
-        'machine contract records persistent startup milestone');
+    $assert->is($contract->{milestone}, 'MB767',
+        'machine contract advances while retaining persistent startup');
     $assert->is($contract->{boot_persistence}{schema}, 1,
         'machine contract publishes boot-state schema');
     $assert->is($contract->{boot_persistence}{maximum_bytes}, 1048576,

@@ -22,7 +22,7 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1125('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB766',
+    $assert->is($contract->{milestone}, 'MB767',
         'machine contract records recall authority');
     $assert->is(join(',',
         @{ $contract->{factoid_write_limits}{operations} }),

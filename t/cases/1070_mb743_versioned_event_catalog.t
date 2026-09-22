@@ -27,7 +27,7 @@ return sub {
 
     my $api_contract = JSON::PP->new->decode(
         _slurp_1070('plugins/API_V3_CONTRACT.json'));
-    $assert->is($api_contract->{milestone}, 'MB766',
+    $assert->is($api_contract->{milestone}, 'MB767',
         'API v3 machine contract records the current platform milestone');
     $assert->is(join(',', @{ $api_contract->{implemented_capabilities} }),
         'data.factoids.read,data.factoids.write,data.quotes.read,data.quotes.write,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
