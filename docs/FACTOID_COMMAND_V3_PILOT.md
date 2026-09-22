@@ -97,3 +97,12 @@ Global lifecycle rollback remains:
 Rollback changes no remaining factoid row. After unload, the exact historical
 `factoid`, `factoids`, `learn`, `forget` and `whatis` handlers must again occupy their
 registry entries.
+
+## MB764 promotion result
+
+The completed MB759–MB763 command set is the first API v3 package accepted for
+one controlled development promotion. MB764 repeats observe/on parity with a
+uniquely named disposable factoid, verifies exact recall counts, removes that
+row and leaves only `factoids-v3` on `#test` active. The retained state is
+instance-scoped: the explicit rollback above is immediate, and a service
+restart returns API v3 to unloaded because no boot autoload was introduced.

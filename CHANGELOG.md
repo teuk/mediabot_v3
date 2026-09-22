@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb764 — convene the first v3 plugin council
+
+- Add Owner-readable `.plugins overviewv3`, a bounded detached portfolio that
+  reconciles all validated local API v3 packages with their loaded lifecycle,
+  deterministic readiness and aggregate policy counts. It exposes neither
+  channel configuration values nor package paths and changes no state. 🏰📜
+- Consolidate the completed Quotes and Factoids migration evidence into one
+  development-promotion runbook. The first promotion is limited to
+  `factoids-v3` on `#test`, uses disposable data, and requires exact one-reply,
+  one-recall accounting plus cleanup before the policy stays `on`. 🧪🪄
+- Keep the gate deliberately reversible: `policy off`, disable and unload are
+  immediate rollback, a service restart returns v3 to unloaded, and no boot
+  autoload or production-channel activation is introduced. The first plugin
+  extraction wave is operationally complete. 🗝️🦉
+
 ### mb763 — let the factoid portraits answer through the v3 corridor
 
 - Mount `whatis` in the inert `factoids-v3` package and let the existing

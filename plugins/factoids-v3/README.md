@@ -30,5 +30,13 @@ default and can neither forge write identity nor authorize deletion by
 nickname text. MB762 added the core recall operation; MB763 consumes it without
 changing the default-off lifecycle or granting the package any direct SQL.
 
+MB764 accepts the complete five-command set for the first controlled API v3
+development promotion on `#test`. The promotion uses disposable factoid data,
+retains exact one-reply/one-counter semantics and leaves no evidence row or
+temporary identity. It remains instance-scoped: policy `off`, disable and
+unload are immediate rollback, while restart returns the package to unloaded.
+
 The supervised development procedure lives in
 [`../../docs/FACTOID_COMMAND_V3_PILOT.md`](../../docs/FACTOID_COMMAND_V3_PILOT.md).
+The consolidated promotion runbook lives in
+[`../../docs/PLUGIN_V3_PROMOTION.md`](../../docs/PLUGIN_V3_PROMOTION.md).

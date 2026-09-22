@@ -1006,9 +1006,38 @@ sub _cmd_plugins {
     my @enabled  = eval { $pm->list(enabled => 1) } ? $pm->list(enabled => 1) : ();
     my @disabled = eval { $pm->list(enabled => 0) } ? $pm->list(enabled => 0) : ();
 
-    # MB750-MB752: these views are deliberately read-only. They expose the
+    # MB750-MB752/MB764: these views are deliberately read-only. They expose the
     # core's decision, capability intersection, bounded failure history and
-    # manual quarantine state, never configuration values or service objects.
+    # manual quarantine state, plus one bounded installed/loaded portfolio;
+    # never configuration values or service objects.
+    if ($mode eq 'overviewv3') {
+        my $report = eval { $pm->v3_portfolio_report };
+        unless ($report) {
+            my $error = $@ || 'portfolio unavailable';
+            $stream->write("API v3 overview failed: "
+                . _plugin_info_text($error, 180) . "\r\n");
+            return;
+        }
+        my $summary = $report->{summary};
+        $stream->write("API v3 overview: discovered=$summary->{discovered}"
+            . " loaded=$summary->{loaded} enabled=$summary->{enabled}"
+            . " active=$summary->{active} ready=$summary->{ready}"
+            . " limited=$summary->{limited}"
+            . " active_channels=$summary->{active_channels}.\r\n");
+        for my $package (@{ $report->{packages} || [] }) {
+            my $policies = $package->{policies};
+            my $source = $package->{installed} ? 'installed' : 'missing';
+            $stream->write("  $package->{name} version=$package->{version}"
+                . " source=$source lifecycle=$package->{lifecycle}"
+                . " status=$package->{status} reason=$package->{reason}"
+                . " policies=on:$policies->{on},observe:$policies->{observe},off:$policies->{off}\r\n");
+        }
+        if (($summary->{truncated} // 0) > 0) {
+            $stream->write("  ... $summary->{truncated} additional package(s) omitted.\r\n");
+        }
+        return;
+    }
+
     if ($mode =~ /\Adoctor\s+(\S+)\z/) {
         my $target = $1;
         my $report = eval { $pm->v3_diagnostic_report($target) };
@@ -1268,7 +1297,7 @@ sub _cmd_plugins {
             . "|quarantine <name> <kind> <resource> <channel>"
             . "|unquarantine <name> <kind> <resource> <channel>|doctor <name>"
             . "|failures <name>|quarantines <name>"
-            . "|permissions <name>|why <name> <channel>]\r\n");
+            . "|permissions <name>|why <name> <channel>|overviewv3]\r\n");
         return;
     }
 
@@ -1330,6 +1359,7 @@ sub _cmd_help {
       . "  .plugins [clearv3data] - Owner-only API v3 repository cleanup\r\n"
       . "  .plugins [quarantine|unquarantine] - Owner-only API v3 resource isolation\r\n"
       . "  .plugins [doctor|failures|quarantines|permissions|why] - API v3 read-only diagnostics\r\n"
+      . "  .plugins [overviewv3] - bounded API v3 installed/active portfolio\r\n"
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary [Administrator+])\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"

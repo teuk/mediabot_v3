@@ -251,3 +251,12 @@ the saved historical handler remains the only visible counter writer. In on,
 one bounded lookup, one core-owned increment and one channel reply execute.
 Explicit misses retain their teaching notice; quiet misses emit nothing. Off,
 disable and unload restore the exact saved `whatis` entry.
+
+MB764 closes the first extraction wave without broadening plugin authority.
+`.plugins overviewv3` exposes one bounded detached reconciliation of installed
+packages and live v3 instances. The first retained activation is
+`factoids-v3` on the development channel `#test`, after disposable observe/on
+evidence and cleanup. It remains an instance-local promotion: no API v3 boot
+autoload is added, restart fails closed to unloaded, and `off`, disable or
+unload remains the immediate operator rollback. Quotes receive no new scope
+and no production channel is activated.

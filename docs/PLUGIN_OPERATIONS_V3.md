@@ -17,6 +17,21 @@ change. `observe` suppresses the shadow write and leaves the historical handler
 as the only mutating path. MB762 adds one on-only exact factoid recall increment
 to the core facade. MB763 mounts `whatis`; the parser-level `?keyword` shortcut
 reaches that same handler and retains its quiet-miss behavior.
+MB764 adds one bounded portfolio across installed and loaded v3 packages, then
+uses it to supervise the first single-channel development promotion.
+
+## What is installed and active across API v3?
+
+```text
+.plugins overviewv3
+```
+
+The first line reports discovered, loaded, enabled, active, ready and limited
+package totals plus the number of active channel policies. Each following row
+contains only package name/version, installed-or-missing source state,
+lifecycle, deterministic readiness/reason and `on`/`observe`/`off` counts.
+At most 64 rows are returned. The command is read-only and contains no package
+path, channel configuration value, object, service or credential.
 
 ## Is the package operationally ready?
 
@@ -162,3 +177,21 @@ the command is safe. It removes only the API v3 repository document.
 `.plugins cleardata <name>` remains the historical v1/v2 operation. It does
 not alias or guess the API v3 namespace, so an identical legacy plugin name
 cannot be erased accidentally.
+
+## First controlled development promotion
+
+MB764 promotes only `factoids-v3` on `#test`. Before leaving policy `on`, the
+operator collects `.plugins overviewv3`, `doctor`, `permissions`, `why` and
+`failures`, proves observe/on parity with one disposable factoid, verifies one
+increment per successful explicit/quiet recall, then deletes the evidence.
+The exact runbook is [`PLUGIN_V3_PROMOTION.md`](PLUGIN_V3_PROMOTION.md).
+
+The promotion is intentionally instance-scoped. It creates no API v3 boot
+autoload; a service restart returns the package to unloaded. Immediate
+explicit rollback remains:
+
+```text
+.plugins policy factoids-v3 #test off
+.plugins disable factoids-v3
+.plugins unload factoids-v3
+```

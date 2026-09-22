@@ -14,7 +14,8 @@ pilot, MB757's namespace-safe API v3 repository cleanup, MB758's second
 approved domain facade for bounded factoid reads and MB759's reversible pure
 factoid-command adoption, followed by MB760's separate factoid-write authority
 and MB761's reversible `learn`/`forget` adoption, MB762's bounded factoid
-recall-counter authority and MB763's reversible `whatis`/`?keyword` adoption.
+recall-counter authority, MB763's reversible `whatis`/`?keyword` adoption and
+MB764's bounded portfolio plus first controlled development promotion.
 It does not enable a plugin or grant a capability automatically.
 
 ## Current baseline
@@ -170,6 +171,11 @@ MB762 adds that one on-only channel-and-keyword-scoped increment to the
 core-owned write service. MB763 mounts `whatis`; the existing `?keyword`
 parser route enters the same handler. Observe leaves the saved historical path
 solely visible and mutating, while on performs one read, increment and reply.
+MB764 adds a single detached operator portfolio over installed and loaded v3
+packages, then accepts `factoids-v3` on `#test` as the first instance-scoped
+development promotion. The promotion creates no boot autoload: explicit
+`off`/disable/unload remains immediate rollback and restart returns the package
+to unloaded.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -305,11 +311,17 @@ Planned capability families include:
     `factoids-v3` mounts `whatis`; the unchanged `?keyword` parser route reaches
     the same saved-handler bridge. Explicit misses teach, quiet misses remain
     silent, and successful on-policy recalls answer and increment exactly once.
+25. **MB764 — portfolio and controlled promotion:** complete operationally.
+    `.plugins overviewv3` reconciles installed packages with live lifecycle,
+    readiness and policy counts in one bounded read-only report. A disposable
+    observe/on proof promotes only `factoids-v3` on `#test`; no boot autoload or
+    production channel is changed, and explicit rollback remains immediate.
 
-The quote path is stabilized and receives no further expansion here. After
-MB763, the first five-command factoid migration set is complete. MB764 may
-consolidate its evidence and promote one development channel only; it must use
-disposable data and retain immediate policy rollback.
+The quote path is stabilized and receives no further expansion here. MB764
+closes the first extraction wave: Quotes remain operator-controlled, while the
+complete five-command Factoids set has one bounded development promotion.
+Further product extraction is a new roadmap decision, not unfinished work in
+this migration set.
 
 ## Extraction order
 

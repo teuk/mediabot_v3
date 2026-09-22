@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB763",
+  "milestone": "MB764",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -311,6 +311,27 @@
       "active"
     ],
     "automatic_remediation": "none"
+  },
+  "operator_portfolio": {
+    "partyline_command": "overviewv3",
+    "mode": "read-only detached snapshot",
+    "maximum_entries": 64,
+    "installed_source": "validated local discovery",
+    "live_source": "loaded PluginManager instances",
+    "configuration_values": "unavailable",
+    "package_paths": "unavailable",
+    "mutation": "none"
+  },
+  "development_promotion": {
+    "package": "factoids-v3",
+    "channel": "#test",
+    "mode": "on",
+    "scope": "single development channel",
+    "evidence": "disposable factoid with exact one-recall accounting and cleanup",
+    "boot_autoload": false,
+    "restart_behavior": "implicit rollback to unloaded",
+    "explicit_rollback": "policy off, disable, unload",
+    "production_channels": 0
   },
   "runtime_failure_history": {
     "mode": "read-only in-memory per loaded instance",

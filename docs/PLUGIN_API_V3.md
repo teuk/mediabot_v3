@@ -1,10 +1,12 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB763. Packages are discoverable and
+Plugin API v3 remains experimental in MB764. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
-reversibly. It adds no automatic remediation and exposes no exception text,
-configuration value, mutable user object, database handle or arbitrary SQL.
+reversibly. MB764 adds a bounded installed/live operator portfolio and the
+first single-channel development promotion. It adds no automatic remediation
+and exposes no exception text, configuration value, mutable user object,
+database handle or arbitrary SQL.
 
 ## Package layout
 
@@ -329,6 +331,8 @@ path solely visible and mutating, while on produces one reply and one count.
 
 The supervised activation and rollback sequence is documented in
 [`FACTOID_COMMAND_V3_PILOT.md`](FACTOID_COMMAND_V3_PILOT.md).
+The accepted one-channel promotion and consolidated evidence are documented in
+[`PLUGIN_V3_PROMOTION.md`](PLUGIN_V3_PROMOTION.md).
 
 ## Authorized factoid writes
 
@@ -502,7 +506,7 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB763 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB764 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
 `data.quotes.read`, `data.quotes.write`, `data.factoids.read` and
 `data.factoids.write`. Other capability names remain reserved for later
@@ -543,6 +547,10 @@ $bot->plugin_manager->set_v3_channel_policy(
 
 The Owner-operated flow is also available on Partyline through `discoverv3`,
 `loadv3`, `policy` and `resetpolicy`. No v3 package is loaded at boot.
+`.plugins overviewv3` is a separate read-only view: it reconciles validated
+local packages with loaded v3 instances and prints only lifecycle, readiness
+and aggregate policy counts. Its output is capped at 64 package rows and never
+contains policy configuration values or package paths.
 
 ## Reversible built-in migration
 
