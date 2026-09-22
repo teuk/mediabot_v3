@@ -260,3 +260,12 @@ evidence and cleanup. It remains an instance-local promotion: no API v3 boot
 autoload is added, restart fails closed to unloaded, and `off`, disable or
 unload remains the immediate operator rollback. Quotes receive no new scope
 and no production channel is activated.
+
+MB766 makes that operator decision durable without reviving broad boot
+autoload. One core-owned, bounded and private JSON ledger records only loaded
+API v3 package names, exact grants, typed channel policies and enabled state.
+The entire document is validated before any restore; corrupt or unknown state
+loads nothing, while a package-specific runtime failure is isolated and
+logged. Partyline `off`, disable and unload remain immediate rollback and now
+survive restart. Manifests stay default-off and no package gains authority from
+installation alone.

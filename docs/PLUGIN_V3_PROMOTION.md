@@ -1,9 +1,10 @@
 # API v3 first controlled development promotion
 
-MB764 closes the first extraction wave by promoting exactly one reviewed
+MB764 closed the first extraction wave by promoting exactly one reviewed
 package on one development channel: `factoids-v3` on `#test`. Quotes remain
-stable and operator-controlled. No production channel, schema, boot autoload
-or second package is changed.
+stable and operator-controlled. MB766 subsequently makes accepted Partyline
+posture restart-persistent through a separate core-owned ledger. No production
+channel, schema or second package is changed.
 
 ## Acceptance evidence
 
@@ -60,6 +61,6 @@ Explicit rollback is three bounded Partyline commands:
 
 The first command immediately restores the saved historical handlers on the
 channel; disable and unload end the instance and restore the exact registry
-entries. API v3 still has no boot autoload, so a service restart is also an
-implicit rollback to unloaded. Re-promotion after restart always requires a
-fresh explicit Owner decision.
+entries. These mutations are persisted. A restart restores the last committed
+state; it is no longer a rollback mechanism. Unload is the definitive rollback
+because it also removes the package from the next boot ledger.

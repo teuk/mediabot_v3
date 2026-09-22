@@ -22,7 +22,7 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1131('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB764',
+    $assert->is($contract->{milestone}, 'MB766',
         'machine contract records the consolidation milestone');
     $assert->is($contract->{operator_portfolio}{partyline_command},
         'overviewv3', 'machine contract names the bounded operator view');
@@ -37,10 +37,12 @@ return sub {
     $assert->is($contract->{development_promotion}{mode}, 'on',
         'promotion uses authoritative on policy');
     $assert->is($contract->{development_promotion}{boot_autoload},
-        JSON::PP::false, 'promotion does not create boot autoload');
+        JSON::PP::false, 'promotion stays outside historical boot autoload');
+    $assert->is($contract->{development_promotion}{persistent_operator_state},
+        JSON::PP::true, 'promotion posture is now restart-persistent');
     $assert->is($contract->{development_promotion}{restart_behavior},
-        'implicit rollback to unloaded',
-        'restart remains a fail-closed rollback');
+        'restore validated operator state',
+        'restart restores only validated operator intent');
     $assert->is($contract->{development_promotion}{production_channels}, 0,
         'no production channel is promoted');
 
@@ -52,8 +54,8 @@ return sub {
         qr/\.plugins policy factoids-v3 #test off.*?\.plugins disable factoids-v3.*?\.plugins unload factoids-v3/s,
         'promotion guide keeps immediate explicit rollback');
     $assert->like($guide,
-        qr/restart.*?unloaded/is,
-        'promotion guide records restart as implicit rollback');
+        qr/restart.*?last committed\s+state/is,
+        'promotion guide records persistent restart semantics');
     $assert->like($guide,
         qr/disposable/i, 'promotion evidence uses disposable data');
 };

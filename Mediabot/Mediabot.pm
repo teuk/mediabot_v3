@@ -293,6 +293,51 @@ sub log_plugin_load_report {
     return 1;
 }
 
+# MB766: API v3 operator state is restored independently from the legacy
+# plugins.AUTOLOAD switch.  The manager validates the complete local document
+# before loading any package and reports per-package failures without turning a
+# broken optional plugin into a bot-wide startup failure.
+sub restore_v3_plugins_from_state {
+    my ($self) = @_;
+    return $self->{plugin_manager}->restore_v3_runtime_state;
+}
+
+sub log_v3_restore_report {
+    my ($self, $report) = @_;
+    return unless ref($report) eq 'HASH';
+
+    if ($report->{skipped}) {
+        $self->{logger}->log(3,
+            'API v3 boot restore skipped: '
+                . ($report->{reason} || 'no persisted state'))
+            if $self->{logger};
+        return 1;
+    }
+
+    my $loaded = ref($report->{loaded}) eq 'ARRAY'
+        ? scalar @{ $report->{loaded} } : 0;
+    $self->{logger}->log(1,
+        "API v3 boot restore: loaded $loaded package(s)")
+        if $self->{logger};
+
+    if (ref($report->{errors}) eq 'ARRAY') {
+        for my $failure (@{ $report->{errors} }) {
+            next unless ref($failure) eq 'HASH';
+            my $package = defined($failure->{package})
+                ? " package '$failure->{package}'" : '';
+            my $error = $failure->{error} || 'unknown restore error';
+            $error =~ s/[\x00-\x1f\x7f]+/ /g;
+            $error =~ s/\s+/ /g;
+            $error = substr($error, 0, 197) . '...'
+                if length($error) > 200;
+            $self->{logger}->log(1,
+                "API v3 boot restore failed for$package: $error")
+                if $self->{logger};
+        }
+    }
+    return 1;
+}
+
 
 # Explicit plugin loading entry point for future boot integration.
 # mb170-B1 does not call this automatically from the constructor.

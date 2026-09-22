@@ -2,8 +2,13 @@ package Mediabot::PluginManager;
 
 use strict;
 use warnings;
+use Fcntl qw(O_CREAT O_EXCL O_WRONLY);
 use File::Spec;
 use JSON::PP ();
+
+our $V3_RUNTIME_STATE_SCHEMA       = 1;
+our $V3_RUNTIME_STATE_MAX_BYTES    = 1_048_576;
+our $V3_RUNTIME_STATE_MAX_PACKAGES = 64;
 
 # mb593-B1: evenements routables vers les scripts sidecar — la liste blanche
 # exacte de ce que le bot emet aujourd'hui (public_command_observed au
@@ -766,6 +771,330 @@ sub v3_channel_policies {
     my $entry = $self->plugin($name) or return ();
     my $policy = $self->_v3_policy_object($entry) or return ();
     return $opts{active} ? $policy->active_policies : $policy->policies;
+}
+
+# MB766: API v3 operator intent survives a clean service restart.  This is a
+# core-owned document, separate from plugin KV repositories and from the
+# historical plugins.AUTOLOAD gate.  Only validated package names, exact
+# grants, typed channel policies and the enabled bit cross the boot boundary.
+sub _v3_entry_state {
+    my ($self, $entry) = @_;
+    return undef unless ref($entry) eq 'HASH'
+        && ref($entry->{metadata}) eq 'HASH'
+        && ($entry->{metadata}{api} // 0) == 3;
+
+    my @policies = $self->v3_channel_policies($entry->{name});
+    my %policies = map {
+        $_->{channel} => {
+            mode   => "$_->{mode}",
+            config => { %{ $_->{config} || {} } },
+        }
+    } @policies;
+    return {
+        grants => [ @{ $entry->{metadata}{granted_capabilities} || [] } ],
+        enabled => $entry->{enabled} ? JSON::PP::true : JSON::PP::false,
+        policies => \%policies,
+    };
+}
+
+sub v3_runtime_state_snapshot {
+    my ($self) = @_;
+    my %packages;
+    for my $entry ($self->list) {
+        my $state = $self->_v3_entry_state($entry) or next;
+        $packages{$entry->{name}} = $state;
+    }
+    die "PluginManager: API v3 runtime state exceeds $V3_RUNTIME_STATE_MAX_PACKAGES packages\n"
+        if keys(%packages) > $V3_RUNTIME_STATE_MAX_PACKAGES;
+    return {
+        schema   => $V3_RUNTIME_STATE_SCHEMA,
+        packages => \%packages,
+    };
+}
+
+sub _v3_runtime_state_path {
+    my ($self, %opts) = @_;
+    my ($dir, $err) = $self->_plugin_data_dir(
+        create => ($opts{create} ? 1 : 0));
+    return (undef, $err) unless defined $dir;
+    return (File::Spec->catfile($dir, '.api-v3-runtime-state.json'), undef);
+}
+
+sub _v3_plain_scalar {
+    my ($value) = @_;
+    return defined($value) && !ref($value) ? 1 : 0;
+}
+
+sub _validate_v3_runtime_state {
+    my ($document) = @_;
+    return (0, 'state must be an object') unless ref($document) eq 'HASH';
+    for my $field (keys %$document) {
+        return (0, "unknown top-level field '$field'")
+            unless $field eq 'schema' || $field eq 'packages';
+    }
+    return (0, 'unsupported state schema')
+        unless _v3_plain_scalar($document->{schema})
+            && "$document->{schema}" eq "$V3_RUNTIME_STATE_SCHEMA";
+    return (0, 'packages must be an object')
+        unless ref($document->{packages}) eq 'HASH';
+    return (0, 'too many persisted packages')
+        if keys(%{ $document->{packages} }) > $V3_RUNTIME_STATE_MAX_PACKAGES;
+
+    for my $name (sort keys %{ $document->{packages} }) {
+        return (0, "invalid package name '$name'")
+            unless $name =~ /\A[a-z0-9][a-z0-9-]{0,47}\z/;
+        my $state = $document->{packages}{$name};
+        return (0, "state for '$name' must be an object")
+            unless ref($state) eq 'HASH';
+        for my $field (keys %$state) {
+            return (0, "unknown state field '$field' for '$name'")
+                unless $field eq 'grants' || $field eq 'enabled'
+                    || $field eq 'policies';
+        }
+        return (0, "grants for '$name' must be an array")
+            unless ref($state->{grants}) eq 'ARRAY';
+        return (0, "too many grants for '$name'")
+            if @{ $state->{grants} } > 64;
+        my %grant;
+        for my $capability (@{ $state->{grants} }) {
+            return (0, "invalid grant for '$name'")
+                unless _v3_plain_scalar($capability)
+                    && $capability =~ /\A[a-z][a-z0-9_.:-]{0,127}\z/;
+            return (0, "duplicate grant for '$name'")
+                if $grant{$capability}++;
+        }
+        return (0, "enabled for '$name' must be a JSON boolean")
+            unless ref($state->{enabled})
+                && eval { $state->{enabled}->isa('JSON::PP::Boolean') };
+        return (0, "policies for '$name' must be an object")
+            unless ref($state->{policies}) eq 'HASH';
+        return (0, "too many policies for '$name'")
+            if keys(%{ $state->{policies} }) > 128;
+        for my $channel (sort keys %{ $state->{policies} }) {
+            return (0, "invalid policy channel for '$name'")
+                unless length($channel) >= 2 && length($channel) <= 128
+                    && $channel =~ /\A[#&+!][^\x00\x07\r\n ,:]+\z/;
+            my $policy = $state->{policies}{$channel};
+            return (0, "policy for '$name' must be an object")
+                unless ref($policy) eq 'HASH';
+            for my $field (keys %$policy) {
+                return (0, "unknown policy field '$field' for '$name'")
+                    unless $field eq 'mode' || $field eq 'config';
+            }
+            return (0, "invalid policy mode for '$name'")
+                unless _v3_plain_scalar($policy->{mode})
+                    && $policy->{mode} =~ /\A(?:off|observe|on)\z/;
+            return (0, "policy config for '$name' must be an object")
+                unless ref($policy->{config}) eq 'HASH';
+        }
+    }
+    return (1, undef);
+}
+
+sub store_v3_runtime_state {
+    my ($self) = @_;
+    my $document = eval { $self->v3_runtime_state_snapshot };
+    return (0, _plugin_error_text($@, 'cannot snapshot API v3 state'))
+        unless $document;
+    my $json = eval { JSON::PP->new->canonical->encode($document) };
+    return (0, 'API v3 state is not JSON-serializable') unless defined $json;
+    return (0, 'API v3 state exceeds the byte limit')
+        if length($json) > $V3_RUNTIME_STATE_MAX_BYTES;
+
+    my ($path, $path_error) = $self->_v3_runtime_state_path(create => 1);
+    return (0, $path_error) unless defined $path;
+    return (0, 'API v3 state path is a symlink') if -l $path;
+
+    my $temporary = "$path.tmp.$$";
+    sysopen my $fh, $temporary, O_WRONLY | O_CREAT | O_EXCL, 0600
+        or return (0, "cannot write API v3 state: $!");
+    binmode $fh, ':raw';
+    unless (chmod 0600, $temporary) {
+        my $error = $!;
+        close $fh;
+        unlink $temporary;
+        return (0, "cannot protect API v3 state: $error");
+    }
+    unless (print {$fh} $json) {
+        my $error = $!;
+        close $fh;
+        unlink $temporary;
+        return (0, "cannot write API v3 state: $error");
+    }
+    close $fh or do {
+        my $error = $!;
+        unlink $temporary;
+        return (0, "cannot close API v3 state: $error");
+    };
+    rename $temporary, $path or do {
+        my $error = $!;
+        unlink $temporary;
+        return (0, "cannot publish API v3 state: $error");
+    };
+    return (1, undef);
+}
+
+sub _read_v3_runtime_state {
+    my ($self) = @_;
+    my ($path, $path_error) = $self->_v3_runtime_state_path;
+    return (undef, $path_error, 0)
+        if defined($path_error) && length($path_error);
+    return (undef, undef, 1) unless defined($path) && -e $path;
+    return (undef, 'API v3 state path is not a regular file', 0)
+        unless -f $path && !-l $path;
+    return (undef, 'API v3 state exceeds the byte limit', 0)
+        if (-s $path) > $V3_RUNTIME_STATE_MAX_BYTES;
+
+    open my $fh, '<:raw', $path
+        or return (undef, "cannot read API v3 state: $!", 0);
+    local $/;
+    my $raw = <$fh>;
+    close $fh;
+    return (undef, 'API v3 state exceeds the byte limit', 0)
+        unless defined($raw) && length($raw) <= $V3_RUNTIME_STATE_MAX_BYTES;
+    my $document = eval { JSON::PP->new->decode($raw) };
+    return (undef, 'API v3 state is not valid JSON', 0)
+        unless $document;
+    my ($valid, $why) = _validate_v3_runtime_state($document);
+    return (undef, "invalid API v3 state: $why", 0) unless $valid;
+    return ($document, undef, 0);
+}
+
+sub restore_v3_runtime_state {
+    my ($self) = @_;
+    my ($document, $error, $missing) = $self->_read_v3_runtime_state;
+    return {
+        skipped => 1, reason => 'no persisted API v3 state',
+        loaded => [], errors => [],
+    } if $missing;
+    return {
+        skipped => 0, loaded => [],
+        errors => [ { package => undef, error => $error } ],
+    } unless $document;
+
+    my @loaded;
+    my @errors;
+    for my $name (sort keys %{ $document->{packages} }) {
+        my $state = $document->{packages}{$name};
+        my $entry = eval {
+            $self->load_package_v3(
+                $name,
+                grants => [ @{ $state->{grants} } ],
+                channel_policies => { %{ $state->{policies} } },
+                enable => $state->{enabled} ? 1 : 0,
+            );
+        };
+        if ($entry) {
+            my @policies = $self->v3_channel_policies($name);
+            push @loaded, {
+                package => $name,
+                enabled => $entry->{enabled} ? 1 : 0,
+                policies => scalar(@policies),
+            };
+            next;
+        }
+        push @errors, {
+            package => $name,
+            error => _plugin_error_text($@, 'API v3 restore failed'),
+        };
+    }
+    return {
+        skipped => 0,
+        loaded  => \@loaded,
+        errors  => \@errors,
+    };
+}
+
+sub _v3_policy_map {
+    my ($self, $name) = @_;
+    my %map = map {
+        $_->{channel} => {
+            mode => "$_->{mode}", config => { %{ $_->{config} || {} } },
+        }
+    } $self->v3_channel_policies($name);
+    return \%map;
+}
+
+sub _replace_v3_policy_map {
+    my ($self, $name, $map) = @_;
+    my $entry = $self->_v3_diagnostic_entry($name);
+    require Mediabot::Plugin::ChannelPolicyV3;
+    $entry->{metadata}{channel_policy} =
+        Mediabot::Plugin::ChannelPolicyV3->new(
+            schema => $entry->{metadata}{config_schema}, policies => $map);
+    return 1;
+}
+
+sub load_package_v3_persistent {
+    my ($self, $name, %opts) = @_;
+    my $entry = $self->load_package_v3($name, %opts);
+    my ($stored, $error) = $self->store_v3_runtime_state;
+    unless ($stored) {
+        $self->unregister_plugin($name);
+        die "PluginManager: API v3 state was not persisted: $error\n";
+    }
+    return $entry;
+}
+
+sub set_v3_channel_policy_persistent {
+    my ($self, $name, $channel, %args) = @_;
+    my $before = $self->_v3_policy_map($name);
+    my $policy = $self->set_v3_channel_policy($name, $channel, %args);
+    my ($stored, $error) = $self->store_v3_runtime_state;
+    unless ($stored) {
+        $self->_replace_v3_policy_map($name, $before);
+        die "PluginManager: API v3 policy was not persisted: $error\n";
+    }
+    return $policy;
+}
+
+sub reset_v3_channel_policy_persistent {
+    my ($self, $name, $channel) = @_;
+    my $before = $self->_v3_policy_map($name);
+    my $removed = $self->reset_v3_channel_policy($name, $channel);
+    my ($stored, $error) = $self->store_v3_runtime_state;
+    unless ($stored) {
+        $self->_replace_v3_policy_map($name, $before);
+        die "PluginManager: API v3 policy reset was not persisted: $error\n";
+    }
+    return $removed;
+}
+
+sub set_v3_enabled_persistent {
+    my ($self, $name, $enabled) = @_;
+    my $entry = $self->_v3_diagnostic_entry($name);
+    my $before = $entry->{enabled} ? 1 : 0;
+    $enabled ? $self->enable($name) : $self->disable($name);
+    my ($stored, $error) = $self->store_v3_runtime_state;
+    unless ($stored) {
+        eval { $before ? $self->enable($name) : $self->disable($name) };
+        die "PluginManager: API v3 lifecycle was not persisted: $error\n";
+    }
+    return 1;
+}
+
+sub unregister_plugin_persistent {
+    my ($self, $name) = @_;
+    my $entry = $self->plugin($name) or return 0;
+    my $state = $self->_v3_entry_state($entry);
+    return $self->unregister_plugin($name) unless $state;
+
+    $self->unregister_plugin($name);
+    my ($stored, $error) = $self->store_v3_runtime_state;
+    unless ($stored) {
+        my $restored = eval {
+            $self->load_package_v3(
+                $name,
+                grants => $state->{grants},
+                channel_policies => $state->{policies},
+                enable => $state->{enabled} ? 1 : 0,
+            );
+            1;
+        };
+        my $suffix = $restored ? '' : '; in-memory rollback also failed';
+        die "PluginManager: API v3 unload was not persisted: $error$suffix\n";
+    }
+    return 1;
 }
 
 # MB750: operator diagnostics are detached, read-only snapshots. They explain

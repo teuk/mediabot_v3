@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb766 — bind v3 operator intent into a sealed boot ledger
+
+- Persist the reviewed API v3 package set, exact granted capabilities, typed
+  channel policies and enabled state in one core-owned, mode-`0600` document.
+  Partyline lifecycle changes now survive a clean service restart without
+  joining the historical `plugins.AUTOLOAD` path. 📜🔐
+- Restore only locally installed packages after strict whole-document
+  validation. Corrupt, oversized, symlinked or structurally unknown state is
+  rejected before any package loads; one package failure is logged and cannot
+  prevent Mediabot or another valid package from starting. 🛡️🦉
+- Keep source manifests default-off and rollback explicit. `policy off` and
+  disable persist their safer posture, while unload removes the package from
+  the next boot as well as restoring its exact saved command handlers. 🗝️↩️
+
 ### mb765 — place a Quietus ward before the shared conversation hall
 
 - Add one reloadable, per-channel exclusion barrier before every public

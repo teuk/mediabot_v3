@@ -524,7 +524,13 @@ Channel keys use RFC1459 casemapping. Policies are limited to 128 channels per
 plugin and may be supplied transactionally at load or changed through
 `set_v3_channel_policy`. `reset_v3_channel_policy` removes the override and
 returns that channel to `off`.
-There is no `plugins.AUTOLOAD` path for API v3 and no automatic migration.
+API v3 remains independent from the historical `plugins.AUTOLOAD` path and
+performs no automatic migration. Owner Partyline mutations are instead saved
+in a core-owned boot ledger containing only package names, exact grants, typed
+policies and enabled state. The ledger is bounded to 64 packages and 1 MiB,
+written atomically with mode `0600`, and restored from local packages only.
+Programmatic manager calls remain instance-local unless they use the explicit
+`*_persistent` operations.
 
 The programmatic development flow is:
 
@@ -546,7 +552,11 @@ $bot->plugin_manager->set_v3_channel_policy(
 ```
 
 The Owner-operated flow is also available on Partyline through `discoverv3`,
-`loadv3`, `policy` and `resetpolicy`. No v3 package is loaded at boot.
+`loadv3`, `policy` and `resetpolicy`. Successful Owner lifecycle mutations are
+persistent: a clean restart restores the validated packages and their exact
+last committed posture. A missing ledger loads nothing. An invalid whole
+ledger loads nothing and is logged; a failure in one valid package is isolated
+while the remaining entries are attempted.
 `.plugins overviewv3` is a separate read-only view: it reconciles validated
 local packages with loaded v3 instances and prints only lifecycle, readiness
 and aggregate policy counts. Its output is capped at 64 package rows and never

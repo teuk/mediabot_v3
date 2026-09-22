@@ -137,7 +137,7 @@ return sub {
 
     # garde structurelle : le demontage precede le teardown objet
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/PluginManager.pm' or die $!; local $/; <$fh> };
-    my $i_un = index($src, "sub unregister_plugin");
+    my $i_un = index($src, "sub unregister_plugin {");
     my $i_mv = index($src, '_unmount_entry_commands($entry)', $i_un);
     my $i_td = index($src, "can('unregister')", $i_un);
     $assert->ok($i_un > -1 && $i_mv > -1 && $i_td > -1 && $i_mv < $i_td,

@@ -34,7 +34,9 @@ MB764 accepts the complete five-command set for the first controlled API v3
 development promotion on `#test`. The promotion uses disposable factoid data,
 retains exact one-reply/one-counter semantics and leaves no evidence row or
 temporary identity. It remains instance-scoped: policy `off`, disable and
-unload are immediate rollback, while restart returns the package to unloaded.
+unload are immediate rollback. With MB766, successful Partyline lifecycle and
+policy changes are restored at restart; unload removes the package from that
+boot ledger.
 
 The supervised development procedure lives in
 [`../../docs/FACTOID_COMMAND_V3_PILOT.md`](../../docs/FACTOID_COMMAND_V3_PILOT.md).

@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB764",
+  "milestone": "MB766",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -322,6 +322,27 @@
     "package_paths": "unavailable",
     "mutation": "none"
   },
+  "boot_persistence": {
+    "mode": "core-owned operator ledger",
+    "historical_autoload_dependency": false,
+    "path_source": "plugins.DATA_DIR",
+    "filename": ".api-v3-runtime-state.json",
+    "schema": 1,
+    "maximum_bytes": 1048576,
+    "maximum_packages": 64,
+    "file_mode": "0600",
+    "persisted_fields": [
+      "package name",
+      "exact grants",
+      "typed channel policies",
+      "enabled state"
+    ],
+    "whole_document_failure": "load none and continue bot startup",
+    "package_failure": "isolate package and continue remaining restores",
+    "network_access": "none",
+    "operator_mutations": "successful Partyline load, policy, enable, disable and unload",
+    "explicit_rollback": "policy off, disable or unload"
+  },
   "development_promotion": {
     "package": "factoids-v3",
     "channel": "#test",
@@ -329,7 +350,8 @@
     "scope": "single development channel",
     "evidence": "disposable factoid with exact one-recall accounting and cleanup",
     "boot_autoload": false,
-    "restart_behavior": "implicit rollback to unloaded",
+    "persistent_operator_state": true,
+    "restart_behavior": "restore validated operator state",
     "explicit_rollback": "policy off, disable, unload",
     "production_channels": 0
   },

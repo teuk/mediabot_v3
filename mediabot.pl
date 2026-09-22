@@ -1953,7 +1953,6 @@ init_signals($mediabot->{logger});
 my $plugin_load_report = $mediabot->load_configured_plugins_if_enabled();
 $mediabot->log_plugin_load_report($plugin_load_report);
 
-
 # Check config
 if ( $MAIN_PROG_CHECK_CONFIG != 0 ) {
     $mediabot->dumpConfig();
@@ -2290,6 +2289,13 @@ $mediabot->{scheduler} = $scheduler;
 # after Scheduler construction, so task histograms are actually populated.
 $scheduler->set_metrics($mediabot->{metrics})
     if $mediabot->{metrics} && $scheduler->can('set_metrics');
+
+# MB766: replay the validated, core-owned API v3 operator state only after the
+# event loop, metrics and scheduler boundaries exist. This stage remains after
+# historical v1/v2 autoload, performs no network lookup, and isolates a rejected
+# package instead of aborting bot startup.
+my $v3_restore_report = $mediabot->restore_v3_plugins_from_state();
+$mediabot->log_v3_restore_report($v3_restore_report);
 
 # Register and keep the main timer handle for setMainTimerTick compatibility
 my $timer = IO::Async::Timer::Periodic->new(interval => 5, on_tick => \&on_timer_tick);

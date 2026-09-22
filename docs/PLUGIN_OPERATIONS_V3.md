@@ -186,12 +186,17 @@ operator collects `.plugins overviewv3`, `doctor`, `permissions`, `why` and
 increment per successful explicit/quiet recall, then deletes the evidence.
 The exact runbook is [`PLUGIN_V3_PROMOTION.md`](PLUGIN_V3_PROMOTION.md).
 
-The promotion is intentionally instance-scoped. It creates no API v3 boot
-autoload; a service restart returns the package to unloaded. Immediate
-explicit rollback remains:
+MB766 makes the accepted operator posture restart-persistent without enabling
+legacy `plugins.AUTOLOAD`. A service restart restores the exact grants,
+policies and enabled bit from the validated local ledger. Immediate explicit
+rollback remains, and is itself persisted:
 
 ```text
 .plugins policy factoids-v3 #test off
 .plugins disable factoids-v3
 .plugins unload factoids-v3
 ```
+
+The first command returns the channel to the saved historical handler, disable
+stops the package while retaining its configuration, and unload removes it
+from both the live registry and the next boot.

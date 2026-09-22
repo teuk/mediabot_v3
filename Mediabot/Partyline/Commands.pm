@@ -706,7 +706,8 @@ sub _cmd_plugins {
             my @grants = defined($grant_text) && $grant_text ne '-'
                 ? grep { length } split /,/, $grant_text : ();
             my $entry = eval {
-                $pm->load_package_v3($package, grants => \@grants);
+                $pm->load_package_v3_persistent(
+                    $package, grants => \@grants);
             };
             if (!$entry) {
                 (my $err = $@ || 'unknown error') =~ s/\s+\z//;
@@ -734,7 +735,7 @@ sub _cmd_plugins {
                 $config{$1} = $2;
             }
             my $policy = eval {
-                $pm->set_v3_channel_policy($target, $channel,
+                $pm->set_v3_channel_policy_persistent($target, $channel,
                     mode => lc($policy_mode),
                     (@pairs ? (config => \%config) : ()));
             };
@@ -755,7 +756,7 @@ sub _cmd_plugins {
                 return;
             }
             my $removed = eval {
-                $pm->reset_v3_channel_policy($target, $channel);
+                $pm->reset_v3_channel_policy_persistent($target, $channel);
             };
             if ($@) {
                 (my $err = $@) =~ s/\s+\z//;
@@ -915,12 +916,45 @@ sub _cmd_plugins {
         }
 
         if ($verb eq 'unload') {
-            $pm->unregister_plugin($target);
+            my $plug = $pm->plugin($target);
+            my $api = ref($plug->{metadata}) eq 'HASH'
+                ? ($plug->{metadata}{api} // 1) : 1;
+            my $ok = eval {
+                $api == 3
+                    ? $pm->unregister_plugin_persistent($target)
+                    : $pm->unregister_plugin($target);
+                1;
+            };
+            unless ($ok) {
+                my $err = $@ || 'unknown error';
+                $stream->write("Unload failed: "
+                    . _plugin_info_text($err, 180) . "\r\n");
+                return;
+            }
             $stream->write("Unloaded plugin '$target' (commands unmounted).\r\n");
             return;
         }
         if ($verb eq 'enable' || $verb eq 'disable') {
-            $verb eq 'enable' ? $pm->enable($target) : $pm->disable($target);
+            my $plug = $pm->plugin($target);
+            my $api = ref($plug->{metadata}) eq 'HASH'
+                ? ($plug->{metadata}{api} // 1) : 1;
+            my $ok = eval {
+                if ($api == 3) {
+                    $pm->set_v3_enabled_persistent(
+                        $target, $verb eq 'enable' ? 1 : 0);
+                }
+                else {
+                    $verb eq 'enable'
+                        ? $pm->enable($target) : $pm->disable($target);
+                }
+                1;
+            };
+            unless ($ok) {
+                my $err = $@ || 'unknown error';
+                $stream->write("Lifecycle change failed: "
+                    . _plugin_info_text($err, 180) . "\r\n");
+                return;
+            }
             $stream->write("Plugin '$target' is now ${verb}d"
                 . ($verb eq 'disable' ? " (mounted commands stay silent)" : "")
                 . ".\r\n");
@@ -939,9 +973,17 @@ sub _cmd_plugins {
                 }
             } @policies;
             my $was_enabled = $plug->{enabled} ? 1 : 0;
-            $pm->unregister_plugin($target);
+            my $unloaded = eval {
+                $pm->unregister_plugin_persistent($target); 1;
+            };
+            unless ($unloaded) {
+                my $err = $@ || 'unload failed';
+                $stream->write("API v3 reload failed before replacement: "
+                    . _plugin_info_text($err, 160) . "\r\n");
+                return;
+            }
             my $entry = eval {
-                $pm->load_package_v3($target,
+                $pm->load_package_v3_persistent($target,
                     grants => \@grants,
                     channel_policies => \%policy_map);
             };
@@ -952,10 +994,12 @@ sub _cmd_plugins {
                 return;
             }
             if ($was_enabled) {
-                my $enabled = eval { $pm->enable($target); 1 };
+                my $enabled = eval {
+                    $pm->set_v3_enabled_persistent($target, 1); 1;
+                };
                 unless ($enabled) {
                     my $err = $@ || 'activation failed';
-                    $pm->unregister_plugin($target);
+                    eval { $pm->unregister_plugin_persistent($target) };
                     $err =~ s/\s+\z//;
                     $stream->write("API v3 reload activation failed; saved built-in handlers are active: "
                         . _plugin_info_text($err, 150) . "\r\n");

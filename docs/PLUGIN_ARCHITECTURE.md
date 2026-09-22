@@ -173,13 +173,15 @@ parser route enters the same handler. Observe leaves the saved historical path
 solely visible and mutating, while on performs one read, increment and reply.
 MB764 adds a single detached operator portfolio over installed and loaded v3
 packages, then accepts `factoids-v3` on `#test` as the first instance-scoped
-development promotion. The promotion creates no boot autoload: explicit
-`off`/disable/unload remains immediate rollback and restart returns the package
-to unloaded.
+development promotion. MB766 replaces restart-as-rollback with a core-owned
+operator ledger. Successful Partyline load, policy and lifecycle changes are
+restored from local packages at boot; explicit `off`, disable and unload remain
+the immediate and now persistent rollback controls.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
-or unload invokes `stop`. API v3 is not connected to historical plugin AUTOLOAD.
+or unload invokes `stop`. API v3 is not connected to historical plugin AUTOLOAD;
+its validated operator ledger is a separate boot stage after legacy loading.
 The complete executable contract is in
 [`PLUGIN_API_V3.md`](PLUGIN_API_V3.md).
 
@@ -316,11 +318,15 @@ Planned capability families include:
     readiness and policy counts in one bounded read-only report. A disposable
     observe/on proof promotes only `factoids-v3` on `#test`; no boot autoload or
     production channel is changed, and explicit rollback remains immediate.
+26. **MB766 — persistent v3 operator posture:** complete in source. A bounded,
+    atomic core ledger restores exact grants, typed policies and enabled state
+    after legacy plugin loading. Invalid whole-state input loads nothing;
+    package failures are isolated; explicit unload removes the boot entry.
 
-The quote path is stabilized and receives no further expansion here. MB764
-closes the first extraction wave: Quotes remain operator-controlled, while the
-complete five-command Factoids set has one bounded development promotion.
-Further product extraction is a new roadmap decision, not unfinished work in
+The quote path is stabilized. MB764 closed the first extraction wave and MB766
+makes reviewed operator posture durable: Quotes remain operator-controlled,
+while the complete five-command Factoids set has one bounded development
+promotion. Further product extraction is a new roadmap decision, not unfinished work in
 this migration set.
 
 ## Extraction order
