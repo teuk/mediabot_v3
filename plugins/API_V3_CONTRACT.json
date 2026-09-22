@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB761",
+  "milestone": "MB762",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -135,7 +135,8 @@
     "capability": "data.factoids.write",
     "operations": [
       "upsert",
-      "delete"
+      "delete",
+      "recall"
     ],
     "activation": "on only",
     "observe_writes": "suppressed",
@@ -149,11 +150,22 @@
     "upsert_attribution": "authenticated user id or SQL NULL plus bounded current IRC nickname",
     "existing_author_on_update": "preserved",
     "delete_authorization": "authenticated numeric author, Administrator global level, or channel level 400",
-    "recall_counter_writes": "unavailable",
+    "recall_counter_writes": "on-only exact channel and keyword increment",
     "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable",
     "schema_administration": "unavailable",
     "plugin_adoption": "factoids-v3 learn and forget, inactive by default"
+  },
+  "factoid_recall_authority": {
+    "capability": "data.factoids.write",
+    "operation": "recall",
+    "activation": "on only",
+    "channel_source": "core invocation policy",
+    "key": "normalized bounded keyword",
+    "mutation": "single COALESCE(hits, 0) increment",
+    "observe_writes": "suppressed before service",
+    "command_adoption": "none in MB762",
+    "plugin_sql": "unavailable"
   },
   "factoid_write_migration": {
     "package": "factoids-v3",

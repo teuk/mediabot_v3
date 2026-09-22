@@ -14,7 +14,8 @@ lifecycle and per-channel policy controls. MB760 adds an on-only factoid write
 facade. MB761 lets the same package request that facade for `learn` and
 `forget`, still with no new Partyline mutation, automatic activation or policy
 change. `observe` suppresses the shadow write and leaves the historical handler
-as the only mutating path.
+as the only mutating path. MB762 adds one on-only exact factoid recall increment
+to the core facade without mounting `whatis` or `?keyword`.
 
 ## Is the package operationally ready?
 

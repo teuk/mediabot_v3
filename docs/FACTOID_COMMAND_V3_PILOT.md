@@ -2,7 +2,9 @@
 
 MB759 adds the inert `factoids-v3` package and moves the side-effect-free public
 readers `factoid` and `factoids` behind the reversible API v3 migration bridge.
-MB761 adds the separately authorized writers `learn` and `forget`. Installing
+MB761 adds the separately authorized writers `learn` and `forget`. MB762 adds
+the exact on-only recall-counter authority but mounts no additional command.
+Installing
 the source still does not load, grant, enable or configure the package, and it
 does not change a factoid row.
 
@@ -17,11 +19,13 @@ does not change a factoid row.
 - unload restores the exact four registry entries captured at load time;
 - the package receives no SQL, DBI handle, mutable user, raw message,
   credential or cross-channel selector;
-- `whatis` and `?keyword` remain historical, including all recall-counter
-  behavior.
+- `whatis` and `?keyword` remain historical in MB762; the new recall operation
+  is authority for the next reversible adoption, not a hidden second counter.
 
 MB760 adds the separately authorized `data.factoids.write` facade. MB761 lets
-`factoids-v3` request it for bounded upsert and delete operations only. Delete
+`factoids-v3` request it for bounded upsert and delete operations. MB762 adds
+one channel-and-keyword-scoped recall increment to the same on-only facade but
+does not call it from the package yet. Delete
 uses authenticated numeric authorship, global Administrator authority or
 channel level 400; matching nickname text is never authorization.
 

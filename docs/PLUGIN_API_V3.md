@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB761. Packages are discoverable and
+Plugin API v3 remains experimental in MB762. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. It adds no automatic remediation and exposes no exception text,
@@ -322,8 +322,9 @@ MB759 adds the inert `factoids-v3` package and first adopts `factoid` and
 the exact historical handlers. `observe` runs the new readers silently before
 the historical handler supplies the only visible answer. `on` makes the package
 authoritative only for that selected channel, while unload restores the saved
-registry entries. MB761 adds `learn` and `forget`; `whatis`, `?keyword` and all
-recall-counter writes remain historical and outside the package.
+registry entries. MB761 adds `learn` and `forget`. MB762 authorizes one exact
+recall-counter mutation but moves no command, so `whatis` and `?keyword`
+remain historical and outside the package.
 
 The supervised activation and rollback sequence is documented in
 [`FACTOID_COMMAND_V3_PILOT.md`](FACTOID_COMMAND_V3_PILOT.md).
@@ -332,12 +333,13 @@ The supervised activation and rollback sequence is documented in
 
 MB760 implements `data.factoids.write` as a capability and core-owned service
 distinct from `data.factoids.read`. It exposes only
-`factoid_upsert($invocation, $keyword, $value)` and
-`factoid_delete($invocation, $keyword)`. The current policy supplies the
+`factoid_upsert($invocation, $keyword, $value)`,
+`factoid_delete($invocation, $keyword)` and, since MB762,
+`factoid_recall($invocation, $keyword)`. The current policy supplies the
 channel. The runtime-issued invocation supplies the detached principal and a
-bounded current IRC nickname for display attribution. Plugins cannot provide a
-channel, user id, authorization level, attribution nickname, SQL statement or
-database handle, and an invocation without the runtime's private origin is
+bounded current IRC nickname for display attribution. Plugins cannot provide
+a channel, user id, authorization level, attribution nickname, SQL statement
+or database handle, and an invocation without the runtime's private origin is
 rejected.
 
 Keywords are normalized lowercase ASCII names of 1–64 characters using the
@@ -357,16 +359,19 @@ resolved factoid id and channel id. Missing factoids return an idempotent
 `not_found` result.
 
 All factoid writes require current policy `on`. `observe` returns a suppressed
-result before the mutation service, and `off` remains inert. Recall-counter
-mutation is not exposed.
+result before the mutation service, and `off` remains inert. MB762's recall
+operation normalizes one bounded keyword and performs one prepared
+channel-and-keyword-scoped `COALESCE(hits, 0) + 1` update. It accepts no
+counter value, factoid id or caller-selected channel.
 
 MB761 grants `data.factoids.write` to `factoids-v3` and mounts only `learn` and
 `forget` through the saved-handler bridge. In `observe`, plugin parsing runs
 silently, the v3 mutation is suppressed before database access, and the exact
 historical handler remains the sole visible and mutating path. In `on`, one
 core-authorized upsert or delete becomes authoritative for the selected
-channel. Disable, `off` and unload restore the saved handlers. `whatis` and
-`?keyword` remain historical until a distinct recall-counter authority exists.
+channel. Disable, `off` and unload restore the saved handlers. MB762 adds the
+distinct recall-counter authority without mounting another command; `whatis`
+and `?keyword` remain historical until the reversible MB763 adoption.
 
 ## Approved quote reads
 
@@ -494,7 +499,7 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB761 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB762 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
 `data.quotes.read`, `data.quotes.write`, `data.factoids.read` and
 `data.factoids.write`. Other capability names remain reserved for later

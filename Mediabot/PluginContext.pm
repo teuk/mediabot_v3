@@ -273,6 +273,12 @@ sub factoid_delete {
         $invocation, 'delete', { keyword => $keyword });
 }
 
+sub factoid_recall {
+    my ($self, $invocation, $keyword) = @_;
+    return $self->_factoids_write(
+        $invocation, 'recall', { keyword => $keyword });
+}
+
 sub _quotes_write {
     my ($self, $invocation, $operation, $args) = @_;
     $self->require_capability('data.quotes.write');

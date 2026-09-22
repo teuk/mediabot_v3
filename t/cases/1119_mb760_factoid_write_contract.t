@@ -21,13 +21,14 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1119('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB761',
+    $assert->is($contract->{milestone}, 'MB762',
         'machine contract records the current platform milestone');
     $assert->ok(grep($_ eq 'data.factoids.write',
         @{ $contract->{implemented_capabilities} }),
         'factoid writes use a capability distinct from reads');
     $assert->is(join(',', @{ $contract->{factoid_write_limits}{operations} }),
-        'upsert,delete', 'only the two approved mutations are exposed');
+        'upsert,delete,recall',
+        'only the three approved factoid mutations are exposed');
     $assert->is($contract->{factoid_write_limits}{activation}, 'on only',
         'observe can never mutate factoid data');
     $assert->is($contract->{factoid_write_limits}{plugin_adoption},
@@ -43,7 +44,8 @@ return sub {
         'opaque runtime authority required',
         'plugin-created invocation lookalikes cannot reach writes');
     $assert->is($contract->{factoid_write_limits}{recall_counter_writes},
-        'unavailable', 'whatis recall mutation remains outside MB760');
+        'on-only exact channel and keyword increment',
+        'recall mutation is bounded without adopting whatis');
 
     my $read = slurp_1119('Mediabot/Plugin/FactoidServiceV3.pm');
     my $write = slurp_1119('Mediabot/Plugin/FactoidWriteServiceV3.pm');
@@ -53,6 +55,8 @@ return sub {
         'upsert SQL lives only in the dedicated service');
     $assert->like($write, qr/DELETE FROM FACTOID/,
         'delete uses the dedicated authorized service');
+    $assert->like($write, qr/SET f\.hits = COALESCE\(f\.hits, 0\) \+ 1/,
+        'recall uses one explicit null-safe counter increment');
     $assert->like($write, qr/created_by AS author_id/,
         'delete authorization uses numeric stored identity');
     $assert->unlike($write, qr/created_by_nick\s*=|lc\([^\n]*nick/,

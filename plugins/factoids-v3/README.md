@@ -12,17 +12,20 @@ explicitly selected channel. Disabling or unloading restores the exact
 registry entries captured at load time.
 
 The package receives immutable factoid records, detached list/ranking values
-and only the core-owned upsert/delete facade. It has no SQL, database handle,
-mutable user, raw IRC message, credential or cross-channel selector. Reads
-never increment `hits`; writes require policy `on` and core-derived identity.
+and only the core-owned upsert/delete/recall facade. It has no SQL, database
+handle, mutable user, raw IRC message, credential or cross-channel selector.
+Reads never increment `hits`; writes require policy `on` and core-derived
+scope.
 
-`whatis`, its recall counter and the `?keyword` shortcut remain historical and
-outside this package.
+`whatis` and the `?keyword` shortcut remain historical and outside this
+package. MB762 makes one bounded recall increment available to authorized
+plugin code but deliberately adopts neither path yet.
 
 MB760 introduced the separate core-owned `data.factoids.write` boundary.
 MB761 requests it for `learn` and `forget` only. The package remains inert by
 default and can neither forge write identity nor authorize deletion by
-nickname text.
+nickname text. MB762 adds the core recall operation for MB763 without changing
+the manifest, mounted commands or activation state.
 
 The supervised development procedure lives in
 [`../../docs/FACTOID_COMMAND_V3_PILOT.md`](../../docs/FACTOID_COMMAND_V3_PILOT.md).

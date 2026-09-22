@@ -216,4 +216,21 @@ sub delete {
     };
 }
 
+sub recall {
+    my ($self, %args) = @_;
+    my $channel = _channel($args{channel});
+    my $keyword = _keyword($args{keyword});
+    my $dbh = $self->_dbh;
+    my $sth = $self->_statement($dbh, q{
+        UPDATE FACTOID f
+        JOIN CHANNEL c ON c.id_channel = f.id_channel
+           SET f.hits = COALESCE(f.hits, 0) + 1
+         WHERE c.name = ? AND f.keyword = ?},
+        $channel, $keyword);
+    eval { $sth->finish };
+    return {
+        ok => 1, status => 'recalled', keyword => $keyword,
+    };
+}
+
 1;

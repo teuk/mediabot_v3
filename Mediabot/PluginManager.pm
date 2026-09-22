@@ -459,9 +459,11 @@ sub _v3_factoids_read {
     return $result;
 }
 
-# MB760: factoid mutations use a separate core-owned service. As with quote
-# writes, only a runtime-issued invocation in explicit on mode may cross this
-# boundary; the policy owns the channel and the command context owns identity.
+# MB760/MB762: factoid mutations use a separate core-owned service. As with
+# quote writes, only a runtime-issued invocation in explicit on mode may cross
+# this boundary; the policy owns the channel and the command context owns
+# identity. MB762 adds only the exact recall-counter operation; no command is
+# adopted by that authority in this milestone.
 sub v3_factoid_write_service {
     my ($self) = @_;
     return $self->{v3_factoid_write_service}
@@ -512,7 +514,9 @@ sub _v3_factoids_write {
     }
     die "PluginManager: factoid write operation requires an object\n"
         unless ref($args) eq 'HASH';
-    my %methods = (upsert => 'upsert', delete => 'delete');
+    my %methods = (
+        upsert => 'upsert', delete => 'delete', recall => 'recall',
+    );
     my $method = $methods{$operation // ''}
         or die "PluginManager: unsupported factoid write operation\n";
     my $principal = eval { $invocation->principal };

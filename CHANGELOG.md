@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb762 — count factoid recalls with a Ministry tally charm
+
+- Extend the existing core-owned `data.factoids.write` service with one exact
+  `recall` operation. The policy supplies the channel, the service normalizes
+  the bounded keyword and one prepared update increments only that matching
+  factoid's `hits` counter. 🧮🪄
+- Keep recall mutation strictly `on`-only. `observe` and `off` stop the write
+  before the service, forged invocation lookalikes remain rejected, and the
+  plugin still receives neither SQL nor a database handle.
+- Move no command in this milestone. `whatis` and `?keyword` remain historical
+  until their rendering, quiet-miss behavior and one-increment parity are
+  adopted reversibly in MB763. The package stays unloaded, disabled and off by
+  default. 🖼️🔒
+
 ### mb761 — issue reversible quills to the factoid desk
 
 - Extend the inert `factoids-v3` package to request the already bounded

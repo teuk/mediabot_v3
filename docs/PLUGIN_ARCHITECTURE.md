@@ -13,7 +13,8 @@ MB755's nullable anonymous-author repair, MB756's supervised short-content
 pilot, MB757's namespace-safe API v3 repository cleanup, MB758's second
 approved domain facade for bounded factoid reads and MB759's reversible pure
 factoid-command adoption, followed by MB760's separate factoid-write authority
-and MB761's reversible `learn`/`forget` adoption.
+and MB761's reversible `learn`/`forget` adoption, followed by MB762's bounded
+factoid recall-counter authority.
 It does not enable a plugin or grant a capability automatically.
 
 ## Current baseline
@@ -164,7 +165,9 @@ MB761 grants that existing write capability to `factoids-v3` and mounts only
 `learn` and `forget` beside the two pure readers. `observe` suppresses the v3
 write before the service and invokes the saved historical handler exactly
 once; `on` performs one authorized mutation. `whatis` and `?keyword` remain
-historical because their recall counter needs a separate authority.
+historical in MB761 because their recall counter needs a separate authority.
+MB762 adds that one on-only channel-and-keyword-scoped increment to the
+core-owned write service. It mounts no command and leaves adoption to MB763.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -188,7 +191,7 @@ Planned capability families include:
 | `data.quotes.read` | eight bounded channel-scoped reads returning detached records |
 | `data.quotes.write` | on-only bounded add/delete/recall with a core-derived principal |
 | `data.factoids.read` | exact lookup plus bounded list/top views without recall mutation |
-| `data.factoids.write` | on-only bounded upsert/delete with core-owned identity and no recall mutation |
+| `data.factoids.write` | on-only bounded upsert/delete plus exact recall increment with core-owned scope and identity |
 | `data.<domain>` | future approved repository methods instead of arbitrary SQL |
 
 ## Dependency boundary matrix
@@ -292,10 +295,14 @@ Planned capability families include:
     `factoids-v3` adopts `learn` and `forget` through the saved-handler bridge.
     `observe` cannot double-write, `on` uses one authorized core mutation, and
     rollback restores all four mounted handlers. Recall remains historical.
+23. **MB762 — factoid recall-counter authority:** complete in source. The
+    existing on-only factoid-write facade gains one exact normalized-keyword
+    increment scoped by the invocation channel. Observe is suppressed before
+    SQL, forged invocations remain rejected, and no command adopts it yet.
 
 The quote path is stabilized and receives no further expansion here. After
-MB761, `whatis` must still wait for distinct recall-counter authority. A live
-pilot may promote the four mounted factoid commands on one development channel
+MB762, `whatis` and `?keyword` still wait for the reversible MB763 adoption. A
+live pilot may promote the four currently mounted factoid commands on one development channel
 only, must use disposable mutation evidence for `learn`/`forget`, and must
 retain immediate policy rollback.
 
@@ -308,8 +315,9 @@ The first migration candidates are deliberately low-risk:
 3. pure quote reads through the MB747 facade and MB748 bridge, then writes as a
    separate gate.
 4. pure factoid reads through the MB758 facade and MB759 reversible package,
-   followed by MB760's separate upsert/delete authority and MB761's reversible
-   `learn`/`forget` adoption before any recall counter moves.
+   followed by MB760's separate upsert/delete authority, MB761's reversible
+   `learn`/`forget` adoption and MB762's recall-counter authority before the
+   remaining recall commands move.
 
 AI conversation, radio, central moderation, authentication, updater and IRC
 transport are not first-wave extraction candidates.

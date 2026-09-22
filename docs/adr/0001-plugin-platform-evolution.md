@@ -234,3 +234,12 @@ visible mutation. `on` performs exactly one bounded core-authorized write.
 `whatis` and `?keyword` remain historical because their recall increment still
 has no dedicated capability. The package remains unloaded, disabled and off by
 default, and rollback restores all four saved command entries.
+
+MB762 closes that remaining authority gap without moving a command. The
+existing `data.factoids.write` service gains one `factoid_recall` operation
+that normalizes a bounded keyword and increments `hits` only for the current
+policy channel and matching factoid. It accepts no caller-provided counter,
+factoid id or channel. Runtime invocation provenance and explicit `on` policy
+remain mandatory; `observe` is suppressed before the service. `whatis` and
+`?keyword` stay historical until MB763 can prove visible and quiet recall
+parity through the reversible bridge.
