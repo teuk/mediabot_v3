@@ -13,8 +13,8 @@ MB755's nullable anonymous-author repair, MB756's supervised short-content
 pilot, MB757's namespace-safe API v3 repository cleanup, MB758's second
 approved domain facade for bounded factoid reads and MB759's reversible pure
 factoid-command adoption, followed by MB760's separate factoid-write authority
-and MB761's reversible `learn`/`forget` adoption, followed by MB762's bounded
-factoid recall-counter authority.
+and MB761's reversible `learn`/`forget` adoption, MB762's bounded factoid
+recall-counter authority and MB763's reversible `whatis`/`?keyword` adoption.
 It does not enable a plugin or grant a capability automatically.
 
 ## Current baseline
@@ -167,7 +167,9 @@ write before the service and invokes the saved historical handler exactly
 once; `on` performs one authorized mutation. `whatis` and `?keyword` remain
 historical in MB761 because their recall counter needs a separate authority.
 MB762 adds that one on-only channel-and-keyword-scoped increment to the
-core-owned write service. It mounts no command and leaves adoption to MB763.
+core-owned write service. MB763 mounts `whatis`; the existing `?keyword`
+parser route enters the same handler. Observe leaves the saved historical path
+solely visible and mutating, while on performs one read, increment and reply.
 
 Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
@@ -299,12 +301,15 @@ Planned capability families include:
     existing on-only factoid-write facade gains one exact normalized-keyword
     increment scoped by the invocation channel. Observe is suppressed before
     SQL, forged invocations remain rejected, and no command adopts it yet.
+24. **MB763 — reversible factoid recall commands:** complete in source.
+    `factoids-v3` mounts `whatis`; the unchanged `?keyword` parser route reaches
+    the same saved-handler bridge. Explicit misses teach, quiet misses remain
+    silent, and successful on-policy recalls answer and increment exactly once.
 
 The quote path is stabilized and receives no further expansion here. After
-MB762, `whatis` and `?keyword` still wait for the reversible MB763 adoption. A
-live pilot may promote the four currently mounted factoid commands on one development channel
-only, must use disposable mutation evidence for `learn`/`forget`, and must
-retain immediate policy rollback.
+MB763, the first five-command factoid migration set is complete. MB764 may
+consolidate its evidence and promote one development channel only; it must use
+disposable data and retain immediate policy rollback.
 
 ## Extraction order
 
@@ -316,8 +321,8 @@ The first migration candidates are deliberately low-risk:
    separate gate.
 4. pure factoid reads through the MB758 facade and MB759 reversible package,
    followed by MB760's separate upsert/delete authority, MB761's reversible
-   `learn`/`forget` adoption and MB762's recall-counter authority before the
-   remaining recall commands move.
+   `learn`/`forget` adoption, MB762's recall-counter authority and MB763's
+   reversible `whatis`/`?keyword` adoption.
 
 AI conversation, radio, central moderation, authentication, updater and IRC
 transport are not first-wave extraction candidates.

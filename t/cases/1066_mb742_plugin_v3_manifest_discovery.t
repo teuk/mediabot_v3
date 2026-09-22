@@ -68,8 +68,8 @@ return sub {
     $assert->is($factoids[0]{activation}, 'off',
         'factoid package discovery preserves default-off activation');
     $assert->is(join(',', @{ $factoids[0]{capabilities} }),
-        'data.factoids.read,data.factoids.write,irc.notice',
-        'discovery exposes only the three factoid package capabilities');
+        'data.factoids.read,data.factoids.write,irc.reply,irc.notice',
+        'discovery exposes the four bounded factoid package capabilities');
     $assert->ok(!'Mediabot::Plugin::Factoids'->can('new'),
         'factoid discovery does not execute its entrypoint');
 

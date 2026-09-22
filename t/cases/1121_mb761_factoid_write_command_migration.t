@@ -83,7 +83,7 @@ return sub {
 
     my $bot = T1121::Bot->new;
     my (%original, %legacy_calls);
-    for my $name (qw(factoid factoids learn forget)) {
+    for my $name (qw(factoid factoids learn forget whatis)) {
         my $handler = sub { $legacy_calls{$name}++; 1 };
         $original{$name} = $handler;
         $bot->{registry}->register_command(
@@ -100,7 +100,7 @@ return sub {
         v3_factoid_service => T1121::Reads->new,
         v3_factoid_write_service => $writes);
     $manager->load_package_v3('factoids-v3', grants => [
-        qw(data.factoids.read data.factoids.write irc.notice)
+        qw(data.factoids.read data.factoids.write irc.reply irc.notice)
     ]);
 
     my $learn = $bot->{registry}->handler_for('learn', 'public');
@@ -158,7 +158,7 @@ return sub {
         'off immediately restores historical forget behavior');
 
     $manager->unregister_plugin('factoids-v3');
-    for my $name (qw(factoid factoids learn forget)) {
+    for my $name (qw(factoid factoids learn forget whatis)) {
         my $restored = $bot->{registry}->command_for($name, 'public');
         $assert->is(refaddr($restored->{handler}), refaddr($original{$name}),
             "unload restores the exact $name handler reference");

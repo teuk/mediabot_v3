@@ -3,7 +3,8 @@
 MB759 adds the inert `factoids-v3` package and moves the side-effect-free public
 readers `factoid` and `factoids` behind the reversible API v3 migration bridge.
 MB761 adds the separately authorized writers `learn` and `forget`. MB762 adds
-the exact on-only recall-counter authority but mounts no additional command.
+the exact on-only recall-counter authority. MB763 mounts `whatis`; the existing
+parser-level `?keyword` shortcut reaches that same handler.
 Installing
 the source still does not load, grant, enable or configure the package, and it
 does not change a factoid row.
@@ -14,13 +15,15 @@ does not change a factoid row.
 - `observe` executes bounded v3 reads silently and suppresses the v3 write
   before the service; the historical handler supplies the only visible answer
   and the only mutation;
-- `on` makes `factoid`, `factoids`, `learn` and `forget` authoritative on the
-  selected channel;
-- unload restores the exact four registry entries captured at load time;
+- `on` makes `factoid`, `factoids`, `learn`, `forget` and `whatis`
+  authoritative on the selected channel;
+- unload restores the exact five registry entries captured at load time;
 - the package receives no SQL, DBI handle, mutable user, raw message,
   credential or cross-channel selector;
-- `whatis` and `?keyword` remain historical in MB762; the new recall operation
-  is authority for the next reversible adoption, not a hidden second counter.
+- explicit `whatis` misses retain their teaching notice, while missing
+  `?keyword` shortcuts remain silent;
+- successful observe recalls increment once through the historical fallback;
+  successful on recalls increment once through the core-owned v3 authority.
 
 MB760 adds the separately authorized `data.factoids.write` facade. MB761 lets
 `factoids-v3` request it for bounded upsert and delete operations. MB762 adds
@@ -36,7 +39,7 @@ The first pilot target is `#test`.
 
 ```text
 .plugins discoverv3
-.plugins loadv3 factoids-v3 data.factoids.read,data.factoids.write,irc.notice
+.plugins loadv3 factoids-v3 data.factoids.read,data.factoids.write,irc.reply,irc.notice
 .plugins policy factoids-v3 #test observe
 .plugins enable factoids-v3
 .plugins doctor factoids-v3
@@ -52,13 +55,15 @@ In `observe`, run representative existing reads and one disposable write pair:
 !factoids <literal-or-glob-pattern>
 !factoids top
 !learn <disposable-keyword> = <disposable-value>
+!whatis <disposable-keyword>
+?<disposable-keyword>
 !forget <disposable-keyword>
 ```
 
 Each command must produce exactly one historical response sequence. The v3
 shadow may read but must not emit a second answer or alter `hits`. `observe`
-suppresses the v3 write before the service, so each disposable mutation is
-performed once by the historical fallback, never twice.
+suppresses v3 writes before the service, so each disposable mutation and each
+recall increment is performed once by the historical fallback, never twice.
 
 After parity evidence, `on` may be tested on the same channel:
 
@@ -68,11 +73,11 @@ After parity evidence, `on` may be tested on the same channel:
 ```
 
 Repeat detail, list, filtered-list and top reads. Then create one uniquely named
-disposable factoid with `learn` and remove it with `forget`. Their visible text
-must retain the historical contract, the stored value must be exact, and the
-disposable factoid must be deleted before rollback. Do not exercise `whatis` or
-the quick `?keyword` shortcut as part of v3 adoption; neither is mounted by
-this package.
+disposable factoid with `learn`, recall it once through explicit `whatis` and
+once through `?keyword`, and remove it with `forget`. Each recall must produce
+one channel reply and advance the stored counter by exactly one. Explicit
+missing lookup must teach; quiet missing lookup must emit nothing. The
+disposable factoid must be deleted before rollback.
 
 ## Immediate rollback
 
@@ -90,5 +95,5 @@ Global lifecycle rollback remains:
 ```
 
 Rollback changes no remaining factoid row. After unload, the exact historical
-`factoid`, `factoids`, `learn` and `forget` handlers must again occupy their
+`factoid`, `factoids`, `learn`, `forget` and `whatis` handlers must again occupy their
 registry entries.

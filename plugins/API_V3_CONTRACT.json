@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB762",
+  "milestone": "MB763",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -126,8 +126,8 @@
     "pattern_mode": "validated glob with literal SQL wildcard escaping",
     "channel_source": "invocation policy",
     "observe_reads": "allowed",
-    "recall_counter_writes": "unavailable",
-    "plugin_adoption": "factoids-v3 factoid, factoids, learn and forget, inactive by default",
+    "recall_counter_writes": "separate data.factoids.write authority",
+    "plugin_adoption": "factoids-v3 factoid, factoids, learn, forget and whatis plus the existing ?keyword route, inactive by default",
     "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable"
   },
@@ -154,7 +154,7 @@
     "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable",
     "schema_administration": "unavailable",
-    "plugin_adoption": "factoids-v3 learn and forget, inactive by default"
+    "plugin_adoption": "factoids-v3 learn, forget and whatis recall accounting, inactive by default"
   },
   "factoid_recall_authority": {
     "capability": "data.factoids.write",
@@ -164,19 +164,20 @@
     "key": "normalized bounded keyword",
     "mutation": "single COALESCE(hits, 0) increment",
     "observe_writes": "suppressed before service",
-    "command_adoption": "none in MB762",
+    "command_adoption": "whatis in MB763; the existing ?keyword parser route enters the same mounted handler",
     "plugin_sql": "unavailable"
   },
   "factoid_write_migration": {
     "package": "factoids-v3",
     "commands": [
       "learn",
-      "forget"
+      "forget",
+      "whatis"
     ],
-    "excluded_commands": [
-      "whatis",
+    "shortcut_routes": [
       "?keyword"
     ],
+    "excluded_commands": [],
     "observe_mutations": "v3 suppressed; historical fallback remains authoritative",
     "on_mutations": "one core-authorized write with v3 output",
     "activation": "explicit package plus channel policy"
@@ -185,14 +186,26 @@
     "package": "factoids-v3",
     "commands": [
       "factoid",
-      "factoids"
+      "factoids",
+      "whatis"
     ],
-    "excluded_commands": [
-      "whatis",
+    "shortcut_routes": [
       "?keyword"
     ],
-    "read_side_effects": "none",
+    "excluded_commands": [],
+    "read_side_effects": "none; whatis recall accounting uses the separate write authority",
     "activation": "explicit package plus channel policy"
+  },
+  "factoid_recall_migration": {
+    "package": "factoids-v3",
+    "manifest_command": "whatis",
+    "shortcut_route": "?keyword -> whatis __quiet__ <keyword>",
+    "visible_missing": "bounded notice for explicit whatis",
+    "quiet_missing": "no output for ?keyword",
+    "successful_output": "one channel reply",
+    "successful_mutation": "one on-only core recall increment",
+    "observe_behavior": "v3 output and mutation suppressed; historical fallback remains authoritative",
+    "rollback": "off, disable or unload restores the exact saved whatis handler"
   },
   "quote_read_limits": {
     "capability": "data.quotes.read",

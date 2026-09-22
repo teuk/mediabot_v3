@@ -33,11 +33,11 @@ return sub {
     $assert->is($manifest->{activation}{default}, 'off',
         'factoid package is inert by default');
     $assert->is(join(',', @{ $manifest->{capabilities} }),
-        'data.factoids.read,data.factoids.write,irc.notice',
+        'data.factoids.read,data.factoids.write,irc.reply,irc.notice',
         'factoid package requests bounded read/write data and private notices');
     $assert->is(join(',', sort keys %{ $manifest->{commands} }),
-        'factoid,factoids,forget,learn',
-        'package contains the two readers and two authorized writers');
+        'factoid,factoids,forget,learn,whatis',
+        'package contains readers, writers and bounded recall');
 
     my (@reads, @notices, @replies);
     my $authority = Mediabot::PluginContext->new(

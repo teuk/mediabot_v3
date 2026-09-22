@@ -15,7 +15,8 @@ facade. MB761 lets the same package request that facade for `learn` and
 `forget`, still with no new Partyline mutation, automatic activation or policy
 change. `observe` suppresses the shadow write and leaves the historical handler
 as the only mutating path. MB762 adds one on-only exact factoid recall increment
-to the core facade without mounting `whatis` or `?keyword`.
+to the core facade. MB763 mounts `whatis`; the parser-level `?keyword` shortcut
+reaches that same handler and retains its quiet-miss behavior.
 
 ## Is the package operationally ready?
 

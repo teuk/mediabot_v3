@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB762. Packages are discoverable and
+Plugin API v3 remains experimental in MB763. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. It adds no automatic remediation and exposes no exception text,
@@ -323,8 +323,9 @@ the exact historical handlers. `observe` runs the new readers silently before
 the historical handler supplies the only visible answer. `on` makes the package
 authoritative only for that selected channel, while unload restores the saved
 registry entries. MB761 adds `learn` and `forget`. MB762 authorizes one exact
-recall-counter mutation but moves no command, so `whatis` and `?keyword`
-remain historical and outside the package.
+recall-counter mutation. MB763 mounts `whatis`; the unchanged parser-level
+`?keyword` shortcut reaches that same handler. Observe keeps the historical
+path solely visible and mutating, while on produces one reply and one count.
 
 The supervised activation and rollback sequence is documented in
 [`FACTOID_COMMAND_V3_PILOT.md`](FACTOID_COMMAND_V3_PILOT.md).
@@ -364,14 +365,16 @@ operation normalizes one bounded keyword and performs one prepared
 channel-and-keyword-scoped `COALESCE(hits, 0) + 1` update. It accepts no
 counter value, factoid id or caller-selected channel.
 
-MB761 grants `data.factoids.write` to `factoids-v3` and mounts only `learn` and
+MB761 grants `data.factoids.write` to `factoids-v3` and mounts `learn` and
 `forget` through the saved-handler bridge. In `observe`, plugin parsing runs
 silently, the v3 mutation is suppressed before database access, and the exact
 historical handler remains the sole visible and mutating path. In `on`, one
 core-authorized upsert or delete becomes authoritative for the selected
 channel. Disable, `off` and unload restore the saved handlers. MB762 adds the
-distinct recall-counter authority without mounting another command; `whatis`
-and `?keyword` remain historical until the reversible MB763 adoption.
+distinct recall-counter authority. MB763 mounts `whatis`, while the existing
+`?keyword` parser route enters that same registry handler with its quiet
+sentinel. Successful on-policy recalls perform one exact read, one core-owned
+increment and one bounded channel reply.
 
 ## Approved quote reads
 
@@ -499,7 +502,7 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB762 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB763 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
 `data.quotes.read`, `data.quotes.write`, `data.factoids.read` and
 `data.factoids.write`. Other capability names remain reserved for later

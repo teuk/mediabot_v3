@@ -21,7 +21,7 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1119('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB762',
+    $assert->is($contract->{milestone}, 'MB763',
         'machine contract records the current platform milestone');
     $assert->ok(grep($_ eq 'data.factoids.write',
         @{ $contract->{implemented_capabilities} }),
@@ -32,7 +32,7 @@ return sub {
     $assert->is($contract->{factoid_write_limits}{activation}, 'on only',
         'observe can never mutate factoid data');
     $assert->is($contract->{factoid_write_limits}{plugin_adoption},
-        'factoids-v3 learn and forget, inactive by default',
+        'factoids-v3 learn, forget and whatis recall accounting, inactive by default',
         'write adoption remains explicit and operator-controlled');
     $assert->is($contract->{factoid_write_limits}{channel_source},
         'core invocation policy', 'plugin cannot select a write channel');
@@ -45,7 +45,7 @@ return sub {
         'plugin-created invocation lookalikes cannot reach writes');
     $assert->is($contract->{factoid_write_limits}{recall_counter_writes},
         'on-only exact channel and keyword increment',
-        'recall mutation is bounded without adopting whatis');
+        'recall mutation remains bounded after adopting whatis');
 
     my $read = slurp_1119('Mediabot/Plugin/FactoidServiceV3.pm');
     my $write = slurp_1119('Mediabot/Plugin/FactoidWriteServiceV3.pm');
@@ -71,8 +71,8 @@ return sub {
         'official factoid package requests the reviewed write authority');
     $assert->ok(exists($manifest->{commands}{learn})
         && exists($manifest->{commands}{forget})
-        && !exists($manifest->{commands}{whatis}),
-        'learn and forget move while recall mutation remains historical');
+        && exists($manifest->{commands}{whatis}),
+        'learn, forget and recall now share reviewed write authority');
 
     my $api = slurp_1119('docs/PLUGIN_API_V3.md');
     $assert->like($api, qr/## Authorized factoid writes/,

@@ -24,7 +24,7 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1113('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB762',
+    $assert->is($contract->{milestone}, 'MB763',
         'machine contract records the current factoid platform milestone');
     $assert->ok(grep($_ eq 'data.factoids.read',
         @{ $contract->{implemented_capabilities} }),
@@ -41,10 +41,10 @@ return sub {
         'invocation policy',
         'machine contract makes channel authority explicit');
     $assert->is($contract->{factoid_read_limits}{recall_counter_writes},
-        'unavailable',
-        'read capability cannot alter recall accounting');
+        'separate data.factoids.write authority',
+        'read capability cannot alter recall accounting by itself');
     $assert->is($contract->{factoid_read_limits}{plugin_adoption},
-        'factoids-v3 factoid, factoids, learn and forget, inactive by default',
+        'factoids-v3 factoid, factoids, learn, forget and whatis plus the existing ?keyword route, inactive by default',
         'read authority now has an inert operator-controlled package');
     $assert->ok(grep($_ eq 'Mediabot::Plugin::FactoidRecordV3',
         @{ $contract->{plugin_receives} }),

@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb763 — let the factoid portraits answer through the v3 corridor
+
+- Mount `whatis` in the inert `factoids-v3` package and let the existing
+  parser-level `?keyword` shortcut enter that same registry handler. Explicit
+  misses retain their teaching notice; quiet shortcut misses remain silent.
+  🖼️🪄
+- Preserve one-answer, one-counter semantics. `observe` suppresses v3 output
+  and recall mutation before the historical fallback answers and increments
+  once; `on` performs one exact read, one core-owned increment and one bounded
+  channel reply.
+- Add `irc.reply` only because successful recalls are public. `off`, disable
+  and unload restore the exact saved `whatis` handler, while installation
+  still loads, enables and configures nothing. The first factoid migration set
+  is now complete and ready for MB764 consolidation. 🔑📚
+
 ### mb762 — count factoid recalls with a Ministry tally charm
 
 - Extend the existing core-owned `data.factoids.write` service with one exact

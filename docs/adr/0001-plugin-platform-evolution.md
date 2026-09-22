@@ -243,3 +243,11 @@ factoid id or channel. Runtime invocation provenance and explicit `on` policy
 remain mandatory; `observe` is suppressed before the service. `whatis` and
 `?keyword` stay historical until MB763 can prove visible and quiet recall
 parity through the reversible bridge.
+
+MB763 completes that adoption. `factoids-v3` mounts `whatis`, and the existing
+parser-level `?keyword` route enters the same registry handler with the quiet
+sentinel intact. In observe, v3 output and recall mutation are suppressed and
+the saved historical handler remains the only visible counter writer. In on,
+one bounded lookup, one core-owned increment and one channel reply execute.
+Explicit misses retain their teaching notice; quiet misses emit nothing. Off,
+disable and unload restore the exact saved `whatis` entry.

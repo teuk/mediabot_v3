@@ -153,6 +153,48 @@ sub command_factoids {
         scalar(@$keywords) . " factoid(s) on $channel: ", $keywords);
 }
 
+sub command_whatis {
+    my ($self, $context, $invocation) = @_;
+    my @args = @{ $invocation->args };
+    my $quiet = @args && $args[0] eq '__quiet__' ? 1 : 0;
+    shift @args if $quiet;
+
+    unless (_channel_ok($invocation)) {
+        return 1 if $quiet;
+        return $context->notice($invocation,
+            'Syntax: whatis <keyword>  (use it in a channel)');
+    }
+
+    my $keyword = lc join ' ', @args;
+    $keyword =~ s/^\s+|\s+$//g;
+    unless ($keyword =~ /\A[a-z0-9_.-]{1,64}\z/) {
+        return 1 if $quiet;
+        return $context->notice($invocation, 'Syntax: whatis <keyword>');
+    }
+
+    my $result = $context->factoid_by_keyword($invocation, $keyword);
+    unless ($result && $result->{ok}) {
+        return 1 if $quiet;
+        return $context->notice($invocation,
+            'whatis: database unavailable.');
+    }
+    my $record = $result->{record};
+    unless ($record) {
+        return 1 if $quiet;
+        return $context->notice($invocation,
+            "I don't know '$keyword'. Teach me: learn $keyword = ...");
+    }
+
+    # Historical recall accounting is best-effort and never withholds the
+    # visible value. The core policy suppresses this mutation in observe, so
+    # the saved handler remains the only counter writer until explicit on.
+    $context->factoid_recall($invocation, $keyword);
+    my $prefix = $keyword . ': ';
+    my $budget = 400 - _wire_length($prefix);
+    return $context->reply($invocation,
+        $prefix . _excerpt($record->value, $budget));
+}
+
 sub command_learn {
     my ($self, $context, $invocation) = @_;
     return $context->notice($invocation,
