@@ -57,6 +57,7 @@ sub new {
         v3_quote_write_service => $args{v3_quote_write_service},
         v3_factoid_service => $args{v3_factoid_service},
         v3_factoid_write_service => $args{v3_factoid_write_service},
+        v3_channel_activity_service => $args{v3_channel_activity_service},
         v3_invocation_authority => $invocation_authority,
         v3_failure_ledgers => {},
         v3_quarantines => {},
@@ -460,6 +461,58 @@ sub _v3_factoids_read {
     _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
         plugin => $name, domain => 'factoids', operation => $operation,
         outcome => 'read',
+    });
+    return $result;
+}
+
+# MB769: channel activity becomes the first domain in the second extraction
+# wave. Only two bounded, read-only aggregates cross this core-owned facade.
+# The invocation policy supplies the channel and observe may read safely.
+sub v3_channel_activity_service {
+    my ($self) = @_;
+    return $self->{v3_channel_activity_service}
+        if $self->{v3_channel_activity_service};
+    require Mediabot::Plugin::ChannelActivityServiceV3;
+    my $bot = $self->{bot};
+    $self->{v3_channel_activity_service} =
+        Mediabot::Plugin::ChannelActivityServiceV3->new(
+            dbh_provider => sub { eval { $bot->{dbh} } },
+            bot_provider => sub { $bot },
+        );
+    return $self->{v3_channel_activity_service};
+}
+
+sub _v3_channel_activity_read {
+    my ($self, $name, $invocation, $operation, $args) = @_;
+    my $entry = $self->plugin($name)
+        or die "PluginManager: API v3 plugin '$name' is not registered\n";
+    return { ok => 0, error => 'disabled' } unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    return { ok => 0, error => 'channel_off' }
+        if $policy->{mode} eq 'off';
+    die "PluginManager: channel activity operation requires an object\n"
+        unless ref($args) eq 'HASH';
+    my %methods = (compare => 'compare', heatmap => 'heatmap');
+    my $method = $methods{$operation // ''}
+        or die "PluginManager: unsupported channel activity operation\n";
+    my $result = eval {
+        $self->v3_channel_activity_service->$method(
+            %$args, channel => $policy->{channel});
+    };
+    unless ($result) {
+        my $error = _plugin_error_text(
+            $@, 'channel activity data read failed');
+        _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+            plugin => $name, domain => 'channel_activity',
+            operation => $operation, outcome => 'error',
+        });
+        eval { $self->{bot}{logger}->log(
+            1, "plugin '$name' API v3 channel activity read failed: $error") };
+        return { ok => 0, error => 'unavailable' };
+    }
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_data_total', {
+        plugin => $name, domain => 'channel_activity',
+        operation => $operation, outcome => 'read',
     });
     return $result;
 }

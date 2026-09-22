@@ -41,6 +41,7 @@ sub new {
         quotes_write_sink => $args{quotes_write_sink},
         factoids_read_sink => $args{factoids_read_sink},
         factoids_write_sink => $args{factoids_write_sink},
+        channel_activity_read_sink => $args{channel_activity_read_sink},
     };
     return $self;
 }
@@ -246,6 +247,31 @@ sub top_factoids {
     my ($self, $invocation, %args) = @_;
     return $self->_factoids_read(
         $invocation, 'top', { limit => $args{limit} });
+}
+
+sub _channel_activity_read {
+    my ($self, $invocation, $operation, $args) = @_;
+    $self->require_capability('data.channel_activity.read');
+    _invocation($invocation);
+    die "PluginContext: channel activity arguments must be an object\n"
+        unless ref($args) eq 'HASH';
+    my $sink = _state($self)->{channel_activity_read_sink};
+    die "PluginContext: channel activity data service is unavailable\n"
+        unless ref($sink) eq 'CODE';
+    return $sink->($invocation, $operation, { %$args });
+}
+
+sub activity_compare {
+    my ($self, $invocation, $left, $right, %args) = @_;
+    return $self->_channel_activity_read($invocation, 'compare', {
+        left => $left, right => $right, period => $args{period},
+    });
+}
+
+sub activity_heatmap {
+    my ($self, $invocation, $nick) = @_;
+    return $self->_channel_activity_read(
+        $invocation, 'heatmap', { nick => $nick });
 }
 
 sub _factoids_write {

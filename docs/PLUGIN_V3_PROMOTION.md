@@ -67,3 +67,17 @@ channel; disable and unload end the instance and restore the exact registry
 entries. These mutations are persisted. A restart restores the last committed
 state; it is no longer a rollback mechanism. Unload is the definitive rollback
 because it also removes the package from the next boot ledger.
+
+## MB768 production observe pilot
+
+Nbot repeated the same observe-first reasoning on production `#i/o` without a
+write probe. In `observe`, one `!q stats` request produced exactly one response
+from the saved historical handler. A bounded `on` window produced exactly one
+response from `quotes-v3`, after which policy returned to `observe`.
+
+The two existing quote rows were identical before and after the window.
+Permissions were complete, failures stayed at zero, and a clean service
+restart restored the enabled/`observe` posture. The final production state is
+therefore evidence-backed but non-authoritative: the historical handler
+remains visible, while `policy off`, disable and unload remain explicit
+rollback.

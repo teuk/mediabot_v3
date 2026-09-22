@@ -19,6 +19,10 @@ to the core facade. MB763 mounts `whatis`; the parser-level `?keyword` shortcut
 reaches that same handler and retains its quiet-miss behavior.
 MB764 adds one bounded portfolio across installed and loaded v3 packages, then
 uses it to supervise the first single-channel development promotion.
+MB766 persists reviewed posture, MB767 promotes Quotes on development, and
+MB768 proves a persistent production `observe` posture on `#i/o`. MB769 adds
+the read-only `data.channel_activity.read` authority only; it introduces no new
+Partyline mutation and no package or channel activation.
 
 ## What is installed and active across API v3?
 

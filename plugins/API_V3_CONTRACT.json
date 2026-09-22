@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB767",
+  "milestone": "MB769",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -46,6 +46,7 @@
     "storage.kv"
   ],
   "implemented_capabilities": [
+    "data.channel_activity.read",
     "data.factoids.read",
     "data.factoids.write",
     "data.quotes.read",
@@ -59,6 +60,8 @@
     "storage.kv"
   ],
   "plugin_receives": [
+    "Mediabot::Plugin::ActivityComparisonV3",
+    "Mediabot::Plugin::ActivityHeatmapV3",
     "Mediabot::PluginContext",
     "Mediabot::Plugin::InvocationV3",
     "Mediabot::Plugin::PrincipalV3",
@@ -110,6 +113,33 @@
     "operator_cleanup": "Owner-only clearv3data with core-derived namespace",
     "cleanup_loaded_or_unloaded": true,
     "plugin_paths": "unavailable",
+    "plugin_database_handles": "unavailable"
+  },
+  "channel_activity_read_limits": {
+    "capability": "data.channel_activity.read",
+    "operations": [
+      "compare",
+      "heatmap"
+    ],
+    "maximum_nickname_characters": 64,
+    "comparison_periods": "all or bounded Nd, Nw, Nm, Ny",
+    "maximum_periods": {
+      "days": 365,
+      "weeks": 52,
+      "months": 24,
+      "years": 10
+    },
+    "heatmap_buckets": 24,
+    "event_types": [
+      "public",
+      "action"
+    ],
+    "history_scope": "core content retention policy",
+    "channel_source": "invocation policy",
+    "observe_reads": "allowed",
+    "writes": "none",
+    "plugin_adoption": "none in MB769",
+    "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable"
   },
   "factoid_read_limits": {
@@ -365,6 +395,22 @@
     "restart_behavior": "restore exact grants, enabled lifecycle and on policy",
     "explicit_rollback": "policy off, disable, unload",
     "production_channels": 0
+  },
+  "production_pilots": {
+    "quotes_v3": {
+      "milestone": "MB768",
+      "instance": "nbot",
+      "channel": "#i/o",
+      "package": "quotes-v3",
+      "final_mode": "observe",
+      "lifecycle": "enabled and persistent",
+      "bounded_on_probe": "one read-only q stats request",
+      "observe_reply": "one historical fallback response",
+      "on_reply": "one v3 response",
+      "quote_rows_changed": 0,
+      "restart_behavior": "exact enabled/observe posture restored",
+      "failures": 0
+    }
   },
   "runtime_failure_history": {
     "mode": "read-only in-memory per loaded instance",

@@ -198,6 +198,7 @@ Planned capability families include:
 | `scheduler.jobs` | ownership, quotas, cancellation and reload cleanup |
 | `http.fetch` | TLS, timeout, size, redirect, private-address and quota policy |
 | `secrets.read:<name>` | reference-based access without manifest or log disclosure |
+| `data.channel_activity.read` | bounded compare/heatmap aggregates using the invocation channel |
 | `data.quotes.read` | eight bounded channel-scoped reads returning detached records |
 | `data.quotes.write` | on-only bounded add/delete/recall with a core-derived principal |
 | `data.factoids.read` | exact lookup plus bounded list/top views without recall mutation |
@@ -215,7 +216,7 @@ Planned capability families include:
 | Scheduler | core tasks plus route-v1 timers | shared owned jobs with quotas and lifecycle cancellation | core scheduler |
 | Storage | v2 last-write-wins JSON document | MB746 namespaced KV with compare-and-swap/short transactions | data service |
 | HTTP | per-feature clients outside v3 | MB746 bounded async client with cache and circuit breaker | HTTP service |
-| Database | possible through full in-process bot | approved quote/factoid reads and distinct authorized quote/factoid write services | data layer |
+| Database | possible through full in-process bot | approved quote/factoid/activity reads and distinct authorized quote/factoid write services | data layer |
 | Secrets | configuration may be reachable in-process | named secret references only | core configuration |
 | Activation | global plugin lifecycle plus MB744 channel policy | `off`, `observe` or `on` per instance/channel | policy service |
 | Health | lifecycle and metrics fragments | Doctor, reason, permissions, bounded failure history and explicit scoped quarantine | plugin runtime |
@@ -322,12 +323,19 @@ Planned capability families include:
     atomic core ledger restores exact grants, typed policies and enabled state
     after legacy plugin loading. Invalid whole-state input loads nothing;
     package failures are isolated; explicit unload removes the boot entry.
+27. **MB767 — persistent quote promotion:** complete operationally. The full
+    `quotes-v3` command set is authoritative on development `#test`, survives
+    restart through the core ledger and retains explicit rollback.
+28. **MB768 — production quote observation:** complete operationally. Nbot
+    keeps `quotes-v3` enabled in `observe` on `#i/o`; one bounded read-only
+    `on` request proved response parity without changing a quote row.
+29. **MB769 — second-wave activity authority:** complete in source.
+    `data.channel_activity.read` exposes only bounded, read-only `compare` and
+    24-bucket `heatmap` aggregates. No package requests it and no command moves.
 
-The quote path is stabilized. MB764 closed the first extraction wave and MB766
-makes reviewed operator posture durable: Quotes remain operator-controlled,
-while the complete five-command Factoids set has one bounded development
-promotion. Further product extraction is a new roadmap decision, not unfinished work in
-this migration set.
+The first extraction wave and durable promotion mechanics are complete. MB769
+opens the second extraction wave on a deliberately read-only domain; command
+adoption remains a separate reversible milestone.
 
 ## Extraction order
 

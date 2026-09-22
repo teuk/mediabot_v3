@@ -276,3 +276,15 @@ before becoming authoritative, and uses disposable add, view and delete
 evidence with one recall increment and exact cleanup. A clean restart must
 restore the enabled lifecycle and `on` policy. Source remains default-off,
 rollback is `off`, disable or unload, and production remains unchanged.
+
+MB768 applies the same gate to production without promoting authority.
+`quotes-v3` is persistent in `observe` on nbot `#i/o`; one bounded read-only
+`on` request proves single-response parity, changes no quote row and returns to
+observe before restart verification.
+
+MB769 begins the second extraction wave with
+`data.channel_activity.read`. The core offers only `compare` and `heatmap`,
+derives the channel from the invocation, validates bounded periods and returns
+opaque detached aggregates over the existing content-retention scope. Reads
+may execute in observe, writes do not exist, and no package or command adopts
+the authority in this milestone.

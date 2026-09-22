@@ -10,6 +10,32 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb769 — open a read-only observatory for channel activity
+
+- Start the second plugin extraction wave with the distinct
+  `data.channel_activity.read` capability. The core exposes only bounded
+  `compare` and 24-bucket `heatmap` aggregates, scoped by the invocation
+  channel and the existing live/archive content-retention policy. 🔭📊
+- Return opaque detached values instead of rows, handles or SQL. Nicknames and
+  periods are validated, results are merged case-insensitively, and database
+  failure returns no partial aggregate.
+- Keep this milestone authority-only: no package requests the capability, no
+  command moves, observe performs reads only, and no channel policy or data is
+  changed. The next milestone can adopt `compare` and `heatmap` reversibly. 🗝️🦉
+
+### mb768 — prove quotes-v3 in the production antechamber
+
+- Run a bounded read-only production pilot on nbot `#i/o`: `quotes-v3`
+  shadows the historical handler in `observe`, briefly owns one `q stats`
+  request in `on`, then returns to `observe`. Exactly one reply is emitted on
+  each path and the two existing quote rows remain unchanged. 🏰📚
+- Persist the enabled/`observe` posture through a clean production restart.
+  Doctor reports all five commands mounted, complete permissions and zero
+  failures; the temporary Partyline identity is removed.
+- Make no source, schema or historical-handler change. Production remains one
+  reversible step away from authority through `policy off`, disable or unload.
+  🛡️🪄
+
 ### mb767 — entrust the quote archive to the persistent v3 corridor
 
 - Promote `quotes-v3` on the single development channel `#test` only after an

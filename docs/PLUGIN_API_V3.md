@@ -300,6 +300,29 @@ package is loaded or unloaded, never prints the path, and cannot remove legacy
 v1/v2 storage with the same package slug. Historical `.plugins cleardata`
 keeps its legacy namespace and semantics.
 
+## Approved channel-activity reads
+
+MB769 begins the second extraction wave with the distinct
+`data.channel_activity.read` capability. It exposes only
+`activity_compare($invocation, $left, $right, period => $period)` and
+`activity_heatmap($invocation, $nick)`. The current invocation policy supplies
+the channel; plugin code cannot choose a second channel, provide SQL or obtain
+a database handle.
+
+Comparison accepts two different validated nicknames and either `all` or one
+bounded `Nd`, `Nw`, `Nm` or `Ny` period. Heatmap always returns exactly 24
+hour buckets. Both operations count only public messages and actions through
+the core's existing content-retention scope, merge live/archive aggregates
+case-insensitively and fail without returning partial data when the live source
+is unavailable.
+
+Results are opaque detached `ActivityComparisonV3` and `ActivityHeatmapV3`
+values. Their scalar accessors and copied hashes/arrays reveal only normalized
+nicknames, validated period metadata and unsigned counters. Reads are allowed
+in `observe`, fail closed in `off`, and expose no write operation. MB769 moves
+no command and no package requests the capability; reversible adoption of
+`compare` and `heatmap` is the following milestone.
+
 ## Approved factoid reads
 
 MB758 opens the second core-owned domain facade with the distinct
@@ -506,11 +529,11 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB764 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB769 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
-`data.quotes.read`, `data.quotes.write`, `data.factoids.read` and
-`data.factoids.write`. Other capability names remain reserved for later
-mediated services.
+`data.quotes.read`, `data.quotes.write`, `data.factoids.read`,
+`data.factoids.write` and `data.channel_activity.read`. Other capability names
+remain reserved for later mediated services.
 
 Discovery reads manifests only. Loading is explicit, leaves the package
 disabled and mounts silent commands. Enabling is a second explicit operation,

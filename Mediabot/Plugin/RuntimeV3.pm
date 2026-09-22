@@ -164,6 +164,9 @@ sub load_package {
         factoids_write_sink => sub {
             return $manager->_v3_factoids_write($name, @_);
         },
+        channel_activity_read_sink => sub {
+            return $manager->_v3_channel_activity_read($name, @_);
+        },
     );
     # The plugin receives a detached manifest snapshot. It cannot rewrite the
     # already validated core-owned contract between validation and mounting.
