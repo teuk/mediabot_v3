@@ -1,0 +1,42 @@
+{
+  "api": 3,
+  "name": "channel-activity-v3",
+  "version": "1.0.0",
+  "description": "A reversible API v3 home for bounded channel activity comparisons and heatmaps.",
+  "runtime": {
+    "api": 3,
+    "kind": "perl",
+    "entrypoint": "lib/ChannelActivity.pm",
+    "class": "Mediabot::Plugin::ChannelActivity"
+  },
+  "compatibility": {
+    "mediabot": ">=3.6dev"
+  },
+  "activation": {
+    "default": "off"
+  },
+  "capabilities": [
+    "data.channel_activity.read",
+    "irc.reply",
+    "irc.notice"
+  ],
+  "commands": {
+    "compare": {
+      "source": "public",
+      "help": "Compare two nicknames over a bounded activity period.",
+      "level": 0,
+      "handler": "command_compare",
+      "migration": "legacy-public-fallback"
+    },
+    "heatmap": {
+      "source": "public",
+      "help": "Show one nickname's bounded 24-hour activity profile.",
+      "level": 0,
+      "handler": "command_heatmap",
+      "migration": "legacy-public-fallback"
+    }
+  },
+  "events": [],
+  "jobs": {},
+  "config_schema": {}
+}

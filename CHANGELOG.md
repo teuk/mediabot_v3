@@ -10,6 +10,23 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb770 — chart channel activity through a reversible telescope
+
+- Add the inert `channel-activity-v3` package with only the reviewed
+  `data.channel_activity.read`, `irc.reply` and `irc.notice` capabilities. It
+  adopts exactly `compare` and `heatmap` and receives detached aggregates,
+  never SQL, rows, handles or a write surface. 🔭🗺️
+- Preserve historical rendering through the saved-handler bridge. `observe`
+  keeps the built-in solely visible, `on` emits one v3 result, and `off`,
+  disable or unload restores the exact handlers without duplicate output.
+- Prove both paths on development `#test` with zero-data disposable targets,
+  zero failures and complete rollback. No package, policy, identity or channel
+  activity data remains after the pilot. 🪄↩️
+- Close the intermittent `CommandAsync` completion race exposed by the live
+  pilot: the parent now waits for both worker reap and result-pipe EOF before
+  decoding JSON. Fast workers can no longer become false `no result` database
+  errors when process completion wins the event-loop race. 🧵✅
+
 ### mb769 — open a read-only observatory for channel activity
 
 - Start the second plugin extraction wave with the distinct

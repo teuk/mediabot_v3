@@ -52,6 +52,12 @@ zero failures and no disposable data. Package source remains default-off.
 The operator ledger, not the historical `plugins.AUTOLOAD` mechanism, restores
 that posture after a clean restart.
 
+MB770 deliberately does not retain another promotion. The inert
+`channel-activity-v3` package is exercised on `#test` through `observe` and a
+bounded `on` window, then returned through `off`, disable and unload. This
+proves singular `compare` and `heatmap` output while keeping the final ledger
+unchanged.
+
 ## Immediate rollback
 
 Explicit rollback is three bounded Partyline commands:

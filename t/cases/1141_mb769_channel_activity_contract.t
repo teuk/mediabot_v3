@@ -22,8 +22,8 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         _slurp('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB769',
-        'API contract advances to the channel-activity authority milestone');
+    $assert->is($contract->{milestone}, 'MB770',
+        'API contract advances beyond the channel-activity authority milestone');
     $assert->ok(grep($_ eq 'data.channel_activity.read',
         @{ $contract->{implemented_capabilities} }),
         'implemented capabilities include channel activity reads');
@@ -50,7 +50,8 @@ return sub {
             "$class is an explicit detached plugin value");
     }
 
-    for my $manifest (glob('plugins/*/plugin.json')) {
+    for my $manifest (grep { $_ !~ m{/channel-activity-v3/} }
+            glob('plugins/*/plugin.json')) {
         my $doc = JSON::PP->new->decode(_slurp($manifest));
         $assert->ok(!grep($_ eq 'data.channel_activity.read',
             @{ $doc->{capabilities} || [] }),

@@ -21,8 +21,10 @@ MB764 adds one bounded portfolio across installed and loaded v3 packages, then
 uses it to supervise the first single-channel development promotion.
 MB766 persists reviewed posture, MB767 promotes Quotes on development, and
 MB768 proves a persistent production `observe` posture on `#i/o`. MB769 adds
-the read-only `data.channel_activity.read` authority only; it introduces no new
-Partyline mutation and no package or channel activation.
+the read-only `data.channel_activity.read` authority. MB770 packages it as
+inert `channel-activity-v3`: `compare` and `heatmap` move through the existing
+`observe` then `on` gate on development only, with `off`, disable and unload as
+exact rollback. No new Partyline mutation or activity write is introduced.
 
 ## What is installed and active across API v3?
 

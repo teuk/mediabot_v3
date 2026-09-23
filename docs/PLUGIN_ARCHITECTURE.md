@@ -329,13 +329,17 @@ Planned capability families include:
 28. **MB768 — production quote observation:** complete operationally. Nbot
     keeps `quotes-v3` enabled in `observe` on `#i/o`; one bounded read-only
     `on` request proved response parity without changing a quote row.
-29. **MB769 — second-wave activity authority:** complete in source.
+29. **MB769 — second extraction wave activity authority:** complete in source.
     `data.channel_activity.read` exposes only bounded, read-only `compare` and
     24-bucket `heatmap` aggregates. No package requests it and no command moves.
+30. **MB770 — reversible activity adoption:** complete in source.
+    The inert `channel-activity-v3` package adopts `compare` and `heatmap`
+    through the saved-handler bridge. Observe keeps historical output solely
+    visible; on is singular; off, disable and unload restore exact handlers.
 
-The first extraction wave and durable promotion mechanics are complete. MB769
-opens the second extraction wave on a deliberately read-only domain; command
-adoption remains a separate reversible milestone.
+The first extraction wave and durable promotion mechanics are complete. MB770
+turns the second wave's read-only authority into one reversible command slice
+without adding a write surface or retaining a development policy.
 
 ## Extraction order
 

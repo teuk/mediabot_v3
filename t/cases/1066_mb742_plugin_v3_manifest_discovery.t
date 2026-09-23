@@ -73,6 +73,17 @@ return sub {
     $assert->ok(!'Mediabot::Plugin::Factoids'->can('new'),
         'factoid discovery does not execute its entrypoint');
 
+    my @activity = grep { $_->{name} eq 'channel-activity-v3' } @packages;
+    $assert->is(scalar @activity, 1,
+        'discovery finds the inert channel activity package');
+    $assert->is($activity[0]{activation}, 'off',
+        'channel activity discovery preserves default-off activation');
+    $assert->is(join(',', @{ $activity[0]{capabilities} }),
+        'data.channel_activity.read,irc.reply,irc.notice',
+        'discovery exposes only reviewed activity package capabilities');
+    $assert->ok(!'Mediabot::Plugin::ChannelActivity'->can('new'),
+        'activity discovery does not execute its entrypoint');
+
     my %unknown = (%$manifest, surprise => 1);
     my $ok = eval { Mediabot::Plugin::ManifestV3->validate(\%unknown); 1 };
     $assert->like($@ // '', qr/unknown manifest field 'surprise'/,

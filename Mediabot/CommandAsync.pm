@@ -160,6 +160,21 @@ sub async_stats_snapshot {
         qw(spawned completed timeouts fallback_sync lock_refused) };
 }
 
+# mb770-R6: a worker can be reaped before IO::Async has delivered the final
+# bytes from its result pipe.  Finalizing on watch_process alone therefore
+# turned a valid JSON result into an intermittent "no result"/Database error.
+# Keep the ordering rule in one tiny pure helper so both possible event orders
+# are testable: process exit first or pipe EOF first.  IO::Async guarantees
+# that on_read_eof runs only after pending on_read data has been presented.
+sub _worker_completion_barrier {
+    my ($state, $finalize) = @_;
+    return 0 unless ref($state) eq 'HASH' && ref($finalize) eq 'CODE';
+    return 0 if $state->{finalized};
+    return 0 unless $state->{process_done} && $state->{pipe_eof};
+    $finalize->();
+    return 1;
+}
+
 sub run_ctx_async {
     my ($self, $ctx, $label, $code) = @_;
     return 0 unless $self && $ctx && ref($code) eq 'CODE';
@@ -284,7 +299,10 @@ sub run_ctx_async {
     eval { $self->{logger}->log(3,
         "CommandAsync: '$label' worker started pid=$pid chan=$channel") };
 
-    my $state = { buffer => '', finalized => 0, timed_out => 0 };
+    my $state = {
+        buffer => '', finalized => 0, timed_out => 0,
+        process_done => 0, pipe_eof => 0,
+    };
     my ($stream, $t_term, $t_kill);
     my $cleanup = sub {
         for my $obj ($stream, $t_term, $t_kill) {
@@ -334,6 +352,9 @@ sub run_ctx_async {
             eval { Mediabot::Helpers::botNotice($self, $nick, 'Database error.') };
         }
     };
+    my $completion_barrier = sub {
+        return _worker_completion_barrier($state, $finalize);
+    };
 
     $stream = IO::Async::Stream->new(
         read_handle => $pipe,
@@ -344,6 +365,10 @@ sub run_ctx_async {
             $state->{buffer} = substr($state->{buffer}, 0, $MAX_PAYLOAD + 1024)
                 if length($state->{buffer}) > $MAX_PAYLOAD + 1024;
             return 0;
+        },
+        on_read_eof => sub {
+            $state->{pipe_eof} = 1;
+            $completion_barrier->();
         },
     );
     $t_term = IO::Async::Timer::Countdown->new(
@@ -362,7 +387,10 @@ sub run_ctx_async {
     my $watch_ok = eval {
         $loop->add($stream);
         $loop->add($t_term); $t_term->start;
-        $loop->watch_process($pid, sub { $finalize->() });
+        $loop->watch_process($pid, sub {
+            $state->{process_done} = 1;
+            $completion_barrier->();
+        });
         1;
     };
     unless ($watch_ok) {

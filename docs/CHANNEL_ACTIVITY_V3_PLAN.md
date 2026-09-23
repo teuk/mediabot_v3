@@ -1,7 +1,7 @@
 # Channel Activity API v3 Migration Plan 🔭📊
 
-MB769 opens the second extraction wave with a read-only authority. It does not
-move commands yet.
+MB769 opened the second extraction wave with a read-only authority. MB770
+adopts its first two commands without expanding that authority.
 
 ## Authority now available
 
@@ -12,17 +12,23 @@ move commands yet.
 - Both return opaque detached values and no SQL, handle or write operation.
 - `observe` may read; `off` does not execute the plugin.
 
-## Deliberate boundary
+In MB769, no package requests this authority; `compare` and `heatmap` remain
+historical until the separate MB770 adoption below.
 
-No package requests `data.channel_activity.read` in MB769. The historical
-`compare` and `heatmap` commands remain the only live implementations. This
-keeps authority review separate from dispatch migration and makes the next
-step mechanically reversible.
+## MB770 reversible adoption
 
-## Next milestone
+The inert `channel-activity-v3` package requests only
+`data.channel_activity.read`, `irc.reply` and `irc.notice`. It mounts `compare`
+and `heatmap` through the `legacy-public-fallback` bridge. Installation changes
+no lifecycle or channel policy.
 
-Create an inert `channel-activity-v3` package that requests only
-`data.channel_activity.read` plus the exact IRC output capabilities needed by
-`compare` and `heatmap`. Mount both commands through the saved-handler bridge,
-prove singular output in `observe` and `on`, then roll back before deciding on
-any retained development policy. No activity write capability is planned. 🗝️
+The supervised development proof begins in `observe`: the v3 aggregate runs
+without output while the saved historical handler remains solely visible. In
+`on`, the package emits the same bounded comparison or heatmap and suppresses
+the fallback. `off`, disable and unload form the immediate rollback path and
+restore the exact saved handlers.
+
+The pilot uses disposable nicknames with no retained activity, proves singular
+output parity on `#test`, records zero failures and rolls back completely. No
+package, policy, identity or data remains. No activity write capability exists
+or is planned. 🗝️

@@ -46,11 +46,11 @@ return sub {
     my $manager = Mediabot::PluginManager->new(
         bot => $bot, plugin_dir => 'plugins');
     my $initial = $manager->v3_portfolio_report;
-    $assert->is($initial->{summary}{discovered}, 5,
-        'portfolio discovers the five reviewed API v3 packages');
+    $assert->is($initial->{summary}{discovered}, 6,
+        'portfolio discovers the six reviewed API v3 packages');
     $assert->is($initial->{summary}{loaded}, 0,
         'discovery does not load a package');
-    $assert->is($initial->{summary}{entries}, 5,
+    $assert->is($initial->{summary}{entries}, 6,
         'portfolio returns one bounded row per installed package');
     $assert->is($initial->{summary}{maximum_entries}, 64,
         'portfolio publishes its fixed output bound');

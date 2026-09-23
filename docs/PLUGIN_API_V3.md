@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB764. Packages are discoverable and
+Plugin API v3 remains experimental in MB770. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. MB764 adds a bounded installed/live operator portfolio and the
@@ -319,9 +319,13 @@ is unavailable.
 Results are opaque detached `ActivityComparisonV3` and `ActivityHeatmapV3`
 values. Their scalar accessors and copied hashes/arrays reveal only normalized
 nicknames, validated period metadata and unsigned counters. Reads are allowed
-in `observe`, fail closed in `off`, and expose no write operation. MB769 moves
-no command and no package requests the capability; reversible adoption of
-`compare` and `heatmap` is the following milestone.
+in `observe`, fail closed in `off`, and expose no write operation.
+
+MB770 adds the inert `channel-activity-v3` package. Its `compare` and `heatmap`
+commands use `legacy-public-fallback`: `observe` executes a silent v3 read and
+leaves the saved built-in solely visible, while `on` emits the historical
+format from detached values and suppresses that fallback. `off`, disable and
+unload restore the exact saved handlers. Installation activates nothing.
 
 ## Approved factoid reads
 
@@ -529,7 +533,7 @@ no plugin job handler.
 
 Effective permissions are the intersection of what the manifest requests and
 what the operator grants. A grant not requested by the manifest is rejected.
-MB769 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
+MB770 implements `irc.reply`, `irc.notice`, `irc.channel_message`,
 `events.subscribe`, `scheduler.jobs`, `http.fetch`, `storage.kv` and
 `data.quotes.read`, `data.quotes.write`, `data.factoids.read`,
 `data.factoids.write` and `data.channel_activity.read`. Other capability names

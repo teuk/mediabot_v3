@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB769",
+  "milestone": "MB770",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -138,9 +138,21 @@
     "channel_source": "invocation policy",
     "observe_reads": "allowed",
     "writes": "none",
-    "plugin_adoption": "none in MB769",
+    "plugin_adoption": "channel-activity-v3 compare and heatmap, inactive by default",
     "plugin_sql": "unavailable",
     "plugin_database_handles": "unavailable"
+  },
+  "channel_activity_migration": {
+    "package": "channel-activity-v3",
+    "commands": [
+      "compare",
+      "heatmap"
+    ],
+    "activation": "explicit package plus channel policy",
+    "observe_behavior": "v3 read and output suppressed; historical fallback remains solely visible",
+    "on_behavior": "one v3 aggregate and historical-format output; saved fallback suppressed",
+    "rollback": "policy off, disable or unload restores the exact saved handlers",
+    "writes": "none"
   },
   "factoid_read_limits": {
     "capability": "data.factoids.read",

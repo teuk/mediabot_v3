@@ -288,3 +288,10 @@ derives the channel from the invocation, validates bounded periods and returns
 opaque detached aggregates over the existing content-retention scope. Reads
 may execute in observe, writes do not exist, and no package or command adopts
 the authority in this milestone.
+
+MB770 adopts that reviewed surface without widening it. The default-off
+`channel-activity-v3` package requests only the activity read and IRC
+reply/notice capabilities. `compare` and `heatmap` use the saved-handler
+bridge, so observe retains one historical answer, on produces one v3 answer,
+and off, disable or unload restores exact registry state. The development
+pilot rolls back and persists no package posture.

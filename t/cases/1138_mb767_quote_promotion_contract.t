@@ -27,7 +27,7 @@ return sub {
     my $manifest = JSON::PP->new->decode(
         slurp_1138('plugins/quotes-v3/plugin.json'));
 
-    $assert->is($contract->{milestone}, 'MB769',
+    $assert->is($contract->{milestone}, 'MB770',
         'machine contract records the quote promotion milestone');
     $assert->is($promotion->{milestone}, 'MB767',
         'current development promotion is versioned');
