@@ -25,6 +25,9 @@ the read-only `data.channel_activity.read` authority. MB770 packages it as
 inert `channel-activity-v3`: `compare` and `heatmap` move through the existing
 `observe` then `on` gate on development only, with `off`, disable and unload as
 exact rollback. No new Partyline mutation or activity write is introduced.
+MB771 retains that package only on development `#test`, persists the exact
+three grants plus enabled/`on` posture, proves restart restoration and leaves
+the existing `quotes-v3` promotion unchanged.
 
 ## What is installed and active across API v3?
 
@@ -206,3 +209,14 @@ rollback remains, and is itself persisted:
 The first command returns the channel to the saved historical handler, disable
 stops the package while retaining its configuration, and unload removes it
 from both the live registry and the next boot.
+
+The second controlled development promotion follows the same boundary:
+
+```text
+.plugins policy channel-activity-v3 #test off
+.plugins disable channel-activity-v3
+.plugins unload channel-activity-v3
+```
+
+MB771 accepts `channel-activity-v3` as enabled and `on` only for `#test` after
+the MB770 parity proof and a clean restart. No production posture is implied.

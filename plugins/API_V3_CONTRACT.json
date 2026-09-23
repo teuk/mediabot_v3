@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB770",
+  "milestone": "MB771",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -393,15 +393,28 @@
       "mode": "on",
       "evidence": "disposable factoid with exact one-recall accounting and cleanup",
       "production_channels": 0
+    },
+    {
+      "milestone": "MB767",
+      "package": "quotes-v3",
+      "channel": "#test",
+      "mode": "on",
+      "scope": "single development channel",
+      "evidence": "observe fallback parity, authoritative disposable add/view/delete, exact recall accounting, cleanup and restart",
+      "boot_autoload": false,
+      "persistent_operator_state": true,
+      "restart_behavior": "restore exact grants, enabled lifecycle and on policy",
+      "explicit_rollback": "policy off, disable, unload",
+      "production_channels": 0
     }
   ],
   "development_promotion": {
-    "milestone": "MB767",
-    "package": "quotes-v3",
+    "milestone": "MB771",
+    "package": "channel-activity-v3",
     "channel": "#test",
     "mode": "on",
     "scope": "single development channel",
-    "evidence": "observe fallback parity, authoritative disposable add/view/delete, exact recall accounting and cleanup",
+    "evidence": "MB770 singular observe/on compare and bounded heatmap parity, CommandAsync completion barrier, zero failures and restart",
     "boot_autoload": false,
     "persistent_operator_state": true,
     "restart_behavior": "restore exact grants, enabled lifecycle and on policy",

@@ -52,11 +52,48 @@ zero failures and no disposable data. Package source remains default-off.
 The operator ledger, not the historical `plugins.AUTOLOAD` mechanism, restores
 that posture after a clean restart.
 
-MB770 deliberately does not retain another promotion. The inert
-`channel-activity-v3` package is exercised on `#test` through `observe` and a
-bounded `on` window, then returned through `off`, disable and unload. This
-proves singular `compare` and `heatmap` output while keeping the final ledger
+MB770 deliberately did not retain another promotion. The inert
+`channel-activity-v3` package was exercised on `#test` through `observe` and a
+bounded `on` window, then returned through `off`, disable and unload. That
+proved singular `compare` and `heatmap` output while keeping the ledger
 unchanged.
+
+## MB771 channel-activity development promotion
+
+MB771 reuses that exact MB770 output and rollback evidence, including the
+CommandAsync completion-barrier regression. An authenticated Owner performs
+the persistent posture change with only the manifest grants:
+
+```text
+.plugins overviewv3
+.plugins loadv3 channel-activity-v3 data.channel_activity.read,irc.reply,irc.notice
+.plugins policy channel-activity-v3 #test observe
+.plugins enable channel-activity-v3
+.plugins doctor channel-activity-v3
+.plugins permissions channel-activity-v3
+.plugins why channel-activity-v3 #test
+.plugins policy channel-activity-v3 #test on
+.plugins why channel-activity-v3 #test
+.plugins failures channel-activity-v3
+```
+
+Before and after a clean restart, `doctor` must report two mounted commands,
+two saved handlers, one `on` policy and zero failures. `permissions` must expose
+exactly the three approved capabilities. `overviewv3` must show both the
+pre-existing `quotes-v3` promotion and `channel-activity-v3` as ready; MB771
+must not replace, reload or otherwise disturb Quotes.
+
+The final development posture is persistent `on` for `#test`. Source remains
+default-off and the immediate rollback is:
+
+```text
+.plugins policy channel-activity-v3 #test off
+.plugins disable channel-activity-v3
+.plugins unload channel-activity-v3
+```
+
+No production channel is included. A production `observe` pilot remains a
+separate decision.
 
 ## Immediate rollback
 

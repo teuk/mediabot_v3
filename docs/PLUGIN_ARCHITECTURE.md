@@ -336,10 +336,15 @@ Planned capability families include:
     The inert `channel-activity-v3` package adopts `compare` and `heatmap`
     through the saved-handler bridge. Observe keeps historical output solely
     visible; on is singular; off, disable and unload restore exact handlers.
+31. **MB771 — persistent activity promotion:** complete operationally. The
+    reviewed `channel-activity-v3` package remains enabled and authoritative
+    only on development `#test`. Exact grants, lifecycle and policy survive a
+    clean restart, zero failures are retained, and the quote promotion remains
+    unchanged.
 
-The first extraction wave and durable promotion mechanics are complete. MB770
-turns the second wave's read-only authority into one reversible command slice
-without adding a write surface or retaining a development policy.
+The first extraction wave and durable promotion mechanics are complete. MB771
+retains the second wave's first read-only command slice on one development
+channel without adding a write surface or touching production.
 
 ## Extraction order
 

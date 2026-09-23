@@ -22,15 +22,19 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1138('plugins/API_V3_CONTRACT.json'));
-    my $promotion = $contract->{development_promotion};
     my $history = $contract->{development_promotion_history};
+    my ($promotion) = grep {
+        ($_->{milestone} // '') eq 'MB767'
+    } @{ $history || [] };
     my $manifest = JSON::PP->new->decode(
         slurp_1138('plugins/quotes-v3/plugin.json'));
 
-    $assert->is($contract->{milestone}, 'MB770',
-        'machine contract records the quote promotion milestone');
+    $assert->is($contract->{milestone}, 'MB771',
+        'machine contract advances while retaining quote promotion evidence');
+    $assert->ok(ref($promotion) eq 'HASH',
+        'quote promotion remains in machine-readable history');
     $assert->is($promotion->{milestone}, 'MB767',
-        'current development promotion is versioned');
+        'historical development promotion remains versioned');
     $assert->is($promotion->{package}, 'quotes-v3',
         'quotes-v3 is the promoted package');
     $assert->is($promotion->{channel}, '#test',

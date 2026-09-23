@@ -118,7 +118,7 @@ return sub {
     local $/;
     my $contract = JSON::PP->new->decode(<$contract_fh>);
     close $contract_fh;
-    $assert->is($contract->{milestone}, 'MB770',
+    $assert->is($contract->{milestone}, 'MB771',
         'machine contract records the current platform milestone');
     $assert->like($contract->{storage_limits}{operator_cleanup},
         qr/Owner-only clearv3data/,

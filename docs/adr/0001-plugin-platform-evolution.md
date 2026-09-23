@@ -295,3 +295,10 @@ reply/notice capabilities. `compare` and `heatmap` use the saved-handler
 bridge, so observe retains one historical answer, on produces one v3 answer,
 and off, disable or unload restores exact registry state. The development
 pilot rolls back and persists no package posture.
+
+MB771 accepts the separate promotion decision. The exact MB770 parity,
+rollback and CommandAsync completion evidence is reused before
+`channel-activity-v3` is loaded with only its three manifest grants and moved
+from observe to on for development `#test`. The core ledger must restore that
+enabled/on posture after restart while leaving the existing `quotes-v3`
+promotion unchanged. Source stays default-off; production receives no policy.

@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb771 — keep the channel observatory open after dawn
+
+- Promote `channel-activity-v3` on development `#test` only, reusing MB770's
+  singular `compare`/`heatmap` parity and repaired asynchronous completion
+  evidence before committing any persistent posture. 🔭🌅
+- Persist exactly `data.channel_activity.read`, `irc.reply` and `irc.notice`,
+  the enabled lifecycle and one `on` policy. A clean restart restores both
+  commands with zero failures while the existing `quotes-v3` promotion remains
+  ready and unchanged.
+- Keep source default-off and rollback explicit through `policy off`, disable
+  and unload. No production channel, schema or channel-activity row changes;
+  the next step remains a separate production `observe` pilot. 🗝️🦉
+
 ### mb770 — chart channel activity through a reversible telescope
 
 - Add the inert `channel-activity-v3` package with only the reviewed

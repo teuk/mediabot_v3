@@ -18,3 +18,9 @@ disable or unload restores the exact saved handlers.
 
 No activity write capability exists. The package receives no SQL, database
 handle, raw message, hostmask or caller-selected channel.
+
+MB771 promotes this package only on development `#test`, after MB770's bounded
+observe/on parity and rollback evidence. The private core ledger restores the
+exact three grants, enabled lifecycle and `on` policy after restart. Manifest
+activation remains default-off, production remains unchanged, and `policy
+off` followed by disable and unload is the explicit persistent rollback.

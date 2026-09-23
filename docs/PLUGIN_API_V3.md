@@ -1,6 +1,6 @@
 # Plugin API v3 author guide
 
-Plugin API v3 remains experimental in MB770. Packages are discoverable and
+Plugin API v3 remains experimental in MB771. Packages are discoverable and
 explicitly loadable, but never activate at startup. MB754 uses the detached
 caller principal and core-owned quote-write gate to adopt `q` and `quote`
 reversibly. MB764 adds a bounded installed/live operator portfolio and the
@@ -326,6 +326,13 @@ commands use `legacy-public-fallback`: `observe` executes a silent v3 read and
 leaves the saved built-in solely visible, while `on` emits the historical
 format from detached values and suppresses that fallback. `off`, disable and
 unload restore the exact saved handlers. Installation activates nothing.
+
+MB771 retains `channel-activity-v3` on development `#test`. The promotion
+grants only `data.channel_activity.read`, `irc.reply` and `irc.notice`, begins
+in `observe`, then records one authoritative `on` policy in the core boot
+ledger. Restart must restore both commands, the exact grants and zero failures
+without changing the already-promoted `quotes-v3` posture. Source activation
+remains default-off and production remains untouched.
 
 ## Approved factoid reads
 
