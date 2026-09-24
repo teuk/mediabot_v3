@@ -302,3 +302,11 @@ rollback and CommandAsync completion evidence is reused before
 from observe to on for development `#test`. The core ledger must restore that
 enabled/on posture after restart while leaving the existing `quotes-v3`
 promotion unchanged. Source stays default-off; production receives no policy.
+
+MB772 records that restart persistence is insufficient if release rotation
+drops the directory that owns it. The IRC updater now resolves
+`plugins.DATA_DIR` from the selected instance configuration. Internal plugin
+state is copied as one post-shutdown snapshot before activation; absolute
+external state remains outside the rotating tree. Internal traversal,
+symlinks and candidate/state merges are rejected. The updater preserves
+operator intent but never creates it when the ledger is already absent.

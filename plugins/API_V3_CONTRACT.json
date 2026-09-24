@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB771",
+  "milestone": "MB772",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -384,6 +384,19 @@
     "network_access": "none",
     "operator_mutations": "successful Partyline load, policy, enable, disable and unload",
     "explicit_rollback": "policy off, disable or unload"
+  },
+  "updater_state_preservation": {
+    "milestone": "MB772",
+    "configuration_source": "plugins.DATA_DIR through Mediabot::Conf",
+    "internal_directory": "copied recursively after bot stop and before release rotation",
+    "external_directory": "left in place outside the rotating release tree",
+    "preserved_state": [
+      ".api-v3-runtime-state.json",
+      "bounded plugin KV documents"
+    ],
+    "candidate_merge": "reject",
+    "symlink_policy": "reject symlinks in the internal source path and staged target parents",
+    "source_mutation": "none"
   },
   "development_promotion_history": [
     {

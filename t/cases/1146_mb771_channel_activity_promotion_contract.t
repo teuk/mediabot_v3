@@ -27,7 +27,7 @@ return sub {
     my $promotion = $contract->{development_promotion};
     my $history = $contract->{development_promotion_history};
 
-    $assert->is($contract->{milestone}, 'MB771',
+    $assert->is($contract->{milestone}, 'MB772',
         'machine contract records the activity promotion milestone');
     $assert->is($promotion->{milestone}, 'MB771',
         'current development promotion is versioned');

@@ -217,7 +217,92 @@ INSTANCE_CONF_NAME="$(basename "${INSTANCE_CONF_REAL}")"
 [[ "${INSTANCE_CONF_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
     || fail "instance config filename '${INSTANCE_CONF_NAME}' is unsafe"
 
+# MB772: the API v3 boot ledger and plugin KV documents are instance state,
+# not release source. Resolve plugins.DATA_DIR from the selected private
+# configuration before shutdown. A relative directory must remain a plain,
+# symlink-free path below the release root; an absolute external directory
+# already survives release rotation and is deliberately left in place.
+PLUGIN_DATA_CONFIG="$(
+    cd "${PROJECT_DIR}"
+    perl -I. -MMediabot::Conf -e '
+        use strict;
+        use warnings;
+        my ($config) = @ARGV;
+        my $conf = Mediabot::Conf->new(undef, $config);
+        my $dir = $conf->get("plugins.DATA_DIR");
+        $dir = "plugin-data"
+            unless defined($dir) && !ref($dir) && length($dir);
+        die "plugins.DATA_DIR contains a forbidden character\n"
+            if $dir =~ /[\x00-\x1f\x7f]/;
+        print $dir;
+    ' "${INSTANCE_CONF_REAL}"
+)" || fail "cannot resolve plugins.DATA_DIR from ${INSTANCE_CONF_NAME}"
+
+PLUGIN_DATA_INTERNAL=0
+PLUGIN_DATA_REL=""
+PLUGIN_DATA_SOURCE=""
+
+validate_internal_plugin_data_path() {
+    local relative="$1"
+    local component=""
+    local cursor="${PROJECT_DIR}"
+    local -a components=()
+
+    [[ "$relative" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]] \
+        || fail "internal plugins.DATA_DIR is not a safe relative path: ${relative}"
+    IFS='/' read -r -a components <<< "$relative"
+    for component in "${components[@]}"; do
+        [ "$component" != '.' ] && [ "$component" != '..' ] \
+            || fail "internal plugins.DATA_DIR contains a traversal component"
+        cursor="${cursor}/${component}"
+        [ ! -L "$cursor" ] \
+            || fail "refusing symbolic-link plugin data path: ${cursor}"
+    done
+}
+
+validate_staged_plugin_data_parent() {
+    local relative="$1"
+    local component=""
+    local cursor="${TMP_CLONE_DIR}"
+    local -a components=()
+
+    IFS='/' read -r -a components <<< "$relative"
+    unset 'components[${#components[@]}-1]'
+    for component in "${components[@]}"; do
+        cursor="${cursor}/${component}"
+        [ ! -L "$cursor" ] \
+            || fail "refusing symbolic-link plugin data parent in candidate: ${cursor}"
+        [ ! -e "$cursor" ] || [ -d "$cursor" ] \
+            || fail "candidate plugin data parent is not a directory: ${cursor}"
+    done
+}
+
+if [[ "${PLUGIN_DATA_CONFIG}" = /* ]]; then
+    case "${PLUGIN_DATA_CONFIG}" in
+        "${PROJECT_DIR}")
+            fail "plugins.DATA_DIR must not be the release root"
+            ;;
+        "${PROJECT_DIR}"/*)
+            PLUGIN_DATA_REL="${PLUGIN_DATA_CONFIG#${PROJECT_DIR}/}"
+            validate_internal_plugin_data_path "${PLUGIN_DATA_REL}"
+            PLUGIN_DATA_SOURCE="${PROJECT_DIR}/${PLUGIN_DATA_REL}"
+            PLUGIN_DATA_INTERNAL=1
+            ;;
+        *)
+            echo "ℹ️  External plugin data remains in place: ${PLUGIN_DATA_CONFIG}"
+            ;;
+    esac
+else
+    PLUGIN_DATA_REL="${PLUGIN_DATA_CONFIG}"
+    validate_internal_plugin_data_path "${PLUGIN_DATA_REL}"
+    PLUGIN_DATA_SOURCE="${PROJECT_DIR}/${PLUGIN_DATA_REL}"
+    PLUGIN_DATA_INTERNAL=1
+fi
+
 echo "==> Instance config: ${INSTANCE_CONF_NAME}"
+if [ "${PLUGIN_DATA_INTERNAL}" -eq 1 ]; then
+    echo "==> Instance plugin data: ${PLUGIN_DATA_REL} (preserved during rotation)"
+fi
 echo "==> Git origin: ${ORIGIN_URL}"
 echo
 
@@ -407,6 +492,23 @@ status_checkpoint "preserve_state"
 echo "⚙️  Restoring private instance state into the staged release ..."
 
 cp -pfv "${INSTANCE_CONF_REAL}" "${TMP_CLONE_DIR}/${INSTANCE_CONF_NAME}"
+
+# MB772: copy the complete bounded plugin data directory after the bot has
+# stopped, so the core-owned API v3 ledger and plugin KV files form one stable
+# instance snapshot. cp -a preserves modes and symlinks without following them;
+# the path itself was proven symlink-free above. Never merge with candidate
+# source: a plugin data directory belongs exclusively to the running instance.
+if [ "${PLUGIN_DATA_INTERNAL}" -eq 1 ] && [ -e "${PLUGIN_DATA_SOURCE}" ]; then
+    [ -d "${PLUGIN_DATA_SOURCE}" ] \
+        || fail "plugin data path is not a directory: ${PLUGIN_DATA_SOURCE}"
+    PLUGIN_DATA_TARGET="${TMP_CLONE_DIR}/${PLUGIN_DATA_REL}"
+    validate_staged_plugin_data_parent "${PLUGIN_DATA_REL}"
+    [ ! -e "${PLUGIN_DATA_TARGET}" ] && [ ! -L "${PLUGIN_DATA_TARGET}" ] \
+        || fail "candidate unexpectedly contains plugin data: ${PLUGIN_DATA_REL}"
+    mkdir -p "$(dirname "${PLUGIN_DATA_TARGET}")"
+    cp -a -- "${PLUGIN_DATA_SOURCE}" "${PLUGIN_DATA_TARGET}"
+    echo "✅ Preserved instance plugin data: ${PLUGIN_DATA_REL}"
+fi
 
 # mb646: transitional safety only. Achievements are DB-backed after migration,
 # but an older instance may still have its last durable state in JSON. Preserve

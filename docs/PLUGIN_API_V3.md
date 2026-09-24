@@ -591,6 +591,15 @@ persistent: a clean restart restores the validated packages and their exact
 last committed posture. A missing ledger loads nothing. An invalid whole
 ledger loads nothing and is logged; a failure in one valid package is isolated
 while the remaining entries are attempted.
+
+MB772 extends that ownership boundary across an IRC-driven software update.
+When `plugins.DATA_DIR` lives inside the rotating release tree, the updater
+copies the complete directory only after the bot has stopped and before the
+new release is activated. This preserves `.api-v3-runtime-state.json` and the
+bounded plugin KV documents together. An absolute external data directory is
+left in place; an internal traversal, symlink or collision with candidate
+source fails closed. An update therefore no longer turns a valid restart
+posture into a missing ledger.
 `.plugins overviewv3` is a separate read-only view: it reconciles validated
 local packages with loaded v3 instances and prints only lifecycle, readiness
 and aggregate policy counts. Its output is capped at 64 package rows and never

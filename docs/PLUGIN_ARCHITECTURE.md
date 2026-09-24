@@ -182,6 +182,11 @@ Discovery reads manifests without loading entrypoints. Loading is explicit and
 leaves the package disabled. Enabling separately invokes `start`, while disable
 or unload invokes `stop`. API v3 is not connected to historical plugin AUTOLOAD;
 its validated operator ledger is a separate boot stage after legacy loading.
+MB772 carries the same ownership rule through release rotation: an internal
+`plugins.DATA_DIR` is instance state and is copied only after the old process
+stops, before the staged release becomes active. An absolute external data
+directory remains outside the release tree. Candidate source may never supply
+or merge plugin state, and internal symlink paths fail closed.
 The complete executable contract is in
 [`PLUGIN_API_V3.md`](PLUGIN_API_V3.md).
 
@@ -341,10 +346,15 @@ Planned capability families include:
     only on development `#test`. Exact grants, lifecycle and policy survive a
     clean restart, zero failures are retained, and the quote promotion remains
     unchanged.
+32. **MB772 — updater plugin-state preservation:** complete in source. IRC
+    release rotation now preserves the configured internal plugin state,
+    including the API v3 ledger, after shutdown and before activation. External
+    state remains in place; traversal, symlinks and candidate merges fail
+    closed.
 
-The first extraction wave and durable promotion mechanics are complete. MB771
-retains the second wave's first read-only command slice on one development
-channel without adding a write surface or touching production.
+The first extraction wave and durable promotion mechanics are complete. MB772
+closes the update boundary discovered before the production activity pilot;
+the pilot itself remains pending until the repaired updater is installed.
 
 ## Extraction order
 

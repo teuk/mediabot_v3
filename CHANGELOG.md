@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb772 — keep the plugin ledger aboard the update train
+
+- Close the persistence gap exposed by the first `channel-activity-v3`
+  production precondition: the IRC updater now resolves `plugins.DATA_DIR`
+  through the selected instance configuration and preserves the complete
+  plugin-state directory across release rotation. 📜🚂
+- Copy internal plugin state only after the bot stops and before activation,
+  preserving the API v3 boot ledger and bounded plugin KV documents as one
+  stable instance snapshot. Absolute external state remains in place.
+- Refuse traversal, symlinked internal paths and candidate/state merges. The
+  failed MB772 pilot changed nothing; production plugin posture must be
+  restored explicitly after the repaired updater is installed. 🔐🦉
+
 ### mb771 — keep the channel observatory open after dawn
 
 - Promote `channel-activity-v3` on development `#test` only, reusing MB770's

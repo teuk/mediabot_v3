@@ -29,7 +29,7 @@ return sub {
     my $manifest = JSON::PP->new->decode(
         slurp_1138('plugins/quotes-v3/plugin.json'));
 
-    $assert->is($contract->{milestone}, 'MB771',
+    $assert->is($contract->{milestone}, 'MB772',
         'machine contract advances while retaining quote promotion evidence');
     $assert->ok(ref($promotion) eq 'HASH',
         'quote promotion remains in machine-readable history');

@@ -28,6 +28,11 @@ exact rollback. No new Partyline mutation or activity write is introduced.
 MB771 retains that package only on development `#test`, persists the exact
 three grants plus enabled/`on` posture, proves restart restoration and leaves
 the existing `quotes-v3` promotion unchanged.
+MB772 repairs the IRC updater boundary exposed before the production activity
+pilot: an internal `plugins.DATA_DIR`, including the API v3 ledger and plugin
+KV documents, is now preserved across release rotation. External absolute
+state remains where configured; internal symlinks, traversal and candidate
+merges are rejected.
 
 ## What is installed and active across API v3?
 
@@ -220,3 +225,11 @@ The second controlled development promotion follows the same boundary:
 
 MB771 accepts `channel-activity-v3` as enabled and `on` only for `#test` after
 the MB770 parity proof and a clean restart. No production posture is implied.
+
+An IRC `update now` is also a restart boundary. Since MB772, the updater reads
+`plugins.DATA_DIR` from the selected private configuration. If that directory
+is internal to the release tree, it is copied after shutdown and before the
+directory swap, so `.api-v3-runtime-state.json` survives exactly like other
+instance state. If it is an absolute external directory, it is not copied and
+continues to live outside the rotation. A missing ledger still loads nothing;
+the updater never invents or reconstructs operator posture.
