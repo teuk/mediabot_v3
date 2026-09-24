@@ -29,7 +29,7 @@ return sub {
         ($_->{milestone} // '') eq 'MB771'
     } @{ $history || [] };
 
-    $assert->is($contract->{milestone}, 'MB778',
+    $assert->is($contract->{milestone}, 'MB781',
         'machine contract records the activity promotion milestone');
     $assert->is($promotion->{milestone}, 'MB771',
         'current development promotion is versioned');
@@ -60,10 +60,10 @@ return sub {
     $assert->is(ref($history), 'ARRAY',
         'prior promotions remain a machine-readable history');
     $assert->is(join(',', map { $_->{milestone} } @$history),
-        'MB764,MB767,MB771',
-        'factoid and quote promotions remain ordered history');
+        'MB764,MB767,MB771,MB778',
+        'prior promotions remain ordered history');
     $assert->is(join(',', map { $_->{package} } @$history),
-        'factoids-v3,quotes-v3,channel-activity-v3',
+        'factoids-v3,quotes-v3,channel-activity-v3,playful-v3',
         'historical promoted packages remain explicit');
 
     $assert->is($manifest->{activation}{default}, 'off',

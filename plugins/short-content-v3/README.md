@@ -21,3 +21,9 @@ Example Partyline pilot:
 
 Use an endpoint you operate or explicitly trust. Reset the channel policy and
 disable/unload the package to roll back immediately.
+
+MB781 retains this package as enabled/on only on development `#test`, using the
+trusted GitHub repository endpoint through the shared HTTP facade. Observe
+remains silent and repository-write-free; on produces one bounded scalar and
+one namespaced repository revision. The exact posture survives restart while
+source remains default-off and production remains untouched.

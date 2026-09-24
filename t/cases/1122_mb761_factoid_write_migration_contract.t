@@ -24,7 +24,7 @@ return sub {
 
     my $contract = JSON::PP->new->decode(
         slurp_1122('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB778',
+    $assert->is($contract->{milestone}, 'MB781',
         'machine contract advances beyond write-command adoption');
     $assert->is($contract->{factoid_write_limits}{plugin_adoption},
         'factoids-v3 learn, forget and whatis recall accounting, inactive by default',

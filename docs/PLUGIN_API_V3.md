@@ -607,6 +607,13 @@ restart. Six commands and one scheduler job are restored, while typed
 configuration leaves `quiet_magic` disabled. Existing ledger packages remain
 byte-for-byte equivalent and production remains untouched.
 
+MB781 applies the same persistent boundary to `short-content-v3` on
+development `#test`. The package receives only `http.fetch`, `irc.reply` and
+`storage.kv`; observe remains silent and write-free, while `on` emits one
+bounded scalar and commits one revision through the namespaced repository.
+Exact grants, policy and lifecycle survive a clean restart with zero failures.
+Source remains default-off and production remains untouched.
+
 `.plugins overviewv3` is a separate read-only view: it reconciles validated
 local packages with loaded v3 instances and prints only lifecycle, readiness
 and aggregate policy counts. Its output is capped at 64 package rows and never

@@ -233,6 +233,14 @@ clean restart; every pre-existing ledger package is fingerprinted before the
 change and must remain unchanged. Rollback remains policy `off`, disable, then
 unload.
 
+MB781 promotes `short-content-v3` on development `#test` with one explicit
+trusted HTTPS endpoint and only the `http.fetch`, `irc.reply` and `storage.kv`
+grants. Observe is silent and repository-write-free; on returns one bounded
+scalar and advances one namespaced repository revision. A clean restart must
+restore the exact policy and zero-failure runtime while every pre-existing
+ledger entry remains unchanged. Immediate rollback remains policy `off`,
+disable, then unload; production receives no policy.
+
 An IRC `update now` is also a restart boundary. Since MB772, the updater reads
 `plugins.DATA_DIR` from the selected private configuration. If that directory
 is internal to the release tree, it is copied after shutdown and before the

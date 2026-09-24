@@ -22,7 +22,7 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1128('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB778',
+    $assert->is($contract->{milestone}, 'MB781',
         'machine contract records recall-command adoption');
     $assert->is($contract->{factoid_recall_migration}{manifest_command},
         'whatis', 'manifest owns the canonical recall command');

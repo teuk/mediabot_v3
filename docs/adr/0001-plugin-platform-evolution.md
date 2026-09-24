@@ -316,3 +316,10 @@ MB778 starts the next functional promotion tranche with the already reviewed
 posture for `#test` across restart, while `quiet_magic` stays disabled and all
 existing package entries remain unchanged. Source stays default-off and no
 production policy is created.
+
+MB781 continues that tranche with `short-content-v3`. The development `#test`
+policy names one trusted HTTPS JSON endpoint while the core retains DNS,
+transport, cache, size, timeout and repository authority. Observe remains
+silent and write-free; on emits one bounded value and commits one revision.
+The persistent posture survives restart, source stays default-off and
+production remains unchanged.

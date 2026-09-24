@@ -128,6 +128,41 @@ Rollback remains explicit and persistent:
 
 Source remains default-off and production remains untouched.
 
+## MB781 short-content development promotion
+
+MB781 reuses the supervised MB756 proof and promotes `short-content-v3` on
+development `#test` only. The channel policy names one trusted HTTPS endpoint,
+one scalar JSON path and bounded output/cache settings:
+
+```text
+.plugins loadv3 short-content-v3 http.fetch,irc.reply,storage.kv
+.plugins policy short-content-v3 #test observe endpoint=https://api.github.com/repos/teuk/mediabot_v3 json_path=name prefix=MB781- language=en cache_ttl_seconds=0 max_chars=80
+.plugins enable short-content-v3
+.plugins doctor short-content-v3
+.plugins permissions short-content-v3
+.plugins why short-content-v3 #test
+.plugins policy short-content-v3 #test on endpoint=https://api.github.com/repos/teuk/mediabot_v3 json_path=name prefix=MB781- language=en cache_ttl_seconds=0 max_chars=80
+.plugins why short-content-v3 #test
+.plugins failures short-content-v3
+```
+
+Observe must produce no public line and no repository change. The first `on`
+request must produce one exact `MB781-mediabot_v3` line and one repository revision
+containing only `last` and `served`. Doctor then reports one command,
+zero failures and the complete three-capability grant before and after a clean
+restart. Every pre-existing ledger entry remains byte-for-byte equivalent.
+
+Rollback is explicit and persistent:
+
+```text
+.plugins policy short-content-v3 #test off
+.plugins disable short-content-v3
+.plugins unload short-content-v3
+```
+
+Source remains default-off, the endpoint is operator-owned typed policy and no
+production channel is included.
+
 ## Immediate rollback
 
 Explicit rollback is three bounded Partyline commands:

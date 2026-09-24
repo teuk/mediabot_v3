@@ -88,3 +88,15 @@ path and an unavailable endpoint each produced only the neutral localized IRC
 message. Doctor remained `ready`, the failure ledger remained empty, the prior
 revision-3 repository was restored exactly, and the temporary Partyline
 accounts were removed. No boot policy or production channel was changed.
+
+## MB781 persistent development promotion
+
+MB781 turns the already supervised package into persistent operator intent on
+development `#test`. It reuses the trusted GitHub repository endpoint, proves
+that observe remains silent and repository-write-free, then accepts one exact
+bounded response and one revisioned commit in `on`.
+
+The core boot ledger restores the exact three grants, typed endpoint policy and
+enabled lifecycle after restart. Existing development promotions are protected
+byte-for-byte. Source remains default-off, rollback remains `off`, disable and
+unload, and production receives no `short-content-v3` posture.

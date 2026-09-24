@@ -355,10 +355,15 @@ Planned capability families include:
     `playful-v3` remains enabled and authoritative only on development `#test`.
     Exact grants, six saved handlers, the dormant autonomous job and zero
     failures survive restart while every existing ledger entry stays unchanged.
+34. **MB781 — persistent short-content promotion:** complete operationally.
+    The reviewed HTTP/repository proof becomes authoritative only on
+    development `#test`. Observe remains silent and write-free; on commits one
+    bounded state revision. Exact grants, policy and lifecycle survive restart
+    while every existing ledger entry remains unchanged.
 
-The first extraction wave and durable promotion mechanics are complete. MB778
-opens the next functional tranche with the already reviewed playful command
-pack while leaving production and autonomous output untouched.
+The first extraction wave and durable promotion mechanics are complete. MB781
+continues the next functional tranche with the reviewed short-content package
+while leaving production untouched.
 
 ## Extraction order
 

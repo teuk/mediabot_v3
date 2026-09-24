@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB781 — let the short messenger keep one trusted window
+
+- Promote `short-content-v3` on development `#test` after reusing MB756's
+  supervised HTTP and repository evidence. Observe remains silent and
+  write-free; `on` returns one bounded repository name through the mediated
+  HTTPS facade and advances exactly one namespaced state revision. 🪟📜
+- Persist only the three manifest grants, one typed channel policy and the
+  enabled lifecycle. A clean restart restores the command with zero failures
+  while every existing ledger package remains byte-for-byte unchanged.
+- Keep source default-off and rollback explicit through `policy off`, disable
+  and unload. Production remains untouched; MB780's four-package enabled/on
+  portfolio on nbot is recorded as accepted evidence, not widened authority.
+  🦉🔐
+
 ### mb778 — keep the playful spellbook open without waking the portraits
 
 - Promote `playful-v3` on development `#test` after an observe-first review of

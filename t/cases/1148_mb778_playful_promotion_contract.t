@@ -24,11 +24,15 @@ return sub {
         _slurp_1148('plugins/API_V3_CONTRACT.json'));
     my $manifest = JSON::PP->new->decode(
         _slurp_1148('plugins/playful-v3/plugin.json'));
-    my $promotion = $contract->{development_promotion};
     my $history = $contract->{development_promotion_history};
+    my ($promotion) = grep {
+        ($_->{milestone} // '') eq 'MB778'
+    } @{ $history || [] };
 
-    $assert->is($contract->{milestone}, 'MB778',
-        'machine contract advances to the playful promotion');
+    $assert->is($contract->{milestone}, 'MB781',
+        'machine contract advances while retaining playful promotion evidence');
+    $assert->ok(ref($promotion) eq 'HASH',
+        'playful promotion remains in ordered history');
     $assert->is($promotion->{milestone}, 'MB778',
         'current development promotion is versioned');
     $assert->is($promotion->{package}, 'playful-v3',
@@ -46,11 +50,11 @@ return sub {
         'development promotion grants no production channel');
 
     $assert->is(join(',', map { $_->{milestone} } @$history),
-        'MB764,MB767,MB771',
-        'three prior development promotions remain ordered history');
+        'MB764,MB767,MB771,MB778',
+        'four development promotions remain ordered history');
     $assert->is(join(',', map { $_->{package} } @$history),
-        'factoids-v3,quotes-v3,channel-activity-v3',
-        'prior promoted packages remain explicit');
+        'factoids-v3,quotes-v3,channel-activity-v3,playful-v3',
+        'promoted packages remain explicit');
 
     $assert->is($manifest->{activation}{default}, 'off',
         'promoted package source remains default-off');
