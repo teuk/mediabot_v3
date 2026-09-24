@@ -22,7 +22,7 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         _slurp('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB781',
+    $assert->is($contract->{milestone}, 'MB784',
         'API contract advances beyond the channel-activity authority milestone');
     $assert->ok(grep($_ eq 'data.channel_activity.read',
         @{ $contract->{implemented_capabilities} }),

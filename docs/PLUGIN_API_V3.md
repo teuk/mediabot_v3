@@ -614,6 +614,15 @@ bounded scalar and commits one revision through the namespaced repository.
 Exact grants, policy and lifecycle survive a clean restart with zero failures.
 Source remains default-off and production remains untouched.
 
+MB784 consolidates the accepted five-package production portfolio after the
+separate MB782 observe and MB783 promotion gates. Quotes, channel activity,
+factoids, playful and short content are persistent enabled/on postures on nbot
+`#i/o` with complete permissions and zero failures after restart. This is a
+source-only evidence milestone: it grants no new runtime authority, contacts
+no production service and leaves the development ledger unchanged. The
+authoritative record is
+[`PLUGIN_V3_PRODUCTION_PORTFOLIO.md`](PLUGIN_V3_PRODUCTION_PORTFOLIO.md).
+
 `.plugins overviewv3` is a separate read-only view: it reconciles validated
 local packages with loaded v3 instances and prints only lifecycle, readiness
 and aggregate policy counts. Its output is capped at 64 package rows and never

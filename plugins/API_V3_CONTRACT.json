@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB781",
+  "milestone": "MB784",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -475,21 +475,50 @@
       "restart_behavior": "exact enabled/observe posture restored",
       "failures": 0
     },
+    "short_content_v3": {
+      "observe_milestone": "MB782",
+      "promotion_milestone": "MB783",
+      "instance": "nbot",
+      "channel": "#i/o",
+      "package": "short-content-v3",
+      "final_mode": "on",
+      "lifecycle": "enabled and persistent",
+      "observe_behavior": "silent and repository write-free",
+      "bounded_on_probe": "one authoritative HTTPS repository-name request",
+      "reply": "MB783-mediabot_v3",
+      "repository_change": "one bounded revision retained",
+      "business_data_changed": 0,
+      "restart_behavior": "exact enabled/on posture restored",
+      "failures": 0
+    },
     "enabled_on_portfolio": {
-      "milestone": "MB780",
+      "milestone": "MB783",
       "instance": "nbot",
       "channel": "#i/o",
       "packages": [
         "quotes-v3",
         "channel-activity-v3",
         "factoids-v3",
-        "playful-v3"
+        "playful-v3",
+        "short-content-v3"
       ],
       "mode": "on",
       "quiet_magic": "disabled",
-      "restart_behavior": "all four exact postures restored",
+      "restart_behavior": "all five exact postures restored",
       "failures": 0,
-      "source_mutation": "none"
+      "source_mutation": "none",
+      "business_data_mutation": "none",
+      "short_content_repository": "one verified bounded revision retained"
+    },
+    "source_consolidation": {
+      "milestone": "MB784",
+      "accepted_evidence": [
+        "MB782",
+        "MB783"
+      ],
+      "runtime_authority_change": "none",
+      "production_contact": "none",
+      "development_ledger_change": "none"
     }
   },
   "runtime_failure_history": {

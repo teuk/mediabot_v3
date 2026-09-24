@@ -28,8 +28,8 @@ return sub {
     my $history = $contract->{development_promotion_history};
     my $portfolio = $contract->{production_pilots}{enabled_on_portfolio};
 
-    $assert->is($contract->{milestone}, 'MB781',
-        'machine contract advances to the short-content promotion');
+    $assert->is($contract->{milestone}, 'MB784',
+        'machine contract advances while retaining short-content promotion');
     $assert->is($promotion->{milestone}, 'MB781',
         'current development promotion is versioned');
     $assert->is($promotion->{package}, 'short-content-v3',
@@ -53,11 +53,11 @@ return sub {
         'factoids-v3,quotes-v3,channel-activity-v3,playful-v3',
         'earlier promoted packages remain explicit');
 
-    $assert->is($portfolio->{milestone}, 'MB780',
-        'latest production portfolio evidence is retained');
+    $assert->is($portfolio->{milestone}, 'MB783',
+        'latest production portfolio evidence includes short-content');
     $assert->is(join(',', @{ $portfolio->{packages} || [] }),
-        'quotes-v3,channel-activity-v3,factoids-v3,playful-v3',
-        'production portfolio records the four enabled-on packages');
+        'quotes-v3,channel-activity-v3,factoids-v3,playful-v3,short-content-v3',
+        'production portfolio records the five enabled-on packages');
     $assert->is($portfolio->{quiet_magic}, 'disabled',
         'production portfolio records the dormant autonomous job');
     $assert->is($portfolio->{failures}, 0,

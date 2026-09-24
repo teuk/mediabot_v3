@@ -29,7 +29,7 @@ return sub {
         ($_->{milestone} // '') eq 'MB771'
     } @{ $history || [] };
 
-    $assert->is($contract->{milestone}, 'MB781',
+    $assert->is($contract->{milestone}, 'MB784',
         'machine contract records the activity promotion milestone');
     $assert->is($promotion->{milestone}, 'MB771',
         'current development promotion is versioned');

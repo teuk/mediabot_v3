@@ -192,3 +192,29 @@ restart restored the enabled/`observe` posture. The final production state is
 therefore evidence-backed but non-authoritative: the historical handler
 remains visible, while `policy off`, disable and unload remain explicit
 rollback.
+
+## MB782 and MB783 short-content production gates
+
+MB782 begins with `short-content-v3` absent from production, loads only
+`http.fetch`, `irc.reply` and `storage.kv`, and enters `observe` on `#i/o`.
+The observe request is silent and repository-write-free. One bounded `on`
+request returns `MB782-mediabot_v3`, after which the repository is restored,
+policy returns to observe and the exact posture survives restart.
+
+MB783 reuses that acceptance, repeats the silent observe request and promotes
+`short-content-v3` on production `#i/o` to persistent `on`. The authoritative
+request returns `MB783-mediabot_v3` and retains exactly one bounded repository
+revision. Quotes, Channel Activity, Factoids and Playful remain byte-for-byte
+equivalent; all five enabled/on postures return after restart with zero
+failures.
+
+The package-scoped rollback is unchanged:
+
+```text
+.plugins policy short-content-v3 #i/o off
+.plugins disable short-content-v3
+.plugins unload short-content-v3
+```
+
+MB784 records those two accepted gates in source and tests only. It contacts no
+production service and grants no additional authority.

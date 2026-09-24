@@ -323,3 +323,11 @@ transport, cache, size, timeout and repository authority. Observe remains
 silent and write-free; on emits one bounded value and commits one revision.
 The persistent posture survives restart, source stays default-off and
 production remains unchanged.
+
+MB784 accepts the production evidence gathered separately by MB782 and MB783.
+MB782 proved silent, write-free observe behavior and exact repository restore;
+MB783 promoted `short-content-v3` to enabled/on on `#i/o`, retained one bounded
+repository revision and restored all five production postures after restart
+with zero failures. MB784 adds no new runtime authority, contacts no production
+service and leaves the development ledger unchanged; it only makes that
+evidence, health gate and rollback boundary durable in source.

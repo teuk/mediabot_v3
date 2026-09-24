@@ -248,3 +248,19 @@ directory swap, so `.api-v3-runtime-state.json` survives exactly like other
 instance state. If it is an absolute external directory, it is not copied and
 continues to live outside the rotation. A missing ledger still loads nothing;
 the updater never invents or reconstructs operator posture.
+
+## MB784 production portfolio record
+
+MB784 consolidates the accepted production posture without replaying it. Five
+packages are persistent enabled/on on nbot `#i/o`: Quotes, Channel Activity,
+Factoids, Playful and Short Content. Permissions are complete, failures are
+zero after restart, `quiet_magic` remains disabled, quote and factoid rows are
+unchanged, and one verified bounded Short Content repository revision remains.
+
+The source-only package contacts no production service and performs no
+Partyline mutation. It fingerprints the complete development `plugin-data`
+tree before applying documentation and executable contracts, then requires the
+same fingerprint immediately before commit. The development ledger is
+therefore unchanged, and MB784 grants no new runtime authority. Operational
+details and package-scoped rollback are recorded in
+[`PLUGIN_V3_PRODUCTION_PORTFOLIO.md`](PLUGIN_V3_PRODUCTION_PORTFOLIO.md).

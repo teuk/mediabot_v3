@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB784 — seal the five production wards into the source ledger
+
+- Consolidate the complete MB783 production posture: `quotes-v3`,
+  `channel-activity-v3`, `factoids-v3`, `playful-v3` and
+  `short-content-v3` are persistent enabled/on packages on nbot `#i/o`, with
+  complete permissions and zero failures after restart. 📜🛡️
+- Record the MB782 silent, write-free observe gate and the MB783 authoritative
+  HTTPS proof, including the single retained bounded short-content repository
+  revision. The four established packages, quote rows and factoid rows remain
+  unchanged.
+- Make MB784 source-only: the executable contract, runbooks and regression
+  tests advance while production is not contacted, no runtime authority is
+  added and the development ledger stays byte-for-byte unchanged. 🦉🔐
+
 ### MB781 — let the short messenger keep one trusted window
 
 - Promote `short-content-v3` on development `#test` after reusing MB756's

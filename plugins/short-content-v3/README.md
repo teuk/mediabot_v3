@@ -27,3 +27,10 @@ trusted GitHub repository endpoint through the shared HTTP facade. Observe
 remains silent and repository-write-free; on produces one bounded scalar and
 one namespaced repository revision. The exact posture survives restart while
 source remains default-off and production remains untouched.
+
+MB782 then proves a silent, repository-write-free observe posture on
+production `#i/o`. MB783 promotes that exact package on production `#i/o` to
+persistent enabled/on, returns one authoritative HTTPS repository name and
+retains one bounded repository revision. All five production postures survive
+restart with zero failures. MB784 records the evidence without widening this
+manifest, changing source defaults or contacting production.

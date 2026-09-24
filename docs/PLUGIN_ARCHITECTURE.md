@@ -360,10 +360,15 @@ Planned capability families include:
     development `#test`. Observe remains silent and write-free; on commits one
     bounded state revision. Exact grants, policy and lifecycle survive restart
     while every existing ledger entry remains unchanged.
+35. **MB784 — production portfolio consolidation:** complete in source.
+    The accepted MB783 production state records five persistent enabled/on
+    packages on `#i/o`, zero failures after restart, unchanged business data
+    and one bounded short-content repository revision. MB784 adds no runtime
+    authority and does not contact production.
 
-The first extraction wave and durable promotion mechanics are complete. MB781
-continues the next functional tranche with the reviewed short-content package
-while leaving production untouched.
+The first extraction wave and durable promotion mechanics are complete. MB784
+closes the current production tranche by making the five-package posture and
+its rollback evidence executable source contracts.
 
 ## Extraction order
 

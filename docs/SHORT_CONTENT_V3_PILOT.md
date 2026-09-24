@@ -100,3 +100,28 @@ The core boot ledger restores the exact three grants, typed endpoint policy and
 enabled lifecycle after restart. Existing development promotions are protected
 byte-for-byte. Source remains default-off, rollback remains `off`, disable and
 unload, and production receives no `short-content-v3` posture.
+
+## MB782 production observe gate
+
+MB782 repeats the bounded proof on nbot `#i/o` without retaining authority.
+Observe is publicly silent and repository-write-free. One temporary `on`
+request returns the exact `MB782-mediabot_v3` value through the core HTTPS
+facade; its one repository revision is then restored exactly before the
+package returns to persistent enabled/observe.
+
+The four established production packages remain byte-for-byte equivalent,
+quote and factoid data are unchanged, and all five postures survive restart
+with complete permissions and zero failures.
+
+## MB783 production promotion
+
+MB783 starts from that accepted observe posture, repeats the silent gate, then
+promotes `short-content-v3` to persistent enabled/on on production `#i/o`.
+One authoritative request returns `MB783-mediabot_v3` and retains one bounded
+repository revision containing the last value and served counter.
+
+After restart, all five production packages return enabled/on with zero
+failures. The package manifest remains default-off, its grants remain exactly
+`http.fetch`, `irc.reply` and `storage.kv`, and rollback remains policy
+`off`, disable and unload. MB784 records this accepted state without contacting
+production or changing runtime authority.
