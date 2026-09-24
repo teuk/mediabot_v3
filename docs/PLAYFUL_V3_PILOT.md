@@ -65,5 +65,21 @@ To remove the pilot and restore the original catalogue entries:
 .plugins unload playful-v3
 ```
 
-Restarting Mediabot also leaves the v3 package unloaded because API v3 has no
-autoload path. No database or private configuration migration is involved.
+Since MB766, successful Owner lifecycle changes are held by the core API v3
+boot ledger. Restart therefore restores the last committed posture; it is not a
+rollback mechanism. Unload remains the definitive rollback because it removes
+the package from the next boot ledger. No database or private configuration
+migration is involved.
+
+## MB778 persistent development promotion
+
+MB778 promotes `playful-v3` only on development `#test`. It enters `observe`
+before `on`, grants exactly `irc.reply`, `irc.notice`, `irc.channel_message` and
+`scheduler.jobs`, and reuses MB745's six-command reversible parity evidence.
+The accepted policy keeps `language=fr`, `ritual_every=4`,
+`ritual_style=subtle` and the typed default `ritual_enabled=false`.
+
+A clean restart must restore six mounted commands, six saved handlers, one
+registered job, one `on` policy and zero failures. Every pre-existing ledger
+entry must remain byte-for-byte equivalent. Source stays default-off and no
+production channel is touched.

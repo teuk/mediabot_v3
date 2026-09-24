@@ -4,8 +4,9 @@
 platform. It owns `8ball`, `abbrev`, `choose`, `flip`, `morse` and `roll` when
 the selected channel policy is `on`.
 
-The package is never loaded or enabled at startup. While it is disabled or a
-channel policy is `off`, the saved built-in registry handler remains
+The package is default-off in source. MB778 records one reviewed Owner posture
+in the core boot ledger: enabled and `on` only for development `#test`, with
+`quiet_magic` disabled. While it is disabled or a channel policy is `off`, the saved built-in registry handler remains
 authoritative. In `observe`, the plugin executes with output suppressed and
 the built-in command still answers. Unloading the package restores the exact
 previous registry entries.
@@ -15,3 +16,4 @@ does not ask a question or require a reply. It is disabled by typed channel
 configuration until an Owner explicitly sets `ritual_enabled=1`.
 
 See `docs/PLAYFUL_V3_PILOT.md` for the staged operator procedure and rollback.
+No production channel is included in the MB778 promotion.

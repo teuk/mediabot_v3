@@ -310,3 +310,9 @@ state is copied as one post-shutdown snapshot before activation; absolute
 external state remains outside the rotating tree. Internal traversal,
 symlinks and candidate/state merges are rejected. The updater preserves
 operator intent but never creates it when the ledger is already absent.
+
+MB778 starts the next functional promotion tranche with the already reviewed
+`playful-v3` command pack. The development ledger retains its enabled/`on`
+posture for `#test` across restart, while `quiet_magic` stays disabled and all
+existing package entries remain unchanged. Source stays default-off and no
+production policy is created.

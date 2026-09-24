@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### mb778 — keep the playful spellbook open without waking the portraits
+
+- Promote `playful-v3` on development `#test` after an observe-first review of
+  the six reversible commands inherited from MB745. The package keeps exactly
+  its four manifest capabilities and remains default-off in source. 🎲🪄
+- Persist the enabled/`on` posture through the core boot ledger while keeping
+  `quiet_magic` explicitly disabled. A clean restart restores all six commands,
+  the dormant job and zero failures without changing any existing promotion.
+- Preserve immediate rollback through `policy off`, disable and unload. No
+  production channel, database row or autonomous public line is introduced by
+  this development-only step. 🦉🔐
+
 ### mb772 — keep the plugin ledger aboard the update train
 
 - Close the persistence gap exposed by the first `channel-activity-v3`

@@ -351,10 +351,14 @@ Planned capability families include:
     including the API v3 ledger, after shutdown and before activation. External
     state remains in place; traversal, symlinks and candidate merges fail
     closed.
+33. **MB778 — persistent playful promotion:** complete operationally.
+    `playful-v3` remains enabled and authoritative only on development `#test`.
+    Exact grants, six saved handlers, the dormant autonomous job and zero
+    failures survive restart while every existing ledger entry stays unchanged.
 
-The first extraction wave and durable promotion mechanics are complete. MB772
-closes the update boundary discovered before the production activity pilot;
-the pilot itself remains pending until the repaired updater is installed.
+The first extraction wave and durable promotion mechanics are complete. MB778
+opens the next functional tranche with the already reviewed playful command
+pack while leaving production and autonomous output untouched.
 
 ## Extraction order
 

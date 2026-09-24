@@ -600,6 +600,13 @@ bounded plugin KV documents together. An absolute external data directory is
 left in place; an internal traversal, symlink or collision with candidate
 source fails closed. An update therefore no longer turns a valid restart
 posture into a missing ledger.
+
+MB778 applies that durable boundary to `playful-v3` on development `#test`.
+The exact four grants, enabled lifecycle and `on` policy survive a clean
+restart. Six commands and one scheduler job are restored, while typed
+configuration leaves `quiet_magic` disabled. Existing ledger packages remain
+byte-for-byte equivalent and production remains untouched.
+
 `.plugins overviewv3` is a separate read-only view: it reconciles validated
 local packages with loaded v3 instances and prints only lifecycle, readiness
 and aggregate policy counts. Its output is capped at 64 package rows and never

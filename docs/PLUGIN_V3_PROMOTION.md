@@ -95,6 +95,39 @@ default-off and the immediate rollback is:
 No production channel is included. A production `observe` pilot remains a
 separate decision.
 
+## MB778 playful development promotion
+
+MB778 reuses MB745's reviewed six-command migration and promotes
+`playful-v3` on development `#test` only. The Owner sequence is observe-first:
+
+```text
+.plugins loadv3 playful-v3 irc.reply,irc.notice,irc.channel_message,scheduler.jobs
+.plugins policy playful-v3 #test observe language=fr ritual_every=4 ritual_style=subtle
+.plugins enable playful-v3
+.plugins doctor playful-v3
+.plugins permissions playful-v3
+.plugins why playful-v3 #test
+.plugins policy playful-v3 #test on language=fr ritual_every=4 ritual_style=subtle
+.plugins why playful-v3 #test
+.plugins failures playful-v3
+```
+
+The omitted boolean retains the typed `ritual_enabled=false` default, so the
+registered `quiet_magic` job remains dormant. Before and after restart,
+`doctor` must show six commands, six saved handlers, one job, one active `on`
+policy and zero failures. Every existing ledger package is fingerprinted and
+must remain unchanged.
+
+Rollback remains explicit and persistent:
+
+```text
+.plugins policy playful-v3 #test off
+.plugins disable playful-v3
+.plugins unload playful-v3
+```
+
+Source remains default-off and production remains untouched.
+
 ## Immediate rollback
 
 Explicit rollback is three bounded Partyline commands:

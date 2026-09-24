@@ -226,6 +226,13 @@ The second controlled development promotion follows the same boundary:
 MB771 accepts `channel-activity-v3` as enabled and `on` only for `#test` after
 the MB770 parity proof and a clean restart. No production posture is implied.
 
+MB778 opens the next functional tranche with `playful-v3`. It is enabled and
+`on` only for development `#test`, with exact grants and the typed
+`ritual_enabled=false` default. Six commands and the dormant job survive a
+clean restart; every pre-existing ledger package is fingerprinted before the
+change and must remain unchanged. Rollback remains policy `off`, disable, then
+unload.
+
 An IRC `update now` is also a restart boundary. Since MB772, the updater reads
 `plugins.DATA_DIR` from the selected private configuration. If that directory
 is internal to the release tree, it is copied after shutdown and before the

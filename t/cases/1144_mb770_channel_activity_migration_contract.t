@@ -25,7 +25,7 @@ return sub {
     my $manifest = JSON::PP->new->decode(
         _slurp_1144('plugins/channel-activity-v3/plugin.json'));
 
-    $assert->is($contract->{milestone}, 'MB772',
+    $assert->is($contract->{milestone}, 'MB778',
         'machine contract records the activity adoption milestone');
     $assert->is($manifest->{name}, 'channel-activity-v3',
         'manifest names the inert activity package');
