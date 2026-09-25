@@ -76,7 +76,7 @@ settings, not a promise to port MegaHAL internals one for one.
 | `lobotomy`, `restorebrain` | Reset and restore a brain | Later, explicit Owner-only per-channel backup/restore with validation and rollback. Never silently reseed a reset channel from the legacy root brain. |
 | `memusage` | Estimate memory use | Report only measurable file/process facts, clearly scoped; avoid claiming an exact per-brain memory figure from process-wide RSS. |
 | `treesize`, `viewbranch`, `getwordsymbol` | Inspect MegaHAL trees and word symbols | MegaHAL-specific model. If needed, offer bounded Hailo token/link diagnostics with an authenticated operator surface and documented different semantics. |
-| `make_words`, `debug_output`, `moulinex_in`, `moulinex_out` | Inspect tokenization, output and Tcl text filters | Offer bounded dry-run normalization/tokenizer diagnostics using Mediabot's actual pipeline; do not log input text or feed it to learning. |
+| `make_words`, `debug_output`, `moulinex_in`, `moulinex_out` | Inspect tokenization, output and Tcl text filters | MB793 brings three harmless French output typo/punctuation fixes into the actual reply path. A bounded, private dry-run command for the wider pipeline remains future work; do not log input text or feed it to learning. |
 | Force prefixes `&`, `%`, `~`, `$` | Override learn/reply combinations | Present in Mediabot's local policy engine, unavailable as public controls until authenticated privilege mapping exists. |
 
 The Tcl also has a permission-gated request to quiet the bot temporarily,

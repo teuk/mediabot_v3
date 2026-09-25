@@ -26,6 +26,10 @@ whether it corrects writing errors and improves coherence without changing
 negation, numbers or the draft's subject; provider failures retain the local
 Hailo fallback. Do not infer semantic quality from unit tests alone.
 
+MB793 makes the old outgoing script's narrow French typo fixes available even
+when the provider fails; a real dev exchange is still needed to judge whether
+the provider improves meaning without replacing Hailo's voice.
+
 Steps 2 and 3 use the baseline from step 1. The URL investigation can run
 independently if a reproducible failure is available. A step may stay open
 until its evidence exists; this table is an order of decisions, not a promise

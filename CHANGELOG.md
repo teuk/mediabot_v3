@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB793 — give Hailo a small, reliable outgoing polish
+
+- Carry three bounded French output corrections from MegaHAL's outgoing
+  moulinette into the per-channel Hailo reply path: `sa va` → `ça va`,
+  `je susi` → `je suis` and stray `,.` punctuation. Only complete words are
+  changed; the first-person condition protects a standalone `Susi` nickname.
+- Apply these fixes before the AI post-editor so they also survive provider
+  failure or the emergency provider switch. Preserve the IRC byte budget,
+  existing Hailo draft, late channel permission checks and aggregate-only
+  diagnostics. Broader grammar and coherence remain the provider's job. 🪄📜
+
 ### MB792 — give Hailo's answers a clearer thought
 
 - Pass direct-reply versus spontaneous intent to the existing asynchronous AI

@@ -12,6 +12,7 @@ BEGIN {
 
 use Mediabot::Hailo::PostEditRuntime;
 use Mediabot::Hailo::ReplyQueue;
+use Mediabot::Hailo::OutputPolish qw(polish_hailo_output);
 
 {
     package MB720D::Editor;
@@ -161,6 +162,74 @@ return sub {
         'provider failure preserves and delivers the Hailo candidate');
     $assert->is($summary[-1]{edit_reason}, 'provider_error',
         'fallback reason remains aggregate and explicit');
+
+    $assert->is(polish_hailo_output(
+        text => 'Sa va, . Je susi prêt', language => 'fr',
+    ), 'Ça va. Je suis prêt',
+        'the historical French typo and punctuation fixes retain the thought');
+    $assert->is(polish_hailo_output(
+        text => 'Je parle avec Susi et SaVa', language => 'fr',
+    ), 'Je parle avec Susi et SaVa',
+        'a nickname and a longer token are left intact');
+    $assert->is(polish_hailo_output(
+        text => 'Sa va, . Je susi prêt', language => 'es',
+    ), 'Sa va, . Je susi prêt',
+        'French spelling is not forced onto a Spanish channel');
+
+    my $polish_editor = MB720D::Editor->new;
+    my (@polish_sent, @polish_summary);
+    my $polish_runtime = Mediabot::Hailo::PostEditRuntime->new(
+        post_editor => $polish_editor,
+        queue => Mediabot::Hailo::ReplyQueue->new(
+            typing_coeff => 0, now_cb => sub { $now },
+        ),
+        clock => sub { $now }, typing_enabled => 0,
+    );
+    $polish_runtime->submit(
+        channel => '#fr', trigger => 'tu vas bien ce soir ?',
+        candidate => 'Sa va, . Je susi prêt', channel_language => 'fr',
+        request_generation => 16,
+        state_cb => sub { _state_1025(16, 1) },
+        send_cb => sub { push @polish_sent, [@_]; 1 },
+        on_done => sub { push @polish_summary, { %{ $_[0] } } },
+    );
+    $assert->is($polish_editor->{submitted}[0]{candidate},
+        'Ça va. Je suis prêt',
+        'the post-editor receives the locally polished Hailo draft');
+    $polish_editor->complete({ ok => 1, reason => 'provider_error',
+        language => { language => 'fr' } });
+    $assert->is(join("\0", @{ $polish_sent[-1] }),
+        "#fr\0Ça va. Je suis prêt",
+        'provider failure delivers the same safe locally polished draft');
+    $assert->is($polish_summary[-1]{edit_reason}, 'provider_error',
+        'local polishing does not claim a successful provider edit');
+
+    $polish_runtime->submit(
+        channel => '#off-fr', trigger => 'tu vas bien ce soir ?',
+        candidate => 'sa va', channel_language => 'fr',
+        request_generation => 17, post_edit_enabled => 0,
+        state_cb => sub { _state_1025(17, 1) },
+        send_cb => sub { push @polish_sent, [@_]; 1 },
+    );
+    $assert->is(join("\0", @{ $polish_sent[-1] }), "#off-fr\0ça va",
+        'emergency provider kill switch keeps the harmless local correction');
+    $assert->is(scalar @{ $polish_editor->{submitted} }, 1,
+        'provider kill switch makes no additional request');
+
+    my $at_budget = ('é' x 196) . 'X sa va.';
+    $polish_runtime->submit(
+        channel => '#budget', trigger => 'tu vas bien ce soir ?',
+        candidate => $at_budget, channel_language => 'fr',
+        request_generation => 18,
+        state_cb => sub { _state_1025(18, 1) },
+        send_cb => sub { push @polish_sent, [@_]; 1 },
+    );
+    $assert->is($polish_editor->{submitted}[1]{candidate}, $at_budget,
+        'accent correction cannot turn a sendable draft into an oversized one');
+    $polish_editor->complete({ ok => 1, line => $at_budget,
+        reason => 'unchanged', language => { language => 'fr' } });
+    $assert->is(join("\0", @{ $polish_sent[-1] }), "#budget\0$at_budget",
+        'budget fallback still passes the final IRC emission gate');
 
     my $ordered_editor = MB720D::Editor->new;
     my $ordered = Mediabot::Hailo::PostEditRuntime->new(

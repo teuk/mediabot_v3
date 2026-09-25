@@ -20,7 +20,8 @@ bounded pipeline, not as a replacement conversational model.
 8. The post-editor considers the configured channel language, the triggering
    phrase language and the Hailo draft language.
 9. Provider failure, timeout, malformed output or excessive rewriting falls
-   back to the original sanitized Hailo candidate.
+   back to the validated local Hailo candidate, after the bounded French
+   outgoing typo cleanup where applicable.
 10. Metrics are aggregate and never contain nicknames, channel text or drafts.
 
 ## MegaHAL interface compatibility
@@ -58,6 +59,7 @@ public line
   -> channel brain reply
   -> channel brain learn
   -> nickname rehydration and local candidate validation
+  -> bounded French outgoing typo cleanup
   -> language decision and bounded recent context
   -> provider-neutral constrained post-edit
   -> lexical-anchor and IRC-output validation
@@ -73,6 +75,11 @@ message, whereas spontaneous chatter should contribute to the recent topic.
 The provider may reorder fragments and add short connective words to make
 the draft coherent. It must retain the draft's subject and explicit meaning;
 the local validator also refuses changed numbers and reversed negation.
+MB793 retains the old MegaHAL output moulinette's `sa va` → `ça va`,
+first-person `je susi` → `je suis`, and `,.` → `.` corrections for French
+replies only. These are small local fixes, not a dictionary or a substitute
+for the provider's spelling and coherence work. A correction that would
+exceed the IRC byte budget is skipped.
 
 ## Channel brain storage
 
@@ -122,7 +129,7 @@ central boundary when the same traffic must also be invisible to Wit/Quip,
 Spark/SparkAction and the rest of the public interaction pipeline.
 
 The output contract is exactly one printable IRC-safe line. The following
-conditions force the original candidate fallback:
+conditions force the locally prepared candidate fallback:
 
 - provider error or timeout;
 - line break, control byte or oversized output;
@@ -131,7 +138,7 @@ conditions force the original candidate fallback:
 - changed numbers or reversed explicit negation.
 
 Every normal Hailo reply enters this boundary. `HAILO_POST_EDIT_ENABLED=0` is
-an explicit emergency provider kill switch: it retains the sanitized local
+an explicit emergency provider kill switch: it retains the locally prepared
 candidate and the same queue, expiry and late-authorization gates. An explicit
 provider is strict; `auto` is the only mode allowed to cross to another
 configured provider after failure.

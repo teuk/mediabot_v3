@@ -7,6 +7,8 @@ use utf8;
 use Carp qw(croak);
 use Encode qw(encode_utf8);
 
+use Mediabot::Hailo::Language qw(resolve_hailo_language);
+use Mediabot::Hailo::OutputPolish qw(polish_hailo_output);
 use Mediabot::Hailo::ReplyQueue;
 
 our $VERSION = '1.0';
@@ -210,6 +212,18 @@ sub submit {
     my $trigger = _clean_context_line($args{trigger}, 600);
     return { accepted => 0, reason => 'invalid_candidate' }
         unless defined($candidate) && defined($trigger);
+    my $language = resolve_hailo_language(
+        channel_language => $args{channel_language},
+        trigger          => $trigger,
+        candidate        => $candidate,
+    );
+    my $polished = polish_hailo_output(
+        text => $candidate, language => $language->{language},
+    );
+    # Keep the original candidate when an accent would cross the IRC byte
+    # budget. The final emission guard still validates every provider result.
+    $candidate = $polished if defined($polished)
+        && length(encode_utf8($polished)) <= 400;
     return { accepted => 0, reason => 'invalid_generation' }
         unless _plain($args{request_generation})
             && "$args{request_generation}" =~ /^[1-9]\d{0,14}\z/;

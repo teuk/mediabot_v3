@@ -72,8 +72,8 @@ return sub {
     );
     $assert->like(
         $design,
-        qr/falls\s+back to the original sanitized Hailo candidate/i,
-        'design fails open to the learned Hailo candidate, not a generic answer',
+        qr/falls\s+back to the validated local Hailo candidate,\s+after the bounded French\s+outgoing typo cleanup where applicable/is,
+        'design falls back to the locally prepared Hailo draft rather than a generic answer',
     );
     $assert->like(
         $design,
