@@ -47,17 +47,17 @@ return sub {
     my $legacy_private = _set_1065(legacy_private_adapter_names());
     my $direct_public = _set_1065(direct_public_command_names());
 
-    $assert->is(scalar @public, 238,
-        'MB741 catalogues all 238 public built-ins');
+    $assert->is(scalar @public, 239,
+        'MB789 catalogues all 239 public built-ins');
     $assert->is(scalar keys %$public, scalar @public,
         'MB741 public catalogue has no duplicate');
     $assert->is(scalar @private, 94,
         'MB741 catalogues all 94 private built-ins');
     $assert->is(scalar keys %$private, scalar @private,
         'MB741 private catalogue has no duplicate');
-    $assert->is(scalar @entries, 332,
+    $assert->is(scalar @entries, 333,
         'MB741 emits one source-scoped definition per built-in');
-    $assert->is(scalar keys %$direct_public, 238,
+    $assert->is(scalar keys %$direct_public, 239,
         'MB749 makes every public built-in a direct registry handler');
     $assert->is(scalar keys %$legacy_public, 0,
         'MB749 retires the public compatibility adapter list');
@@ -98,7 +98,7 @@ return sub {
     require Mediabot::Mediabot;
     my $bot = Mediabot->new({});
     my $registry = $bot->commands;
-    $assert->is($registry->count('public'), 238,
+    $assert->is($registry->count('public'), 239,
         'runtime registry exposes the complete public catalogue');
     $assert->is($registry->count('private'), 94,
         'runtime registry exposes the complete private catalogue');
@@ -109,6 +109,10 @@ return sub {
     $assert->ok($registry->command_for('karma', 'public')
             ->{metadata}{migration_fallback},
         'migratable public built-in retains explicit fallback eligibility');
+    $assert->ok($registry->command_for('hailo', 'public')
+            && !$registry->command_for('hailo', 'public')
+                ->{metadata}{migration_fallback},
+        'new hailo operator command has no legacy migration fallback');
     $assert->is($registry->command_for('login', 'private')->{metadata}{dispatch},
         'registry', 'private built-in has native registry metadata');
     $assert->ok(!$registry->has_command('not_a_real_command', 'public'),

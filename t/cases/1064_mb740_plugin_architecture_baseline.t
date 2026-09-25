@@ -88,7 +88,7 @@ return sub {
         'development inventory records the stable version line');
     $assert->unlike($generated, qr/Source version: `[^`]+-\d{8}_\d{6}`/,
         'development inventory excludes volatile commit timestamps');
-    $assert->like($generated, qr/\| Internal help entries \| 245 \|/,
+    $assert->like($generated, qr/\| Internal help entries \| 246 \|/,
         'MB740 records all 245 current built-in help entries');
     $assert->like($generated, qr/\| Help parser anomalies \| 0 \|/,
         'MB741 resolves the two frozen help parser anomalies');

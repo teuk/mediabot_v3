@@ -15,7 +15,7 @@ before any separately approved change to the nbot `#i/o` instance.
 | Step | Development work | Evidence needed before proceeding |
 | --- | --- | --- |
 | 1. Establish the `#i/o` baseline | Review the current pyDuckHunt commands and bot identities against [`CONVERSATION_EXCLUSIONS.md`](CONVERSATION_EXCLUSIONS.md); inspect recent `mediabot.log` and existing exclusion diagnostics. Correct the documented command list or scoped tests if the external bot changed. | A reviewed list of exact commands and senders; ordinary conversation still enters the normal pipeline; excluded traffic produces no Hailo learning, Spark activity or URL preview. No private message text in retained evidence. |
-| 2. Exercise Hailo separately | On development, replay representative `#i/o` patterns against the existing per-channel Hailo controls: learning, direct replies and spontaneous chatter are independent. Verify exclusions, per-user and per-channel bounds, late revocation and provider fallback. | Targeted tests and a bounded observation showing no learning from commands, bots or the bot itself, no reply after authorization is removed, and no uncontrolled chatter. A later nbot pilot needs its own explicit channel policy and rollback. |
+| 2. Exercise Hailo separately | Inspect each channel with `<prefix>hailo braininfo #channel`, then replay representative `#i/o` patterns against the existing per-channel Hailo controls: learning, direct replies and spontaneous chatter are independent. Verify exclusions, per-user and per-channel bounds, late revocation and provider fallback. | Targeted tests and a bounded observation showing no learning from commands, bots or the bot itself, no reply after authorization is removed, and no uncontrolled chatter. A later nbot pilot needs its own explicit channel policy and rollback. |
 | 3. Measure Spark pacing | Reuse the audience policy and dry-run diagnostics with quiet, solo, small and busy channel samples. Check bot pressure, cooldowns, in-flight cancellation and the shared Spark/SparkAction delivery budget before considering a live send. | An anonymized replay plus tests showing no unsolicited output from excluded lines, one bounded candidate per eligible window and silence when a gate fails. Keep both send arms off during observation; any live `#i/o` trial is a separate, reversible operator decision. |
 | 4. Investigate URL failures | Reproduce the reported TinyURL/news failures, including `blocked_destination` and rate limits, with controlled URLs. Identify the failing boundary before changing URL handling. | Tests proving unsafe destinations remain blocked, a failed shortening request can retain the original safe URL, and caching or retry cannot cause a request flood. No weakening of the destination guard to make a case pass. |
 | 5. Preserve the production portfolio | Keep the five accepted API v3 packages and their nbot `#i/o` policies observable across ordinary updates. Extend tests only when a concrete regression appears in plugin state, updater ordering or restart restoration. | Doctor, permissions, policy and failure checks remain healthy; the boot ledger and plugin-data survive update and restart exactly as their contracts require. A new plugin or authority grant needs its own observe and rollback gate. |
@@ -24,6 +24,22 @@ Steps 2 and 3 use the baseline from step 1. The URL investigation can run
 independently if a reproducible failure is available. A step may stay open
 until its evidence exists; this table is an order of decisions, not a promise
 to turn every capability on in production.
+
+## Hailo brain maintenance
+
+MB789 adds `<prefix>hailo help`, private
+`<prefix>hailo braininfo #channel` for authenticated Master/Owner and
+`<prefix>hailo savebrain #channel` for Owner. The prefix comes from
+`main.MAIN_PROG_CMD_CHAR`. Inspection never creates an absent brain; saving
+only persists an existing one. `hailo_status` also requires a channel when
+called privately. The [maintenance crosswalk](HAILO_BRAIN_MAINTENANCE.md)
+compares the MegaHAL operator commands with Hailo's actual behavior.
+
+`forget` and `forgetword` need an exact channel training corpus and a tested
+isolated rebuild before they can truthfully erase learned material. Hailo 0.75
+does not expose selective deletion, and an old brain does not retain its input
+phrases. Do not substitute a reply filter, raw SQLite edit or complete reset
+for selective forgetting.
 
 ## Acceptance and rollback
 

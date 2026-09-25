@@ -2323,6 +2323,7 @@ sub _builtin_public_command_handlers {
         mp3          => sub { my ($ctx) = @_; mp3_ctx($ctx) },
         exec         => sub { my ($ctx) = @_; mbExec_ctx($ctx) },
         qlog         => sub { my ($ctx) = @_; mbChannelLog_ctx($ctx) },
+        hailo          => sub { my ($ctx) = @_; Mediabot::Hailo::BrainInfo::hailo_command($ctx) },
         hailo_ignore   => sub { my ($ctx) = @_; hailo_ignore_ctx($ctx) },
         hailo_unignore => sub { my ($ctx) = @_; hailo_unignore_ctx($ctx) },
         hailo_status   => sub { my ($ctx) = @_; hailo_status_ctx($ctx) },
@@ -2715,7 +2716,8 @@ f|f <player>|public|Display Fortnite stats when configured.
 greet|greet [text]|public|Show or set a greeting.
 hailo_chatter|hailo_chatter [on|off]|admin|Control Hailo chatter behavior.
 hailo_ignore|hailo_ignore <nick>|admin|Ignore a nick for Hailo learning or replies.
-hailo_status|hailo_status|admin|Show Hailo status.
+hailo|hailo help / braininfo #channel / savebrain #channel|admin|Inspect or save one Hailo brain privately (save requires Owner).
+hailo_status|hailo_status [#channel]|admin|Show channel-specific Hailo brain counters.
 hailo_unignore|hailo_unignore <nick>|admin|Remove a nick from the Hailo ignore list.
 help|help [#channel|command|docs|search <term>|level <level>]|public|Show command lists, search internal help, or documentation pointers.
 commands|commands|public|Alias for help commands.

@@ -355,6 +355,7 @@ Further references:
 - [3.5 release notes](docs/RELEASE_NOTES_3.5.md);
 - [3.6dev development line](https://github.com/teuk/mediabot_v3/wiki/Development-line-3.6dev);
 - [3.6dev working roadmap](docs/ROADMAP_3.6DEV.md);
+- [Hailo brain operations](docs/HAILO_BRAIN_MAINTENANCE.md);
 - [Partyline architecture](docs/PARTYLINE_ARCHITECTURE.md).
 
 ## Operations and troubleshooting

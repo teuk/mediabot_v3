@@ -8,10 +8,10 @@ Source version line: `3.6dev`
 
 | Measure | Count |
 | --- | ---: |
-| Internal help entries | 245 |
-| Registered public built-ins | 238 |
+| Internal help entries | 246 |
+| Registered public built-ins | 239 |
 | Registered private built-ins | 94 |
-| Direct public registry handlers | 238 |
+| Direct public registry handlers | 239 |
 | Direct private registry handlers | 94 |
 | Compatibility dispatch tables | 0 |
 | Help parser anomalies | 0 |
@@ -108,9 +108,10 @@ Source version line: `3.6dev`
 | `forget` | public | registry-public | `forget <keyword>` | Delete a channel fact (author or channel op only). |  |
 | `gemini` | public | registry-public | `gemini <prompt>` | Ask Google Gemini in at most two IRC-rendered lines. Requires the per-channel +Gemini chanset. |  |
 | `greet` | public | registry-public, registry-private | `greet [text]` | Show or set a greeting. |  |
+| `hailo` | admin | registry-public | `hailo help / braininfo #channel / savebrain #channel` | Inspect or save one Hailo brain privately (save requires Owner). |  |
 | `hailo_chatter` | admin | registry-public | `hailo_chatter [on\|off]` | Control Hailo chatter behavior. |  |
 | `hailo_ignore` | admin | registry-public | `hailo_ignore <nick>` | Ignore a nick for Hailo learning or replies. |  |
-| `hailo_status` | admin | registry-public | `hailo_status` | Show Hailo status. |  |
+| `hailo_status` | admin | registry-public | `hailo_status [#channel]` | Show channel-specific Hailo brain counters. |  |
 | `hailo_unignore` | admin | registry-public | `hailo_unignore <nick>` | Remove a nick from the Hailo ignore list. |  |
 | `halloffame` | public | registry-public | `halloffame [n]` | Alias for topquote. |  |
 | `heatmap` | public | registry-public | `heatmap [nick]` | Show hourly activity chart as ASCII bars. |  |

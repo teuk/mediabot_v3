@@ -56,14 +56,14 @@ return sub {
         'public handler keys exactly match the public catalogue');
     $assert->is(join(',', sort @private_handlers), join(',', sort @private),
         'private handler keys exactly match the private catalogue');
-    $assert->is(scalar direct_public_command_names(), 238,
-        'all 238 public built-ins are direct registry handlers');
+    $assert->is(scalar direct_public_command_names(), 239,
+        'all 239 public built-ins are direct registry handlers');
     $assert->is(scalar @legacy_public, 0,
         'public compatibility adapter list is empty');
     $assert->is(scalar @legacy_private, 0,
         'private compatibility adapter list is empty');
-    $assert->is(scalar grep({ $_->{dispatch} eq 'registry' } @entries), 332,
-        'all 332 catalogue entries use registry dispatch');
+    $assert->is(scalar grep({ $_->{dispatch} eq 'registry' } @entries), 333,
+        'all 333 catalogue entries use registry dispatch');
     $assert->is(scalar grep({ $_->{migration_fallback} } @entries), 234,
         'the previous 234 migratable public handlers keep explicit eligibility');
 

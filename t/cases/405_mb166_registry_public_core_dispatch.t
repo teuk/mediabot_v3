@@ -37,10 +37,12 @@ my $case = sub {
 
     $assert->($reg && ref($reg) eq 'Mediabot::CommandRegistry',
         'Mediabot->commands returns CommandRegistry');
-    $assert->($reg->count('public') == 238,
+    $assert->($reg->count('public') == 239,
         'public registry contains the complete frozen built-in surface');
     $assert->($reg->count('private') == 94,
         'private registry contains the complete frozen built-in surface');
+    $assert->($reg->has_command('hailo', 'public'),
+        'new hailo operator command is available through the public registry');
 
     for my $cmd (qw(version uptime help commands)) {
         $assert->($reg->has_command($cmd, 'public'),

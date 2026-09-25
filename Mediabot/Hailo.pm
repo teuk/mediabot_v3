@@ -19,6 +19,7 @@ use warnings;
 use Exporter 'import';
 use Mediabot::Helpers;
 use Mediabot::Hailo::BrainRegistry;
+use Mediabot::Hailo::BrainInfo qw(brain_info);
 use Mediabot::Hailo::Normalizer qw(
     normalize_hailo_input
     rehydrate_hailo_output
@@ -1006,69 +1007,27 @@ sub hailo_status_ctx {
         return;
     }
 
-    # --- Get Hailo object ---
-    my $hailo = eval { get_hailo($self, $channel) };
-    if ($@ || !$hailo) {
-        $self->{logger}->log(1, "hailo_status_ctx(): failed to get Hailo object: $@");
-        botNotice($self, $nick, "Internal error: could not access Hailo brain.");
+    my @args = ref($ctx->args) eq 'ARRAY' ? @{ $ctx->args } : ();
+    my $target = @args ? $args[0] : $channel;
+    unless (@args <= 1 && defined($target) && !ref($target)
+            && $target =~ /\A\#[^\s,\x00-\x1f\x7f]{1,79}\z/) {
+        botNotice($self, $nick, 'Syntax: hailo_status [#channel] (channel required in private)');
         return;
     }
 
-    # --- Get stats from Hailo ---
-    my $stats_raw = eval { $hailo->stats };
-    if ($@) {
-        $self->{logger}->log(1, "hailo_status_ctx(): Hailo->stats died: $@");
-        botNotice($self, $nick, "Internal error: Hailo stats() failed.");
-        return;
-    }
-    unless (defined $stats_raw) {
-        botNotice($self, $nick, "Hailo did not return any stats.");
+    my $policy = hailo_channel_policy($self, $target, fresh => 1);
+    my $info = brain_info($self->{hailo_registry}, $target, $policy);
+    unless ($info->{ok}) {
+        botNotice($self, $nick, "Hailo stats unavailable: $info->{error}");
         return;
     }
 
-    my $summary;
-    my $extra = "";
-
-    if (ref $stats_raw eq 'HASH') {
-        my $href = $stats_raw;
-
-        # Generic listing of all available keys
-        my @pairs;
-        for my $k (sort keys %$href) {
-            next unless defined $href->{$k};
-            push @pairs, "$k=$href->{$k}";
-        }
-        $summary = join(", ", @pairs) || "No stats available";
-
-        # Try to compute some useful derived metrics if we recognize keys
-        my $tokens = $href->{tokens};
-        my $prev   = $href->{previous_token_links} // $href->{previous_links};
-        my $next   = $href->{next_token_links}     // $href->{next_links};
-
-        if (defined $tokens && $tokens > 0 && defined $prev && defined $next) {
-            my $total_links = $prev + $next;
-            my $avg_links   = sprintf("%.2f", $total_links / $tokens);
-            # Y3: human-readable format for Hailo brain stats
-            my $size_k = int($tokens / 1000);
-            $extra = $size_k > 0
-                ? sprintf(' | ~%dk tokens, %.1f links/token', $size_k, $avg_links)
-                : sprintf(' | %d tokens, %.1f links/token', $tokens, $avg_links);
-        }
-    }
-    else {
-        # Old behaviour: stats() returns a simple string like
-        # "X tokens, Y expressions, Z previous links and W next links"
-        $summary = $stats_raw;
-    }
-
-    my $msg_out = "Hailo stats: $summary$extra";
-
-    if (defined $channel && $channel ne '') {
-        botPrivmsg($self, $channel, $msg_out);
-        logBot($self, $message, $channel, "hailo_status", undef);
+    if (defined($channel) && $channel ne '' && !@args) {
+        botPrivmsg($self, $channel, $info->{text});
+        logBot($self, $message, $channel, 'hailo_status', undef);
     } else {
-        botNotice($self, $nick, $msg_out);
-        logBot($self, $message, undef, "hailo_status", undef);
+        botNotice($self, $nick, $info->{text});
+        logBot($self, $message, $target, 'hailo_status', undef);
     }
 
     return 1;

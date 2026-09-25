@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB789 — inspect and save channel Hailo brains
+
+- Add authenticated, private `<prefix>hailo braininfo #channel` with bounded
+  counters, channel policy, file size and an explicit absent state. Add
+  `<prefix>hailo help` and Owner-only `<prefix>hailo savebrain #channel` for
+  existing brains. Keep the configured command prefix and avoid opening an
+  absent brain through these operations. 🧠🔎
+- Make `hailo_status` channel-explicit when called privately and use the same
+  bounded readout. Document the selective-forgetting requirement: old Hailo
+  brains cannot be reliably purged phrase by phrase without a training corpus.
+
 ### MB788 — chart the next development work without scheduling 3.7
 
 - Record the `3.6dev` working roadmap: verify `#i/o` automation exclusions,

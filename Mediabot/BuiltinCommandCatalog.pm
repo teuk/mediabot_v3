@@ -42,7 +42,7 @@ my @PUBLIC_CATALOGUE = qw(
     rplay radioimport radioimportdir radioqueue queue radiocheck radiocache
     radiocacheprune radiodlstatus radiodlcancel radiopush radioskip radioflush
     addresponder delresponder lastcom q quote moduser antifloodset leet rehash
-    mp3 exec qlog hailo_ignore hailo_unignore hailo_status hailo_chatter
+    mp3 exec qlog hailo hailo_ignore hailo_unignore hailo_status hailo_chatter
     whereis birthday f xlogin tellme chatgpt openai ai claude gemini yomomma
     resolve tmdb tmdblangset debug version uptime help commands spike update
 );
@@ -60,10 +60,10 @@ my @PRIVATE_CATALOGUE = qw(
     lastcom moduser antifloodset rehash ai claude
 );
 
-# The first four native handlers predated MB741 and therefore never had the
-# reversible legacy-fallback migration contract. All other public built-ins
-# keep that explicit migration eligibility while becoming registry-native.
-my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands);
+# The first four native handlers predated MB741. The new hailo operator
+# command has no legacy public handler to fall back to. All existing
+# migratable public built-ins retain their original migration eligibility.
+my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo);
 
 sub public_command_names {
     return @PUBLIC_CATALOGUE;
