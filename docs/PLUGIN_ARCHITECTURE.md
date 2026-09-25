@@ -365,10 +365,17 @@ Planned capability families include:
     packages on `#i/o`, zero failures after restart, unchanged business data
     and one bounded short-content repository revision. MB784 adds no runtime
     authority and does not contact production.
+36. **MB786 — production update acceptance consolidation:** complete in
+    source. MB785 moved nbot from `62820dc` to `7db72ea` through the repaired
+    IRC updater while preserving the five enabled/on postures, complete
+    plugin-data tree, boot ledger and retained Short Content KV revision. An
+    isolated executable rehearsal now locks stop-before-snapshot ordering,
+    Git release rotation, durable success status and metadata-exact state
+    preservation without contacting production.
 
-The first extraction wave and durable promotion mechanics are complete. MB784
-closes the current production tranche by making the five-package posture and
-its rollback evidence executable source contracts.
+The first extraction wave and durable promotion mechanics are complete. MB786
+closes the current production tranche by binding the five-package posture and
+its proven release-rotation survival to executable source contracts.
 
 ## Extraction order
 

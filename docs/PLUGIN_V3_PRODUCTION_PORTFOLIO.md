@@ -95,3 +95,23 @@ documentation and executable tests. It does not contact nbot, change the five
 production policies, mutate the development ledger, add a capability, or
 replay a live probe. The next authority decision therefore remains separate
 and must begin with its own bounded observe gate.
+
+## MB785 release-rotation acceptance
+
+MB785 tested the MB772 preservation repair against the complete portfolio.
+One authenticated `update now` request moved nbot from exact MB781 source
+`62820dc` to reviewed MB784 source `7db72ea`. Staged syntax and startup
+integrity completed before shutdown; durable status finished
+`success/completed`; systemd restarted the instance; and the exact old release
+remained available as `/home/mediabot/mediabot_v3.229`.
+
+The post-update gate repeated doctor, permissions, why and failures for all
+five packages. Every package returned enabled/on on `#i/o` with complete
+permissions and zero failures. The complete plugin-data tree, core boot ledger
+and retained Short Content KV revision were exact. Quote and factoid rows did
+not change, and the disposable operator identity was removed.
+
+MB786 records that acceptance in the machine contract and an isolated updater
+rehearsal. It replays no production action, changes no development ledger and
+grants no runtime authority. The detailed update evidence lives in
+[`PLUGIN_V3_UPDATE_ACCEPTANCE.md`](PLUGIN_V3_UPDATE_ACCEPTANCE.md).

@@ -28,7 +28,7 @@ return sub {
     my $history = $contract->{development_promotion_history};
     my $portfolio = $contract->{production_pilots}{enabled_on_portfolio};
 
-    $assert->is($contract->{milestone}, 'MB784',
+    $assert->is($contract->{milestone}, 'MB786',
         'machine contract advances while retaining short-content promotion');
     $assert->is($promotion->{milestone}, 'MB781',
         'current development promotion is versioned');

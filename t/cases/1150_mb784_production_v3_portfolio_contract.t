@@ -28,8 +28,8 @@ return sub {
     my $portfolio = $contract->{production_pilots}{enabled_on_portfolio};
     my $consolidation = $contract->{production_pilots}{source_consolidation};
 
-    $assert->is($contract->{milestone}, 'MB784',
-        'machine contract advances to production portfolio consolidation');
+    $assert->is($contract->{milestone}, 'MB786',
+        'machine contract retains the portfolio beyond its consolidation');
     $assert->is($short->{observe_milestone}, 'MB782',
         'short-content production observation remains explicit');
     $assert->is($short->{promotion_milestone}, 'MB783',

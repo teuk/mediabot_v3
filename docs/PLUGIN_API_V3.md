@@ -623,6 +623,17 @@ no production service and leaves the development ledger unchanged. The
 authoritative record is
 [`PLUGIN_V3_PRODUCTION_PORTFOLIO.md`](PLUGIN_V3_PRODUCTION_PORTFOLIO.md).
 
+MB785 then exercised that boundary through the real authenticated IRC updater.
+Nbot moved from `62820dc` to `7db72ea` only after staged syntax and startup
+integrity checks. The bot stopped before the internal `plugins.DATA_DIR`
+snapshot, systemd restored the new process, and durable status finished
+`success/completed`. All five enabled/on postures, the complete plugin-data
+tree, the boot ledger and the retained Short Content KV revision survived
+exactly with zero failures. MB786 records that acceptance and adds an isolated
+end-to-end rotation rehearsal; it does not contact production or grant new
+authority. See
+[`PLUGIN_V3_UPDATE_ACCEPTANCE.md`](PLUGIN_V3_UPDATE_ACCEPTANCE.md).
+
 `.plugins overviewv3` is a separate read-only view: it reconciles validated
 local packages with loaded v3 instances and prints only lifecycle, readiness
 and aggregate policy counts. Its output is capped at 64 package rows and never

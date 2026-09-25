@@ -264,3 +264,27 @@ same fingerprint immediately before commit. The development ledger is
 therefore unchanged, and MB784 grants no new runtime authority. Operational
 details and package-scoped rollback are recorded in
 [`PLUGIN_V3_PRODUCTION_PORTFOLIO.md`](PLUGIN_V3_PRODUCTION_PORTFOLIO.md).
+
+## MB785 production update acceptance
+
+MB785 used the authenticated `update status` and `update now` IRC paths to
+move nbot from `62820dc` (`3.6dev-20260924_144509`) to the reviewed MB784
+source `7db72ea` (`3.6dev-20260924_204823`). Staged Perl syntax and startup
+integrity passed before shutdown. The systemd contract remained
+`Restart=always` plus `ExitType=cgroup`, durable status finished
+`success/completed`, and the exact previous release was retained as
+`/home/mediabot/mediabot_v3.229`.
+
+After restart, all five packages were ready, fully permitted, enabled/on on
+`#i/o` and at zero failures. The complete internal plugin-data tree was exact
+in bytes, modes, ownership and stable timestamps. The boot ledger and retained
+Short Content KV revision were byte-for-byte identical; quote and factoid data
+were unchanged.
+
+MB786 turns that live evidence into an isolated end-to-end regression. A local
+temporary Git release and disposable bot exercise the real updater, including
+a final shutdown write that must appear only because snapshotting happens after
+the bot stops. The rehearsal contacts no production service, changes no
+operator posture and grants no authority. The evidence and recovery boundary
+are recorded in
+[`PLUGIN_V3_UPDATE_ACCEPTANCE.md`](PLUGIN_V3_UPDATE_ACCEPTANCE.md).

@@ -331,3 +331,19 @@ repository revision and restored all five production postures after restart
 with zero failures. MB784 adds no new runtime authority, contacts no production
 service and leaves the development ledger unchanged; it only makes that
 evidence, health gate and rollback boundary durable in source.
+
+MB785 validates the remaining operational claim: the MB772 updater repair can
+carry the complete MB784 portfolio through a real production release rotation.
+An authenticated IRC update moved nbot from `62820dc` to `7db72ea` only after
+staged syntax and startup-integrity validation. The stopped snapshot preserved
+the complete plugin-data tree, boot ledger and retained Short Content KV
+revision exactly; all five enabled/on postures returned after systemd restart
+with zero failures and unchanged quote/factoid data.
+
+MB786 accepts that proof without repeating production authority. It publishes
+the exact source/version transition, durable success state, archive and IRC
+marker, then adds an isolated end-to-end updater rehearsal. The rehearsal
+starts a disposable local bot, requires its shutdown write to survive, rotates
+between local Git releases and checks state bytes plus metadata. Production is
+not contacted, the development ledger is unchanged and no capability or
+runtime policy is widened.

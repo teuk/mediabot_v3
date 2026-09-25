@@ -1,7 +1,7 @@
 {
   "api": 3,
   "status": "experimental",
-  "milestone": "MB784",
+  "milestone": "MB786",
   "compatibility_dispatch_tables": 0,
   "activation_default": "off",
   "manifest_file": "plugin.json",
@@ -520,6 +520,46 @@
       "production_contact": "none",
       "development_ledger_change": "none"
     }
+  },
+  "production_update_acceptance": {
+    "milestone": "MB785",
+    "source_consolidation_milestone": "MB786",
+    "instance": "nbot",
+    "channel": "#i/o",
+    "trigger": "authenticated IRC update now",
+    "previous_commit": "62820dc",
+    "previous_version": "3.6dev-20260924_144509",
+    "installed_commit": "7db72ea",
+    "installed_version": "3.6dev-20260924_204823",
+    "durable_status": "success/completed",
+    "staged_validation": [
+      "Perl syntax",
+      "startup integrity"
+    ],
+    "systemd_contract": [
+      "Restart=always",
+      "ExitType=cgroup"
+    ],
+    "snapshot_order": "after bot stop and before release rotation",
+    "previous_release_archive": "/home/mediabot/mediabot_v3.229",
+    "packages": [
+      "quotes-v3",
+      "channel-activity-v3",
+      "factoids-v3",
+      "playful-v3",
+      "short-content-v3"
+    ],
+    "final_mode": "on",
+    "plugin_failures": 0,
+    "plugin_data": "complete tree byte, mode, ownership and stable timestamp exact",
+    "boot_ledger": "byte-for-byte exact",
+    "short_content_kv": "byte-for-byte exact with MB783 retained revision",
+    "business_data_mutation": "none",
+    "temporary_identity": "removed",
+    "irc_marker": "MB785-NBOT-20260925T132057Z-354760",
+    "production_replay_by_mb786": false,
+    "development_ledger_change": "none",
+    "runtime_authority_change": "none"
   },
   "runtime_failure_history": {
     "mode": "read-only in-memory per loaded instance",

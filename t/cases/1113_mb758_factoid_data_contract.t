@@ -24,7 +24,7 @@ return sub {
     my ($assert) = @_;
     my $contract = JSON::PP->new->decode(
         slurp_1113('plugins/API_V3_CONTRACT.json'));
-    $assert->is($contract->{milestone}, 'MB784',
+    $assert->is($contract->{milestone}, 'MB786',
         'machine contract records the current factoid platform milestone');
     $assert->ok(grep($_ eq 'data.factoids.read',
         @{ $contract->{implemented_capabilities} }),

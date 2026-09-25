@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB786 — bind the moving staircase to an executable rehearsal
+
+- Consolidate MB785's authenticated production update from `62820dc`
+  (`3.6dev-20260924_144509`) to `7db72ea`
+  (`3.6dev-20260924_204823`). The durable updater status finished
+  `success/completed`, the exact prior release remained at
+  `/home/mediabot/mediabot_v3.229`, and the post-update IRC marker was
+  delivered on nbot `#i/o`. 🪜📜
+- Record that all five API v3 packages returned enabled/on with complete
+  permissions and zero failures. The complete plugin-data tree, boot ledger
+  and retained Short Content KV revision survived byte-for-byte and
+  metadata-exact; quote and factoid data were unchanged.
+- Add an isolated end-to-end updater rehearsal. It stops a disposable local
+  bot, captures its final shutdown write, rotates to a locally staged Git
+  release, and proves ordering, durable status, archive retention and exact
+  plugin-state metadata without contacting production or changing runtime
+  authority. 🦉🛡️
+
 ### MB784 — seal the five production wards into the source ledger
 
 - Consolidate the complete MB783 production posture: `quotes-v3`,
