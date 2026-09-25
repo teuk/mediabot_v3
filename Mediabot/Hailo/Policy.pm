@@ -281,4 +281,13 @@ sub stats {
     };
 }
 
+# Read-only view of the limits actually used by decide(). Keep operator
+# reporting independent from the configuration parser and its defaults.
+sub operator_settings {
+    my ($self) = @_;
+    croak 'policy object is required' unless ref($self);
+    return { map { $_ => $self->{$_} }
+        qw(min_words max_words learn_interval reply_interval key_reply_rate) };
+}
+
 1;

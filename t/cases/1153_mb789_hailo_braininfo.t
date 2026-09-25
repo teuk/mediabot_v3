@@ -88,7 +88,7 @@ like($ctx->{replies}[-1], qr/Syntax: hailo braininfo <#channel>/,
     'explicit channel is required');
 $ctx->{args} = ['braininfo', '#i/o'];
 hailo_command($ctx);
-like($ctx->{replies}[-1], qr/Hailo brain #i\/o:.*tokens=17/,
+like(join(' ', @{ $ctx->{replies} }), qr/Hailo #i\/o.*17 jetons.*9 expressions/,
     'authorized caller gets private channel-specific counters');
 
 $ctx->{args} = ['help'];

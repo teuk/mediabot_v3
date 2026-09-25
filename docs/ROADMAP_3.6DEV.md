@@ -35,6 +35,11 @@ only persists an existing one. `hailo_status` also requires a channel when
 called privately. The [maintenance crosswalk](HAILO_BRAIN_MAINTENANCE.md)
 compares the MegaHAL operator commands with Hailo's actual behavior.
 
+MB790 presents the channel's brain state, readable Hailo counts and effective
+policy in private notices. The percentages shown are configured base rates;
+actual replies also depend on traffic and other guards. `hailo_status` keeps
+its existing compact machine-readable output.
+
 `forget` and `forgetword` need an exact channel training corpus and a tested
 isolated rebuild before they can truthfully erase learned material. Hailo 0.75
 does not expose selective deletion, and an old brain does not retain its input

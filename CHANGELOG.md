@@ -10,6 +10,14 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB790 — let the Hailo brain speak plainly
+
+- Give `<prefix>hailo braininfo #channel` a short private operator report:
+  channel brain state and disk size, readable Hailo counters, and the actual
+  learning, mention-reply and adaptive chatter settings. Keep `hailo_status`
+  compatible and make no claim that Hailo tokens are words or that expressions
+  are retained training phrases. The report never opens an absent brain. 🧠✨
+
 ### MB789 — inspect and save channel Hailo brains
 
 - Add authenticated, private `<prefix>hailo braininfo #channel` with bounded

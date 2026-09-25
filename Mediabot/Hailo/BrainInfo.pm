@@ -2,9 +2,10 @@ package Mediabot::Hailo::BrainInfo;
 
 use strict;
 use warnings;
+use utf8;
 use Exporter 'import';
 
-our @EXPORT_OK = qw(brain_info save_existing hailo_command);
+our @EXPORT_OK = qw(brain_info brain_report save_existing hailo_command);
 
 sub _count {
     my ($value) = @_;
@@ -41,7 +42,8 @@ sub brain_info {
     } qw(master learn respond chatter);
     my $prefix = "Hailo brain $channel: backend=SQLite $switches";
 
-    return { ok => 1, text => "$prefix state=absent" } unless -f $path;
+    return { ok => 1, text => "$prefix state=absent", state => 'absent' }
+        unless -f $path;
 
     my $brain = eval { $registry->brain_for($channel) };
     return { ok => 0, error => 'Brain could not be opened' }
@@ -55,7 +57,84 @@ sub brain_info {
     return { ok => 0, error => 'Brain file unavailable' }
         if !@st || -l $path || !-f $path;
     my $bytes = _count($st[7]);
-    return { ok => 1, text => "$prefix state=ready bytes=$bytes " . _stats(@raw) };
+    return {
+        ok => 1, text => "$prefix state=ready bytes=$bytes " . _stats(@raw),
+        state => 'ready', bytes => $bytes,
+        counters => { map { $_ => _count(shift @raw) }
+            qw(tokens expressions previous_links next_links) },
+    };
+}
+
+sub _number {
+    my ($value) = @_;
+    return 'inconnu' if !defined($value) || $value eq 'unknown';
+    $value =~ s/(?<=\d)(?=(?:\d{3})+\z)/ /g;
+    return $value;
+}
+
+sub _size {
+    my ($bytes) = @_;
+    return 'taille inconnue' if !defined($bytes) || $bytes eq 'unknown';
+    return _number($bytes) . ' octets' if $bytes < 1024;
+    return sprintf('%.2f Mio sur disque', $bytes / 1048576)
+        if $bytes >= 1048576;
+    return sprintf('%.1f Kio sur disque', $bytes / 1024);
+}
+
+sub _percent {
+    my ($value) = @_;
+    return undef unless defined($value) && !ref($value)
+        && "$value" =~ /\A(?:0|[1-9][0-9]{0,2})\z/ && $value <= 100;
+    return "$value%";
+}
+
+# A small presentation adapter: no backend subclass, disk scan, brain mutation,
+# or claim that a Hailo expression is a retained original training sentence.
+# Each line fits easily in an IRC NOTICE, even with a long channel name.
+sub brain_report {
+    my ($channel, $info, $policy, $settings, $chatter_ratio) = @_;
+    return [] unless ref($info) eq 'HASH' && $info->{ok};
+    $policy = {} unless ref($policy) eq 'HASH';
+    $settings = {} unless ref($settings) eq 'HASH';
+
+    my @lines;
+    if ($info->{state} eq 'absent') {
+        push @lines, "Hailo $channel : aucun cerveau enregistré pour ce salon. Cette consultation n'en crée pas.";
+    } else {
+        push @lines, "Hailo $channel : cerveau prêt (SQLite, " . _size($info->{bytes}) . ').';
+        my $c = $info->{counters} || {};
+        push @lines, 'Mon modèle compte ' . _number($c->{tokens})
+            . ' jetons et ' . _number($c->{expressions})
+            . ' expressions ; ' . _number($c->{previous_links})
+            . ' liens vers le précédent et ' . _number($c->{next_links})
+            . ' vers le suivant. Ce ne sont pas des phrases archivées.';
+    }
+
+    if (!$policy->{master}) {
+        push @lines, 'Sur ce salon, Hailo est désactivé : ni apprentissage ni réponse.';
+        return \@lines;
+    }
+    my $learning = $policy->{learn} ? 'actif' : 'désactivé';
+    if ($policy->{learn} && defined($settings->{min_words})
+            && defined($settings->{max_words})) {
+        $learning .= ' (phrases de ' . $settings->{min_words}
+            . ($settings->{max_words} ? ' à ' . $settings->{max_words} : ' mots ou plus')
+            . ($settings->{max_words} ? ' mots' : '') . ')';
+    }
+    my $respond = $policy->{respond} ? 'actives' : 'désactivées';
+    my $rate = _percent($settings->{key_reply_rate});
+    $respond .= " ($rate avant les limites de débit)" if $policy->{respond} && defined $rate;
+    push @lines, "Sur ce salon : apprentissage $learning ; réponses aux mentions $respond.";
+
+    my $chatter = $policy->{chatter} ? 'active' : 'désactivée';
+    my $ratio = _percent($chatter_ratio);
+    if ($policy->{chatter}) {
+        $chatter = !defined($ratio) ? 'inactive (ratio non configuré ou indisponible)'
+            : $chatter_ratio == 0 ? 'inactive (ratio de 0%)'
+            : "active ($ratio de base, réduit selon l'activité du salon)";
+    }
+    push @lines, "Libre expression : $chatter.";
+    return \@lines;
 }
 
 # Persist only a brain that already exists on disk. Never create or seed a
@@ -115,9 +194,14 @@ sub hailo_command {
         return;
     }
     my $info = brain_info($bot->{hailo_registry}, $channel, $policy);
-    $ctx->reply_private($info->{ok} ? $info->{text}
-        : "Hailo brain info unavailable: $info->{error}");
-    return $info->{ok} ? 1 : 0;
+    unless ($info->{ok}) {
+        $ctx->reply_private("Hailo brain info unavailable: $info->{error}");
+        return 0;
+    }
+    my $settings = eval { $bot->{hailo_policy}->operator_settings };
+    my $ratio = eval { $bot->get_hailo_channel_ratio($channel) };
+    $ctx->reply_private($_) for @{ brain_report($channel, $info, $policy, $settings, $ratio) };
+    return 1;
 }
 
 1;
