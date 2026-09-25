@@ -35,6 +35,12 @@ count. Learning is lossy and there is no documented public `forget` API:
   traffic; other runtime checks can also suppress learning or delivery. These
   counters are not MegaHAL nodes, remembered word counts or an archive of
   original messages. `hailo_status` retains its compact technical line.
+- MB791 adds the same restrained IRC foreground accents used elsewhere in
+  Mediabot: orange/bold for Hailo, underlined section labels, cyan figures,
+  green for enabled, red for disabled and amber for missing information.
+  Clients that ignore formatting still see the complete text. The read-only
+  operator notices remain within Mediabot's 400-byte send budget; the compact
+  `hailo_status` output keeps its original bytes.
 - `BrainRegistry` maps the RFC1459-casemapped channel and network to a private
   SHA-256-derived `.brn` path, seeds a new channel brain once from an old root
   brain if available, saves on eviction and exposes `save_all`. It does not

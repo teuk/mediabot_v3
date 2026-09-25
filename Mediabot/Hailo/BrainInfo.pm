@@ -88,6 +88,21 @@ sub _percent {
     return "$value%";
 }
 
+# Use Mediabot's existing IRC accents (radio orange, numeric cyan, status
+# green/red/amber). Foreground only, with a reset after each highlight so
+# clients with either light or dark backgrounds keep their own text colour.
+sub _accent {
+    my ($color, $value) = @_;
+    return "\x03${color}\x02${value}\x02\x0f";
+}
+
+sub _label { "\x1f$_[0]\x1f" }
+
+sub _metric {
+    my ($value) = @_;
+    return _accent($value eq 'inconnu' ? '08' : '11', $value);
+}
+
 # A small presentation adapter: no backend subclass, disk scan, brain mutation,
 # or claim that a Hailo expression is a retained original training sentence.
 # Each line fits easily in an IRC NOTICE, even with a long channel name.
@@ -98,42 +113,54 @@ sub brain_report {
     $settings = {} unless ref($settings) eq 'HASH';
 
     my @lines;
+    my $heading = _accent('07', 'Hailo') . ' ' . _label($channel);
     if ($info->{state} eq 'absent') {
-        push @lines, "Hailo $channel : aucun cerveau enregistré pour ce salon. Cette consultation n'en crée pas.";
+        push @lines, "$heading : " . _accent('08', 'aucun cerveau enregistré')
+            . " pour ce salon. Cette consultation n'en crée pas.";
     } else {
-        push @lines, "Hailo $channel : cerveau prêt (SQLite, " . _size($info->{bytes}) . ').';
+        push @lines, "$heading : cerveau " . _accent('03', 'prêt')
+            . ' (SQLite, ' . _metric(_size($info->{bytes})) . ').';
         my $c = $info->{counters} || {};
-        push @lines, 'Mon modèle compte ' . _number($c->{tokens})
-            . ' jetons et ' . _number($c->{expressions})
-            . ' expressions ; ' . _number($c->{previous_links})
-            . ' liens vers le précédent et ' . _number($c->{next_links})
+        push @lines, _label('Mon modèle') . ' compte ' . _metric(_number($c->{tokens}))
+            . ' jetons et ' . _metric(_number($c->{expressions}))
+            . ' expressions ; ' . _metric(_number($c->{previous_links}))
+            . ' liens vers le précédent et ' . _metric(_number($c->{next_links}))
             . ' vers le suivant. Ce ne sont pas des phrases archivées.';
     }
 
     if (!$policy->{master}) {
-        push @lines, 'Sur ce salon, Hailo est désactivé : ni apprentissage ni réponse.';
+        push @lines, _label('Sur ce salon') . ', Hailo est '
+            . _accent('04', 'désactivé') . ' : ni apprentissage ni réponse.';
         return \@lines;
     }
-    my $learning = $policy->{learn} ? 'actif' : 'désactivé';
+    my $learning = $policy->{learn}
+        ? _accent('03', 'actif') : _accent('04', 'désactivé');
     if ($policy->{learn} && defined($settings->{min_words})
             && defined($settings->{max_words})) {
         $learning .= ' (phrases de ' . $settings->{min_words}
             . ($settings->{max_words} ? ' à ' . $settings->{max_words} : ' mots ou plus')
             . ($settings->{max_words} ? ' mots' : '') . ')';
     }
-    my $respond = $policy->{respond} ? 'actives' : 'désactivées';
+    my $respond = $policy->{respond}
+        ? _accent('03', 'actives') : _accent('04', 'désactivées');
     my $rate = _percent($settings->{key_reply_rate});
-    $respond .= " ($rate avant les limites de débit)" if $policy->{respond} && defined $rate;
-    push @lines, "Sur ce salon : apprentissage $learning ; réponses aux mentions $respond.";
+    $respond .= ' (' . _metric($rate) . ' avant les limites de débit)'
+        if $policy->{respond} && defined $rate;
+    push @lines, _label('Sur ce salon')
+        . " : apprentissage $learning ; réponses aux mentions $respond.";
 
-    my $chatter = $policy->{chatter} ? 'active' : 'désactivée';
+    my $chatter = $policy->{chatter}
+        ? _accent('03', 'active') : _accent('04', 'désactivée');
     my $ratio = _percent($chatter_ratio);
     if ($policy->{chatter}) {
-        $chatter = !defined($ratio) ? 'inactive (ratio non configuré ou indisponible)'
-            : $chatter_ratio == 0 ? 'inactive (ratio de 0%)'
-            : "active ($ratio de base, réduit selon l'activité du salon)";
+        $chatter = !defined($ratio)
+            ? _accent('08', 'inactive') . ' (ratio non configuré ou indisponible)'
+            : $chatter_ratio == 0
+            ? _accent('04', 'inactive') . ' (ratio de ' . _metric($ratio) . ')'
+            : _accent('03', 'active') . ' (' . _metric($ratio)
+                . " de base, réduit selon l'activité du salon)";
     }
-    push @lines, "Libre expression : $chatter.";
+    push @lines, _label('Libre expression') . " : $chatter.";
     return \@lines;
 }
 

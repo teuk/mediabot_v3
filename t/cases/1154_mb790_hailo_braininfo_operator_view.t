@@ -5,11 +5,19 @@ use Test::More;
 use FindBin qw($Bin);
 use File::Temp qw(tempdir);
 use File::Spec;
+use Encode qw(encode);
 
 BEGIN { unshift @INC, "$Bin/../.." }
 
 use Mediabot::Hailo::BrainInfo qw(brain_info brain_report hailo_command);
 use Mediabot::Hailo::Policy;
+
+sub visible {
+    my ($text) = @_;
+    $text =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;
+    $text =~ s/[\x02\x0f\x1f]//g;
+    return $text;
+}
 
 {
     package MB790::Brain;
@@ -48,12 +56,14 @@ my $ctx = MB790::Context->new($bot);
 ok(hailo_command($ctx), 'absent brain is displayed without opening it');
 is($registry->{opens}, 0, 'absent brain was not seeded');
 is(scalar @{ $ctx->{replies} }, 3, 'absent brain and effective policy use three notices');
-like($ctx->{replies}[0], qr/aucun cerveau enregistré/, 'absence is explained');
-like($ctx->{replies}[1], qr/apprentissage actif \(phrases de 3 à 20 mots\)/,
+like(visible($ctx->{replies}[0]), qr/aucun cerveau enregistré/, 'absence is explained');
+like($ctx->{replies}[0], qr/\x0308\x02aucun cerveau enregistré\x02\x0f/,
+    'absence uses the existing amber status accent');
+like(visible($ctx->{replies}[1]), qr/apprentissage actif \(phrases de 3 à 20 mots\)/,
     'effective learning bounds are visible');
-like($ctx->{replies}[1], qr/réponses aux mentions actives \(95% avant les limites/,
+like(visible($ctx->{replies}[1]), qr/réponses aux mentions actives \(95% avant les limites/,
     'effective addressed-reply rate is qualified');
-like($ctx->{replies}[2], qr/23% de base, réduit selon l'activité/,
+like(visible($ctx->{replies}[2]), qr/23% de base, réduit selon l'activité/,
     'adaptive chatter base is qualified');
 
 open my $fh, '>:raw', $path or die $!;
@@ -62,19 +72,39 @@ close $fh;
 $ctx->{replies} = [];
 ok(hailo_command($ctx), 'existing brain reports conversational view');
 is(scalar @{ $ctx->{replies} }, 4, 'ready brain uses four bounded notices');
-like($ctx->{replies}[0], qr/Hailo #radiocapsule : cerveau prêt \(SQLite, 5 octets\)/,
+like(visible($ctx->{replies}[0]), qr/Hailo #radiocapsule : cerveau prêt \(SQLite, 5 octets\)/,
     'format reports disk size without claiming RAM usage');
-like($ctx->{replies}[1], qr/9 020 jetons et 29 147 expressions.*38 631 liens.*39 712/,
+like($ctx->{replies}[0], qr/\x0307\x02Hailo\x02\x0f \x1f#radiocapsule\x1f/,
+    'existing Mediabot orange, bold and underline frame the channel');
+like($ctx->{replies}[0], qr/\x0303\x02prêt\x02\x0f.*\x0311\x025 octets\x02\x0f/,
+    'status green and values cyan use foreground accents with reset');
+like(visible($ctx->{replies}[1]), qr/9 020 jetons et 29 147 expressions.*38 631 liens.*39 712/,
     'readable numbers preserve Hailo counters');
+like($ctx->{replies}[1], qr/\x1fMon modèle\x1f.*\x0311\x029 020\x02\x0f/,
+    'model label and counters are emphasized');
 like($ctx->{replies}[1], qr/Ce ne sont pas des phrases archivées/,
     'operators cannot mistake lossy expressions for a corpus');
 ok(!grep(/radiocapsule\.brn|\bn[œo]uds\b/, @{ $ctx->{replies} }),
     'no path or MegaHAL node claim');
 ok(!grep(length($_) > 300, @{ $ctx->{replies} }), 'four notices stay short');
-
+ok(!grep(length(encode('UTF-8', $_)) > 400, @{ $ctx->{replies} }),
+    'four styled notices fit the IRC byte budget');
 my $info = brain_info($registry, '#radiocapsule', $bot->hailo_channel_policy);
+my $max_channel = '#' . ('x' x 79);
+my $max_lines = brain_report($max_channel, $info,
+    $bot->hailo_channel_policy, $runtime->operator_settings, 100);
+ok(!grep(length(encode('UTF-8', $_)) > 400, @$max_lines),
+    'even the longest accepted channel fits the IRC byte budget');
+
 like($info->{text}, qr/tokens=9020 expressions=29147 previous_links=38631 next_links=39712/,
     'existing machine-readable hailo_status contract is kept');
+unlike($info->{text}, qr/[\x02\x03\x0f\x1f]/,
+    'technical status never receives IRC presentation controls');
+my $unknown = { %$info, counters => { %{ $info->{counters} }, tokens => 'unknown' } };
+my $unknown_lines = brain_report('#radiocapsule', $unknown,
+    $bot->hailo_channel_policy, $runtime->operator_settings, 23);
+like($unknown_lines->[1], qr/\x0308\x02inconnu\x02\x0f/,
+    'unknown counters use amber rather than pretending to be measured');
 my $disabled = brain_report('#radiocapsule', $info,
     { master => 0, learn => 1, respond => 1, chatter => 1 },
     $runtime->operator_settings, 23);
@@ -82,15 +112,19 @@ is(scalar @$disabled, 3, 'disabled master switch suppresses misleading active se
 like($disabled->[-1], qr/ni apprentissage ni réponse/, 'master switch is explicit');
 my $off = brain_report('#radiocapsule', $info,
     { master => 1, learn => 0, respond => 0, chatter => 1 }, {}, -1);
-like(join(' ', @$off), qr/apprentissage désactivé.*réponses aux mentions désactivées.*Libre expression : inactive \(ratio non configuré/,
+like(visible(join(' ', @$off)), qr/apprentissage désactivé.*réponses aux mentions désactivées.*Libre expression : inactive \(ratio non configuré/,
     'disabled switches and missing ratio do not invent rates');
+like($off->[-1], qr/\x0308\x02inactive\x02\x0f/,
+    'missing ratio uses amber rather than green');
 my $ratio_zero = brain_report('#radiocapsule', $info,
     { master => 1, learn => 0, respond => 0, chatter => 1 }, {}, 0);
-like($ratio_zero->[-1], qr/inactive \(ratio de 0%\)/, 'zero chatter is silent despite enabled switch');
+like(visible($ratio_zero->[-1]), qr/inactive \(ratio de 0%\)/, 'zero chatter is silent despite enabled switch');
+like($ratio_zero->[-1], qr/\x0304\x02inactive\x02\x0f/,
+    'zero chatter uses red');
 my $ratio_full = brain_report('#radiocapsule', $info,
     { master => 1, learn => 0, respond => 1, chatter => 1 },
     { key_reply_rate => 100 }, 100);
-like(join(' ', @$ratio_full), qr/100% avant les limites.*100% de base/,
+like(visible(join(' ', @$ratio_full)), qr/100% avant les limites.*100% de base/,
     'upper bound percentages are rendered');
 my $unbounded = Mediabot::Hailo::Policy->new(max_words => 0)->operator_settings;
 my $open_range = brain_report('#radiocapsule', $info,

@@ -10,6 +10,14 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB791 — illuminate the Hailo operator view
+
+- Style the private `hailo braininfo #channel` notices with Mediabot's
+  foreground palette: orange bold heading, underlined labels, cyan figures,
+  green active states, red disabled states and amber missing data. Keep every
+  line inside the IRC byte budget and preserve the plain meaning for clients
+  without formatting support. The compact `hailo_status` line is unchanged. 🪄🎨
+
 ### MB790 — let the Hailo brain speak plainly
 
 - Give `<prefix>hailo braininfo #channel` a short private operator report:
