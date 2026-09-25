@@ -52,12 +52,6 @@ esac
 [ "$SOURCE_VERSION" = "$(git -C "$REPO" show HEAD:VERSION | tr -d '\r\n')" ] || {
   echo 'ERROR: candidate VERSION differs from checked-out commit' >&2; exit 1;
 }
-if [ -n "${GITHUB_SHA:-}" ]; then
-  [ "$(git -C "$REPO" rev-parse HEAD)" = "$GITHUB_SHA" ] || {
-    echo 'ERROR: checkout differs from selected CI candidate' >&2; exit 1;
-  }
-fi
-
 WORK="$(mktemp -d /tmp/mediabot-37-upgrade.XXXXXX)"
 DB_PID=''
 DB_LOG=''
@@ -128,6 +122,9 @@ cat "$WORK/ordered-new"
 }
 [ -n "${GITHUB_SHA:-}" ] && [ -n "${GITHUB_WORKSPACE:-}" ] || {
   echo 'ERROR: exact GitHub candidate identity is required' >&2; exit 1
+}
+[ "$(git -C "$REPO" rev-parse HEAD)" = "$GITHUB_SHA" ] || {
+  echo 'ERROR: checkout differs from selected CI candidate' >&2; exit 1
 }
 [ "$REPO" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)" ] || {
   echo 'ERROR: repository differs from the CI checkout' >&2; exit 1

@@ -88,6 +88,9 @@ return sub {
     _write_1152("$candidate/install/migrations/README.md", $candidate_order);
     my @invocation = ('bash', $script, '--repo', $repo, '--candidate', $candidate,
         '--lineage-only');
+    # The real workflows inject GITHUB_SHA for their own checkout. A disposable
+    # fixture has a different HEAD and must still validate in lineage-only mode.
+    local $ENV{GITHUB_SHA} = 'f' x 40;
     my $rc = _run_1152($log, @invocation);
     $assert->is($rc, 0, 'released and candidate migration histories align');
     $assert->like(_read_1152($log), qr/MB787_LINEAGE=OK stable=3\.5.*migrations=1\n\Q$next\E\n/,
