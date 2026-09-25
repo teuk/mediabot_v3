@@ -418,6 +418,13 @@ of truth.
 
 ## Debian 13 stable-upgrade CI gate
 
+For the 3.7 candidate, MB787 adds a separate upgrade from the annotated
+stable `3.5` tag to the unpacked, non-publishable rehearsal archive. It checks
+every released 3.5 migration byte for byte, verifies the public migration
+order covers every SQL file exactly once, and applies only post-3.5 migrations
+to a disposable MariaDB database. Exact logical rollback and deterministic
+reapplication are required. The historical 3.3 path below remains in place.
+
 The Debian 13 workflow now validates the database upgrade boundary from the
 actual stable `3.3` Git tag to the current development tree.
 

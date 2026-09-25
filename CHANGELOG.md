@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB787 — qualify the 3.7 rehearsal from stable 3.5
+
+- Add a distinct Debian 13 database gate for the unpacked, non-publishable
+  3.7 rehearsal: export the annotated stable 3.5 schema and verify that every
+  released migration is still present and byte-identical. Require the public
+  migration order to describe exactly the candidate SQL inventory. 🧭📜
+- Apply only post-3.5 migrations to a disposable MariaDB database. Prove
+  strict drift before and after, byte-exact logical rollback, then deterministic
+  reapplication; retain the historical 3.3-to-current gate unchanged.
+- Keep `VERSION` on `3.6dev`, stable 3.5 published, and all production and
+  plugin authority untouched. This is candidate qualification, not a 3.7
+  release decision. 🦉🔒
+
 ### MB786 — bind the moving staircase to an executable rehearsal
 
 - Consolidate MB785's authenticated production update from `62820dc`

@@ -73,6 +73,28 @@ state. Both the normal CI workflow and this Debian 13 workflow must be green on
 the accepted commit. This evidence does not change `VERSION`, create a tag or
 publish an artifact; those remain explicit release actions below.
 
+## MB787 3.7 candidate qualification
+
+The published stable version remains **3.5**. On the `3.6dev` line, the Debian
+13 workflow packages the tested commit as a non-publishable 3.7 rehearsal and
+installs only that unpacked archive. The historical stable 3.3 upgrade and its
+rollback/reapplication proof remain in the same workflow.
+
+MB787 adds an independent path from the actual annotated `3.5` tag. The gate
+exports its schema and migration files from Git, checks that released migrations
+are byte-identical, and requires the candidate's public migration order to
+cover every SQL migration exactly once. In a disposable MariaDB instance it
+applies only migrations added after 3.5, checks strict drift, restores a logical
+dump byte for byte and reapplies the upgrade to the same final dump. Success
+reports `MB787_LINEAGE=OK`, `MB787_ROLLBACK=OK` and `MB787_REAPPLY=OK`.
+
+To inspect migration lineage without starting a database, unpack the verified
+rehearsal archive and run `tools/qualify_37_upgrade.sh --repo <checkout>
+--candidate <unpacked archive> --lineage-only`. The database trial runs only
+inside disposable GitHub Actions CI. Its output does not declare 3.7 stable or
+authorize publication, tagging, database changes on an installed instance, or
+an update of production. A later release decision must be explicit.
+
 ## Supported release-path authorities
 
 | Boundary | Authoritative path |

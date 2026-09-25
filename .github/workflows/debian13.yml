@@ -157,6 +157,7 @@ jobs:
           fi
 
           printf 'MEDIABOT_CANDIDATE_ROOT=%s\n' "$CANDIDATE_ROOT" >>"$GITHUB_ENV"
+          printf 'MEDIABOT_CANDIDATE_VERSION=%s\n' "$CANDIDATE_VERSION" >>"$GITHUB_ENV"
           printf 'MEDIABOT_CANDIDATE_SHA256=%s\n' "$(
             sha256sum "$CANDIDATE_ARTIFACTS/${CANDIDATE_BASE}.tar.gz" | awk '{print $1}'
           )" >>"$GITHUB_ENV"
@@ -601,6 +602,20 @@ jobs:
           cmp --silent "$MIGRATED_DUMP" "$REAPPLIED_DUMP"
           echo 'MB725_REAPPLY=OK'
 
+      - name: Exercise stable 3.5 to 3.7 rehearsal database upgrade
+        if: env.MEDIABOT_CANDIDATE_VERSION == '3.7'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
+
+          # The historical 3.3 gate above stays independent. This gate starts
+          # from the actual annotated stable 3.5 tag and uses the same unpacked
+          # and explicitly non-publishable 3.7 rehearsal as the fresh trial.
+          bash "$MEDIABOT_CANDIDATE_ROOT/tools/qualify_37_upgrade.sh" \
+            --repo "$GITHUB_WORKSPACE" \
+            --candidate "$MEDIABOT_CANDIDATE_ROOT"
+
       - name: Run Debian 13 fresh-install contracts
         shell: bash
         run: |
@@ -612,4 +627,4 @@ jobs:
           cd "$GITHUB_WORKSPACE"
 
           perl t/test_commands.pl \
-            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|718_|719_|720_|723_|830_|884_|885_|886_|887_|888_|889_|1043_)'
+            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|718_|719_|720_|723_|830_|884_|885_|886_|887_|888_|889_|1043_|1152_)'
