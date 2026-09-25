@@ -318,11 +318,58 @@ INTEGRITY
     }
     $assert->ok(-f $ready, 'disposable bot reached its running barrier');
 
+    # GitHub's hosted runner puts every child under its own systemd service.
+    # The disposable bot inherits that cgroup even though the tiny reaper,
+    # rather than systemd, owns its lifetime. Scope a systemctl stand-in to
+    # this one bot so the real updater exercises its systemd-safe branch while
+    # the production unit check in deploy_update.sh remains untouched.
+    my $fixture_pid = _slurp_1151($bot_pid_file, 1);
+    chomp $fixture_pid;
+    die "invalid disposable bot PID\n" unless $fixture_pid =~ /\A\d+\z/;
+    my $fixture_unit = '';
+    if (open my $cgroup_fh, '<', "/proc/$fixture_pid/cgroup") {
+        while (my $line = <$cgroup_fh>) {
+            if ($line =~ m{/([^/\s]+\.service)\s*$}) {
+                $fixture_unit = $1;
+                last;
+            }
+        }
+        close $cgroup_fh;
+    }
+
     my $update_log = File::Spec->catfile($tmp, 'update.log');
     local $ENV{LC_ALL} = 'C';
-    my $update_rc = _run_1151($live, $update_log,
+    my @update_command = (
         File::Spec->catfile($live, 'install', 'deploy_update.sh'),
-        '--conf=mediabot.conf');
+        '--conf=mediabot.conf',
+    );
+    my $update_rc;
+    if (length $fixture_unit) {
+        my $fixture_bin = File::Spec->catdir($tmp, 'fixture-bin');
+        make_path($fixture_bin);
+        _write_1151(File::Spec->catfile($fixture_bin, 'systemctl'), <<'SYSTEMCTL', 0755);
+#!/bin/sh
+set -eu
+[ "$#" -eq 4 ] && [ "$1" = show ] && [ "$4" = --value ] || exit 2
+[ "$2" = "${MB786_FIXTURE_UNIT:-}" ] || exit 2
+case "${MB786_FIXTURE_BOT_PID:-}" in ''|*[!0-9]*) exit 2 ;; esac
+[ -r "/proc/${MB786_FIXTURE_BOT_PID}/cgroup" ] || exit 2
+actual="$(awk -F: '{print $3}' "/proc/${MB786_FIXTURE_BOT_PID}/cgroup" \
+  | sed -n 's#^.*/\([^/]*\.service\)$#\1#p' | head -1)"
+[ "$actual" = "$2" ] || exit 2
+case "$3" in
+  --property=Restart) printf 'always\n' ;;
+  --property=ExitType) printf 'cgroup\n' ;;
+  *) exit 2 ;;
+esac
+SYSTEMCTL
+        local $ENV{PATH} = "$fixture_bin:$ENV{PATH}";
+        local $ENV{MB786_FIXTURE_UNIT} = $fixture_unit;
+        local $ENV{MB786_FIXTURE_BOT_PID} = $fixture_pid;
+        $update_rc = _run_1151($live, $update_log, @update_command);
+    } else {
+        $update_rc = _run_1151($live, $update_log, @update_command);
+    }
     my $update_output = _slurp_1151($update_log, 1);
     warn "MB786 updater rehearsal failed:\n$update_output\n" if $update_rc;
 
@@ -337,6 +384,12 @@ INTEGRITY
     }
     $assert->is($update_rc, 0,
         'isolated real updater completed successfully');
+    return if $update_rc;
+    if (length $fixture_unit) {
+        $assert->like($update_output,
+            qr/\Qsystemd instance: $fixture_unit (Restart=always, ExitType=cgroup)\E/,
+            'hosted runner exercises the updater systemd lifecycle gate');
+    }
     $assert->is($waited, $bot_reaper,
         'updater stopped the exact disposable bot before returning');
     $assert->like($update_output,
