@@ -68,6 +68,11 @@ public line
 The Hailo draft is the creative anchor. The provider may repair spelling,
 grammar and immediate coherence, but it may not invent a new generic answer.
 A deterministic lexical-overlap and length-ratio gate enforces that boundary.
+MB792 supplies the reply mode: a direct reply should address the triggering
+message, whereas spontaneous chatter should contribute to the recent topic.
+The provider may reorder fragments and add short connective words to make
+the draft coherent. It must retain the draft's subject and explicit meaning;
+the local validator also refuses changed numbers and reversed negation.
 
 ## Channel brain storage
 
@@ -122,7 +127,8 @@ conditions force the original candidate fallback:
 - provider error or timeout;
 - line break, control byte or oversized output;
 - implausible expansion or contraction;
-- loss of the candidate's learned lexical anchor.
+- loss of the candidate's learned lexical anchor;
+- changed numbers or reversed explicit negation.
 
 Every normal Hailo reply enters this boundary. `HAILO_POST_EDIT_ENABLED=0` is
 an explicit emergency provider kill switch: it retains the sanitized local

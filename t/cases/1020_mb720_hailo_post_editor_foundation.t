@@ -84,6 +84,14 @@ return sub {
         'provider request has a short explicit deadline');
     $assert->like($request->{system}, qr/Hailo draft is the creative source/,
         'system prompt makes the learned draft the immutable creative anchor');
+    $assert->like($request->{system}, qr/Correct spelling, punctuation, agreement and grammar/,
+        'provider is explicitly asked to fix writing errors');
+    $assert->like($request->{system}, qr/Join or reorder fragments.*makes sense in the immediate conversation/,
+        'provider is asked to make the Hailo answer meaningful');
+    $assert->like($request->{system}, qr/address the speaker.s triggering message.*answer it using only what the Hailo draft supports/,
+        'direct replies are tied to the triggering question without invented facts');
+    $assert->like($request->{messages}[0]{content}, qr/Reply mode: direct reply/,
+        'the provider can identify the direct reply intent');
     $assert->like($request->{system}, qr/exactly one plain IRC-safe line/,
         'system prompt requires one IRC-safe line');
 
@@ -131,4 +139,53 @@ return sub {
         'provider may explicitly keep an already suitable draft');
     $assert->ok(!$unchanged->{edited},
         'unchanged draft is not counted as an edit');
+
+    my (undef, $meaningful, $meaningful_request) = _run_editor_1020(
+        result => { ok => 1, answer => 'Je viendrai demain malgré la pluie.' },
+        mode => 'mention', channel_language => 'fr',
+        trigger => 'tu viens demain ?', candidate => 'moi venir demain malgré pluie',
+    );
+    $assert->is($meaningful->{line}, 'Je viendrai demain malgré la pluie.',
+        'a coherent answer may repair tense and word order while keeping the Hailo image');
+    $assert->like($meaningful_request->{system}, qr/Preserve negation, numbers/,
+        'explicit semantic anchors accompany the coherence instruction');
+
+    my (undef, $inverted) = _run_editor_1020(
+        result => { ok => 1, answer => 'Moi, je veux partir ce soir.' },
+        channel_language => 'fr', trigger => 'tu veux partir ce soir ?',
+        candidate => 'moi ne veux pas partir ce soir',
+    );
+    $assert->is($inverted->{reason}, 'anchor_rejected',
+        'lexical overlap does not permit a polarity reversal');
+    $assert->is($inverted->{line}, 'moi ne veux pas partir ce soir',
+        'polarity reversal falls back to the original draft');
+
+    my (undef, $fixed_negative) = _run_editor_1020(
+        result => { ok => 1, answer => "Je n'aime pas ce film." },
+        channel_language => 'fr', trigger => 'tu aimes ce film ?',
+        candidate => 'je n aime pas ce film',
+    );
+    $assert->is($fixed_negative->{reason}, 'edited',
+        'repairing a broken French negation remains allowed');
+
+    my (undef, $quantity) = _run_editor_1020(
+        result => { ok => 1, answer => 'Je pars à 22 heures ce soir.' },
+        channel_language => 'fr', trigger => 'à quelle heure pars-tu ?',
+        candidate => 'je pars à 21 heures ce soir',
+    );
+    $assert->is($quantity->{reason}, 'anchor_rejected',
+        'provider cannot replace a number while preserving most words');
+
+    my (undef, $chatter, $chatter_request) = _run_editor_1020(
+        result => { ok => 1, answer => 'Cette musique me rappelle la pluie.' },
+        mode => 'chatter', channel_language => 'fr',
+        trigger => 'encore de la musique ce soir',
+        candidate => 'cette musique rappeler pluie',
+    );
+    $assert->is($chatter->{reason}, 'edited',
+        'spontaneous chatter can also repair a fragment into a coherent thought');
+    $assert->like($chatter_request->{system}, qr/spontaneous comment.*without pretending someone asked you a question/,
+        'spontaneous mode does not mimic a direct answer');
+    $assert->like($chatter_request->{messages}[0]{content}, qr/Reply mode: spontaneous comment/,
+        'the provider receives the spontaneous intent');
 };

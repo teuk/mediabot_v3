@@ -95,6 +95,8 @@ return sub {
         'bounded context excludes commands, bots and the duplicated trigger');
     $assert->is($editor->{submitted}[0]{channel_language}, 'fr',
         'channel language crosses the provider boundary');
+    $assert->is($editor->{submitted}[0]{mode}, 'mention',
+        'direct-reply intent reaches the post-editor');
 
     $editor->complete({
         ok       => 1,
@@ -176,6 +178,7 @@ return sub {
         $ordered->submit(
             channel => $channel, trigger => 'trigger words here',
             candidate => $candidate, request_generation => 20,
+            mode => $channel eq '#b' ? 'chatter' : 'mention',
             state_cb => sub { _state_1025(20, 1) }, send_cb => sub { 1 },
         );
     };
@@ -188,6 +191,8 @@ return sub {
         'first channel starts with its first candidate');
     $assert->is($ordered_editor->{submitted}[1]{candidate}, 'parallel candidate phrase',
         'busy channel is skipped without blocking another channel');
+    $assert->is($ordered_editor->{submitted}[1]{mode}, 'chatter',
+        'spontaneous-reply intent crosses the runtime boundary');
     $ordered_editor->complete({
         line => 'first candidate phrase', reason => 'unchanged',
         language => { language => 'en' },

@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB792 — give Hailo's answers a clearer thought
+
+- Pass direct-reply versus spontaneous intent to the existing asynchronous AI
+  post-editor. Ask it to fix spelling and grammar, arrange Hailo's fragments
+  into a reply that fits the immediate conversation, and preserve the draft's
+  subject and voice instead of writing a generic assistant answer.
+- Extend the local acceptance gate to reject edits that reverse explicit
+  negation or change numbers, even when most words still overlap. Provider
+  failures and rejected edits continue to use the original Hailo draft;
+  channel authorization and delivery checks remain in place. 🧠🪄
+
 ### MB791 — illuminate the Hailo operator view
 
 - Style the private `hailo braininfo #channel` notices with Mediabot's

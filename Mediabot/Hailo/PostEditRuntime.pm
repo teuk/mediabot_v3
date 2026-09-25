@@ -318,6 +318,7 @@ sub _start_job {
             context          => $job->{context},
             trigger          => $job->{trigger},
             candidate        => $job->{candidate},
+            mode             => $job->{mode},
             on_done          => sub {
                 return if $callback_seen++;
                 $self->_provider_done($job, $_[0]);

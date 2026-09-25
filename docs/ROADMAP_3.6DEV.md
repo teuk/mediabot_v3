@@ -20,6 +20,12 @@ before any separately approved change to the nbot `#i/o` instance.
 | 4. Investigate URL failures | Reproduce the reported TinyURL/news failures, including `blocked_destination` and rate limits, with controlled URLs. Identify the failing boundary before changing URL handling. | Tests proving unsafe destinations remain blocked, a failed shortening request can retain the original safe URL, and caching or retry cannot cause a request flood. No weakening of the destination guard to make a case pass. |
 | 5. Preserve the production portfolio | Keep the five accepted API v3 packages and their nbot `#i/o` policies observable across ordinary updates. Extend tests only when a concrete regression appears in plugin state, updater ordering or restart restoration. | Doctor, permissions, policy and failure checks remain healthy; the boot ledger and plugin-data survive update and restart exactly as their contracts require. A new plugin or authority grant needs its own observe and rollback gate. |
 
+MB792 prepares this pilot's answer-quality gate: the provider now knows whether
+Hailo is answering a speaker or joining a conversation. Observe on development
+whether it corrects writing errors and improves coherence without changing
+negation, numbers or the draft's subject; provider failures retain the local
+Hailo fallback. Do not infer semantic quality from unit tests alone.
+
 Steps 2 and 3 use the baseline from step 1. The URL investigation can run
 independently if a reproducible failure is available. A step may stay open
 until its evidence exists; this table is an order of decisions, not a promise
