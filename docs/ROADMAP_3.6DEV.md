@@ -1,0 +1,42 @@
+# Mediabot 3.6dev development roadmap
+
+This is the working order for the development line after MB787. Stable 3.5
+remains the published version. There is no scheduled 3.7 release, target date,
+release tag or production upgrade in this roadmap. The MB787 Debian 13 and
+stable-3.5 migration gates remain technical compatibility evidence; passing
+them does not decide when to publish.
+
+The [3.5 roadmap](ROADMAP_3.5.md) records completed release work. New work
+below is accepted in small, reversible steps on `3.6dev`, with source tests
+before any separately approved change to the nbot `#i/o` instance.
+
+## Next work, in order
+
+| Step | Development work | Evidence needed before proceeding |
+| --- | --- | --- |
+| 1. Establish the `#i/o` baseline | Review the current pyDuckHunt commands and bot identities against [`CONVERSATION_EXCLUSIONS.md`](CONVERSATION_EXCLUSIONS.md); inspect recent `mediabot.log` and existing exclusion diagnostics. Correct the documented command list or scoped tests if the external bot changed. | A reviewed list of exact commands and senders; ordinary conversation still enters the normal pipeline; excluded traffic produces no Hailo learning, Spark activity or URL preview. No private message text in retained evidence. |
+| 2. Exercise Hailo separately | On development, replay representative `#i/o` patterns against the existing per-channel Hailo controls: learning, direct replies and spontaneous chatter are independent. Verify exclusions, per-user and per-channel bounds, late revocation and provider fallback. | Targeted tests and a bounded observation showing no learning from commands, bots or the bot itself, no reply after authorization is removed, and no uncontrolled chatter. A later nbot pilot needs its own explicit channel policy and rollback. |
+| 3. Measure Spark pacing | Reuse the audience policy and dry-run diagnostics with quiet, solo, small and busy channel samples. Check bot pressure, cooldowns, in-flight cancellation and the shared Spark/SparkAction delivery budget before considering a live send. | An anonymized replay plus tests showing no unsolicited output from excluded lines, one bounded candidate per eligible window and silence when a gate fails. Keep both send arms off during observation; any live `#i/o` trial is a separate, reversible operator decision. |
+| 4. Investigate URL failures | Reproduce the reported TinyURL/news failures, including `blocked_destination` and rate limits, with controlled URLs. Identify the failing boundary before changing URL handling. | Tests proving unsafe destinations remain blocked, a failed shortening request can retain the original safe URL, and caching or retry cannot cause a request flood. No weakening of the destination guard to make a case pass. |
+| 5. Preserve the production portfolio | Keep the five accepted API v3 packages and their nbot `#i/o` policies observable across ordinary updates. Extend tests only when a concrete regression appears in plugin state, updater ordering or restart restoration. | Doctor, permissions, policy and failure checks remain healthy; the boot ledger and plugin-data survive update and restart exactly as their contracts require. A new plugin or authority grant needs its own observe and rollback gate. |
+
+Steps 2 and 3 use the baseline from step 1. The URL investigation can run
+independently if a reproducible failure is available. A step may stay open
+until its evidence exists; this table is an order of decisions, not a promise
+to turn every capability on in production.
+
+## Acceptance and rollback
+
+- Do development source work on `3.6dev`; run focused tests, the fast lane and
+  one final full suite before a source commit. CI results must also be green
+  before relying on a new qualification gate.
+- Read `mediabot.log` first for application behavior. Use service status for
+  lifecycle evidence. Do not infer a successful production pilot from a local
+  rehearsal or from a green test suite.
+- A production change needs one scoped proposal with a before-state record,
+  an observable acceptance window and the exact reversal of its configuration
+  or policy. Preserve the existing five-plugin posture unless that proposal
+  expressly changes it.
+- Revisit a future stable release only after the development work merits one
+  and the operator makes a separate release decision. The procedures in
+  [`RELEASING.md`](RELEASING.md) remain available without starting a release.

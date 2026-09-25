@@ -10,6 +10,16 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB788 — chart the next development work without scheduling 3.7
+
+- Record the `3.6dev` working roadmap: verify `#i/o` automation exclusions,
+  exercise Hailo and Spark behind independent gates, investigate URL failures
+  with their destination guard intact, and preserve the five-package portfolio.
+  Each production trial requires its own observable acceptance and rollback.
+  🗺️🦉
+- Keep 3.5 as stable and MB787 as technical qualification. No 3.7 release date,
+  stable `VERSION`, tag, publication or production upgrade is authorized here.
+
 ### MB787 — qualify the 3.7 rehearsal from stable 3.5
 
 - Add a distinct Debian 13 database gate for the unpacked, non-publishable

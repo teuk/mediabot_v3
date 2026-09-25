@@ -95,6 +95,11 @@ inside disposable GitHub Actions CI. Its output does not declare 3.7 stable or
 authorize publication, tagging, database changes on an installed instance, or
 an update of production. A later release decision must be explicit.
 
+There is no 3.7 release schedule. Current development priorities and the
+separate acceptance steps for `#i/o` are in the
+[`3.6dev roadmap`](ROADMAP_3.6DEV.md). Qualification evidence can continue to
+run in CI without opening a release or changing production.
+
 ## Supported release-path authorities
 
 | Boundary | Authoritative path |
