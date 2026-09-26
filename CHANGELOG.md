@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB794 — read the Hailo post-editor's flight log
+
+- Add authenticated, private `<prefix>hailo edits #channel` with bounded
+  per-channel counts: submitted, corrected, unchanged, locally fallen back,
+  dropped, in flight and waiting. An absent brain stays unopened. Counters
+  live only in memory, reset on restart and never retain prompts, drafts,
+  replies or nicknames. 🦉📊
+- Preserve existing post-edit queuing and late delivery checks. The operator
+  report helps locate provider fallbacks, but the quality and meaning of live
+  replies still need a conversation on development before any nbot trial.
+
 ### MB793 — give Hailo a small, reliable outgoing polish
 
 - Carry three bounded French output corrections from MegaHAL's outgoing

@@ -2716,7 +2716,7 @@ f|f <player>|public|Display Fortnite stats when configured.
 greet|greet [text]|public|Show or set a greeting.
 hailo_chatter|hailo_chatter [on|off]|admin|Control Hailo chatter behavior.
 hailo_ignore|hailo_ignore <nick>|admin|Ignore a nick for Hailo learning or replies.
-hailo|hailo help / braininfo #channel / savebrain #channel|admin|Inspect or save one Hailo brain privately (save requires Owner).
+hailo|hailo help / braininfo #channel / edits #channel / savebrain #channel|admin|Inspect a Hailo brain or its private edit counters; save requires Owner.
 hailo_status|hailo_status [#channel]|admin|Show channel-specific Hailo brain counters.
 hailo_unignore|hailo_unignore <nick>|admin|Remove a nick from the Hailo ignore list.
 help|help [#channel|command|docs|search <term>|level <level>]|public|Show command lists, search internal help, or documentation pointers.

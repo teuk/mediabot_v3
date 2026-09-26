@@ -28,6 +28,11 @@ count. Learning is lossy and there is no documented public `forget` API:
 - `<prefix>hailo help` lists the available subcommands. Owner-only
   `<prefix>hailo savebrain #channel` persists one existing channel brain,
   answers privately, and refuses absent or unsafe brain paths.
+- MB794 adds Master/Owner `<prefix>hailo edits #channel`: two private notices
+  show that channel's accepted provider edits, unchanged replies, local
+  fallbacks, dropped work and current queue/in-flight counts. The bounded
+  counters live in process memory since startup, may evict older channel
+  histories, and never contain draft text or open a brain.
 - MB790 makes `hailo braininfo` readable in three or four short private
   notices. It describes the brain's saved file size, Hailo's four counters,
   and the effective learning bounds, mention-reply percentage and channel
@@ -54,7 +59,8 @@ count. Learning is lossy and there is no documented public `forget` API:
 
 Tcl command names below omit its configurable public prefix (`.` by default).
 `<prefix>hailo help`, `<prefix>hailo braininfo #channel` and
-`<prefix>hailo savebrain #channel` are delivered in MB789. `<prefix>` is
+`<prefix>hailo savebrain #channel` are delivered in MB789;
+`<prefix>hailo edits #channel` is delivered in MB794. `<prefix>` is
 `main.MAIN_PROG_CMD_CHAR` (usually `!`); Partyline keeps `.` for any separate
 operator commands. The `<prefix>hailo forget` and `<prefix>hailo forgetword`
 examples remain **proposed**, without callable mutators.
@@ -66,7 +72,7 @@ settings, not a promise to port MegaHAL internals one for one.
 | `aide_megahal`, `megaver` | Help and engine/interface version | Later: add `<prefix>hailo help` and version/backend metadata in the operator view. |
 | `megahal`, `learn`, `respond`, `chatter` | Channel master, learning, direct replies, free chatter | Already modeled by the four Hailo chansets; document/query their effective state, keeping policy changes in the existing authorized channel path. |
 | `replyrate`, `keyreplyrate` | Free-chat and addressed-reply probabilities | `hailo_chatter` already manages the former. Audit the configured `HAILO_KEY_REPLY_RATE` and expose a bounded read-only value before deciding whether a runtime setter is useful. |
-| `megahal_status`, `braininfo` | Channel switches and brain metrics | MB789/790: `<prefix>hailo braininfo #channel` reports the four Hailo counters, readable on-disk size, brain state, effective policy and applicable rates in short private notices. Unavailable counters are labelled unknown. No MegaHAL node count, raw training text or ambiguous last-brain default. |
+| `megahal_status`, `braininfo` | Channel switches and brain metrics | MB789/790: `<prefix>hailo braininfo #channel` reports the four Hailo counters, readable on-disk size, brain state, effective policy and applicable rates in short private notices. MB794 `<prefix>hailo edits #channel` separately reports transient post-editor outcomes; these are neither MegaHAL node counts nor retained training text. |
 | `countword`, `seekstatement` | Count a word; find a learned statement | Design bounded, read-only Hailo queries only if the stored representation supports truthful semantics. An occurrence of a token or transition does not prove an original sentence is retained verbatim. Mark uncertainty rather than invent a match. |
 | `forget`, `forgetword` | Remove a phrase; remove learned phrases containing a word | Priority: `<prefix>hailo forget #channel <exact phrase>` and `<prefix>hailo forgetword #channel <word>`. Implement only with proven selective deletion or verified rebuild of that channel from an authorized source. No fuzzy nearest-phrase deletion or substring match. See the contract below. |
 | `savebrain`, `reloadbrain` | Save or reload a brain | MB789: Owner-only `savebrain #channel` persists an existing channel brain. Replacement/reload still requires a coordinated switch; do not swap a live SQLite file while Hailo or a pending reply is using it. |

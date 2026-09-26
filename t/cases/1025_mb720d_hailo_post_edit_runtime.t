@@ -119,6 +119,17 @@ return sub {
         'completion summary distinguishes a real edit');
     $assert->ok(!exists($summary[0]{line}) && !exists($summary[0]{candidate}),
         'aggregate summary contains no trigger, draft or edited text');
+    my $edited_stats = $runtime->channel_stats('#TEST');
+    $assert->is($edited_stats->{submitted}, 1,
+        'per-channel counters use the IRC casemap');
+    $assert->is($edited_stats->{edited}, 1,
+        'completed provider correction is counted for its channel');
+    $assert->is($edited_stats->{fallback}, 0,
+        'accepted edit is not mistaken for a fallback');
+    $assert->ok(!exists($edited_stats->{line}) && !exists($edited_stats->{candidate}),
+        'operator statistics never contain conversation text');
+    $assert->is($runtime->channel_stats('#unknown')->{submitted}, 0,
+        'inspection of an unused channel returns zero without seeding it');
 
     my $enabled = 1;
     $runtime->submit(
@@ -141,6 +152,8 @@ return sub {
     $assert->is($summary[-1]{reason}, 'disabled',
         'late channel revocation wins over provider completion');
     $assert->is(scalar(@sent), 1, 'revoked candidate is never emitted');
+    $assert->is($runtime->channel_stats('#late')->{dropped}, 1,
+        'a revoked channel records a dropped reply rather than a sent edit');
 
     $runtime->submit(
         channel            => '#fallback',
@@ -162,6 +175,8 @@ return sub {
         'provider failure preserves and delivers the Hailo candidate');
     $assert->is($summary[-1]{edit_reason}, 'provider_error',
         'fallback reason remains aggregate and explicit');
+    $assert->is($runtime->channel_stats('#fallback')->{fallback}, 1,
+        'provider failure is counted as a local fallback for its channel');
 
     $assert->is(polish_hailo_output(
         text => 'Sa va, . Je susi prêt', language => 'fr',
@@ -262,6 +277,11 @@ return sub {
         'busy channel is skipped without blocking another channel');
     $assert->is($ordered_editor->{submitted}[1]{mode}, 'chatter',
         'spontaneous-reply intent crosses the runtime boundary');
+    my $waiting = $ordered->channel_stats('#a');
+    $assert->is($waiting->{queued}, 1,
+        'one same-channel answer waits behind an in-flight provider request');
+    $assert->is($waiting->{inflight}, 1,
+        'channel status distinguishes an active request from queued work');
     $ordered_editor->complete({
         line => 'first candidate phrase', reason => 'unchanged',
         language => { language => 'en' },
@@ -357,4 +377,26 @@ return sub {
     $assert->is($stats->{inflight}, 0, 'completed runtime has no leaked inflight job');
     $assert->ok($stats->{sent} >= 2 && $stats->{dropped} >= 1,
         'runtime exposes bounded aggregate delivery counters');
+
+    my $bounded = Mediabot::Hailo::PostEditRuntime->new(
+        post_editor => MB720D::Editor->new,
+        queue => Mediabot::Hailo::ReplyQueue->new(
+            typing_coeff => 0, now_cb => sub { $now },
+        ),
+        clock => sub { $now }, typing_enabled => 0,
+        max_stat_channels => 1,
+    );
+    for my $channel ('#old', '#recent') {
+        $bounded->submit(
+            channel => $channel, trigger => 'ordinary message',
+            candidate => 'safe learned phrase', request_generation => 50,
+            post_edit_enabled => 0,
+            state_cb => sub { _state_1025(50, 1) },
+            send_cb => sub { 1 },
+        );
+    }
+    $assert->is($bounded->channel_stats('#old')->{submitted}, 0,
+        'old channel counters are evicted when the configured memory bound is reached');
+    $assert->is($bounded->channel_stats('#recent')->{fallback}, 1,
+        'the latest channel retains its aggregate local-fallback outcome');
 };

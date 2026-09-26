@@ -81,6 +81,10 @@ my $ctx = MB789::Context->new(bot => $bot, master => 0,
     args => ['braininfo', '#i/o'], replies => []);
 hailo_command($ctx);
 like($ctx->{replies}[-1], qr/Access denied/, 'non-Master cannot read brain counters');
+$ctx->{args} = ['edits', '#i/o'];
+hailo_command($ctx);
+like($ctx->{replies}[-1], qr/Access denied/,
+    'non-Master cannot inspect post-editor outcomes');
 $ctx->{master} = 1;
 $ctx->{args} = ['braininfo'];
 hailo_command($ctx);
@@ -98,6 +102,8 @@ $ctx->{args} = ['help'];
 hailo_command($ctx);
 like($ctx->{replies}[-1], qr/braininfo.*savebrain.*forgetword/,
     'operator can see available commands and the corpus limitation');
+like($ctx->{replies}[-1], qr/edits #channel/,
+    'help includes private per-channel edit outcomes');
 $ctx->{args} = ['savebrain', '#i/o'];
 hailo_command($ctx);
 is($registry->{brains}{'#i/o'}{saves}, 0, 'Master cannot save a brain');

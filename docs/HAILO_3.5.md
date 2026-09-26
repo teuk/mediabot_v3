@@ -149,6 +149,10 @@ state, and compares the captured channel generation. Disabling Hailo, removing
 respond/chatter permission, leaving the channel, reconnecting, queue expiry or
 shutdown revokes the pending reply. Diagnostics and Prometheus series contain
 only bounded outcomes, never trigger text, drafts, edited replies or nicks.
+The authenticated `<prefix>hailo edits #channel` view reads bounded,
+memory-only post-editor counters for one explicit channel. It never opens a
+brain; counts reset on restart and older channel counters may be evicted.
+Accepted editing is not evidence that a reply makes sense in context.
 
 ## Delivery stages
 

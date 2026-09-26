@@ -5,7 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 
-our @EXPORT_OK = qw(brain_info brain_report save_existing hailo_command);
+our @EXPORT_OK = qw(brain_info brain_report post_edit_report save_existing hailo_command);
 
 sub _count {
     my ($value) = @_;
@@ -164,6 +164,25 @@ sub brain_report {
     return \@lines;
 }
 
+# Private aggregate counters only. This deliberately never exposes a prompt,
+# candidate, edited line, provider credential or remembered training material.
+sub post_edit_report {
+    my ($channel, $stats) = @_;
+    $stats = {} unless ref($stats) eq 'HASH';
+    my $value = sub { _metric(_number(_count($stats->{$_[0]} // 0))) };
+    return [
+        _accent('07', 'Hailo') . ' ' . _label($channel)
+            . ' : édition AI depuis le démarrage (compteurs en mémoire).',
+        _label('Réponses') . ' : traitées ' . $value->('submitted')
+            . ', corrigées ' . $value->('edited')
+            . ', inchangées ' . $value->('unchanged')
+            . ', repli local ' . $value->('fallback')
+            . ', abandonnées ' . $value->('dropped')
+            . ' ; en cours ' . $value->('inflight')
+            . ', en attente ' . $value->('queued') . '.',
+    ];
+}
+
 # Persist only a brain that already exists on disk. Never create or seed a
 # channel brain as a side effect of an operator maintenance command.
 sub save_existing {
@@ -197,17 +216,33 @@ sub hailo_command {
     my @args = @{ $ctx->args };
     my $action = @args ? lc($args[0]) : '';
     if ($action eq 'help' && @args == 1) {
-        $ctx->reply_private('Hailo: braininfo #channel (Master), savebrain #channel (Owner). Selective forget and forgetword require a complete training corpus.');
+        $ctx->reply_private('Hailo: braininfo #channel, edits #channel (Master); savebrain #channel (Owner). Selective forget and forgetword require a complete training corpus.');
         return 1;
     }
-    unless (@args == 2 && ($action eq 'braininfo' || $action eq 'savebrain')
+    unless (@args == 2 && ($action eq 'braininfo' || $action eq 'edits' || $action eq 'savebrain')
             && defined($args[1]) && !ref($args[1])
             && $args[1] =~ /\A\#[^\s,\x00-\x1f\x7f]{1,79}\z/) {
-        $ctx->reply_private('Syntax: hailo braininfo <#channel> | hailo savebrain <#channel> | hailo help');
+        $ctx->reply_private('Syntax: hailo braininfo <#channel> | hailo edits <#channel> | hailo savebrain <#channel> | hailo help');
         return;
     }
     my $channel = $args[1];
     my $bot = $ctx->bot;
+    if ($action eq 'edits') {
+        my $runtime = $bot->{hailo_post_edit_runtime};
+        my $stats;
+        if ($runtime) {
+            my $ok = eval {
+                $stats = $runtime->channel_stats($channel);
+                1;
+            };
+            unless ($ok && ref($stats) eq 'HASH') {
+                $ctx->reply_private('Hailo edit status unavailable: runtime counters could not be read.');
+                return 0;
+            }
+        }
+        $ctx->reply_private($_) for @{ post_edit_report($channel, $stats) };
+        return 1;
+    }
     if ($action eq 'savebrain') {
         return unless $ctx->require_level('Owner');
         my $result = save_existing($bot->{hailo_registry}, $channel);

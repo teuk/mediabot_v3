@@ -74,10 +74,11 @@ sub new {
 
     my $queue = $args{queue};
     if (defined $queue) {
-        croak 'queue must provide enqueue(), take_next() and typing_delay_seconds()'
+        croak 'queue must provide enqueue(), take_next(), queued_for() and typing_delay_seconds()'
             unless ref($queue)
                 && eval { $queue->can('enqueue') }
                 && eval { $queue->can('take_next') }
+                && eval { $queue->can('queued_for') }
                 && eval { $queue->can('typing_delay_seconds') };
     }
     else {
@@ -99,10 +100,13 @@ sub new {
         max_context_lines   => _bounded_int($args{max_context_lines}, 4, 1, 8),
         max_context_chars   => _bounded_int($args{max_context_chars}, 500, 80, 800),
         max_context_channels => _bounded_int($args{max_context_channels}, 256, 1, 4096),
+        max_stat_channels   => _bounded_int($args{max_stat_channels}, 256, 1, 4096),
         max_inflight        => _bounded_int($args{max_inflight}, 4, 1, 32),
         typing_enabled      => exists($args{typing_enabled})
             ? ($args{typing_enabled} ? 1 : 0) : 1,
         contexts            => {},
+        channel_outcomes    => {},
+        outcome_sequence    => 0,
         inflight            => {},
         inflight_total      => 0,
         pumping             => 0,
@@ -174,11 +178,40 @@ sub recent_context {
     return \@lines;
 }
 
+sub _outcomes_for {
+    my ($self, $key) = @_;
+    my $outcomes = $self->{channel_outcomes};
+    if (!exists($outcomes->{$key})
+        && keys(%$outcomes) >= $self->{max_stat_channels}) {
+        my ($oldest) = sort {
+            $outcomes->{$a}{touched} <=> $outcomes->{$b}{touched}
+        } keys %$outcomes;
+        delete $outcomes->{$oldest} if defined $oldest;
+    }
+    my $slot = $outcomes->{$key} ||= {
+        submitted => 0, edited => 0, unchanged => 0,
+        fallback => 0, dropped => 0,
+    };
+    $slot->{touched} = ++$self->{outcome_sequence};
+    return $slot;
+}
+
 sub _report {
     my ($self, $summary, $on_done) = @_;
     my $action = ref($summary) eq 'HASH' ? ($summary->{action} // 'dropped') : 'dropped';
     $action = $action eq 'sent' ? 'sent' : 'dropped';
     $self->{stats}{$action}++;
+    if (ref($summary) eq 'HASH') {
+        my $key = _channel_key($summary->{channel});
+        if (defined $key) {
+            my $slot = $self->_outcomes_for($key);
+            my $kind = $action eq 'dropped' ? 'dropped'
+                : ($summary->{edit_reason} // '') eq 'edited' ? 'edited'
+                : ($summary->{edit_reason} // '') eq 'unchanged' ? 'unchanged'
+                : 'fallback';
+            $slot->{$kind}++;
+        }
+    }
 
     eval { $self->{metric_cb}->($summary) } if $self->{metric_cb};
     eval { $self->{log_cb}->($summary) } if $self->{log_cb};
@@ -271,6 +304,7 @@ sub submit {
 
     $job->{queue_id} = $queued->{id};
     $self->{stats}{submitted}++;
+    $self->_outcomes_for($channel_key)->{submitted}++;
     $self->_pump;
     return { accepted => 1, reason => 'queued', id => $queued->{id} };
 }
@@ -458,6 +492,23 @@ sub stats {
         inflight => $self->{inflight_total},
         contexts => scalar(keys %{ $self->{contexts} }),
         queue    => $self->{queue}->stats,
+    };
+}
+
+sub channel_stats {
+    my ($self, $channel) = @_;
+    croak 'runtime object is required' unless ref($self);
+    my $key = _channel_key($channel);
+    return undef unless defined $key;
+    # Pruning may complete expired jobs and update their counters.
+    my $queued = $self->{queue}->queued_for($channel);
+    my $stored = $self->{channel_outcomes}{$key} || {};
+    my %counts = map { $_ => $stored->{$_} || 0 }
+        qw(submitted edited unchanged fallback dropped);
+    return {
+        %counts,
+        queued   => $queued,
+        inflight => exists($self->{inflight}{$key}) ? 1 : 0,
     };
 }
 

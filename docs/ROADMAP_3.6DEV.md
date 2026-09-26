@@ -30,6 +30,11 @@ MB793 makes the old outgoing script's narrow French typo fixes available even
 when the provider fails; a real dev exchange is still needed to judge whether
 the provider improves meaning without replacing Hailo's voice.
 
+MB794 adds a private, per-channel post-editor outcome view so an operator can
+see whether live replies were corrected, unchanged, locally fallen back or
+dropped. Its memory-only counters reset on restart and contain no reply text;
+they support, but cannot replace, a real development conversation.
+
 Steps 2 and 3 use the baseline from step 1. The URL investigation can run
 independently if a reproducible failure is available. A step may stay open
 until its evidence exists; this table is an order of decisions, not a promise
@@ -44,6 +49,8 @@ MB789 adds `<prefix>hailo help`, private
 only persists an existing one. `hailo_status` also requires a channel when
 called privately. The [maintenance crosswalk](HAILO_BRAIN_MAINTENANCE.md)
 compares the MegaHAL operator commands with Hailo's actual behavior.
+MB794 adds Master/Owner `<prefix>hailo edits #channel` for private runtime
+counts without opening or seeding the channel brain.
 
 MB790 presents the channel's brain state, readable Hailo counts and effective
 policy in private notices. The percentages shown are configured base rates;

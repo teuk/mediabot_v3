@@ -9,7 +9,7 @@ use Encode qw(encode);
 
 BEGIN { unshift @INC, "$Bin/../.." }
 
-use Mediabot::Hailo::BrainInfo qw(brain_info brain_report hailo_command);
+use Mediabot::Hailo::BrainInfo qw(brain_info brain_report post_edit_report hailo_command);
 use Mediabot::Hailo::Policy;
 
 sub visible {
@@ -34,6 +34,20 @@ sub visible {
     sub new { bless { hailo_registry => $_[1], hailo_policy => $_[2], ratio => 23 }, $_[0] }
     sub hailo_channel_policy { { master => 1, learn => 1, respond => 1, chatter => 1 } }
     sub get_hailo_channel_ratio { $_[0]{ratio} }
+}
+{
+    package MB790::EditRuntime;
+    sub new { bless { queried => [] }, $_[0] }
+    sub channel_stats {
+        my ($self, $channel) = @_;
+        push @{ $self->{queried} }, $channel;
+        return { submitted => 9, edited => 4, unchanged => 2,
+            fallback => 2, dropped => 1, inflight => 1, queued => 2 };
+    }
+}
+{
+    package MB790::BrokenEditRuntime;
+    sub channel_stats { die 'private provider data'; }
 }
 {
     package MB790::Context;
@@ -130,5 +144,47 @@ my $unbounded = Mediabot::Hailo::Policy->new(max_words => 0)->operator_settings;
 my $open_range = brain_report('#radiocapsule', $info,
     { master => 1, learn => 1, respond => 0, chatter => 0 }, $unbounded, undef);
 like(join(' ', @$open_range), qr/phrases de 3 mots ou plus/, 'unbounded learning is described correctly');
+
+my $edits = MB790::EditRuntime->new;
+$bot->{hailo_post_edit_runtime} = $edits;
+$ctx->{args} = ['edits', '#radiocapsule'];
+$ctx->{replies} = [];
+my $opened_before = $registry->{opens};
+ok(hailo_command($ctx), 'Master can inspect Hailo edit outcomes');
+is_deeply($edits->{queried}, ['#radiocapsule'],
+    'the counters are scoped to the explicitly named channel');
+is($registry->{opens}, $opened_before,
+    'edit inspection neither opens nor seeds the brain');
+is(scalar @{ $ctx->{replies} }, 2, 'private status uses two bounded notices');
+like(visible(join(' ', @{ $ctx->{replies} })),
+    qr/depuis le démarrage.*traitées 9, corrigées 4, inchangées 2, repli local 2, abandonnées 1 ; en cours 1, en attente 2/,
+    'status separates real provider edits, unchanged replies, fallback and drops');
+ok(!grep(length(encode('UTF-8', $_)) > 400, @{ $ctx->{replies} }),
+    'operator notices fit the IRC byte budget');
+my $long_edits = post_edit_report($max_channel, {
+    map { $_ => 999999999999999 }
+        qw(submitted edited unchanged fallback dropped inflight queued)
+});
+ok(!grep(length(encode('UTF-8', $_)) > 400, @$long_edits),
+    'large counters and the longest channel still fit the IRC byte budget');
+unlike(join(' ', @{ $ctx->{replies} }), qr/\.brn|(?:candidate|trigger|prompt)=/,
+    'status does not reveal the brain path or conversation content');
+
+$ctx->{args} = ['edits', '#unused'];
+delete $bot->{hailo_post_edit_runtime};
+$ctx->{replies} = [];
+ok(hailo_command($ctx), 'uninitialized runtime has a readable zero status');
+like(visible(join(' ', @{ $ctx->{replies} })), qr/traitées 0, corrigées 0/,
+    'idle channel status does not invent provider traffic');
+is($registry->{opens}, $opened_before,
+    'idle channel inspection leaves the brain absent');
+
+$bot->{hailo_post_edit_runtime} = bless {}, 'MB790::BrokenEditRuntime';
+$ctx->{replies} = [];
+ok(!hailo_command($ctx), 'unavailable runtime counters are not reported as zero');
+like($ctx->{replies}[-1], qr/counters could not be read/,
+    'operator receives a bounded runtime error');
+unlike($ctx->{replies}[-1], qr/private provider data/,
+    'runtime exception cannot leak provider details to IRC');
 
 done_testing;

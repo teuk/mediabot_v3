@@ -135,6 +135,15 @@ sub ttl_seconds {
     return $self->{ttl_seconds};
 }
 
+sub queued_for {
+    my ($self, $channel) = @_;
+    croak 'queue object is required' unless ref($self);
+    my $key = _channel_key($channel);
+    return 0 unless defined $key;
+    $self->_prune;
+    return scalar grep { $_->{channel_key} eq $key } @{ $self->{queue} };
+}
+
 sub dispatch_next {
     my ($self) = @_;
     my $entry = $self->take_next or return 0;
