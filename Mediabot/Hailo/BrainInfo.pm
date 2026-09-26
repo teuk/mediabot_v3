@@ -216,13 +216,60 @@ sub hailo_command {
     my @args = @{ $ctx->args };
     my $action = @args ? lc($args[0]) : '';
     if ($action eq 'help' && @args == 1) {
-        $ctx->reply_private('Hailo: braininfo #channel, edits #channel (Master); savebrain #channel (Owner). Selective forget and forgetword require a complete training corpus.');
+        $ctx->reply_private('Hailo: braininfo #channel, edits #channel, check #channel ambient|mention|chatter <texte> (Master); savebrain #channel (Owner). Selective forget and forgetword require a complete training corpus.');
+        return 1;
+    }
+    if ($action eq 'check') {
+        unless (@args >= 4 && defined($args[1]) && !ref($args[1])
+                && $args[1] =~ /\A\#[^\s,\x00-\x1f\x7f]{1,79}\z/
+                && defined($args[2]) && !ref($args[2])
+                && $args[2] =~ /\A(?:ambient|mention|chatter)\z/
+                && !grep { !defined($_) || ref($_) } @args[3 .. $#args]) {
+            $ctx->reply_private('Syntax: hailo check <#channel> <ambient|mention|chatter> <texte>');
+            return;
+        }
+        my $text = join ' ', @args[3 .. $#args];
+        unless (length($text) && length($text) <= 600
+                && $text !~ /[\x00-\x1f\x7f]/) {
+            $ctx->reply_private('Hailo check: texte invalide ou trop long.');
+            return;
+        }
+        my $bot = $ctx->bot;
+        my $result = eval {
+            $bot->hailo_preview_turn(
+                channel => $args[1], speaker => $ctx->nick,
+                mode => $args[2], text => $text,
+            );
+        };
+        unless (ref($result) eq 'HASH' && $result->{ok}) {
+            $ctx->reply_private('Hailo check indisponible : politique ou exclusions illisibles.');
+            return 0;
+        }
+        my $reason = sub {
+            my ($value) = @_;
+            return defined($value) && !ref($value)
+                && $value =~ /\A[a-z_]{1,32}\z/ ? $value : 'unknown';
+        };
+        my $learn = $result->{learn} ? 'éligible'
+            : 'bloqué (' . $reason->($result->{learn_reason}) . ')';
+        my $reply = $result->{reply} ? 'éligible'
+            : 'bloquée (' . $reason->($result->{reply_reason}) . ')';
+        my $rate = $result->{key_reply_rate};
+        $reply .= ' (tirage ' . $rate . '% restant)'
+            if $result->{reply} && $result->{rate_pending}
+                && defined($rate) && !ref($rate)
+                && "$rate" =~ /\A(?:100|[1-9]?[0-9])\z/;
+        $ctx->reply_private(_accent('07', 'Hailo') . ' ' . _label($args[1])
+            . ' : simulation privée (' . $args[2]
+            . '), sans apprentissage ni envoi.');
+        $ctx->reply_private(_label('Apprentissage') . " : $learn ; "
+            . _label('réponse') . " : $reply. Trafic et livraison non simulés.");
         return 1;
     }
     unless (@args == 2 && ($action eq 'braininfo' || $action eq 'edits' || $action eq 'savebrain')
             && defined($args[1]) && !ref($args[1])
             && $args[1] =~ /\A\#[^\s,\x00-\x1f\x7f]{1,79}\z/) {
-        $ctx->reply_private('Syntax: hailo braininfo <#channel> | hailo edits <#channel> | hailo savebrain <#channel> | hailo help');
+        $ctx->reply_private('Syntax: hailo braininfo <#channel> | hailo edits <#channel> | hailo check <#channel> <mode> <texte> | hailo savebrain <#channel> | hailo help');
         return;
     }
     my $channel = $args[1];

@@ -157,6 +157,14 @@ memory-only post-editor counters for one explicit channel. It never opens a
 brain; counts reset on restart and older channel counters may be evicted.
 Accepted editing is not evidence that a reply makes sense in context.
 
+MB796 adds Master/Owner `<prefix>hailo check #channel ambient|mention|chatter
+<texte>` as a private policy rehearsal for the authenticated caller. It
+classifies configured conversation exclusions and applies normal Hailo input
+normalization to a copy of current channel policy state. No brain is opened,
+no sentence is learned or echoed, no provider is called and no channel reply
+is sent. The notice reports eligibility, not an actual random mention draw,
+adaptive chatter trigger or successful late delivery.
+
 ## Delivery stages
 
 - **MB720-A:** per-channel brain registry, legacy seed, explicit save boundary,

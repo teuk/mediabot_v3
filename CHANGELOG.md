@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB796 — rehearse Hailo's policy without speaking
+
+- Add authenticated, private `hailo check #channel ambient|mention|chatter
+  <text>`. It applies the configured conversation exclusions, Hailo input
+  normalization and a copy of the channel policy to the operator's text. Show
+  learning/reply eligibility and reasons without repeating the text, opening
+  a brain, learning, calling a provider or posting to the channel.
+- Preserve live cooldowns and the random stream during inspection; make the
+  mention probability and unsimulated traffic/delivery gates explicit. Give
+  3.6dev a shorter decision-based roadmap before any `#i/o` pilot. 🪄🧭
+
 ### MB795 — keep Hailo's negative meaning and sequence
 
 - Reject AI post-edits that exchange one negative marker for another (such as

@@ -36,7 +36,9 @@ It does not drop a later ordinary-language occurrence. For example,
 
 `CHANNEL_COMMANDS` contains exact, prefixed command words belonging to an
 external bot. It neither accepts wildcards nor consumes a different command.
-For the current pyDuckHunt public command set on production `#i/o`:
+The recorded `#i/o` configuration example is below. Compare it with the
+installed pyDuckHunt command list before treating it as current production
+coverage; external commands may have changed since this list was written:
 
 ```ini
 [conversation]
@@ -47,7 +49,9 @@ CHANNEL_COMMANDS=i/o:!bang+!pan+!reload+!shop+!inventory+!duckstats+!lastduck+!d
 Thus `!bang vite` is ignored by Mediabot, while `#quote`, `!helpful` and normal
 conversation continue through their existing paths. The command list is an
 explicit operational contract and must be reviewed if pyDuckHunt adds or
-renames public commands.
+renames public commands. MB796's private Hailo policy check can rehearse an
+exact candidate command, but only a review of the live bot establishes the
+complete list.
 
 ## Runtime and observation
 

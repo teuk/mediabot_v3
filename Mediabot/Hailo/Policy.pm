@@ -248,6 +248,40 @@ sub decide {
     };
 }
 
+# Evaluate the actual policy gates against a copy of the relevant channel
+# state. A deterministic zero roll means "eligible before the rate draw";
+# preview never consumes the live random stream or changes cooldowns.
+sub preview_decide {
+    my ($self, %args) = @_;
+    croak 'policy object is required' unless ref($self);
+
+    my %states = %{ $self->{channel_states} };
+    my $channel_key = _key($args{channel});
+    if (defined($channel_key) && exists $states{$channel_key}) {
+        my %channel = %{ $states{$channel_key} };
+        my %users = %{ $channel{users} || {} };
+        my $speaker_key = _key($args{speaker});
+        $users{$speaker_key} = { %{ $users{$speaker_key} } }
+            if defined($speaker_key) && exists $users{$speaker_key};
+        $channel{users} = \%users;
+        $channel{replies} = [ @{ $channel{replies} || [] } ];
+        $states{$channel_key} = \%channel;
+    }
+
+    my %shadow = (%$self,
+        channel_states => \%states,
+        rng_cb => sub { 0 },
+    );
+    my $copy = bless \%shadow, ref($self);
+    my $decision = $copy->decide(%args);
+    $decision->{rate_pending} = 1
+        if $decision->{reply}
+            && ($args{mode} // '') eq 'mention'
+            && ($decision->{force} // '') eq 'normal'
+            && $self->{key_reply_rate} < 100;
+    return $decision;
+}
+
 sub record_learn {
     my ($self, %args) = @_;
     my $channel_state = $self->_channel_state($args{channel});

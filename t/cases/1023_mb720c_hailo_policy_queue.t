@@ -52,6 +52,19 @@ return sub {
     $assert->is($cooldown->{reply_reason}, 'reply_cooldown',
         'per-user reply cooldown blocks repeated triggers');
 
+    $now = 103;
+    my $preview_cooldown = $policy->preview_decide(%base);
+    $assert->is($preview_cooldown->{learn_reason}, 'learn_cooldown',
+        'private preview reads the real learning cooldown');
+    $assert->is($preview_cooldown->{reply_reason}, 'reply_cooldown',
+        'private preview reads the real reply cooldown');
+    $assert->is($policy->{channel_states}{'#test'}{touched}, 102,
+        'private preview does not update the live channel timestamp');
+    $assert->is($policy->{channel_states}{'#test'}{users}{alice}{touched}, 102,
+        'private preview does not update the live user timestamp');
+    $assert->is($policy->{channel_states}{'#test'}{users}{alice}{last_reply}, 100,
+        'private preview does not change the reply cooldown');
+
     $now = 106;
     my $after = $policy->decide(%base);
     $assert->ok($after->{learn} && $after->{reply},
@@ -126,6 +139,22 @@ return sub {
     my $rate = $rate_policy->decide(%base, text => 'hello there friend');
     $assert->is($rate->{reply_reason}, 'key_reply_rate',
         'direct trigger probability is independently configurable');
+
+    my $rng_called = 0;
+    my $preview_policy = Mediabot::Hailo::Policy->new(
+        now_cb => sub { 55 }, rng_cb => sub { $rng_called++; return 99 },
+        key_reply_rate => 95,
+    );
+    my $eligible = $preview_policy->preview_decide(%base, channel => '#unused');
+    $assert->ok($eligible->{reply} && $eligible->{rate_pending},
+        'preview reports mention eligibility before the real probability draw');
+    $assert->is($rng_called, 0, 'preview does not consume the live random draw');
+    $assert->is($preview_policy->stats->{channels}, 0,
+        'preview does not create live channel policy state');
+    my $disabled_preview = $preview_policy->preview_decide(
+        %base, channel => '#unused', master_enabled => 0);
+    $assert->is($disabled_preview->{reason}, 'master_disabled',
+        'preview respects the effective channel master switch');
 
     my $queue_now = 10;
     my @delivered;

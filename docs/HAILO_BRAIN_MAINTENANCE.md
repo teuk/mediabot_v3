@@ -33,6 +33,13 @@ count. Learning is lossy and there is no documented public `forget` API:
   fallbacks, dropped work and current queue/in-flight counts. The bounded
   counters live in process memory since startup, may evict older channel
   histories, and never contain draft text or open a brain.
+- MB796 adds Master/Owner `<prefix>hailo check #channel ambient|mention|chatter
+  <texte>`: a private, read-only policy rehearsal for the authenticated
+  operator's own text. It inspects configured conversation exclusions, Hailo
+  normalization and current learn/reply gates without opening a brain,
+  training, making a provider request or sending to a channel. A possible
+  mention reply still needs its random draw; chatter traffic and late delivery
+  are not simulated. The sample text is not echoed in the notices.
 - MB790 makes `hailo braininfo` readable in three or four short private
   notices. It describes the brain's saved file size, Hailo's four counters,
   and the effective learning bounds, mention-reply percentage and channel
@@ -60,7 +67,8 @@ count. Learning is lossy and there is no documented public `forget` API:
 Tcl command names below omit its configurable public prefix (`.` by default).
 `<prefix>hailo help`, `<prefix>hailo braininfo #channel` and
 `<prefix>hailo savebrain #channel` are delivered in MB789;
-`<prefix>hailo edits #channel` is delivered in MB794. `<prefix>` is
+`<prefix>hailo edits #channel` is delivered in MB794 and private
+`<prefix>hailo check #channel <mode> <texte>` in MB796. `<prefix>` is
 `main.MAIN_PROG_CMD_CHAR` (usually `!`); Partyline keeps `.` for any separate
 operator commands. The `<prefix>hailo forget` and `<prefix>hailo forgetword`
 examples remain **proposed**, without callable mutators.
@@ -69,9 +77,9 @@ settings, not a promise to port MegaHAL internals one for one.
 
 | MenzAgitat Tcl | Purpose | Mediabot decision |
 | --- | --- | --- |
-| `aide_megahal`, `megaver` | Help and engine/interface version | Later: add `<prefix>hailo help` and version/backend metadata in the operator view. |
+| `aide_megahal`, `megaver` | Help and engine/interface version | MB789 delivers `<prefix>hailo help`; braininfo identifies SQLite. An exact Hailo engine version is not yet reported. |
 | `megahal`, `learn`, `respond`, `chatter` | Channel master, learning, direct replies, free chatter | Already modeled by the four Hailo chansets; document/query their effective state, keeping policy changes in the existing authorized channel path. |
-| `replyrate`, `keyreplyrate` | Free-chat and addressed-reply probabilities | `hailo_chatter` already manages the former. Audit the configured `HAILO_KEY_REPLY_RATE` and expose a bounded read-only value before deciding whether a runtime setter is useful. |
+| `replyrate`, `keyreplyrate` | Free-chat and addressed-reply probabilities | `hailo_chatter` manages the former; MB790 braininfo shows the configured `HAILO_KEY_REPLY_RATE` as a base rate. MB796 check marks a pending random draw without consuming it. |
 | `megahal_status`, `braininfo` | Channel switches and brain metrics | MB789/790: `<prefix>hailo braininfo #channel` reports the four Hailo counters, readable on-disk size, brain state, effective policy and applicable rates in short private notices. MB794 `<prefix>hailo edits #channel` separately reports transient post-editor outcomes; these are neither MegaHAL node counts nor retained training text. |
 | `countword`, `seekstatement` | Count a word; find a learned statement | Design bounded, read-only Hailo queries only if the stored representation supports truthful semantics. An occurrence of a token or transition does not prove an original sentence is retained verbatim. Mark uncertainty rather than invent a match. |
 | `forget`, `forgetword` | Remove a phrase; remove learned phrases containing a word | Priority: `<prefix>hailo forget #channel <exact phrase>` and `<prefix>hailo forgetword #channel <word>`. Implement only with proven selective deletion or verified rebuild of that channel from an authorized source. No fuzzy nearest-phrase deletion or substring match. See the contract below. |
@@ -82,7 +90,7 @@ settings, not a promise to port MegaHAL internals one for one.
 | `lobotomy`, `restorebrain` | Reset and restore a brain | Later, explicit Owner-only per-channel backup/restore with validation and rollback. Never silently reseed a reset channel from the legacy root brain. |
 | `memusage` | Estimate memory use | Report only measurable file/process facts, clearly scoped; avoid claiming an exact per-brain memory figure from process-wide RSS. |
 | `treesize`, `viewbranch`, `getwordsymbol` | Inspect MegaHAL trees and word symbols | MegaHAL-specific model. If needed, offer bounded Hailo token/link diagnostics with an authenticated operator surface and documented different semantics. |
-| `make_words`, `debug_output`, `moulinex_in`, `moulinex_out` | Inspect tokenization, output and Tcl text filters | MB793 brings three harmless French output typo/punctuation fixes into the actual reply path. A bounded, private dry-run command for the wider pipeline remains future work; do not log input text or feed it to learning. |
+| `make_words`, `debug_output`, `moulinex_in`, `moulinex_out` | Inspect tokenization, output and Tcl text filters | MB793 brings three French output typo/punctuation fixes into the actual reply path. MB796 privately rehearses exclusions and Hailo learn/reply policy without sending; provider output and the wider pipeline are not simulated. |
 | Force prefixes `&`, `%`, `~`, `$` | Override learn/reply combinations | Present in Mediabot's local policy engine, unavailable as public controls until authenticated privilege mapping exists. |
 
 The Tcl also has a permission-gated request to quiet the bot temporarily,

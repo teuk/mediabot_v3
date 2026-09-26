@@ -108,7 +108,7 @@ Source version line: `3.6dev`
 | `forget` | public | registry-public | `forget <keyword>` | Delete a channel fact (author or channel op only). |  |
 | `gemini` | public | registry-public | `gemini <prompt>` | Ask Google Gemini in at most two IRC-rendered lines. Requires the per-channel +Gemini chanset. |  |
 | `greet` | public | registry-public, registry-private | `greet [text]` | Show or set a greeting. |  |
-| `hailo` | admin | registry-public | `hailo help / braininfo #channel / edits #channel / savebrain #channel` | Inspect a Hailo brain or its private edit counters; save requires Owner. |  |
+| `hailo` | admin | registry-public | `hailo help / braininfo #channel / edits #channel / check #channel mode text / savebrain #channel` | Inspect Hailo policy, brain and private edit counters; save requires Owner. |  |
 | `hailo_chatter` | admin | registry-public | `hailo_chatter [on\|off]` | Control Hailo chatter behavior. |  |
 | `hailo_ignore` | admin | registry-public | `hailo_ignore <nick>` | Ignore a nick for Hailo learning or replies. |  |
 | `hailo_status` | admin | registry-public | `hailo_status [#channel]` | Show channel-specific Hailo brain counters. |  |

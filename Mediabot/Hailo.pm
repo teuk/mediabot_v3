@@ -17,6 +17,7 @@ use strict;
 use warnings;
 
 use Exporter 'import';
+use Mediabot::AI::ConversationExclusion;
 use Mediabot::Helpers;
 use Mediabot::Hailo::BrainRegistry;
 use Mediabot::Hailo::BrainInfo qw(brain_info);
@@ -38,6 +39,7 @@ our @EXPORT = qw(
     hailo_reply_before_learning
     hailo_channel_policy
     hailo_process_turn
+    hailo_preview_turn
     hailo_post_edit_runtime
     hailo_observe_public_line
     hailo_submit_candidate
@@ -569,6 +571,85 @@ sub hailo_process_turn {
         normalized    => $normalized,
         policy        => $policy_state,
         output_reason => $output_reason,
+    };
+}
+
+# Private policy rehearsal for an operator. It reads the same exclusion,
+# normalization and channel policy as a public line, but never opens a brain,
+# learns, requests a provider answer or sends to the channel. No input text
+# leaves this call in its return value.
+sub hailo_preview_turn {
+    my ($self, %args) = @_;
+    my ($channel, $speaker, $text, $mode) = @args{qw(channel speaker text mode)};
+    return { ok => 0, reason => 'invalid_input' }
+        unless defined($channel) && !ref($channel)
+            && $channel =~ /\A\#[^\s,\x00-\x1f\x7f]{1,79}\z/
+            && defined($speaker) && !ref($speaker)
+            && length($speaker) && length($speaker) <= 100
+            && $speaker !~ /[\s,;:=+\x00-\x1f\x7f]/
+            && defined($text) && !ref($text)
+            && length($text) && length($text) <= 600
+            && $text !~ /[\x00-\x1f\x7f]/
+            && defined($mode) && !ref($mode)
+            && $mode =~ /\A(?:ambient|mention|chatter)\z/;
+
+    my $policy = $self->{hailo_policy};
+    return { ok => 0, reason => 'policy_unavailable' }
+        unless $policy && $policy->can('preview_decide');
+    my $bot_nick = eval { $self->{irc}->nick_folded } || '';
+    my $exclusion = eval {
+        Mediabot::AI::ConversationExclusion->new(conf => $self->{conf})
+            ->classify_public_line(
+                channel => $channel, nick => $speaker,
+                bot_nick => $bot_nick, message => $text,
+            );
+    };
+    return { ok => 0, reason => 'exclusion_unavailable' }
+        if $@ || ref($exclusion) ne 'HASH';
+    if ($exclusion->{excluded}) {
+        my $reason = $exclusion->{reason} // '';
+        $reason = 'excluded' unless $reason =~ /\A(?:declared_bot|bot_address|bot_command)\z/;
+        return { ok => 1, learn => 0, reply => 0,
+            learn_reason => $reason, reply_reason => $reason };
+    }
+
+    my $excluded = eval { is_hailo_excluded_nick($self, $speaker) };
+    return { ok => 0, reason => 'exclusion_unavailable' } if $@;
+    my $normalized = normalize_hailo_input(
+        channel          => $channel,
+        speaker          => $speaker,
+        bot_nick         => $bot_nick,
+        nicks            => _hailo_channel_nicks($self, $channel),
+        text             => $text,
+        command_prefixes => _hailo_command_prefixes($self),
+        max_chars        => eval { $self->{conf}->get('hailo.HAILO_MAX_INPUT_CHARS') },
+    );
+    return { ok => 0, reason => 'normalization_failed' }
+        unless ref($normalized) eq 'HASH' && $normalized->{ok};
+    my $switches = eval { hailo_channel_policy($self, $channel, fresh => 1) };
+    return { ok => 0, reason => 'policy_unavailable' }
+        if $@ || ref($switches) ne 'HASH';
+    my $decision = eval { $policy->preview_decide(
+        channel => $channel, speaker => $speaker,
+        text => $normalized->{text}, mode => $mode,
+        master_enabled => $switches->{master},
+        learn_enabled => $switches->{learn},
+        respond_enabled => $switches->{respond},
+        chatter_enabled => $switches->{chatter},
+        excluded => $excluded ? 1 : 0,
+        is_command => $normalized->{is_command},
+        force_authorized => 0,
+    ) };
+    return { ok => 0, reason => 'policy_unavailable' }
+        if $@ || ref($decision) ne 'HASH';
+
+    return { ok => 1,
+        learn => $decision->{learn} ? 1 : 0,
+        reply => $decision->{reply} ? 1 : 0,
+        rate_pending => $decision->{rate_pending} ? 1 : 0,
+        learn_reason => $decision->{learn_reason} // $decision->{reason} // 'unknown',
+        reply_reason => $decision->{reply_reason} // $decision->{reason} // 'unknown',
+        key_reply_rate => $policy->operator_settings->{key_reply_rate},
     };
 }
 
