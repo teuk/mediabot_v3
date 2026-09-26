@@ -35,6 +35,10 @@ see whether live replies were corrected, unchanged, locally fallen back or
 dropped. Its memory-only counters reset on restart and contain no reply text;
 they support, but cannot replace, a real development conversation.
 
+MB795 closes two gaps in the answer-quality gate: `pas` cannot silently become
+`jamais`, and the same two numbers cannot silently exchange places. It still
+needs real conversation samples on development to judge semantic quality.
+
 Steps 2 and 3 use the baseline from step 1. The URL investigation can run
 independently if a reproducible failure is available. A step may stay open
 until its evidence exists; this table is an order of decisions, not a promise

@@ -168,6 +168,32 @@ return sub {
     $assert->is($fixed_negative->{reason}, 'edited',
         'repairing a broken French negation remains allowed');
 
+    my (undef, $strengthened_negative) = _run_editor_1020(
+        result => { ok => 1, answer => 'Je ne veux jamais partir ce soir.' },
+        channel_language => 'fr', trigger => 'tu veux partir ce soir ?',
+        candidate => 'je ne veux pas partir ce soir',
+    );
+    $assert->is($strengthened_negative->{reason}, 'anchor_rejected',
+        'changing pas to jamais is rejected even when both edits are negative');
+    $assert->is($strengthened_negative->{line}, 'je ne veux pas partir ce soir',
+        'changed negative meaning falls back to the Hailo draft');
+
+    my (undef, $lost_negative) = _run_editor_1020(
+        result => { ok => 1, answer => 'Je ne veux pas partir ce soir.' },
+        channel_language => 'fr', trigger => 'tu veux partir ce soir ?',
+        candidate => 'je ne veux jamais partir sans toi ce soir',
+    );
+    $assert->is($lost_negative->{reason}, 'anchor_rejected',
+        'keeping one negative word does not excuse losing another one');
+
+    my (undef, $gender_agreement) = _run_editor_1020(
+        result => { ok => 1, answer => 'Je ne vois aucune voiture ici.' },
+        channel_language => 'fr', trigger => 'tu vois une voiture ?',
+        candidate => 'je ne vois aucun voiture ici',
+    );
+    $assert->is($gender_agreement->{reason}, 'edited',
+        'aucun to aucune gender agreement remains a valid grammatical repair');
+
     my (undef, $quantity) = _run_editor_1020(
         result => { ok => 1, answer => 'Je pars à 22 heures ce soir.' },
         channel_language => 'fr', trigger => 'à quelle heure pars-tu ?',
@@ -175,6 +201,24 @@ return sub {
     );
     $assert->is($quantity->{reason}, 'anchor_rejected',
         'provider cannot replace a number while preserving most words');
+
+    my (undef, $reversed_order) = _run_editor_1020(
+        result => { ok => 1, answer => 'Je pars à 22 heures puis à 21 heures.' },
+        channel_language => 'fr', trigger => 'quel est ton ordre de départ ?',
+        candidate => 'je pars à 21 heures puis à 22 heures',
+    );
+    $assert->is($reversed_order->{reason}, 'anchor_rejected',
+        'provider cannot invert the order of two preserved numbers');
+    $assert->is($reversed_order->{line}, 'je pars à 21 heures puis à 22 heures',
+        'inverted number order falls back to the Hailo draft');
+
+    my (undef, $numbers_repaired) = _run_editor_1020(
+        result => { ok => 1, answer => 'Je pars à 21 heures, puis à 22 heures.' },
+        channel_language => 'fr', trigger => 'quel est ton ordre de départ ?',
+        candidate => 'je pars à 21 heures puis à 22 heures',
+    );
+    $assert->is($numbers_repaired->{reason}, 'edited',
+        'grammar and punctuation can improve a reply with numbers in place');
 
     my (undef, $chatter, $chatter_request) = _run_editor_1020(
         result => { ok => 1, answer => 'Cette musique me rappelle la pluie.' },

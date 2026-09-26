@@ -74,7 +74,10 @@ MB792 supplies the reply mode: a direct reply should address the triggering
 message, whereas spontaneous chatter should contribute to the recent topic.
 The provider may reorder fragments and add short connective words to make
 the draft coherent. It must retain the draft's subject and explicit meaning;
-the local validator also refuses changed numbers and reversed negation.
+the local validator also refuses changed or reordered numbers and changes to
+explicit negative markers (for example `pas` → `jamais`). French grammatical
+agreement between `aucun` and `aucune` remains allowed. This is a bounded
+heuristic, not a guarantee that every accepted answer preserves meaning.
 MB793 retains the old MegaHAL output moulinette's `sa va` → `ça va`,
 first-person `je susi` → `je suis`, and `,.` → `.` corrections for French
 replies only. These are small local fixes, not a dictionary or a substitute
@@ -135,7 +138,7 @@ conditions force the locally prepared candidate fallback:
 - line break, control byte or oversized output;
 - implausible expansion or contraction;
 - loss of the candidate's learned lexical anchor;
-- changed numbers or reversed explicit negation.
+- changed number order or values, or a changed explicit negative marker.
 
 Every normal Hailo reply enters this boundary. `HAILO_POST_EDIT_ENABLED=0` is
 an explicit emergency provider kill switch: it retains the locally prepared

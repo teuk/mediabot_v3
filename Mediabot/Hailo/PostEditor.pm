@@ -51,19 +51,24 @@ sub _tokens {
         map { lc $_ } "$text" =~ /([\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)?)/gu;
 }
 
-sub _negated {
+sub _negative_markers {
     my ($text) = @_;
     my $copy = lc "$text";
     $copy =~ tr/’/'/;
     my @words = $copy =~ /([\p{L}]+(?:'[\p{L}]+)?)/gu;
-    return scalar grep {
+    my @markers = grep {
         /\A(?:pas|jamais|aucun|aucune|non|ni|sans|not|never|no|nothing|without|cannot|can't|don't|didn't|won't|nunca|nadie|sin)\z/u
     } @words;
+    # Grammatical gender agreement can change aucun/aucune without changing
+    # the negative quantifier. Keep other markers distinct: pas != jamais.
+    return map { $_ eq 'aucune' ? 'aucun' : $_ } @markers;
 }
 
 sub _numbers {
     my ($text) = @_;
-    return sort "$text" =~ /(?<!\p{N})(\p{N}+)(?!\p{N})/gu;
+    # The same quantities in a different order can describe the opposite
+    # result ("21 puis 22" versus "22 puis 21").
+    return "$text" =~ /(?<!\p{N})(\p{N}+)(?!\p{N})/gu;
 }
 
 sub _preserves_anchor {
@@ -73,7 +78,9 @@ sub _preserves_anchor {
     # Overlapping words alone cannot detect inverted answers or changed
     # quantities. These checks make the provider keep explicit meaning while
     # still allowing grammar, word order and short connective repairs.
-    return 0 if !!_negated($candidate) != !!_negated($edited);
+    my @base_negation = _negative_markers($candidate);
+    my @edited_negation = _negative_markers($edited);
+    return 0 unless "@base_negation" eq "@edited_negation";
     my @base_numbers = _numbers($candidate);
     my @edited_numbers = _numbers($edited);
     return 0 unless "@base_numbers" eq "@edited_numbers";
@@ -103,7 +110,7 @@ sub _system_prompt {
         $intent,
         'Correct spelling, punctuation, agreement and grammar. Join or reorder fragments when needed so the reply makes sense in the immediate conversation.',
         'The Hailo draft is the creative source: preserve its concrete images, topic, tone and recognisable vocabulary, not accidental broken syntax.',
-        'Preserve negation, numbers and the direction of any claim. Do not reverse an answer or make up a new subject.',
+        'Preserve negation, numbers and the direction of any claim. Keep the exact negative meaning (for example, pas is not jamais) and the order and roles of numbers. Do not reverse an answer or make up a new subject.',
         "Write naturally in $name unless the supplied conversation clearly code-switches.",
         'Do not add facts, advice, explanations, greetings, moral commentary or claims not supported by the draft.',
         'If the draft cannot become a sensible reply without inventing meaning, return it unchanged.',

@@ -10,6 +10,14 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB795 — keep Hailo's negative meaning and sequence
+
+- Reject AI post-edits that exchange one negative marker for another (such as
+  `pas` for `jamais`) or reorder numbers, even when the resulting line retains
+  most words. Let French `aucun`/`aucune` agreement remain a valid correction.
+- Ask the provider to preserve those meanings explicitly. Rejected edits still
+  use the original Hailo candidate and the existing late delivery gates. 🪄🧠
+
 ### MB794 — read the Hailo post-editor's flight log
 
 - Add authenticated, private `<prefix>hailo edits #channel` with bounded
