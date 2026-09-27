@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB797 — check the Quietus ward against the actual configuration
+
+- Add a read-only exclusion audit that accepts an operator-supplied inventory
+  of external commands and senders, loads Mediabot's real configuration
+  reader and tests it through the public-line exclusion classifier. Report
+  uncovered names and whether an ordinary line remains visible; never print
+  message text or the configuration's other values.
+- Mark the eight recorded `#i/o` pyDuckHunt commands as a historical example,
+  awaiting comparison with the live bot (including any renamed commands).
+  No nbot config or traffic changes are made. 🪄🛡️
+
 ### MB796 — rehearse Hailo's policy without speaking
 
 - Add authenticated, private `hailo check #channel ambient|mention|chatter

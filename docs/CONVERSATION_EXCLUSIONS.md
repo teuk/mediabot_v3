@@ -46,12 +46,35 @@ CHANNEL_BOTS=i/o:Coin
 CHANNEL_COMMANDS=i/o:!bang+!pan+!reload+!shop+!inventory+!duckstats+!lastduck+!duckrank
 ```
 
-Thus `!bang vite` is ignored by Mediabot, while `#quote`, `!helpful` and normal
-conversation continue through their existing paths. The command list is an
+With this example installed, `!bang vite` is ignored by Mediabot, while
+`#quote`, `!helpful` and normal conversation continue through their existing
+paths. The recorded command list is an
 explicit operational contract and must be reviewed if pyDuckHunt adds or
 renames public commands. MB796's private Hailo policy check can rehearse an
 exact candidate command, but only a review of the live bot establishes the
 complete list.
+
+MB797 adds a read-only comparison against the **configuration file of the
+instance being checked**. Supply command names from the current external bot
+and its bot nick explicitly. This example includes the eight recorded names
+plus `!bread` and `!birdcall` as candidates to verify; the latter two are not
+asserted to be deployed:
+
+```sh
+perl tools/mb_conversation_exclusions_audit.pl \
+  --config mediabot.conf --channel '#i/o' --bot-nick nbot --bot Coin \
+  --command '!bang' --command '!pan' --command '!reload' \
+  --command '!shop' --command '!inventory' --command '!duckstats' \
+  --command '!lastduck' --command '!duckrank' \
+  --command '!bread' --command '!birdcall'
+```
+
+The tool prints only counts and missing command/bot names. It returns exit 2
+when coverage is missing or an ordinary sample is wrongly excluded, exit 0
+when the **provided list** is covered, and an error if the file cannot be read.
+It cannot discover the live pyDuckHunt command set or prove that a bot has
+reloaded a changed file. Run it on the same host and configuration as the
+instance under review; a clean dev result is not evidence about nbot.
 
 ## Runtime and observation
 

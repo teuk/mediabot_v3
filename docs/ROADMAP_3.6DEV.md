@@ -12,6 +12,7 @@ records previous release decisions.
 | Hailo brains | Per-channel persistence; private `braininfo`, `savebrain` and `edits` commands (MB789–794). | Real channel observation; selective forgetting needs a faithful corpus and an isolated rebuild. |
 | Answer quality | Provider grammar/coherence request, local typo cleanup and semantic fallbacks (MB792–795). | Compare actual Hailo drafts and provider replies on development; counters alone cannot prove quality. |
 | Hailo policy | MB796 adds private `hailo check #channel ambient|mention|chatter <texte>` for an operator's own text, without learning, opening a brain, submitting to a provider or sending to a channel. | Review actual pyDuckHunt command names and bot senders before using this on an nbot pilot. The check reports eligibility; randomness, traffic and late delivery remain separate. |
+| `#i/o` exclusions | MB797 adds a read-only audit of a supplied pyDuckHunt command/bot inventory against the configuration and classifier of the instance being checked. | Compare against the live pyDuckHunt list and runtime diagnostics on nbot; the recorded eight names are an example, not proven current. |
 | Spark and URLs | Existing pacing guards and TinyURL destination checks. | Bounded Spark replay; reproduce `blocked_destination` and rate limit failures with safe URLs. |
 | API v3 plugins | Five accepted packages and their existing nbot policies. | Preserve boot, policy and restart behavior across upgrades. |
 
@@ -19,7 +20,8 @@ records previous release decisions.
 
 1. **Qualify `#i/o` exclusions.** Compare the live pyDuckHunt command list and
    sender identities with [the exact exclusion contract](CONVERSATION_EXCLUSIONS.md)
-   and recent `mediabot.log`. Update configuration and fixtures only after that
+   and recent `mediabot.log`. Run MB797's read-only audit against the target
+   instance's own configuration. Update configuration and fixtures only after that
    comparison. Acceptance: an ordinary user line remains eligible; known bot
    lines, direct addresses and exact external commands never reach learning,
    Spark or URL preview. Keep message bodies out of retained diagnostics.

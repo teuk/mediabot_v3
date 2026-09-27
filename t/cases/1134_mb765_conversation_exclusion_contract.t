@@ -34,7 +34,10 @@ return sub {
         'production Coin declaration is exact');
     $assert->like($guide,
         qr/CHANNEL_COMMANDS=i\/o:!bang\+!pan\+!reload\+!shop\+!inventory\+!duckstats\+!lastduck\+!duckrank/,
-        'documented pyDuckHunt namespace matches its reviewed public commands');
+        'the recorded pyDuckHunt command example remains available for comparison');
+    $assert->like($guide,
+        qr/Compare it with the\s+installed pyDuckHunt command list before treating it as current production\s+coverage/s,
+        'recorded examples must not claim unverified current production coverage');
     $assert->like($guide,
         qr/before user-seen updates, achievements, reminders, trivia,/,
         'operator contract states the early shared boundary');
