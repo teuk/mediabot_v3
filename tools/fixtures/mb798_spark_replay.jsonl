@@ -1,0 +1,10 @@
+{"at":0,"type":"line","nick":"Alice","message":"un café"}
+{"at":1,"type":"line","nick":"Bob","message":"bonjour"}
+{"at":2,"type":"line","nick":"Alice","message":"il arrive"}
+{"at":3,"type":"line","nick":"Bob","message":"merci"}
+{"at":4,"type":"line","nick":"Coin","message":"duck appears"}
+{"at":5,"type":"line","nick":"Alice","message":"Coin: !bang"}
+{"at":6,"type":"line","nick":"Bob","message":"!bang now"}
+{"at":50,"type":"probe"}
+{"at":70,"type":"probe"}
+{"at":90,"type":"probe"}

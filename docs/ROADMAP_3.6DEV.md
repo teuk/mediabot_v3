@@ -13,7 +13,7 @@ records previous release decisions.
 | Answer quality | Provider grammar/coherence request, local typo cleanup and semantic fallbacks (MB792–795). | Compare actual Hailo drafts and provider replies on development; counters alone cannot prove quality. |
 | Hailo policy | MB796 adds private `hailo check #channel ambient|mention|chatter <texte>` for an operator's own text, without learning, opening a brain, submitting to a provider or sending to a channel. | Review actual pyDuckHunt command names and bot senders before using this on an nbot pilot. The check reports eligibility; randomness, traffic and late delivery remain separate. |
 | `#i/o` exclusions | MB797 adds a read-only audit of a supplied pyDuckHunt command/bot inventory against the configuration and classifier of the instance being checked. | Compare against the live pyDuckHunt list and runtime diagnostics on nbot; the recorded eight names are an example, not proven current. |
-| Spark and URLs | Existing pacing guards and TinyURL destination checks. | Bounded Spark replay; reproduce `blocked_destination` and rate limit failures with safe URLs. |
+| Spark and URLs | MB798 adds a bounded, offline Spark replay using the production exclusion and pacing logic; TinyURL destination checks exist. | Replay anonymized windows from the target environment; reproduce `blocked_destination` and rate limit failures with safe URLs. |
 | API v3 plugins | Five accepted packages and their existing nbot policies. | Preserve boot, policy and restart behavior across upgrades. |
 
 ## Next decisions
@@ -31,10 +31,11 @@ records previous release decisions.
    Acceptance: no excluded learning, distinct learn/respond/chatter controls,
    bounded rates, no send after revocation, and replies whose meaning stays
    anchored to the Hailo draft. The preview does not replace live evidence.
-3. **Measure Spark independently.** Replay quiet, solo, small and busy channel
-   windows with both send arms disabled. Acceptance: at most one eligible
-   candidate per window, correct bot pressure and cooldown decisions, and no
-   output from excluded lines. A live send requires its own decision.
+3. **Measure Spark independently.** Use the MB798
+   [offline replay](SPARK_OFFLINE_REPLAY.md) on anonymized quiet, solo, small
+   and busy channel windows. Acceptance: at most one momentum candidate per
+   unchanged human conversation window, correct bot pressure and pacing,
+   and no influence from excluded lines. A live send requires its own decision.
 4. **Investigate URL failures.** Reproduce TinyURL/news `blocked_destination`
    and rate limit behavior with controlled URLs. Acceptance: destinations stay
    blocked when unsafe, safe originals survive a failed shortening attempt,

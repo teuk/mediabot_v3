@@ -10,6 +10,15 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB798 — replay Spark without waking the room
+
+- Add a bounded offline Spark replay using the production conversation
+  exclusion, observer, state and orchestrator. Anonymized JSON Lines input
+  produces decision metadata only: no provider request or IRC sender exists.
+- Verify empty, solo and small audiences, nonexcluded bot pressure, excluded
+  automation and the one-momentum-candidate-per-human-window rule. Keep
+  target-instance evidence separate from the included synthetic fixture. 🪄✨
+
 ### MB797 — check the Quietus ward against the actual configuration
 
 - Add a read-only exclusion audit that accepts an operator-supplied inventory
