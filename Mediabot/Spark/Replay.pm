@@ -27,6 +27,16 @@ sub replay_events {
         && $bot_nick =~ /\A[^\s,:\x00-\x1f\x7f]{1,100}\z/
         && ref($events) eq 'ARRAY' && @$events <= 256;
 
+    # The live observer receives the instance's configured public command
+    # prefix. A replay must use that same prefix or it may count commands as
+    # human conversation. Older synthetic fixtures without this key use !.
+    my $command_char = eval { $args{conf}->get('main.MAIN_PROG_CMD_CHAR') };
+    die "replay command prefix unavailable\n" if $@;
+    $command_char = '!' unless defined($command_char) && "$command_char" ne '';
+    die "invalid replay command prefix\n"
+        if ref($command_char) || length("$command_char") != 1
+            || "$command_char" =~ /[\s\x00-\x1f\x7f]/;
+
     my $time = 10_000;
     my $clock = sub { $time };
     my $observer = Mediabot::Spark::Observer->new(clock => $clock);
@@ -73,7 +83,7 @@ sub replay_events {
             my $result = $runtime->observe_public_line(
                 enabled => 1, channel => $channel,
                 nick => $nick, message => $message,
-                bot_nick => $bot_nick, command_char => '!',
+                bot_nick => $bot_nick, command_char => $command_char,
                 from_bot => $event->{from_bot} ? 1 : 0,
             );
             die "observer unavailable\n" unless ref($result) eq 'HASH'

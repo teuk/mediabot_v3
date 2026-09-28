@@ -10,6 +10,15 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB805 — rehearse Hailo recovery and read Spark's real prefix
+
+- Add a synthetic, isolated Hailo 0.75 exercise for exact-phrase and whole-word
+  corpus selection, rebuild, reopen, channel isolation and backup restoration.
+  It never reads a live brain or claims selective removal from an old one.
+- Use the instance's configured public command prefix in offline Spark replay;
+  `#rss` must not become a human conversation event when the prefix is `#`.
+  Keep the five accepted plugin packages under their existing source gate. 🧠⚡
+
 ### MB804 — distinguish RSS DNS outages from blocked destinations
 
 - Report resolver failures and empty DNS answers as `dns_unavailable`, while

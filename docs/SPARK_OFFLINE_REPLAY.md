@@ -6,6 +6,14 @@ orchestrator with a virtual monotonic clock. The tool constructs no generator,
 provider, IRC connection or sender. Candidate results are policy evidence only.
 It changes neither process send arm nor channel capability.
 
+MB805 takes `main.MAIN_PROG_CMD_CHAR` from the supplied instance configuration
+when classifying the bot's own commands. Thus a configured `#rss` contributes
+short command pressure rather than human conversation in a replay, just as it
+does at runtime. The synthetic fixture
+below has no prefix setting and retains the historical `!` default. An invalid
+configured prefix fails the replay instead of counting command traffic as
+conversation.
+
 The synthetic fixture is tracked as `.txt`: `commit.sh` deliberately removes
 `.conf` files from source commits to protect live configuration. Copy the
 fixture to a private temporary `.conf` for the real config reader. From the

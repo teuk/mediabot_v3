@@ -1,65 +1,45 @@
 # Mediabot 3.6dev — development roadmap
 
-Stable 3.5 is published. The source work below stays on 3.6dev; there is no
-scheduled 3.7 release or production upgrade. A green source suite qualifies
-code, not the behavior of nbot on `#i/o`. The [3.5 roadmap](ROADMAP_3.5.md)
-records previous release decisions.
+Stable 3.5 remains published. There is no scheduled 3.7 release or production
+upgrade. The operator considers the `#i/o` exclusion inventory and Hailo reply
+observation complete for the current planning sequence. This decision does not
+turn a development commit into an nbot deployment.
 
 ## Current position
 
-| Area | Delivered on development | Still needed |
+| Area | Delivered | Current work |
 | --- | --- | --- |
-| Hailo brains | Per-channel persistence; private `braininfo`, `savebrain` and `edits` commands (MB789–794). | Real channel observation; selective forgetting needs a faithful corpus and an isolated rebuild. |
-| Answer quality | Provider grammar/coherence request, local typo cleanup and semantic fallbacks (MB792–795). | Compare actual Hailo drafts and provider replies on development; counters alone cannot prove quality. |
-| Hailo policy | MB796 adds private `hailo check #channel ambient|mention|chatter <texte>` for an operator's own text, without learning, opening a brain, submitting to a provider or sending to a channel. | Review actual pyDuckHunt command names and bot senders before using this on an nbot pilot. The check reports eligibility; randomness, traffic and late delivery remain separate. |
-| `#i/o` exclusions | MB797 adds a read-only audit of a supplied pyDuckHunt command/bot inventory against the configuration and classifier of the instance being checked. | Compare against the live pyDuckHunt list and runtime diagnostics on nbot; the recorded eight names are an example, not proven current. |
-| Spark and URLs | MB798 adds a bounded, offline Spark replay using the production exclusion and pacing logic; TinyURL destination checks exist. | Replay anonymized windows from the target environment; reproduce `blocked_destination` and rate limit failures with safe URLs. |
-| API v3 plugins | Five accepted packages and their existing nbot policies. | Preserve boot, policy and restart behavior across upgrades. |
+| Hailo | Channel brains, `braininfo`, `savebrain`, `edits`, policy `check`, and the development reply work through MB803. | MB805 rehearses backup and isolated rebuild with synthetic input. `forget` and `forgetword` still need an exact authorized corpus and a safe live replacement protocol. |
+| Spark | MB798 offline replay uses the production exclusion, observer and pacing logic without a sender. | MB805 aligns replay's command prefix with its supplied configuration; measure anonymized `#i/o` windows before a separate live-send decision. |
+| URLs | MB804 distinguishes DNS unavailability from a blocked RSS destination. A Journal du Geek probe returned HTTP 200 and a news item was announced on development. | Revisit TinyURL or RSS only with a reproducible failure; keep unsafe destinations blocked and safe original links usable. |
+| API v3 plugins | Five packages are accepted with their nbot policies and the MB784/786 preservation contracts. | Recheck source contracts and live Doctor/policy/boot state after an upgrade; retain the existing rollback boundary. |
 
-## Next decisions
+## Next sequence
 
-1. **Qualify `#i/o` exclusions.** Compare the live pyDuckHunt command list and
-   sender identities with [the exact exclusion contract](CONVERSATION_EXCLUSIONS.md)
-   and recent `mediabot.log`. Run MB797's read-only audit against the target
-   instance's own configuration. Update configuration and fixtures only after that
-   comparison. Acceptance: an ordinary user line remains eligible; known bot
-   lines, direct addresses and exact external commands never reach learning,
-   Spark or URL preview. Keep message bodies out of retained diagnostics.
-2. **Exercise Hailo on development.** Use private `hailo check` with ambient,
-   mention and chatter samples; inspect `hailo braininfo` and `hailo edits`.
-   Then observe actual provider output and late delivery after a policy change.
-   Acceptance: no excluded learning, distinct learn/respond/chatter controls,
-   bounded rates, no send after revocation, and replies whose meaning stays
-   anchored to the Hailo draft. The preview does not replace live evidence.
-3. **Measure Spark independently.** Use the MB798
-   [offline replay](SPARK_OFFLINE_REPLAY.md) on anonymized quiet, solo, small
-   and busy channel windows. Acceptance: at most one momentum candidate per
-   unchanged human conversation window, correct bot pressure and pacing,
-   and no influence from excluded lines. A live send requires its own decision.
-4. **Investigate URL failures.** Reproduce TinyURL/news `blocked_destination`
-   and rate limit behavior with controlled URLs. Acceptance: destinations stay
-   blocked when unsafe, safe originals survive a failed shortening attempt,
-   and retries cannot flood a provider.
-5. **Maintain plugin and release gates.** Recheck the five API v3 packages,
-   Doctor, policy, boot ledger and plugin data after upgrades. A proposed nbot
-   change needs its own before-state, observation window and exact rollback.
-   Consider a future stable release only by a separate operator decision.
+1. **Selective Hailo maintenance.** Run the synthetic MB805 rehearsal on the
+   development host. Determine whether a complete, authorized per-channel
+   training corpus can be retained for future brains. Prove exact selection,
+   interruption recovery, isolated rebuild, generation-gated switch, restart
+   persistence and rollback before adding Owner-only `forget` or `forgetword`.
+   An old brain without a faithful corpus remains ineligible for selective
+   deletion; a whole-brain reset is a different operation.
+2. **Spark measurement.** Replay anonymized quiet, solo, small and busy windows
+   using the target instance's configuration, including its actual command
+   prefix. Require correct bot pressure and pacing, no excluded-line influence,
+   and at most one momentum candidate in an unchanged human conversation
+   window. A live send requires its own acceptance and rollback.
+3. **Plugin and release maintenance.** Preserve all five API v3 packages,
+   manifest capabilities, policies, boot ledger and business data after an
+   upgrade. Keep Doctor and failures readable; run the existing MB784/786
+   source contracts before a source commit. A future stable release needs a
+   separate decision.
+4. **URLs on evidence.** If a TinyURL/news failure recurs, record the exact
+   failure class and test a controlled destination without weakening the
+   destination guard or causing a retry flood.
 
-## Source gate and nbot boundary
+## Source and runtime boundary
 
-Run targeted tests, the fast lane, then one visible full suite immediately
-before each source commit. Use `mediabot.log` for application behavior and
-systemd for service lifecycle. A dev restart never changes nbot. CI and live
-observation are additional evidence before a separately scoped nbot pilot.
-
-## Hailo maintenance still open
-
-Delivered: Master/Owner can inspect a channel brain, view in-memory post-edit
-outcomes and rehearse a sample policy decision; Owner can save an existing
-brain. See the [command crosswalk](HAILO_BRAIN_MAINTENANCE.md) for exact
-privileges and the separate MegaHAL semantics.
-
-`forget` and `forgetword` are not implemented. Old Hailo brains do not retain
-all training phrases, so an exact channel corpus and a tested isolated rebuild
-are prerequisites for selective removal. Do not claim that a reply filter,
-SQLite edit or whole-brain reset forgets an individual phrase.
+Run focused tests, the fast lane, then one visible full suite immediately
+before each source commit. A dev restart does not change nbot. An offline
+replay or synthetic brain proves only the behavior it exercises; nbot work
+requires its own observed before-state, window and rollback.

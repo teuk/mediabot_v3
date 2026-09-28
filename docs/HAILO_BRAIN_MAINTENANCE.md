@@ -136,3 +136,14 @@ feasibility/fixture tests for exact forgetting. Ship actual mutators only after 
 throwaway brain, including interruption and restart cases. Then use the
 regular targeted tests, fast lane and single final full suite before commit;
 observe any nbot `#i/o` pilot separately with a before-state and reversal.
+
+MB805 adds `perl tools/mb_hailo_forget_rehearsal.pl` for an isolated synthetic
+exercise on a host with Hailo 0.75 installed. It trains two throwaway brains,
+selects one exact phrase and two whole-word matches from a four-line sample,
+builds separate replacements, reopens them, checks that the other brain is
+untouched, and proves that the backup can be restored. It prints counts only
+and removes its private temporary files. Its simple sample-word selection is
+not Hailo's production tokenizer and is not a deletion algorithm for old
+brains. It reads no live brain or channel text. No `forget`/`forgetword` command
+is enabled by this rehearsal; a complete authorized training corpus and a
+separate replacement protocol remain required for real channels.
