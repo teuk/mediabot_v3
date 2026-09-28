@@ -10,6 +10,15 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB803 — show Hailo's own brain report in the current channel
+
+- Accept both `<prefix>hailo braininfo` and `<prefix>hailo braininfo #channel`
+  when invoked publicly: the first uses the current channel and both publish
+  the bounded, styled report there when the target matches the current channel.
+- Preserve authenticated Master access, private replies for cross-channel or
+  private invocations, and an explicit channel requirement in private. Other
+  Hailo subcommands retain their original argument and reply contracts. 🪄🧠
+
 ### MB798b — keep the Spark sample available after checkout
 
 - Track the synthetic replay configuration as plain text because the commit

@@ -208,6 +208,17 @@ sub save_existing {
     return { ok => 1, text => "Hailo brain $channel saved." };
 }
 
+sub _same_irc_channel {
+    my ($left, $right) = @_;
+    return 0 unless defined($left) && defined($right)
+        && !ref($left) && !ref($right);
+    $left = lc "$left";
+    $right = lc "$right";
+    $left =~ tr/[]\\^/{}|~/;
+    $right =~ tr/[]\\^/{}|~/;
+    return $left eq $right;
+}
+
 # The public command is registered in Mediabot's built-in catalogue, so its
 # prefix comes from main.MAIN_PROG_CMD_CHAR rather than being hard-coded here.
 sub hailo_command {
@@ -216,7 +227,7 @@ sub hailo_command {
     my @args = @{ $ctx->args };
     my $action = @args ? lc($args[0]) : '';
     if ($action eq 'help' && @args == 1) {
-        $ctx->reply_private('Hailo: braininfo #channel, edits #channel, check #channel ambient|mention|chatter <texte> (Master); savebrain #channel (Owner). Selective forget and forgetword require a complete training corpus.');
+        $ctx->reply_private('Hailo: braininfo [#channel] (canal courant si omis en public), edits #channel, check #channel ambient|mention|chatter <texte> (Master); savebrain #channel (Owner). Selective forget and forgetword require a complete training corpus.');
         return 1;
     }
     if ($action eq 'check') {
@@ -266,13 +277,23 @@ sub hailo_command {
             . _label('réponse') . " : $reply. Trafic et livraison non simulés.");
         return 1;
     }
-    unless (@args == 2 && ($action eq 'braininfo' || $action eq 'edits' || $action eq 'savebrain')
+    my $source_channel = eval { $ctx->channel };
+    my $in_channel = defined($source_channel) && !ref($source_channel)
+        && $source_channel =~ /\A\#[^\s,\x00-\x1f\x7f]{1,79}\z/;
+    my $channel;
+    if ($action eq 'braininfo' && @args == 1 && $in_channel) {
+        $channel = $source_channel;
+    }
+    elsif (@args == 2
+            && ($action eq 'braininfo' || $action eq 'edits' || $action eq 'savebrain')
             && defined($args[1]) && !ref($args[1])
             && $args[1] =~ /\A\#[^\s,\x00-\x1f\x7f]{1,79}\z/) {
-        $ctx->reply_private('Syntax: hailo braininfo <#channel> | hailo edits <#channel> | hailo check <#channel> <mode> <texte> | hailo savebrain <#channel> | hailo help');
+        $channel = $args[1];
+    }
+    else {
+        $ctx->reply_private('Syntax: hailo braininfo [#channel] (canal requis en privé) | hailo edits <#channel> | hailo check <#channel> <mode> <texte> | hailo savebrain <#channel> | hailo help');
         return;
     }
-    my $channel = $args[1];
     my $bot = $ctx->bot;
     if ($action eq 'edits') {
         my $runtime = $bot->{hailo_post_edit_runtime};
@@ -309,7 +330,10 @@ sub hailo_command {
     }
     my $settings = eval { $bot->{hailo_policy}->operator_settings };
     my $ratio = eval { $bot->get_hailo_channel_ratio($channel) };
-    $ctx->reply_private($_) for @{ brain_report($channel, $info, $policy, $settings, $ratio) };
+    my $reply = $in_channel && _same_irc_channel($channel, $source_channel)
+        ? sub { $ctx->reply($_[0]) }
+        : sub { $ctx->reply_private($_[0]) };
+    $reply->($_) for @{ brain_report($channel, $info, $policy, $settings, $ratio) };
     return 1;
 }
 

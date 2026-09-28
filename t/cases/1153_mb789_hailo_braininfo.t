@@ -88,8 +88,8 @@ like($ctx->{replies}[-1], qr/Access denied/,
 $ctx->{master} = 1;
 $ctx->{args} = ['braininfo'];
 hailo_command($ctx);
-like($ctx->{replies}[-1], qr/Syntax: hailo braininfo <#channel>/,
-    'explicit channel is required');
+like($ctx->{replies}[-1], qr/Syntax: hailo braininfo \[#channel\].*canal requis en priv/,
+    'explicit channel is still required in a private context');
 $ctx->{args} = ['braininfo', '#i/o'];
 hailo_command($ctx);
 my $visible = join(' ', @{ $ctx->{replies} });
