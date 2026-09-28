@@ -35,19 +35,21 @@ sub _validated_addresses {
     my ($host, $port, $resolver) = @_;
     my $literal = is_public_ip_literal($host);
     if (defined $literal) {
-        die "blocked RSS destination $host" unless $literal;
-        return [ $host ];
+        return (undef, 'blocked_destination', 'blocked IP literal') unless $literal;
+        return ([ $host ], undef, undef);
     }
 
     $resolver ||= \&_default_resolver;
-    my $ips = $resolver->($host, $port);
-    die "RSS destination has no address" unless ref($ips) eq 'ARRAY' && @$ips;
+    my $ips = eval { $resolver->($host, $port) };
+    return (undef, 'dns_unavailable', 'DNS resolution failed') if $@;
+    return (undef, 'dns_unavailable', 'RSS destination has no address')
+        unless ref($ips) eq 'ARRAY' && @$ips;
     for my $ip (@$ips) {
         my $public = is_public_ip_literal($ip);
-        die "RSS destination resolved to blocked address $ip"
+        return (undef, 'blocked_destination', 'RSS destination resolved to blocked address')
             unless defined($public) && $public;
     }
-    return $ips;
+    return ($ips, undef, undef);
 }
 
 sub _default_requester {
@@ -168,11 +170,10 @@ sub fetch_feed_once {
         return { ok => 0, error => $valid->{error} || 'invalid_url' }
             unless $valid->{ok};
 
-        my $ips = eval { _validated_addresses($valid->{host}, $valid->{port}, $resolver) };
+        my ($ips, $address_error, $detail) =
+            _validated_addresses($valid->{host}, $valid->{port}, $resolver);
         if (!$ips) {
-            my $err = $@ || 'dns_validation_failed';
-            $err =~ s/[\r\n\0]+/ /g;
-            return { ok => 0, error => 'blocked_destination', detail => $err };
+            return { ok => 0, error => $address_error, detail => $detail };
         }
 
         my %request_headers;

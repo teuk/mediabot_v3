@@ -10,6 +10,15 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB804 — distinguish RSS DNS outages from blocked destinations
+
+- Report resolver failures and empty DNS answers as `dns_unavailable`, while
+  private, reserved and invalid destinations remain `blocked_destination`.
+  Neither failure can send an HTTP request; redirects validate their target
+  independently. 🦉🔎
+- Keep diagnostics bounded and free of destination names. This source change
+  does not establish the cause of an earlier live RSS or TinyURL failure.
+
 ### MB803 — show Hailo's own brain report in the current channel
 
 - Accept both `<prefix>hailo braininfo` and `<prefix>hailo braininfo #channel`
