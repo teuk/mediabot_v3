@@ -10,6 +10,13 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB798b — keep the Spark sample available after checkout
+
+- Track the synthetic replay configuration as plain text because the commit
+  script correctly protects `.conf` files. Document copying it to a private
+  temporary `.conf` before running the read-only replay. No live configuration
+  or sending policy changes. 🪄📜
+
 ### MB798 — replay Spark without waking the room
 
 - Add a bounded offline Spark replay using the production conversation

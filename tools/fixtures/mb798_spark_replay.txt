@@ -1,0 +1,3 @@
+[conversation]
+CHANNEL_BOTS=room:Coin
+CHANNEL_COMMANDS=room:!bang

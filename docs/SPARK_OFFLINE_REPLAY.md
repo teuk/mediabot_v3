@@ -6,13 +6,23 @@ orchestrator with a virtual monotonic clock. The tool constructs no generator,
 provider, IRC connection or sender. Candidate results are policy evidence only.
 It changes neither process send arm nor channel capability.
 
-Run from the Mediabot source directory on development:
+The synthetic fixture is tracked as `.txt`: `commit.sh` deliberately removes
+`.conf` files from source commits to protect live configuration. Copy the
+fixture to a private temporary `.conf` for the real config reader. From the
+Mediabot source directory on development:
 
 ```sh
-perl tools/mb_spark_replay.pl \
-  --config tools/fixtures/mb798_spark_replay.conf \
-  --input tools/fixtures/mb798_spark_replay.jsonl \
-  --channel '#room' --bot-nick Mediabot
+(
+  set -Eeuo pipefail
+  umask 077
+  example_conf="$(mktemp /home/mediabot/mb798-example.XXXXXX.conf)"
+  trap 'rm -f -- "$example_conf"' EXIT
+  cp tools/fixtures/mb798_spark_replay.txt "$example_conf"
+  perl tools/mb_spark_replay.pl \
+    --config "$example_conf" \
+    --input tools/fixtures/mb798_spark_replay.jsonl \
+    --channel '#room' --bot-nick Mediabot
+)
 ```
 
 Supply a **copy of the target instance's config** when testing its exclusions;
