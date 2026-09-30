@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB807 — teach the dynamic spellbook Unicode and safe choices
+
+- Accept Unicode command names (including `café`), normalise NFC across
+  administration and runtime, and reject names shadowed by built-ins/plugins.
+- Compile dynamic templates in one pass: preserve legacy variables and numeric
+  ranges, support inclusive `%rand{min,max}`, literal `%choose{a|b}`, `%yesno%`,
+  positional arguments and `%%`. Inserted values are never interpreted again.
+- Apply the same validation to add/mod/rename; honour the 255-character action
+  column, reject line/CTCP injection and invalid bounded random directives.
+- Add `cmdvars` and private `testcmd` previews without hit updates, support
+  `holdcmd on|off|toggle`, find literal keywords in both command names and
+  templates, and allow Master ownership transfer of system-owned commands.
+- Keep category syntax compatible, correct help/inventory metadata, and count
+  valid invocations atomically without suppressing replies on a stats failure.
+
 ### MB806 — let Spark announce its VDM and DTC stories
 
 - Offer `vdm` and `dtc` in the long-silence Spark repertoire when each

@@ -17,6 +17,8 @@ use List::Util qw(min);
 use Exporter 'import';
 use Mediabot::Helpers;
 use Mediabot::SafeCalc qw(evaluate_expression format_result);
+use Mediabot::DynamicTemplate qw(normalize_name name_error template_error template_help);
+use Mediabot::BuiltinCommandCatalog qw(public_command_names);
 
 our @EXPORT = qw(
     IgnoresList_ctx
@@ -47,6 +49,8 @@ our @EXPORT = qw(
     mbDbRemCommand_ctx
     mbDbSearchCommand_ctx
     mbDbShowCommand_ctx
+    mbDbTestCommand_ctx
+    mbDbCommandVars_ctx
     mbLastCommand_ctx
     mbPopCommand_ctx
     mbRemTimer_ctx
@@ -623,8 +627,52 @@ sub mbTimers_ctx {
 }
 
 
-# Allows a user to set their IRC bot password.
-# Syntax: /msg <botnick> pass <new_password>
+# Shared validation for dynamic command creation and renaming. Existing lookups
+# only normalise Unicode, so historical commands remain manageable.
+sub _dynamic_name {
+    my ($self, $nick, $name) = @_;
+    my $normal = eval { normalize_name($name) };
+    if ($@) {
+        botNotice($self, $nick, "Command name must be valid UTF-8.");
+        return;
+    }
+    return $normal;
+}
+
+sub _new_dynamic_name {
+    my ($self, $nick, $name) = @_;
+    if (my $error = name_error($name)) {
+        botNotice($self, $nick, $error);
+        return;
+    }
+    my $normal = normalize_name($name);
+    # Use the very same folding as public dispatch: an accented spelling of
+    # a built-in (e.g. météo) must not create an unreachable dynamic command.
+    my $folded = defined(&Mediabot::_fold_command_name)
+        ? Mediabot::_fold_command_name($normal) : lc($normal);
+    my %builtin = map { $_ => 1 } public_command_names();
+    my $reserved = $builtin{$folded};
+    if (!$reserved && $self->can('commands')) {
+        my $registry = $self->commands;
+        $reserved = $registry && $registry->command_for($folded, 'public');
+    }
+    if ($reserved) {
+        botNotice($self, $nick, "Command '$normal' is reserved by a built-in or loaded plugin.");
+        return;
+    }
+    return $normal;
+}
+
+sub _dynamic_text_ok {
+    my ($self, $nick, $text) = @_;
+    if (my $error = template_error($text)) {
+        botNotice($self, $nick, $error);
+        botNotice($self, $nick, "Use cmdvars for dynamic template syntax.");
+        return;
+    }
+    return 1;
+}
+
 sub mbDbAddCommand_ctx {
     my ($ctx) = @_;
 
@@ -650,26 +698,12 @@ sub mbDbAddCommand_ctx {
         return;
     }
 
-    my $sCommand  = shift @args;
-
-    # B3/A2: validate command name
-    if (length($sCommand) > 64) {
-        botNotice($self, $nick, "Command name too long (max 64 chars).");
-        return;
-    }
-    if ($sCommand !~ /^[a-zA-Z0-9_-]+$/) {
-        botNotice($self, $nick, "Command name must be alphanumeric (a-z, 0-9, - _).");
-        return;
-    }
+    my $sCommand = _new_dynamic_name($self, $nick, shift @args);
+    return unless defined $sCommand;
     my $sType     = shift @args;
-    my $sCategory = shift @args;
-
-    # A3: validate action text AFTER sType and sCategory are removed from @args
-    my $action_text_check = join(' ', @args);
-    if (length($action_text_check) > 512) {
-        botNotice($self, $nick, "Action text too long (max 512 chars).");
-        return;
-    }
+    my $sCategory = _dynamic_name($self, $nick, shift @args);
+    return unless defined $sCategory;
+    return unless _dynamic_text_ok($self, $nick, join(' ', @args));
 
     # Resolve category
     my $id_cat = getCommandCategory($self, $sCategory);
@@ -683,6 +717,7 @@ sub mbDbAddCommand_ctx {
     my $sth = $self->{dbh}->prepare($query_check);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query_check");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth->finish if $sth;
         return;
     }
@@ -707,6 +742,7 @@ sub mbDbAddCommand_ctx {
     $sth = $self->{dbh}->prepare($insert_query);
     unless ($sth && $sth->execute($user->id, $id_cat, $sCommand, $sCommand, $sAction)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $insert_query");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth->finish if $sth;
         return;
     }
@@ -768,12 +804,14 @@ sub mbDbRemCommand_ctx {
         return;
     }
 
-    my $sCommand = shift @args;
+    my $sCommand = _dynamic_name($self, $nick, shift @args);
+    return unless defined $sCommand;
 
     my $query = "SELECT id_user, id_public_commands FROM PUBLIC_COMMANDS WHERE command = ?";
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth->finish if $sth;
         return;
     }
@@ -802,6 +840,7 @@ sub mbDbRemCommand_ctx {
     my $sth_del = $self->{dbh}->prepare($delete_query);
     unless ($sth_del && $sth_del->execute($id_public_commands)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $delete_query");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth_del->finish if $sth_del;
         return;
     }
@@ -843,9 +882,12 @@ sub mbDbModCommand {
         return;
     }
 
-    my $sCommand  = shift @tArgs;
+    my $sCommand = _dynamic_name($self, $sNick, shift @tArgs);
+    return unless defined $sCommand;
     my $sType     = shift @tArgs;
-    my $sCategory = shift @tArgs;
+    my $sCategory = _dynamic_name($self, $sNick, shift @tArgs);
+    return unless defined $sCategory;
+    return unless _dynamic_text_ok($self, $sNick, join(' ', @tArgs));
 
     my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command = ?";
     my $sth = $self->{dbh}->prepare($query);
@@ -859,7 +901,7 @@ sub mbDbModCommand {
         my $id_owner     = $ref->{id_user};
         my $id_command   = $ref->{id_public_commands};
 
-        if ($id_owner == $user->id || $user->has_level("Master")) {
+        if (($id_owner // -1) == $user->id || $user->has_level("Master")) {
             my $id_cat = getCommandCategory($self, $sCategory);
             unless (defined $id_cat) {
                 botNotice($self, $sNick, "Unknown category : $sCategory");
@@ -874,8 +916,8 @@ sub mbDbModCommand {
             if ($sth_old && $sth_old->execute($id_command)) {
                 my $r = $sth_old->fetchrow_hashref;
                 $old_action = $r->{action} // '' if $r;
-                $sth_old->finish;
             }
+            $sth_old->finish if $sth_old;
             my $old_str = $old_action ne '' ? " (was: $old_action)" : '';
             botNotice($self, $sNick, "Modifying command $sCommand [$sType]$old_str");
 
@@ -933,14 +975,18 @@ sub mbDbModCommand_ctx {
         return;
     }
 
-    my $sCommand  = shift @args;
+    my $sCommand = _dynamic_name($self, $nick, shift @args);
+    return unless defined $sCommand;
     my $sType     = shift @args;
-    my $sCategory = shift @args;
+    my $sCategory = _dynamic_name($self, $nick, shift @args);
+    return unless defined $sCategory;
+    return unless _dynamic_text_ok($self, $nick, join(' ', @args));
 
     my $query = "SELECT id_public_commands, id_user FROM PUBLIC_COMMANDS WHERE command = ?";
     my $sth = $self->{dbh}->prepare($query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $query");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth->finish if $sth;
         return;
     }
@@ -976,8 +1022,8 @@ sub mbDbModCommand_ctx {
         if ($sth_old && $sth_old->execute($sCommand)) {
             my $r = $sth_old->fetchrow_hashref;
             $old_action = $r->{action} // '' if $r;
-            $sth_old->finish;
         }
+        $sth_old->finish if $sth_old;
     }
     my $old_str = $old_action ne '' ? " (was: $old_action)" : '';
     botNotice($self, $nick, "Modifying command $sCommand [$sType]$old_str");
@@ -989,6 +1035,7 @@ sub mbDbModCommand_ctx {
     my $sth_upd = $self->{dbh}->prepare($update_query);
     unless ($sth_upd && $sth_upd->execute($id_cat, $sAction, $id_command)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $update_query");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth_upd->finish if $sth_upd;
         return;
     }
@@ -1019,7 +1066,9 @@ sub mbChownCommand_ctx {
         return;
     }
 
-    my ($sCommand, $sTargetUser) = @args[0,1];
+    my $sCommand = _dynamic_name($self, $nick, $args[0]);
+    return unless defined $sCommand;
+    my $sTargetUser = $args[1];
 
     # Step 1: Get command info (current owner)
     my $cmd_query = q{
@@ -1027,7 +1076,7 @@ sub mbChownCommand_ctx {
                PC.id_user AS old_user,
                U.nickname AS old_nick
         FROM PUBLIC_COMMANDS PC
-        JOIN USER U ON PC.id_user = U.id_user
+        LEFT JOIN USER U ON PC.id_user = U.id_user
         WHERE PC.command = ?
         LIMIT 1
     };
@@ -1035,6 +1084,7 @@ sub mbChownCommand_ctx {
     my $sth = $self->{dbh}->prepare($cmd_query);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $cmd_query");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth->finish if $sth;
         return;
     }
@@ -1061,6 +1111,7 @@ sub mbChownCommand_ctx {
     $sth = $self->{dbh}->prepare($user_query);
     unless ($sth && $sth->execute($sTargetUser)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $user_query");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth->finish if $sth;
         return;
     }
@@ -1081,6 +1132,7 @@ sub mbChownCommand_ctx {
     $sth = $self->{dbh}->prepare($update_query);
     unless ($sth && $sth->execute($id_new_user, $id_cmd)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $update_query");
+        botNotice($self, $nick, "Database error; command was not changed.");
         $sth->finish if $sth;
         return;
     }
@@ -1107,7 +1159,8 @@ sub mbDbShowCommand_ctx {
         return;
     }
 
-    my $sCommand = $args[0];
+    my $sCommand = _dynamic_name($self, $nick, $args[0]);
+    return unless defined $sCommand;
 
     my $sQuery = q{
         SELECT
@@ -1127,6 +1180,7 @@ sub mbDbShowCommand_ctx {
     my $sth = $self->{dbh}->prepare($sQuery);
     unless ($sth && $sth->execute($sCommand)) {
         $self->{logger}->log(1, "SQL Error : $DBI::errstr Query : $sQuery");
+        botNotice($self, $nick, "Database error while reading command.");
         $sth->finish if $sth;
         return;
     }
@@ -1192,8 +1246,58 @@ sub mbDbShowCommand_ctx {
 # chanstatlines => sub { channelStatLines_ctx($ctx) },
 
 # Show the number of lines sent on a channel during the last hour (Administrator+)
+sub mbDbCommandVars_ctx {
+    my ($ctx) = @_;
+    botNotice($ctx->bot, $ctx->nick, $_) for template_help();
+    return;
+}
+
+# Administrator-only private rendering. No channel send, hit update or logBot
+# write: safe to inspect a held command or user arguments before activating it.
+sub mbDbTestCommand_ctx {
+    my ($ctx) = @_;
+    return unless $ctx->require_level('Administrator');
+    my ($self, $nick) = ($ctx->bot, $ctx->nick);
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    unless (@args && defined($args[0]) && $args[0] ne '') {
+        botNotice($self, $nick, 'Syntax: testcmd <command> [arguments]');
+        return;
+    }
+    my $command = _dynamic_name($self, $nick, shift @args);
+    return unless defined $command;
+    my $sth = $self->{dbh}->prepare('SELECT action, active FROM PUBLIC_COMMANDS WHERE command = ?');
+    unless ($sth && $sth->execute($command)) {
+        $sth->finish if $sth;
+        botNotice($self, $nick, 'Database error while checking command.');
+        return;
+    }
+    my $row = $sth->fetchrow_hashref;
+    $sth->finish;
+    unless ($row) {
+        botNotice($self, $nick, "Command '$command' does not exist.");
+        return;
+    }
+    my ($type, $target, $text) = split(/ /, $row->{action} // '', 3);
+    unless (defined($text) && ($type eq 'PRIVMSG' || $type eq 'ACTION') && $target eq '%c') {
+        botNotice($self, $nick, 'Invalid stored command action.');
+        return;
+    }
+    # In a private context a channel cannot be inferred. Avoid querying a
+    # random channel member there; evalAction falls back to the caller.
+    my $channel = $ctx->is_private ? '' : $ctx->channel;
+    my $rendered = evalAction($self, $ctx->message, $nick, $channel, $command, $text, @args);
+    unless (defined $rendered && $rendered =~ /\S/) {
+        botNotice($self, $nick, 'Invalid or empty template result; use showcmd / cmdvars.');
+        return;
+    }
+    botNotice($self, $nick, "Preview $command [$type, " . ($row->{active} ? 'active' : 'on hold') . "]: $rendered");
+    return;
+}
+
 sub mbDbCommand {
 	my ($self,$message,$sChannel,$sNick,$sCommand,@tArgs) = @_;
+	$sCommand = eval { normalize_name($sCommand) };
+	return 0 unless defined $sCommand && $sCommand ne '';
 	# CC19: log command dispatch with context
 	$self->{logger}->log(3,"mbDbCommand: !$sCommand on $sChannel by $sNick");
 
@@ -1212,35 +1316,27 @@ sub mbDbCommand {
 	my $id_public_commands = $ref->{'id_public_commands'};
 	my $description        = $ref->{'description'};
 	my $action             = $ref->{'action'};
-	my $hits               = $ref->{'hits'} + 1;
+	my ($actionType, $actionTo, $actionDo) = split(/ /, $action // '', 3);
+	unless (defined($actionDo) && ($actionType eq 'PRIVMSG' || $actionType eq 'ACTION') && $actionTo eq '%c') {
+		$self->{logger}->log(1, "Invalid stored dynamic action for $sCommand");
+		return 1; # Already found: suppress unrelated natural-language fallback.
+	}
+	$actionDo = evalAction($self, $message, $sNick, $sChannel, $sCommand, $actionDo, @tArgs);
+	return 1 unless defined($actionDo) && $actionDo =~ /\S/;
 
-	$sQuery = "UPDATE PUBLIC_COMMANDS SET hits=? WHERE id_public_commands=?";
+	# Atomic increment avoids losing simultaneous uses. Invalid templates never
+	# increase hits. A statistics outage must not suppress a valid response.
+	$sQuery = "UPDATE PUBLIC_COMMANDS SET hits=hits+1 WHERE id_public_commands=?";
 	my $sth_upd = $self->{dbh}->prepare($sQuery);
-	unless ($sth_upd && $sth_upd->execute($hits,$id_public_commands)) {
+	unless ($sth_upd && $sth_upd->execute($id_public_commands)) {
 		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-		$sth_upd->finish if $sth_upd;
-		return 0;
 	}
 	$sth_upd->finish if $sth_upd;
 
 	$self->{logger}->log(2,"SQL command found : $sCommand description : $description action : $action");
-	my ($actionType,$actionTo,$actionDo) = split(/ /,$action,3);
-	if (( $actionType eq 'PRIVMSG' ) || ( $actionType eq 'ACTION' )) {
-		if ( $actionTo eq '%c' ) {
-			$actionDo = evalAction($self,$message,$sNick,$sChannel,$sCommand,$actionDo,@tArgs);
-			if ( $actionType eq 'PRIVMSG' ) {
-				botPrivmsg($self,$sChannel,$actionDo);
-			}
-			else {
-				botAction($self,$sChannel,$actionDo);
-			}
-		}
-		return 1;
-	}
-	else {
-		$self->{logger}->log(2,"Unknown actionType : $actionType");
-		return 0;
-	}
+	if ($actionType eq 'PRIVMSG') { botPrivmsg($self, $sChannel, $actionDo) }
+	else { botAction($self, $sChannel, $actionDo) }
+	return 1;
 }
 
 
@@ -1262,7 +1358,9 @@ sub mbDbMvCommand_ctx {
         return;
     }
 
-    my ($old_cmd, $new_cmd) = @args[0,1];
+    my $old_cmd = _dynamic_name($self, $nick, $args[0]);
+    my $new_cmd = _new_dynamic_name($self, $nick, $args[1]);
+    return unless defined $old_cmd && defined $new_cmd;
 
     # 1) New name must not already exist
     my $sth = $self->{dbh}->prepare("SELECT 1 FROM PUBLIC_COMMANDS WHERE command = ? LIMIT 1");
@@ -1664,7 +1762,8 @@ sub mbDbSearchCommand_ctx {
         $search_limit = 20 if $search_limit > 20;
     }
 
-    my $kw = $args[0];
+    my $kw = _dynamic_name($self, $nick, join(" ", @args));
+    return unless defined $kw;
 
     # Escape SQL LIKE wildcards so the keyword is treated literally.
     # Use ESCAPE '!' instead of backslash because ESCAPE '\' is fragile with
@@ -1678,13 +1777,13 @@ sub mbDbSearchCommand_ctx {
     my $sql = q{
         SELECT command, hits
         FROM PUBLIC_COMMANDS
-        WHERE action LIKE ? ESCAPE '!'
+        WHERE (command LIKE ? ESCAPE '!' OR action LIKE ? ESCAPE '!')
         ORDER BY hits DESC, command ASC
         LIMIT ?
     };
 
     my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($like, $search_limit)) {  # B1/A1: use $search_limit
+    unless ($sth && $sth->execute($like, $like, $search_limit)) {  # B1/A1: use $search_limit
         $self->{logger}->log(1, "mbDbSearchCommand_ctx() SQL Error: $DBI::errstr Query: $sql");
         botNotice($self, $nick, "Internal error (SQL).");
         $sth->finish if $sth;
@@ -1875,12 +1974,14 @@ sub mbDbHoldCommand_ctx {
     }
 
     # Args
-    unless (defined $args[0] && $args[0] ne '') {
-        botNotice($self, $nick, "Syntax: holdcmd <command>");
+    unless (@args <= 2 && defined $args[0] && $args[0] ne '' && (!defined($args[1]) || $args[1] =~ /\A(?:on|off|toggle)\z/i)) {
+        botNotice($self, $nick, "Syntax: holdcmd <command> [on|off|toggle]");
         return;
     }
 
-    my $cmd = $args[0];
+    my $cmd = _dynamic_name($self, $nick, $args[0]);
+    return unless defined $cmd;
+    my $mode = lc($args[1] // 'on');
 
     # Lookup command
     my $sth = $self->{dbh}->prepare("SELECT id_public_commands, active FROM PUBLIC_COMMANDS WHERE command = ?");
@@ -1899,25 +2000,26 @@ sub mbDbHoldCommand_ctx {
         return;
     }
 
-    unless ($ref->{active}) {
-        botNotice($self, $nick, "Command '$cmd' is already on hold.");
+    my $active = $mode eq 'off' ? 1 : $mode eq 'toggle' ? !$ref->{active} : 0;
+    if (!!$ref->{active} == !!$active) {
+        botNotice($self, $nick, "Command '$cmd' is already " . ($active ? 'active.' : 'on hold.'));
         return;
     }
 
     my $id = $ref->{id_public_commands};
 
     # Put on hold
-    $sth = $self->{dbh}->prepare("UPDATE PUBLIC_COMMANDS SET active = 0 WHERE id_public_commands = ?");
-    unless ($sth && $sth->execute($id)) {
+    $sth = $self->{dbh}->prepare("UPDATE PUBLIC_COMMANDS SET active = ? WHERE id_public_commands = ?");
+    unless ($sth && $sth->execute($active ? 1 : 0, $id)) {
         $self->{logger}->log(1, "mbDbHoldCommand_ctx() SQL Error: $DBI::errstr Query: UPDATE holdcmd");
-        botNotice($self, $nick, "Failed to put command '$cmd' on hold.");
+        botNotice($self, $nick, "Failed to change status of command '$cmd'.");
         $sth->finish if $sth;
         return;
     }
     $sth->finish if $sth;
 
-    botNotice($self, $nick, "Command '$cmd' has been placed on hold.");
-    logBot($self, $ctx->message, $ctx->channel, "holdcmd", "Command '$cmd' deactivated");
+    botNotice($self, $nick, "Command '$cmd' " . ($active ? "has been reactivated." : "has been placed on hold."));
+    logBot($self, $ctx->message, $ctx->channel, "holdcmd", "Command '$cmd' " . ($active ? "reactivated" : "deactivated"));
 
     return $id;
 }
@@ -1955,11 +2057,12 @@ sub mbDbAddCategoryCommand_ctx {
         return;
     }
 
-    my $category = $args[0];
+    my $category = _dynamic_name($self, $nick, $args[0]);
+    return unless defined $category;
 
     # A3: validate category name
-    if (length($category) > 64 || $category !~ /^[\w\s-]+$/) {
-        botNotice($self, $nick, "Category name invalid (max 64 chars, alphanumeric/spaces/hyphens).");
+    if (@args != 1 || name_error($category)) {
+        botNotice($self, $nick, "Category name invalid (one token, max 64 characters, Unicode letters/digits/-/_).");
         return;
     }
 

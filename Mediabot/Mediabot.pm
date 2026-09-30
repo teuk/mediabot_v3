@@ -2091,6 +2091,8 @@ sub _builtin_public_command_handlers {
         mvcmd        => sub { my ($ctx) = @_; mbDbMvCommand_ctx($ctx) },
         chowncmd     => sub { my ($ctx) = @_; mbChownCommand_ctx($ctx) },
         showcmd      => sub { my ($ctx) = @_; mbDbShowCommand_ctx($ctx) },
+        testcmd      => sub { my ($ctx) = @_; mbDbTestCommand_ctx($ctx) },
+        cmdvars      => sub { my ($ctx) = @_; mbDbCommandVars_ctx($ctx) },
         chanstatlines => sub { my ($ctx) = @_; channelStatLines_ctx($ctx) },
         whotalk      => sub { my ($ctx) = @_; whoTalk_ctx($ctx) },
         whotalks     => sub { my ($ctx) = @_; whoTalk_ctx($ctx) },
@@ -2675,7 +2677,7 @@ add|add #channel <nick> <level>|channel admin|Add or update a user access level 
 addbadword|addbadword #channel <word>|channel admin|Add a badword filter entry for a channel.
 addcatcmd|addcatcmd <category>|authorized|Create a PUBLIC_COMMANDS category.
 addchan|addchan #channel|admin|Add a channel to the bot configuration.
-addcmd|addcmd <category> <command> <action>|authorized|Create a dynamic command stored in PUBLIC_COMMANDS.
+addcmd|addcmd <command> <message|action> <category> <text>|admin|Create a Unicode dynamic command; cmdvars lists template variables.
 addhost|addhost <nick> <hostmask>|admin|Add a hostmask to a known user.
 addresponder|addresponder <trigger> <response>|admin|Add an automatic responder.
 addtimer|addtimer <name> <seconds> <command>|admin|Add a bot timer.
@@ -2693,11 +2695,11 @@ channels|channels|public|Alias for chanlist.
 channellist|channellist|public|Alias for chanlist.
 chanset|chanset #channel <setting> <value>|channel admin|Change a channel setting.
 chanstatlines|chanstatlines #channel|public|Show channel line/statistics information.
-chcatcmd|chcatcmd <command> <category>|authorized|Move a dynamic command to another category.
+chcatcmd|chcatcmd <new_category> <command>|admin|Move a dynamic command to another category.
 checkhost|checkhost <hostmask>|admin|Search users matching a hostmask.
 checkhostchan|checkhostchan #channel <hostmask>|admin|Search channel users matching a hostmask.
 checknick|checknick <nick>|admin|Search known hostmasks for a nick.
-chowncmd|chowncmd <command> <nick>|authorized|Change the owner of a dynamic PUBLIC_COMMANDS command.
+chowncmd|chowncmd <command> <username>|master|Change the owner of a dynamic PUBLIC_COMMANDS command, including system-owned commands.
 colors|colors|public|Display IRC color information.
 countcmd|countcmd|authorized|Count dynamic PUBLIC_COMMANDS entries.
 cstat|cstat #channel|public|Show channel statistics.
@@ -2721,7 +2723,7 @@ hailo_status|hailo_status [#channel]|admin|Show channel-specific Hailo brain cou
 hailo_unignore|hailo_unignore <nick>|admin|Remove a nick from the Hailo ignore list.
 help|help [#channel|command|docs|search <term>|level <level>]|public|Show command lists, search internal help, or documentation pointers.
 commands|commands|public|Alias for help commands.
-holdcmd|holdcmd <command> [on|off]|authorized|Put a dynamic command on hold or restore it.
+holdcmd|holdcmd <command> [on|off|toggle]|admin|Hold (on), reactivate (off) or toggle a dynamic command; default on.
 ident|ident <login> <password>|private|Legacy/private authentication helper.
 ignore|ignore <nick|mask>|admin|Add an ignore entry.
 ignores|ignores|admin|List ignore entries.
@@ -2737,7 +2739,7 @@ listeners|listeners|public|Show Icecast listener counts.
 login|login <user> <password>|private|Authenticate with the bot.
 logout|logout|private|Logout from the bot.
 meteo|meteo [city]|public|Alias for weather.
-modcmd|modcmd <command> <new action>|authorized|Modify a dynamic PUBLIC_COMMANDS command.
+modcmd|modcmd <command> <message|action> <category> <text>|admin|Modify a validated dynamic template; owner or Master+ required.
 modinfo|modinfo <nick>|admin|Show moderation information about a user.
 moduser|moduser <nick> <field> <value>|admin|Modify a bot user.
 mp3|mp3 <query>|public|Search or display MP3/radio related information.
@@ -2942,6 +2944,8 @@ claude|claude <prompt>|public|Alias for ai.
 spike|spike|public|Show Spike memorial image.
 last|last <nick>|public|Show the last message posted by a nick on this channel.
 alias|alias <alias> <command>|owner|Create or manage IRC command aliases (alias list, alias del <alias>).
+testcmd|testcmd <command> [arguments]|admin|Preview a dynamic command privately, including held commands; does not change hits.
+cmdvars|cmdvars|public|List dynamic template variables, random choices and Unicode naming rules.
 MEDIABOT_INTERNAL_HELP
 
     for my $line (split /\n/, $raw) {
@@ -3227,7 +3231,7 @@ sub _mbHelpCategoryForCommand {
 
     return 'radio' if $hay =~ /\b(?:radio|song|mp3|icecast|liquidsoap|listener|yt|youtube|tmdb|play|queue)\b/;
     return 'dynamic' if $hay =~ /\b(?:cmd|public_commands|category|timer|responder)\b/
-        || $cmd =~ /cmd$/ || $cmd =~ /^(?:addcmd|modcmd|remcmd|showcmd|showcommands|searchcmd|topcmd|popcmd|lastcmd|countcmd|owncmd|chowncmd|mvcmd|holdcmd|addcatcmd|chcatcmd|addtimer|remtimer|timers|addresponder|delresponder)$/;
+        || $cmd eq 'cmdvars' || $cmd =~ /cmd$/ || $cmd =~ /^(?:addcmd|modcmd|remcmd|showcmd|showcommands|searchcmd|topcmd|popcmd|lastcmd|countcmd|owncmd|chowncmd|mvcmd|holdcmd|addcatcmd|chcatcmd|addtimer|remtimer|timers|addresponder|delresponder)$/;
     return 'moderation' if $hay =~ /\b(?:ban|kick|ignore|voice|op|deop|devoice|invite|topic|mode)\b/;
     return 'channel' if $hay =~ /\b(?:channel|chan|access|chanset|owner)\b/
         || $cmd =~ /^(?:add|del|access|chan|channels|chanlist|channellist|chaninfo|chanset|addchan|part|join|purge|nicklist)$/;
@@ -3758,6 +3762,8 @@ sub _builtin_private_command_handlers {
         mvcmd       => sub { my ($ctx) = @_; mbDbMvCommand_ctx($ctx) },
         chowncmd    => sub { my ($ctx) = @_; mbChownCommand_ctx($ctx) },
         showcmd     => sub { my ($ctx) = @_; mbDbShowCommand_ctx($ctx) },
+        testcmd      => sub { my ($ctx) = @_; mbDbTestCommand_ctx($ctx) },
+        cmdvars      => sub { my ($ctx) = @_; mbDbCommandVars_ctx($ctx) },
         chanstatlines => sub { my ($ctx) = @_; channelStatLines_ctx($ctx) },
         whotalk     => sub { my ($ctx) = @_; whoTalk_ctx($ctx) },
         whotalks    => sub { my ($ctx) = @_; whoTalk_ctx($ctx) },

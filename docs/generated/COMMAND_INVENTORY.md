@@ -8,11 +8,11 @@ Source version line: `3.6dev`
 
 | Measure | Count |
 | --- | ---: |
-| Internal help entries | 246 |
-| Registered public built-ins | 239 |
-| Registered private built-ins | 94 |
-| Direct public registry handlers | 239 |
-| Direct private registry handlers | 94 |
+| Internal help entries | 248 |
+| Registered public built-ins | 241 |
+| Registered private built-ins | 96 |
+| Direct public registry handlers | 241 |
+| Direct private registry handlers | 96 |
 | Compatibility dispatch tables | 0 |
 | Help parser anomalies | 0 |
 | Help-only entries | 0 |
@@ -39,7 +39,7 @@ Source version line: `3.6dev`
 | `addbadword` | channel admin | registry-public | `addbadword #channel <word>` | Add a badword filter entry for a channel. |  |
 | `addcatcmd` | authorized | registry-public, registry-private | `addcatcmd <category>` | Create a PUBLIC_COMMANDS category. |  |
 | `addchan` | admin | registry-public, registry-private | `addchan #channel` | Add a channel to the bot configuration. |  |
-| `addcmd` | authorized | registry-public, registry-private | `addcmd <category> <command> <action>` | Create a dynamic command stored in PUBLIC_COMMANDS. |  |
+| `addcmd` | admin | registry-public, registry-private | `addcmd <command> <message\|action> <category> <text>` | Create a Unicode dynamic command; cmdvars lists template variables. |  |
 | `addhost` | admin | registry-public, registry-private | `addhost <nick> <hostmask>` | Add a hostmask to a known user. |  |
 | `addresponder` | admin | registry-public | `addresponder <trigger> <response>` | Add an automatic responder. |  |
 | `addtimer` | admin | registry-public, registry-private | `addtimer <name> <seconds> <command>` | Add a bot timer. |  |
@@ -68,15 +68,16 @@ Source version line: `3.6dev`
 | `chanstatlines` | public | registry-public, registry-private | `chanstatlines #channel` | Show channel line/statistics information. |  |
 | `chanstats` | public | registry-public | `chanstats` | Alias for dashboard. |  |
 | `chatgpt` | public | registry-public | `chatgpt <prompt>` | Alias for tellme. |  |
-| `chcatcmd` | authorized | registry-public, registry-private | `chcatcmd <command> <category>` | Move a dynamic command to another category. |  |
+| `chcatcmd` | admin | registry-public, registry-private | `chcatcmd <new_category> <command>` | Move a dynamic command to another category. |  |
 | `checkhost` | admin | registry-public, registry-private | `checkhost <hostmask>` | Search users matching a hostmask. |  |
 | `checkhostchan` | admin | registry-public, registry-private | `checkhostchan #channel <hostmask>` | Search channel users matching a hostmask. |  |
 | `checknick` | admin | registry-public, registry-private | `checknick <nick>` | Search known hostmasks for a nick. |  |
 | `choose` | public | registry-public | `choose <a> \| <b>` | Random pick. Weight opt:N. Deduplicates (empty result → error). |  |
-| `chowncmd` | authorized | registry-public, registry-private | `chowncmd <command> <nick>` | Change the owner of a dynamic PUBLIC_COMMANDS command. |  |
+| `chowncmd` | master | registry-public, registry-private | `chowncmd <command> <username>` | Change the owner of a dynamic PUBLIC_COMMANDS command, including system-owned commands. |  |
 | `chrono` | public | registry-public | `chrono [short\|full]` | Alias for chronos. |  |
 | `chronos` | public | registry-public | `chronos [short\|full]` | Show a compact or full narrative timeline of the current channel. |  |
 | `claude` | public | registry-public, registry-private | `claude <prompt>` | Alias for ai. |  |
+| `cmdvars` | public | registry-public, registry-private | `cmdvars` | List dynamic template variables, random choices and Unicode naming rules. |  |
 | `colors` | public | registry-public | `colors` | Display IRC color information. |  |
 | `commands` | public | registry-public, registry-private | `commands` | Alias for help commands. |  |
 | `compare` | public | registry-public | `compare <nick1> <nick2>` | Compare message counts between two nicks on the channel. |  |
@@ -116,7 +117,7 @@ Source version line: `3.6dev`
 | `halloffame` | public | registry-public | `halloffame [n]` | Alias for topquote. |  |
 | `heatmap` | public | registry-public | `heatmap [nick]` | Show hourly activity chart as ASCII bars. |  |
 | `help` | public | registry-public | `help [#channel\|command\|docs\|search <term>\|level <level>]` | Show command lists, search internal help, or documentation pointers. |  |
-| `holdcmd` | authorized | registry-public, registry-private | `holdcmd <command> [on\|off]` | Put a dynamic command on hold or restore it. |  |
+| `holdcmd` | admin | registry-public, registry-private | `holdcmd <command> [on\|off\|toggle]` | Hold (on), reactivate (off) or toggle a dynamic command; default on. |  |
 | `horo` | public | registry-public | `horo [nick\\|signe]` | Alias for horoscope. |  |
 | `horoscope` | public | registry-public | `horoscope [nick\\|signe]` | Show a deterministic daily IRC horoscope. Public use is gated by +Games. |  |
 | `ident` | private | registry-private | `ident <login> <password>` | Legacy/private authentication helper. |  |
@@ -149,7 +150,7 @@ Source version line: `3.6dev`
 | `meteo` | public | registry-public | `meteo [city]` | Alias for weather. |  |
 | `milestone` | public | registry-public | `milestone` | Show channel milestones: total messages, next round milestone, progress and ETA. Alias: milestones |  |
 | `milestones` | public | registry-public | `milestones` | Alias for milestone. |  |
-| `modcmd` | authorized | registry-public, registry-private | `modcmd <command> <new action>` | Modify a dynamic PUBLIC_COMMANDS command. |  |
+| `modcmd` | admin | registry-public, registry-private | `modcmd <command> <message\|action> <category> <text>` | Modify a validated dynamic template; owner or Master+ required. |  |
 | `modinfo` | admin | registry-public, registry-private | `modinfo <nick>` | Show moderation information about a user. |  |
 | `moduser` | admin | registry-public, registry-private | `moduser <nick> <field> <value>` | Modify a bot user. |  |
 | `monthstats` | public | registry-public | `monthstats [nick]` | Show activity count per month for the last 12 months. |  |
@@ -232,6 +233,7 @@ Source version line: `3.6dev`
 | `streak` | public | registry-public | `streak [nick]` | Show consecutive days of activity on the channel. |  |
 | `tell` | public | registry-public | `tell <nick> <msg>` | Leave a message for a nick, delivered when they next join or speak here. |  |
 | `tellme` | public | registry-public | `tellme <prompt>` | Ask the configured ChatGPT/OpenAI integration; output is rendered for IRC in at most two lines. |  |
+| `testcmd` | admin | registry-public, registry-private | `testcmd <command> [arguments]` | Preview a dynamic command privately, including held commands; does not change hits. |  |
 | `timeline` | public | registry-public | `timeline [short\|full]` | Alias for chronos. |  |
 | `timers` | admin | registry-public, registry-private | `timers` | List bot timers. |  |
 | `tmdb` | public | registry-public | `tmdb <movie or show>` | Search TMDB when configured. |  |

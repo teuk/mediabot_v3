@@ -23,6 +23,7 @@ use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
 use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
+use Mediabot::DynamicTemplate qw(normalize_name);
 
 our @EXPORT = qw(
     getChannel
@@ -2976,7 +2977,11 @@ sub mbDbChangeCategoryCommand_ctx {
         return;
     }
 
-    my ($category_name, $command_name) = @args[0,1];
+    my ($category_name, $command_name) = eval { map { normalize_name($_) } @args[0,1] };
+    if ($@) {
+        botNotice($self, $nick, 'Category and command must be valid UTF-8.');
+        return;
+    }
 
     # 1) Resolve category id
     my $sth = $self->{dbh}->prepare(

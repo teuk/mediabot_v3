@@ -23,7 +23,7 @@ my @PUBLIC_CATALOGUE = qw(
     useradd deluser users userinfo addhost addchan chanset purge part join add
     del modinfo op deop invite voice devoice kick ban kickban kb unban bans
     showcommands chaninfo chanlist channels channellist whoami auth verify
-    access addcmd remcmd modcmd mvcmd chowncmd showcmd chanstatlines whotalk
+    access addcmd remcmd modcmd mvcmd chowncmd showcmd testcmd cmdvars chanstatlines whotalk
     whotalks countcmd topcmd popcmd searchcmd lastcmd owncmd holdcmd addcatcmd
     chcatcmd topsay checkhostchan checkhost checknick greet nicklist rnick
     birthdate colors seen stats top calc convert 8ball remind remindlist tell
@@ -54,16 +54,16 @@ my @PRIVATE_CATALOGUE = qw(
     users cstat login logout userinfo addhost addchan chanset purge part join
     add del modinfo op deop invite voice devoice kick showcommands chaninfo
     chanlist channels channellist whoami auth verify access addcmd remcmd modcmd
-    mvcmd chowncmd showcmd chanstatlines whotalk whotalks countcmd topcmd popcmd
+    mvcmd chowncmd showcmd testcmd cmdvars chanstatlines whotalk whotalks countcmd topcmd popcmd
     searchcmd lastcmd owncmd holdcmd addcatcmd chcatcmd topsay checkhostchan
     checkhost checknick greet nicklist rnick birthdate ignores ignore unignore
     lastcom moduser antifloodset rehash ai claude
 );
 
 # The first four native handlers predated MB741. The new hailo operator
-# command has no legacy public handler to fall back to. All existing
+# command and MB807 previews/variable guide have no legacy public handlers. All existing
 # migratable public built-ins retain their original migration eligibility.
-my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo);
+my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars);
 
 sub public_command_names {
     return @PUBLIC_CATALOGUE;
