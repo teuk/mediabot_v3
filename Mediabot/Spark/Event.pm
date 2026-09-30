@@ -124,6 +124,17 @@ my %PROFILE = (
         lane => 'revival',
         selectable => 1,
     },
+    dtc => {
+        duration_seconds => 45,
+        min_recent_humans => 3,
+        needs_context => 0,
+        ai_use => 'never',
+        interaction => 'quote',
+        requires_response => 0,
+        delivery_style => 'message',
+        lane => 'revival',
+        selectable => 1,
+    },
 );
 
 $PROFILE{fork}{delivery_style} = 'message';
@@ -143,7 +154,7 @@ sub _kind {
 }
 
 sub spark_event_kinds {
-    return [ qw(fork portal callback reaction mosaic aside micro_scene stage_cue afterglow vdm) ];
+    return [ qw(fork portal callback reaction mosaic aside micro_scene stage_cue afterglow vdm dtc) ];
 }
 
 sub spark_event_profile {

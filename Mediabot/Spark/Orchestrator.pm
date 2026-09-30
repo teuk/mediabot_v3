@@ -618,6 +618,7 @@ sub evaluate_channel {
         context_lines => scalar(@$context),
         ai_available  => _bool($args{ai_available}),
         vdm_enabled   => _bool($args{vdm_enabled}),
+        dtc_enabled   => _bool($args{dtc_enabled}),
         cursor        => $rt->{cursor},
         last_kind     => $rt->{last_kind},
         audience_regime => $adaptive->{audience_regime},
@@ -731,7 +732,7 @@ sub format_dryrun_log {
     return undef unless ref($summary) eq 'HASH';
     return undef unless ($summary->{action} // '') eq 'dryrun_candidate';
     return undef unless _plain_scalar($summary->{kind})
-        && "$summary->{kind}" =~ /^(?:portal|callback|reaction|aside|micro_scene|vdm)\z/;
+        && "$summary->{kind}" =~ /^(?:portal|callback|reaction|aside|micro_scene|vdm|dtc)\z/;
 
     my @parts = (
         '[SPARK_DRYRUN]',

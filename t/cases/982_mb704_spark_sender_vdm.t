@@ -13,8 +13,9 @@ return sub {
  $s->arm;
  my $ok=$s->attempt_send(channel=>'#x',kind=>'vdm',generation=>9,generated=>$gen,state_cb=>sub { return { %$state } });
  $assert->is($ok->{action},'sent','mb704-982: authorized VDM uses guarded Spark sender');
- $assert->like($sent[0][1],qr/^\x02\x0301,15\[513869\]\x0f /,'mb704-982: Spark sender preserves canonical VDM id formatting');
- $assert->like($sent[0][1],qr/VDM\x0f\z/,'mb704-982: Spark sender preserves canonical VDM closing/reset');
+ $assert->is($sent[0][1], '!vdm', 'mb806: Spark announces the configured command before the story');
+ $assert->like($sent[1][1],qr/^\x02\x0301,15\[513869\]\x0f /,'mb704-982: Spark sender preserves canonical VDM id formatting');
+ $assert->like($sent[1][1],qr/VDM\x0f\z/,'mb704-982: Spark sender preserves canonical VDM closing/reset');
  my $log=Mediabot::Spark::Sender::format_sender_log('#x',$ok);
  $assert->like($log,qr/kind=vdm/,'mb704-982: Spark delivery metadata identifies VDM kind');
  $assert->unlike($log,qr/Spark a choisi/,'mb704-982: VDM source content is absent from Spark sender log');

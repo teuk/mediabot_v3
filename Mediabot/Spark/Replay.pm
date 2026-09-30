@@ -98,7 +98,7 @@ sub replay_events {
             game_active => 0, wit_pending => 0, ai_available => 1,
         );
         my $revival = $runtime->evaluate_channel(
-            %gate, enabled => 1, vdm_enabled => 1,
+            %gate, enabled => 1, vdm_enabled => 1, dtc_enabled => 1,
         );
         my $momentum = $runtime->evaluate_action_channel(
             %gate, spark_enabled => 1, action_enabled => 1,

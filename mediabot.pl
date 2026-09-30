@@ -42,6 +42,7 @@ use Mediabot::Spark::Event qw(
     spark_event_requires_response spark_event_is_momentum
 );
 use Mediabot::VDM::Runtime ();
+use Mediabot::DTC::AsyncFetcher ();
 use Mediabot::Radio::Icecast;
 use Mediabot::DB;
 use Mediabot::Channel;
@@ -117,6 +118,8 @@ sub _spark_fail_mosaic_close;
 sub _spark_tick_mosaic_lifecycle;
 sub _spark_vdm_runtime;
 sub _spark_handle_vdm_candidate;
+sub _spark_dtc_fetcher;
+sub _spark_handle_dtc_candidate;
 sub _spark_finish_human_event;
 sub _spark_observe_public_line;
 sub _spark_tick_all;
@@ -223,6 +226,9 @@ sub _spark_sender {
     return undef unless $bot;
 
     $bot->{spark_sender} ||= Mediabot::Spark::Sender->new(
+        command_char_cb => sub {
+            $bot->{conf}->get('main.MAIN_PROG_CMD_CHAR')
+        },
         send_cb => sub {
             my ($channel, $text) = @_;
             return 0 unless defined($channel) && defined($text) && length($text);
@@ -381,6 +387,7 @@ sub _spark_finish_ambient_delivery {
         ? eval {
             $bot->{spark_orchestrator}->action_cooldown_seconds($channel)
         }
+        : ($kind eq 'vdm' || $kind eq 'dtc') ? 2_400
         : undef;
 
     my $done = eval {
@@ -1154,6 +1161,79 @@ sub _spark_handle_vdm_candidate {
     return $send;
 }
 
+sub _spark_dtc_fetcher {
+    my ($bot) = @_;
+    return undef unless $bot;
+    $bot->{_spark_dtc_fetcher} ||= Mediabot::DTC::AsyncFetcher->new(
+        loop => (eval { $bot->getLoop } || $bot->{loop}),
+    );
+    return $bot->{_spark_dtc_fetcher};
+}
+
+sub _spark_handle_dtc_candidate {
+    my ($bot, $channel, $duration_seconds, $quote) = @_;
+    return { action => 'no_send', reason => 'invalid_candidate', kind => 'dtc' }
+        unless $bot && defined($channel) && $channel =~ /^#/
+            && ref($quote) eq 'HASH';
+
+    my $sender = eval { _spark_sender($bot) };
+    return { action => 'no_send', reason => 'sender_unavailable', kind => 'dtc' }
+        unless $sender && _spark_sync_sender_arm($bot, $sender);
+
+    my $pre = _spark_delivery_state($bot, $channel);
+    my $dtc_enabled = eval {
+        Mediabot::Helpers::chanset_enabled($bot, $channel, 'DansTonChat', default => 0)
+    } ? 1 : 0;
+    my $blocked = !$pre->{enabled}          ? 'disabled'
+                : !$dtc_enabled             ? 'dtc_disabled'
+                : !$pre->{runtime_active}   ? 'runtime_inactive'
+                : !$pre->{irc_connected}    ? 'irc_disconnected'
+                : !$pre->{channel_joined}   ? 'not_joined'
+                : $pre->{flood_suppressed}  ? 'flood_suppressed'
+                : $pre->{game_active}       ? 'game_active'
+                : $pre->{wit_pending}       ? 'wit_pending'
+                : undef;
+    return { action => 'no_send', reason => $blocked, kind => 'dtc' }
+        if defined $blocked;
+
+    my $generation = eval {
+        $bot->{spark_state}->begin_event(
+            channel => $channel, kind => 'dtc',
+            duration_seconds => $duration_seconds,
+        )
+    };
+    return { action => 'no_send', reason => 'event_unavailable', kind => 'dtc' }
+        unless $generation;
+
+    my $send = eval {
+        $sender->attempt_send(
+            channel => $channel, kind => 'dtc', generation => $generation,
+            generated => {
+                action => 'ready', kind => 'dtc',
+                content => { id => $quote->{id}, text => $quote->{text} },
+            },
+            state_cb => sub {
+                my $state = _spark_delivery_state($bot, $channel);
+                $state->{enabled} = 0 unless eval {
+                    Mediabot::Helpers::chanset_enabled(
+                        $bot, $channel, 'DansTonChat', default => 0,
+                    )
+                };
+                return $state;
+            },
+        )
+    };
+    $send = { action => 'no_send', reason => 'sender_exception', kind => 'dtc' }
+        unless ref($send) eq 'HASH';
+    eval { $bot->{spark_state}->invalidate_event($channel) }
+        unless ($send->{action} // '') eq 'sent';
+    my $line = Mediabot::Spark::Sender::format_sender_log($channel, $send);
+    $bot->{logger}->log(3, $line) if defined $line;
+    _spark_finish_ambient_delivery($bot, $channel, 'dtc')
+        if ($send->{action} // '') eq 'sent';
+    return $send;
+}
+
 sub _spark_finish_human_event {
     my ($bot, $channel, $observation, $nick, $line, $bot_nick) = @_;
     return 0 unless $bot && defined($channel) && $channel =~ /^#/;
@@ -1372,6 +1452,9 @@ sub _spark_tick_all {
         } ? 1 : 0;
         my $vdm_enabled = eval {
             Mediabot::Helpers::chanset_enabled($bot, $channel, 'VDM', default => 0)
+        } ? 1 : 0;
+        my $dtc_enabled = eval {
+            Mediabot::Helpers::chanset_enabled($bot, $channel, 'DansTonChat', default => 0)
         } ? 1 : 0;
 
         my $irc_state = eval { $bot->{wit_runtime_state}->snapshot($channel) };
@@ -1634,6 +1717,7 @@ sub _spark_tick_all {
                 wit_pending    => $wit_pending,
                 ai_available   => $ai_available,
                 vdm_enabled    => $vdm_enabled,
+                dtc_enabled    => $dtc_enabled,
             )
         };
 
@@ -1654,6 +1738,47 @@ sub _spark_tick_all {
         }
 
         next unless ($summary->{action} // '') eq 'dryrun_candidate';
+
+        if (($summary->{kind} // '') eq 'dtc') {
+            next unless $dtc_enabled;
+            my $sender = eval { _spark_sender($bot) };
+            next unless $sender && _spark_sync_sender_arm($bot, $sender);
+            my $fetcher = eval { _spark_dtc_fetcher($bot) };
+            next unless $fetcher && !$fetcher->inflight;
+            my $candidate_state = eval { $bot->{spark_state}->snapshot($channel) };
+            next unless ref($candidate_state) eq 'HASH';
+            my $last_human_at = $candidate_state->{last_human_at};
+            my $started = eval {
+                $fetcher->fetch(on_done => sub {
+                    my ($result) = @_;
+                    return unless ref($result) eq 'HASH' && $result->{ok};
+                    my $id = $result->{id};
+                    my $key = lc $channel;
+                    return if defined($id) && !ref($id)
+                        && "$id" =~ /\A\d+\z/
+                        && defined($bot->{_spark_dtc_last_id}{$key})
+                        && $bot->{_spark_dtc_last_id}{$key} eq "$id";
+                    my $current = eval { $bot->{spark_state}->snapshot($channel) };
+                    return unless ref($current) eq 'HASH'
+                        && defined($last_human_at)
+                        && defined($current->{last_human_at})
+                        && $current->{last_human_at} == $last_human_at;
+                    my $delivery = _spark_handle_dtc_candidate(
+                        $bot, $channel, $summary->{duration_seconds}, $result,
+                    );
+                    $bot->{_spark_dtc_last_id}{$key} = "$id"
+                        if ref($delivery) eq 'HASH'
+                            && ($delivery->{action} // '') eq 'sent'
+                            && defined($id) && !ref($id)
+                            && "$id" =~ /\A\d+\z/;
+                })
+            };
+            $bot->{logger}->log(3,
+                '[SPARK_DTC] channel=' . $channel . ' action=fetch_started')
+                if $started;
+            $logged++ if $started;
+            next;
+        }
 
         if (($summary->{kind} // '') eq 'vdm') {
             my $vdm = eval { _spark_vdm_runtime($bot) };

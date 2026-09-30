@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB806 — let Spark announce its VDM and DTC stories
+
+- Offer `vdm` and `dtc` in the long-silence Spark repertoire when each
+  channel capability is enabled. Announce the configured public command prefix
+  before the source result; DTC fetches off the IRC loop and caps its automatic
+  quote at three lines. Both still use the guarded sender and late revocation.
+- Give source-backed stories a 40-minute delivery cooldown (previously one
+  hour) and a slightly larger share of eligible selections. Audience, silence,
+  flood and shared channel limits remain in force; immediate DTC ID repeats are
+  skipped. Manual commands are unchanged.
+
 ### MB805 — rehearse Hailo recovery and read Spark's real prefix
 
 - Add a synthetic, isolated Hailo 0.75 exercise for exact-phrase and whole-word

@@ -57,6 +57,7 @@ sub select_spark_event {
     my $context_lines = _nonneg_int($args{context_lines}, 0);
     my $ai_available = _bool($args{ai_available});
     my $vdm_enabled = _bool($args{vdm_enabled});
+    my $dtc_enabled = _bool($args{dtc_enabled});
     my $cursor = _nonneg_int($args{cursor}, 0);
     my $last_kind = _normal_kind($args{last_kind});
     my $audience_regime = _normal_regime($args{audience_regime});
@@ -81,6 +82,7 @@ sub select_spark_event {
         next if $p->{needs_context} && $context_lines < 3;
         next if $p->{ai_use} ne 'never' && !$ai_available;
         next if $kind eq 'vdm' && !$vdm_enabled;
+        next if $kind eq 'dtc' && !$dtc_enabled;
         push @eligible, $kind;
     }
 
@@ -99,16 +101,16 @@ sub select_spark_event {
     }
     elsif ($audience_regime eq 'crowded'
         && $ai_available && $context_lines >= 6) {
-        @schedule = qw(reaction micro_scene callback aside portal reaction micro_scene vdm);
+        @schedule = qw(reaction vdm micro_scene dtc callback aside portal reaction micro_scene vdm dtc);
     }
     elsif ($ai_available && $context_lines >= 6) {
-        @schedule = qw(reaction aside callback micro_scene reaction aside portal vdm);
+        @schedule = qw(reaction vdm aside dtc callback micro_scene reaction aside portal vdm dtc);
     }
     elsif ($ai_available && $context_lines >= 3) {
-        @schedule = qw(aside reaction micro_scene callback aside portal vdm);
+        @schedule = qw(aside vdm reaction dtc micro_scene callback aside portal vdm dtc);
     }
     else {
-        @schedule = qw(aside micro_scene portal vdm);
+        @schedule = qw(aside vdm micro_scene dtc portal vdm dtc);
     }
 
     @schedule = grep { $eligible{$_} } @schedule;

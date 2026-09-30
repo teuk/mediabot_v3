@@ -129,6 +129,19 @@ No new configuration key is required.
 
 ## Long-silence repertoire
 
+Spark can announce the actual public command (`!vdm` or `!dtc` with a `!`
+prefix; another configured prefix is used on that instance) before posting
+the source result. VDM needs `+Spark +VDM`; DTC needs `+Spark +DansTonChat`.
+The separate `+SparkAction` switch does not govern these long-silence events.
+DTC performs its network fetch in a worker, drops the result if human activity
+or a channel permission changes, and posts at most three quote lines after
+the command. The two source-backed events have a 40-minute delivered cooldown
+instead of the one-hour default for other Spark events. They receive two
+schedule slots apiece when eligible, while audience thresholds, adaptive
+silence, shared channel pacing, the master send arm and the sender's rate
+limit continue to govern every delivery. An immediately repeated DTC quote ID
+is skipped for that channel.
+
 `aside` behaves like a quiet regular who finally drops one dry observation: a
 mock status, a note about the atmosphere, or an absurd conclusion that makes
 the room feel inhabited. `micro_scene` adds a compact visual gag with at most

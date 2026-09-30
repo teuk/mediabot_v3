@@ -9,7 +9,7 @@ use Mediabot::Spark::Selector qw(select_spark_event);
 return sub {
     my ($assert) = @_;
     my $kinds = spark_event_kinds();
-    $assert->is(join(',', @$kinds), 'fork,portal,callback,reaction,mosaic,aside,micro_scene,stage_cue,afterglow,vdm',
+    $assert->is(join(',', @$kinds), 'fork,portal,callback,reaction,mosaic,aside,micro_scene,stage_cue,afterglow,vdm,dtc',
         'mb739: autonomous and momentum families join the complete compatibility catalog');
     my $p = spark_event_profile('vdm');
     $assert->is($p->{ai_use}, 'never', 'mb704-979: VDM never consumes the AI generator');

@@ -5,6 +5,7 @@ use warnings;
 
 use Carp qw(croak);
 use Encode qw(encode_utf8);
+use Mediabot::DTC::Format qw(format_quote_lines);
 use Mediabot::Spark::Event qw(spark_event_profile spark_event_is_momentum);
 use Mediabot::VDM qw(format_vdm_line);
 
@@ -59,7 +60,7 @@ sub _result {
         $out{$key} = int($extra{$key});
     }
     $out{kind} = $extra{kind}
-        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|aside|micro_scene|stage_cue|afterglow|vdm)\z/;
+        if _plain_scalar($extra{kind}) && "$extra{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|aside|micro_scene|stage_cue|afterglow|vdm|dtc)\z/;
     $out{delivery} = $extra{delivery}
         if _plain_scalar($extra{delivery})
             && "$extra{delivery}" =~ /^(?:message|action)\z/;
@@ -138,6 +139,8 @@ sub new {
 
     return bless {
         send_cb      => $send_cb,
+        command_char_cb => ref($args{command_char_cb}) eq 'CODE'
+            ? $args{command_char_cb} : sub { '!' },
         clock        => $clock || sub { time() },
         armed        => 0,
         last_sent_at => {},
@@ -236,9 +239,41 @@ sub attempt_send {
         generation => $generation, kind => $kind, delivery => $delivery,
     ) if $continuation && $kind ne 'portal' && $kind ne 'mosaic';
 
-    my $text = render_generation($args{generated});
-    return _result('no_send', 'invalid_content', generation => $generation, kind => $kind, delivery => $delivery)
-        unless defined $text;
+    my @messages;
+    if ($kind eq 'vdm' || $kind eq 'dtc') {
+        my $prefix = eval { $self->{command_char_cb}->() };
+        return _result('no_send', 'invalid_prefix', generation => $generation, kind => $kind)
+            unless _plain_scalar($prefix) && length("$prefix") == 1
+                && "$prefix" !~ /[\s\x00-\x1f\x7f]/;
+        my $content = $args{generated}{content};
+        return _result('no_send', 'invalid_content', generation => $generation, kind => $kind)
+            unless ref($content) eq 'HASH';
+        my $lines;
+        if ($kind eq 'vdm') {
+            my $text = render_generation($args{generated});
+            $lines = [ $text ] if defined $text;
+        }
+        else {
+            return _result('no_send', 'invalid_content', generation => $generation, kind => $kind)
+                unless _plain_scalar($content->{id})
+                    && "$content->{id}" =~ /\A(?:\d{1,12}|\?\?)\z/
+                    && _plain_scalar($content->{text})
+                    && length($content->{text}) <= 12_000
+                    && $content->{text} !~ /[\x00-\x09\x0b-\x1f\x7f]/;
+            $lines = format_quote_lines(
+                $content->{id}, $content->{text}, max_lines => 3,
+            );
+        }
+        return _result('no_send', 'invalid_content', generation => $generation, kind => $kind)
+            unless ref($lines) eq 'ARRAY' && @$lines && @$lines <= 3;
+        @messages = ("$prefix$kind", @$lines);
+    }
+    else {
+        my $text = render_generation($args{generated});
+        return _result('no_send', 'invalid_content', generation => $generation, kind => $kind, delivery => $delivery)
+            unless defined $text;
+        @messages = ($text);
+    }
 
     my $state_cb = $args{state_cb};
     croak 'state_cb must be a code reference' unless ref($state_cb) eq 'CODE';
@@ -325,12 +360,20 @@ sub attempt_send {
         ) if defined $retry;
     }
 
-    my ($send_ok, $accepted);
-    $send_ok = eval { $accepted = $self->{send_cb}->($channel, $text); 1 };
-    return _result('no_send', 'send_error', generation => $generation, kind => $kind)
-        unless $send_ok;
-    return _result('no_send', 'send_failed', generation => $generation, kind => $kind)
-        unless $accepted;
+    my $sent_count = 0;
+    for my $message (@messages) {
+        my ($send_ok, $accepted);
+        $send_ok = eval { $accepted = $self->{send_cb}->($channel, $message); 1 };
+        unless ($send_ok && $accepted) {
+            # A command may already be visible. Keep the channel rate limit
+            # even when a later line fails so retries cannot create a flood.
+            $self->{last_sent_at}{$key} = $before_send if $sent_count;
+            return _result('no_send', $sent_count ? 'partial_delivery'
+                : $send_ok ? 'send_failed' : 'send_error',
+                generation => $generation, kind => $kind);
+        }
+        $sent_count++;
+    }
 
     my $sent_at = $self->_now();
     $sent_at = $before_send unless defined $sent_at;
@@ -350,8 +393,8 @@ sub attempt_send {
         kind        => $kind,
         delivery    => $delivery,
         continuation => $continuation,
-        reply_chars => length($text),
-        reply_bytes => length(encode_utf8($text)),
+        reply_chars => length(join('', @messages)),
+        reply_bytes => length(encode_utf8(join('', @messages))),
     );
 }
 
@@ -371,7 +414,7 @@ sub format_sender_log {
         'reason=' . $summary->{reason},
     );
     push @parts, 'kind=' . $summary->{kind}
-        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|aside|micro_scene|stage_cue|afterglow|vdm)\z/;
+        if _plain_scalar($summary->{kind}) && "$summary->{kind}" =~ /^(?:fork|portal|callback|reaction|mosaic|aside|micro_scene|stage_cue|afterglow|vdm|dtc)\z/;
     push @parts, 'delivery=' . $summary->{delivery}
         if _plain_scalar($summary->{delivery})
             && "$summary->{delivery}" =~ /^(?:message|action)\z/;
