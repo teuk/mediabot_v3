@@ -219,7 +219,7 @@ Source version line: `3.6dev`
 | `rnick` | public | registry-public, registry-private | `rnick #channel` | Pick a random nick from a channel. |  |
 | `roll` | public | registry-public | `roll [NdN]` | Roll dice. Defaults to 1d6. Supports NdN format (e.g. 2d6, 1d20). |  |
 | `rplay` | public | registry-public | `rplay <artist or title>` | Request a random catalogue track on a +Radio channel. |  |
-| `rss` | public | registry-public | `rss <list\|info\|add\|del\|set\|probe\|show> ...` | Native per-channel RSS/Atom feeds with automatic polling; first poll is silent. Changes require channel level 400+ or Administrator. |  |
+| `rss` | public | registry-public | `rss [#channel] <list\|info\|add\|del\|set\|probe\|show\|limit> ...` | Native per-channel RSS/Atom feeds with automatic polling; first poll is silent. Channel limits: gap=minutes, daily=rolling-24h cap. Changes require channel level 400+ or Administrator. |  |
 | `say` | admin | registry-public, registry-private | `say #channel <text>` | Send a channel message through the bot. |  |
 | `searchcmd` | public | registry-public, registry-private | `searchcmd <keyword> [limit]` | Search dynamic PUBLIC_COMMANDS entries. |  |
 | `seen` | public | registry-public | `seen <nick>` | Show when a nick was last seen. |  |

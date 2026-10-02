@@ -3,12 +3,14 @@ package Mediabot::RSS::Runtime;
 use strict;
 use warnings;
 use utf8;
+use Encode qw(encode);
 
 use IO::Async::Timer::Countdown;
 use Mediabot::AsyncWorker;
 use Mediabot::Helpers ();
 use Mediabot::RSS qw(format_rss_announcement);
 use Mediabot::RSS::Poller;
+use Mediabot::RSS::Pacing;
 use Mediabot::RSS::Repository;
 use Mediabot::URLShortener qw(make_bot_shortener format_event);
 
@@ -30,6 +32,7 @@ sub new {
 
     return bless {
         bot           => $bot,
+        pacing        => $args{pacing} || Mediabot::RSS::Pacing->new(bot => $bot),
         loop          => $loop,
         max_workers   => $max_workers,
         dispatch_limit => int($args{dispatch_limit} // 20),
@@ -123,7 +126,7 @@ sub _child_poll {
     my $value;
     my $ok = eval {
         my $repo = Mediabot::RSS::Repository->new(dbh => $dbh);
-        my $poller = Mediabot::RSS::Poller->new(repo => $repo);
+        my $poller = Mediabot::RSS::Poller->new(repo => $repo, pacing => $self->{pacing});
         my $res = $poller->poll_feed($feed);
 
         $value = {
@@ -145,6 +148,7 @@ sub _child_poll {
                         if @{ $value->{shorturl_events} } < 8;
                 },
             );
+            my $policy = $self->{pacing}->status($feed->{channel});
             for my $item (@{ $res->{pending} }) {
                 next unless ref($item) eq 'HASH';
                 next unless defined($item->{item_key}) && $item->{item_key} =~ /^[0-9a-f]{64}$/i;
@@ -154,6 +158,7 @@ sub _child_poll {
                     label => $feed->{label},
                     title => $item->{title},
                     url   => $display_url,
+                    max_bytes => $policy->{active} ? 400 : undef,
                 );
                 next unless defined($line) && length($line);
                 push @{ $value->{announcements} }, {
@@ -341,10 +346,26 @@ sub _drain_channel {
     delete $self->{queued}{ $item->{qid} };
 
     my $repo = eval { $self->_parent_repo };
+    my $policy = eval { $self->{pacing}->status($q->{channel}) };
+    my $paced = $policy && $policy->{active};
     my $enabled = $repo ? eval { $repo->is_feed_enabled($item->{feed_id}) } : 0;
-    if ($enabled) {
+    # State failures block output. Recheck limits immediately before delivery,
+    # including messages queued before an operator changes the policy.
+    if ($enabled && $policy) {
+        my $allowed = !$paced;
+        if ($paced) {
+            my $latest = eval { $repo->paced_pending_items($item->{feed_id}) };
+            my $current = $latest && @$latest && $latest->[0]{item_key} eq $item->{item_key};
+            my $connected = eval { $self->{bot}{irc}->is_connected };
+            my $one_line = length(encode('UTF-8', $item->{line})) <= 400;
+            if ($current && $connected && $one_line) {
+                my $slot = eval { $self->{pacing}->reserve($q->{channel}) };
+                $allowed = $slot && $slot->{allowed};
+            }
+        }
         my $accepted = eval {
-            Mediabot::Helpers::botPrivmsg($self->{bot}, $q->{channel}, $item->{line})
+            $allowed ? Mediabot::Helpers::botPrivmsg($self->{bot}, $q->{channel}, $item->{line},
+                $paced ? {no_defer => 1} : undef) : 0
         };
         if ($accepted) {
             my $marked = eval {
@@ -358,10 +379,19 @@ sub _drain_channel {
             $self->_log(2, "rss_poll_dispatch: output rejected; item remains pending feed=$item->{feed_id} key=$item->{item_key}");
         }
     }
+    elsif (!$policy) {
+        $self->_log(1, "rss_poll_dispatch: pacing state unavailable; output held");
+    }
     else {
         $self->_log(3, "rss_poll_dispatch: dropped queued item for deleted/disabled feed=$item->{feed_id}");
     }
 
+    # No timer-driven catch-up on protected channels. Pending candidates are
+    # refreshed by a later poll; no delayed AntiFlood queue may bypass the gap.
+    if ($paced || !$policy) {
+        delete $self->{queued}{$_->{qid}} for @{$q->{items}};
+        $q->{items} = [];
+    }
     $q->{draining} = 0;
     if (@{ $q->{items} || [] }) {
         $self->_arm_next($ckey);

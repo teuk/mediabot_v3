@@ -75,3 +75,7 @@ snap_mediabot*.sh
 node_modules/
 !contrib/mbweb/package.json
 !contrib/mbweb/package-lock.json
+
+# MB809: core-owned RSS pacing lock and incomplete state writes
+.rss-pacing.json.lock
+.rss-pacing-*

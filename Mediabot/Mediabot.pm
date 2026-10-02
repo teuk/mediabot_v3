@@ -2880,7 +2880,7 @@ actualites|actualites [sujet] [en\|fr\|es]|public|Latest news on a topic (or tod
 actualite|actualite [sujet] [en\|fr\|es]|public|Alias for actualites (accented forms actualités/actualité work too).
 actu|actu [sujet] [en\|fr\|es]|public|Alias for actualites.
 news|news [sujet] [en\|fr\|es]|public|Alias for actualites.
-rss|rss <list|info|add|del|set|probe|show> ...|public|Native per-channel RSS/Atom feeds with automatic polling; first poll is silent. Changes require channel level 400+ or Administrator.
+rss|rss [#channel] <list|info|add|del|set|probe|show|limit> ...|public|Native per-channel RSS/Atom feeds with automatic polling; first poll is silent. Channel limits: gap=minutes, daily=rolling-24h cap. Changes require channel level 400+ or Administrator.
 vdm|vdm [id]|public|Post one recent VDM or the exact numbered article when +VDM is enabled on the channel.
 dtc|dtc [id|search text]|public|Show a random, numbered, or searched DansTonChat quote when +DansTonChat is enabled.
 bashfr|bashfr [id|search text]|public|Alias for dtc.

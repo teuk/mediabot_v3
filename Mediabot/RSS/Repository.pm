@@ -254,6 +254,31 @@ sub pending_items {
     return \@rows;
 }
 
+# Paced salons retain only the newest pending candidate for each feed. Older
+# candidates are suppressed durably, rather than queued for a later catch-up.
+sub paced_pending_items {
+    my ($self, $id_feed) = @_;
+    die "invalid RSS feed id" unless defined($id_feed) && $id_feed =~ /^\d+$/;
+    my $sth = $self->dbh->prepare(q{
+        SELECT id_rss_item, item_key, title, url, published_raw, seen_at
+          FROM RSS_ITEM
+         WHERE id_rss_feed = ? AND announced_at IS NULL
+         ORDER BY id_rss_item DESC LIMIT 1
+    }) or die "RSS latest-pending prepare failed";
+    $sth->execute($id_feed) or die "RSS latest-pending execute failed";
+    my $item = $sth->fetchrow_hashref;
+    my $copy = $item ? {%$item} : undef;
+    $sth->finish;
+    return [] unless $copy;
+    $sth = $self->dbh->prepare(q{
+        UPDATE RSS_ITEM SET announced_at = NOW()
+         WHERE id_rss_feed = ? AND announced_at IS NULL AND id_rss_item < ?
+    }) or die "RSS discard-old-pending prepare failed";
+    $sth->execute($id_feed, $copy->{id_rss_item}) or die "RSS discard-old-pending execute failed";
+    $sth->finish;
+    return [$copy];
+}
+
 sub mark_announced {
     my ($self, $id_feed, $keys) = @_;
     die "invalid RSS feed id" unless defined($id_feed) && $id_feed =~ /^\d+$/;

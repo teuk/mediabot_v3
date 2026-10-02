@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB809 — quiet channel-wide RSS news and console targeting
+
+- Accept `!rss #channel <subcommand> ...` alongside the existing command order,
+  preserving destination channel authorization and multiword feed labels.
+- Add `!rss #channel limit gap=180 daily=3` for a channel-wide minimum gap and
+  a rolling 24-hour cap shared by all feeds, with private policy/status replies.
+- Persist locked, atomic instance history in the data directory already kept by
+  the updater. Reconfiguration and restarts do not reset limits; no SQL migration.
+- Keep one recent candidate per feed on protected channels, discard superseded
+  news, recheck settings at delivery and prevent catch-up or AntiFlood bursts.
+- Bound paced news to one IRC line, retain silent baselines and accepted-output
+  acknowledgements, and make protected manual previews private.
+- Document dev validation and later production promotion without activating or
+  changing existing production subscriptions.
+
 ### MB808 — retrieve the requested VDM and DTC number
 
 - Make `!vdm <id>` fetch the official article directly instead of silently

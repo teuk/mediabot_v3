@@ -11,6 +11,7 @@ package Mediabot::RSS;
 use strict;
 use warnings;
 use utf8;
+use Encode qw(encode);
 
 use Exporter 'import';
 use Digest::SHA qw(sha256_hex);
@@ -378,6 +379,17 @@ sub format_rss_announcement {
     my $url   = _article_url($args{url});
 
     return undef unless length($title) && length($url);
+
+    if (defined $args{max_bytes}) {
+        my $limit = int($args{max_bytes});
+        $limit = 400 if $limit > 400;
+        my $build = sub { "\001ACTION - news \002:\002 \00313[$label]\0036 $title \00313\002-\002\00314 $url\001" };
+        while (length(encode('UTF-8', $build->())) > $limit && length($title) > 1) { chop $title }
+        while (length(encode('UTF-8', $build->())) > $limit && length($label) > 1) { chop $label }
+        # Keep the URL intact; skip an unshortened URL which cannot fit.
+        return undef if length(encode('UTF-8', $build->())) > $limit;
+        return $build->();
+    }
 
     return "\001ACTION - news \002:\002 "
          . "\00313[$label]"

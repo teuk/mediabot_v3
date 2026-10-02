@@ -11,6 +11,7 @@ sub new {
     die "repo is required" unless $args{repo};
     return bless {
         repo    => $args{repo},
+        pacing  => $args{pacing},
         fetcher => $args{fetcher} || \&Mediabot::RSS::Fetcher::fetch_feed_once,
     }, $class;
 }
@@ -33,10 +34,17 @@ sub poll_feed {
         && defined($feed->{id_rss_feed}) && $feed->{id_rss_feed} =~ /^\d+$/
         && defined($feed->{url}) && !ref($feed->{url});
 
+    my $paced = 0;
+    if ($self->{pacing}) {
+        my $policy = eval { $self->{pacing}->status($feed->{channel}) };
+        return {ok => 0, error => 'pacing_state'} unless $policy;
+        $paced = $policy->{active};
+    }
     my $id = 0 + $feed->{id_rss_feed};
     my $limit = int($feed->{announce_limit} || 5);
     $limit = 1 if $limit < 1;
     $limit = 10 if $limit > 10;
+    $limit = 1 if $paced;
     my $baseline = defined($feed->{last_success_at}) && length($feed->{last_success_at}) ? 0 : 1;
 
     my $res = eval {
@@ -70,7 +78,7 @@ sub poll_feed {
             1;
         };
         return { ok => 0, error => 'repository_error', detail => $@ } unless $ok;
-        my $pending = eval { $self->repo->pending_items($id, $limit) };
+        my $pending = eval { $paced ? $self->repo->paced_pending_items($id) : $self->repo->pending_items($id, $limit) };
         return { ok => 0, error => 'repository_error', detail => $@ } if $@;
         return {
             ok           => 1,
@@ -107,7 +115,7 @@ sub poll_feed {
     return { ok => 0, error => 'repository_error', detail => $@ }
         unless $persist_ok;
 
-    my $pending = $baseline ? [] : eval { $self->repo->pending_items($id, $limit) };
+    my $pending = $baseline ? [] : eval { $paced ? $self->repo->paced_pending_items($id) : $self->repo->pending_items($id, $limit) };
     return { ok => 0, error => 'repository_error', detail => $@ } if $@;
 
     return {

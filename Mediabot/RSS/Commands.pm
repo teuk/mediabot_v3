@@ -13,6 +13,7 @@ use Mediabot::RSS qw(
 );
 use Mediabot::RSS::Fetcher;
 use Mediabot::RSS::Repository;
+use Mediabot::RSS::Pacing;
 use Mediabot::URLShortener qw(make_bot_shortener format_event);
 
 sub _url_shortener {
@@ -36,15 +37,16 @@ sub _syntax {
     my ($ctx) = @_;
     my $nick = $ctx->nick;
     my $bot  = $ctx->bot;
-    botNotice($bot, $nick, 'RSS syntax:');
+    botNotice($bot, $nick, 'RSS syntax (also: rss #channel <subcommand> ...):');
     botNotice($bot, $nick, 'rss list [#channel]');
     botNotice($bot, $nick, 'rss info [#channel] <feed name>');
     botNotice($bot, $nick, 'rss add [#channel] <feed name> <https://...> [interval=30] [max=5]');
     botNotice($bot, $nick, 'rss del [#channel] <feed name>');
     botNotice($bot, $nick, 'rss set [#channel] <feed name> <interval|max|enabled> <value>');
+    botNotice($bot, $nick, 'rss limit [#channel] [gap=180] [daily=3] (minutes / rolling 24h; 0 = off)');
     botNotice($bot, $nick, 'rss probe <https://...>');
     botNotice($bot, $nick, 'rss show [#channel] <feed name>');
-    botNotice($bot, $nick, 'Management: add/set/del require channel level 400+ or Administrator.');
+    botNotice($bot, $nick, 'Management: add/set/del/limit require channel level 400+ or Administrator.');
     botNotice($bot, $nick, 'Automatic polling: the first successful poll is silent; only later new items are announced.');
     return;
 }
@@ -93,6 +95,45 @@ sub _db_error {
     return;
 }
 
+sub _pacing_error {
+    my ($ctx, $err) = @_;
+    $err = 'unknown state error' unless defined($err) && length($err);
+    $err =~ s/[\r\n\0]+/ /g;
+    eval { $ctx->bot->{logger}->log(1, "rss limits: $err") };
+    return $ctx->reply_private('RSS limit operation failed; settings were not confirmed.');
+}
+
+sub _pacing { Mediabot::RSS::Pacing->new(bot => $_[0]->bot) }
+
+sub _limit {
+    my ($ctx, @args) = @_;
+    my $channel = _target_channel($ctx, \@args);
+    return botNotice($ctx->bot, $ctx->nick,
+        'Syntax: rss #channel limit [gap=180] [daily=3]; gap: 0 or 5..10080 min; daily: 0..24')
+        unless defined $channel;
+    return unless _can_manage($ctx, $channel);
+    return botNotice($ctx->bot, $ctx->nick, "Channel $channel is not registered to Mediabot.")
+        unless defined _registered_channel_id($ctx, $channel);
+    my %opts;
+    for my $arg (@args) {
+        return botNotice($ctx->bot, $ctx->nick, 'Invalid RSS limits: use gap=180 daily=3; gap: 0 or 5..10080 min; daily: 0..24.')
+            unless defined($arg) && $arg =~ /\A(gap|daily)=([0-9]{1,5})\z/i
+                && !exists($opts{lc $1});
+        $opts{lc $1} = 0 + $2;
+    }
+    return botNotice($ctx->bot, $ctx->nick, 'Invalid RSS limits: gap: 0 or 5..10080 min; daily: 0..24.')
+        if (exists($opts{gap}) && $opts{gap} && ($opts{gap} < 5 || $opts{gap} > 10080))
+            || (exists($opts{daily}) && $opts{daily} > 24);
+    my $status = eval { keys(%opts) ? _pacing($ctx)->configure($channel, %opts) : _pacing($ctx)->status($channel) };
+    return _pacing_error($ctx, $@) unless $status;
+    logBot($ctx->bot, $ctx->message, $channel, 'rss', 'limit', @args) if @args;
+    my $gap = $status->{gap} ? "min $status->{gap} min between news" : 'gap off';
+    my $daily = $status->{daily} ? "max $status->{daily} / rolling 24h" : 'daily cap off';
+    my $wait = int(($status->{wait} + 59) / 60);
+    return $ctx->reply_private("RSS limits on $channel: $gap; $daily; used $status->{used}; wait ${wait} min. "
+        . ($status->{active} ? 'One recent article at a time; no catch-up burst.' : 'Legacy per-feed limits apply.'));
+}
+
 sub _list {
     my ($ctx, @args) = @_;
     my $channel = _target_channel($ctx, \@args);
@@ -115,6 +156,9 @@ sub _info {
     my $feed = eval { _repo($ctx)->get_feed($channel, $label) };
     return _db_error($ctx, 'reading feed info', $@) if $@;
     return botNotice($ctx->bot, $ctx->nick, "RSS feed '$label' not found on $channel.") unless $feed;
+    my $status = eval { _pacing($ctx)->status($channel) };
+    return _pacing_error($ctx, $@) unless $status;
+    botNotice($ctx->bot, $ctx->nick, "Channel RSS limits: gap=$status->{gap} min; daily=$status->{daily}/24h; wait=$status->{wait}s.");
     my $lines = format_rss_feed_info_lines($feed);
     botNotice($ctx->bot, $ctx->nick, $_) for @$lines;
     return 1;
@@ -268,6 +312,9 @@ sub _probe_worker {
     my $feed = $res->{feed};
     my $title = $feed->{title} || 'RSS';
     my $count = scalar @{ $feed->{items} || [] };
+    my $current_channel = $ctx->channel // '';
+    my $status = $current_channel =~ /^[#&!+]/ ? eval { _pacing($ctx)->status($current_channel) } : {active => 1};
+    return _pacing_error($ctx, $@) unless $status;
     $ctx->reply_private(
         "RSS probe OK: [$title] $feed->{format} · $count item(s) · HTTP $res->{status}.");
     if ($count) {
@@ -277,7 +324,9 @@ sub _probe_worker {
         my $line = format_rss_announcement(
             label => $title, title => $it->{title}, url => $display_url
         );
-        $ctx->reply($line) if defined $line;
+        if (defined $line) {
+            $status->{active} ? $ctx->reply_private($line) : $ctx->reply($line);
+        }
     }
     return 1;
 }
@@ -309,6 +358,8 @@ sub _show_worker {
         return $ctx->reply_private(
             "RSS [$feed->{label}] fetch failed: " . ($res->{error} // 'unknown') . '.');
     }
+    my $status = eval { _pacing($ctx)->status($channel) };
+    return _pacing_error($ctx, $@) unless $status;
     my @items = @{ $res->{feed}{items} || [] };
     return $ctx->reply_private("RSS [$feed->{label}] has no readable items.") unless @items;
     my $shorten = _url_shortener($ctx->bot);
@@ -317,7 +368,9 @@ sub _show_worker {
         my $line = format_rss_announcement(
             label => $feed->{label}, title => $it->{title}, url => $display_url
         );
-        $ctx->reply($line) if defined $line;
+        if (defined $line) {
+            $status->{active} ? $ctx->reply_private($line) : $ctx->reply($line);
+        }
     }
     return 1;
 }
@@ -340,8 +393,16 @@ sub mbRss_ctx {
     my ($ctx) = @_;
     my @args = @{ $ctx->args || [] };
     return _syntax($ctx) unless @args;
+    my $leading_channel = @args && $args[0] =~ /^[#&!+]/ ? shift @args : undef;
+    return _syntax($ctx) unless @args;
     my $sub = lc shift @args;
+    # Normalize the new console form into the established target/ACL path.
+    if (defined $leading_channel) {
+        return _syntax($ctx) if $sub eq 'probe' || (@args && $args[0] =~ /^[#&!+]/);
+        unshift @args, $leading_channel;
+    }
     return _syntax($ctx) if $sub =~ /^(?:help|syntax)$/;
+    return _limit($ctx, @args) if $sub eq 'limit';
     return _list($ctx, @args)  if $sub eq 'list';
     return _info($ctx, @args)  if $sub eq 'info';
     return _add($ctx, @args)   if $sub eq 'add';
