@@ -71,10 +71,13 @@ return sub {
         'mb692-895: default requester consumes validated address set');
 
     my $cmd = _slurp_895('Mediabot/RSS/Commands.pm');
-    $assert->like($cmd, qr/sub _probe_worker .*?reply_private.*?reply\(/s,
+    $assert->like($cmd, qr/sub _probe_worker .*?reply_private.*?_reply_preview\(/s,
         'mb692-895: probe worker uses Context reply paths captured by CommandAsync');
-    $assert->like($cmd, qr/sub _show_worker .*?reply_private.*?reply\(/s,
+    $assert->like($cmd, qr/sub _show_worker .*?reply_private.*?_reply_preview\(/s,
         'mb692-895: show worker uses Context reply paths captured by CommandAsync');
+
+    $assert->like($cmd, qr/sub _reply_preview .*?return \$ctx->reply_private\(\$line\).*?return \$ctx->reply\(\$line\)/s,
+        'mb811: preview helper preserves Context reply capture for both transports');
 
     my $async = _slurp_895('Mediabot/CommandAsync.pm');
     $assert->like($async, qr/local \*Mediabot::botPrivmsg/,

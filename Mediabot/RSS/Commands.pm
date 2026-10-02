@@ -303,6 +303,18 @@ sub _set {
     return $ctx->reply(_setting_confirmation($label, $channel, $setting, $value));
 }
 
+# NOTICE carrying CTCP ACTION is displayed as a CTCP reply by clients such as
+# WeeChat. Keep public /me announcements, but send private previews as text.
+sub _reply_preview {
+    my ($ctx, $line, $private) = @_;
+    $private ||= ($ctx->channel // '') !~ /^[#&!+]/;
+    if ($private) {
+        $line =~ s/\A\001ACTION (.*)\001\z/$1/s;
+        return $ctx->reply_private($line);
+    }
+    return $ctx->reply($line);
+}
+
 sub _probe_worker {
     my ($ctx, $url) = @_;
     my $res = Mediabot::RSS::Fetcher::fetch_feed_once($url, max_items => 3);
@@ -326,7 +338,7 @@ sub _probe_worker {
             label => $title, title => $it->{title}, url => $display_url
         );
         if (defined $line) {
-            $status->{active} ? $ctx->reply_private($line) : $ctx->reply($line);
+            _reply_preview($ctx, $line, $status->{active});
         }
     }
     return 1;
@@ -370,7 +382,7 @@ sub _show_worker {
             label => $feed->{label}, title => $it->{title}, url => $display_url
         );
         if (defined $line) {
-            $status->{active} ? $ctx->reply_private($line) : $ctx->reply($line);
+            _reply_preview($ctx, $line, $status->{active});
         }
     }
     return 1;
@@ -413,7 +425,7 @@ sub _latest_worker {
     my $output_channel = $ctx->channel // '';
     my $policy = $output_channel =~ /^[#&!+]/ ? eval { _pacing($ctx)->status($output_channel) } : {active => 1};
     return _pacing_error($ctx, $@) unless $policy;
-    return $policy->{active} ? $ctx->reply_private($line) : $ctx->reply($line);
+    return _reply_preview($ctx, $line, $policy->{active});
 }
 
 sub _latest {

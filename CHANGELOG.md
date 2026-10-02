@@ -10,6 +10,15 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB811 — display private RSS previews as normal notices
+
+- Remove the CTCP ACTION envelope from private `latest`, `show` and `probe`
+  article replies so WeeChat displays normal notices instead of CTCP replies.
+- Preserve article titles, short links, IRC styling and public ACTION news;
+  private previews still respect RSS channel limits without consuming quotas.
+- Cover protected channels, private commands, public previews and asynchronous
+  replay with a regression test.
+
 ### MB810 — preview the latest RSS article where requested
 
 - Add `!rss latest Feed`, `!rss #channel latest Feed` and the legacy target

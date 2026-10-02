@@ -52,7 +52,10 @@ The response goes to the **issuing channel**, even when the feed belongs to
 another destination. Thus `!rss #35+ans latest LeMonde` in the console replies
 in the console, not on #35+ans. If the issuing channel itself has RSS limits,
 the preview goes privately to the requester. Private commands also stay
-private. Feed/HTTP/format errors are private.
+private. Feed/HTTP/format errors are private. Private `latest`, `show` and `probe`
+previews use ordinary NOTICE text with IRC styling, without a CTCP ACTION
+envelope; WeeChat displays them as normal notices. Public announcements keep
+their existing ACTION format.
 
 Identify to Mediabot as User or higher. A 15-second cooldown applies to latest
 in the issuing channel, shared across feed choices. News fit in one IRC line.
