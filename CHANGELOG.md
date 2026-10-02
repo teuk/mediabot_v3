@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB808 — retrieve the requested VDM and DTC number
+
+- Make `!vdm <id>` fetch the official article directly instead of silently
+  ignoring the argument and selecting a recent feed item. Keep bare `!vdm`
+  on the recent feed and preserve the existing channel authorization.
+- Share asynchronous VDM work only for identical source requests, with bounded
+  workers and waiters. Revalidate the requested ID and channel before delivery.
+- Verify DTC page identity and extract the complete matching content block for
+  both `!dtc <id>` and `!bashfr <id>`, including nested markup. Missing or
+  mismatched IDs receive an error without substituting an unrelated quote.
+- Keep DTC random/text search, Spark content announcements, and existing IRC
+  output limits. Explicit VDM IDs may be reread within the random repeat window.
+- Document the command forms and cover source selection, registry dispatch,
+  aliases, concurrency, revocation, redirects and missing content.
+
 ### MB807 — teach the dynamic spellbook Unicode and safe choices
 
 - Accept Unicode command names (including `café`), normalise NFC across

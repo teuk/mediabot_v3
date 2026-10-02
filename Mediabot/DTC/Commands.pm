@@ -59,7 +59,8 @@ sub _run_ctx {
     if ($arg =~ /\A\s*\(?\s*([0-9]+)\s*\)?\s*\z/) {
         my $id = $1;
         my $res = fetch_by_id($id);
-        unless ($res->{ok}) {
+        unless ($res->{ok} && defined($res->{id}) && !ref($res->{id})
+            && "$res->{id}" eq "$id") {
             Mediabot::Helpers::botPrivmsg($bot, $channel,
                 "D\x{00e9}sol\x{00e9}, je n'ai pas trouv\x{00e9} la quote #$id.");
             return 1;

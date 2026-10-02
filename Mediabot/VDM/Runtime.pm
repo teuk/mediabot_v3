@@ -184,14 +184,16 @@ sub _safe_notice {
 }
 
 sub _pick_item {
-    my ($self, $state, $items) = @_;
+    my ($self, $state, $items, $requested_id) = @_;
     return undef unless ref($items) eq 'ARRAY';
 
     for my $item (@$items) {
         next unless ref($item) eq 'HASH';
         my $id = $item->{id};
         my $story = $item->{story};
-        next if $self->_recent_id($state, $id);
+        next if defined($requested_id)
+            && (!defined($id) || ref($id) || "$id" ne "$requested_id");
+        next if !defined($requested_id) && $self->_recent_id($state, $id);
         my $line = format_vdm_line(id => $id, story => $story);
         next unless defined($line) && length($line);
         return { item => $item, line => $line };
@@ -224,6 +226,17 @@ sub request_manual {
         return 1;
     }
 
+    my $args = eval { $ctx->args };
+    $args = [] unless defined $args;
+    my $requested_id;
+    if (ref($args) ne 'ARRAY' || @$args > 1
+        || (@$args && (!defined($args->[0]) || ref($args->[0])
+            || $args->[0] !~ /\A[1-9][0-9]{0,11}\z/))) {
+        $self->_safe_notice($nick, 'Usage: !vdm [id].');
+        return 1;
+    }
+    $requested_id = "$args->[0]" if @$args;
+
     my $state = $self->_channel_state($channel) or return 0;
     if ($state->{pending}) {
         $self->_safe_notice($nick, 'A VDM request is already in flight on this channel.');
@@ -243,6 +256,7 @@ sub request_manual {
     $state->{touched} = $self->_now;
 
     my $accepted = $fetcher->fetch(
+        (defined($requested_id) ? (id => $requested_id) : ()),
         on_done => sub {
             my ($result) = @_;
             my $current = $self->{channel_states}{$key};
@@ -260,14 +274,18 @@ sub request_manual {
             unless (ref($result) eq 'HASH' && $result->{ok} && ref($result->{items}) eq 'ARRAY') {
                 my $reason = ref($result) eq 'HASH' ? ($result->{error} // 'fetch_failed') : 'invalid_result';
                 $reason =~ s/[^A-Za-z0-9_.:-]+/_/g;
-                $self->_safe_notice($nick, 'VDM feed is temporarily unavailable.');
+                $self->_safe_notice($nick, defined($requested_id)
+                    ? "VDM #$requested_id introuvable ou temporairement indisponible."
+                    : 'VDM feed is temporarily unavailable.');
                 $self->_log(2, "[VDM] channel=$channel action=no_send reason=$reason mode=manual request_id=$request_id");
                 return;
             }
 
-            my $picked = $self->_pick_item($current, $result->{items});
+            my $picked = $self->_pick_item($current, $result->{items}, $requested_id);
             unless ($picked) {
-                $self->_safe_notice($nick, 'No fresh VDM is available right now.');
+                $self->_safe_notice($nick, defined($requested_id)
+                    ? "VDM #$requested_id introuvable."
+                    : 'No fresh VDM is available right now.');
                 $self->_log(3, "[VDM] channel=$channel action=no_send reason=repeat_window mode=manual request_id=$request_id");
                 return;
             }

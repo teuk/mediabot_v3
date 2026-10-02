@@ -22,7 +22,7 @@ return sub {
     $assert->like($mainmod,
         qr/\bvdm\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::VDM::Runtime::mbVdm_ctx\(\$ctx\)/s,
         'mb704-977: public registry handler wires vdm to the dedicated runtime');
-    $assert->like($mainmod, qr/^vdm\|vdm\|public\|Post one VDM/m,
+    $assert->like($mainmod, qr/^vdm\|vdm \[id\]\|public\|Post one recent VDM/m,
         'mb704-977: internal help exposes the manual VDM command');
 
     $assert->like($runtime, qr/chanset_enabled\([^\n]*'VDM',\s*default\s*=>\s*0/s,

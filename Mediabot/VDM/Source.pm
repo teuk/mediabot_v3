@@ -6,11 +6,15 @@ use utf8;
 
 use Exporter qw(import);
 use HTML::Entities qw(decode_entities);
+use HTML::TreeBuilder;
 
 use Mediabot::RSS::Fetcher ();
 use Mediabot::VDM qw(vdm_feed_url vdm_item_id format_vdm_line);
 
-our @EXPORT_OK = qw(parse_vdm_feed_document fetch_vdm_once);
+our @EXPORT_OK = qw(
+    parse_vdm_feed_document fetch_vdm_once
+    vdm_article_url parse_vdm_article_document fetch_vdm_by_id
+);
 
 use constant MAX_FEED_BYTES => 2 * 1024 * 1024;
 use constant MAX_ITEMS      => 50;
@@ -162,6 +166,104 @@ sub parse_vdm_feed_document {
         items  => \@items,
         bytes  => length($xml),
     };
+}
+
+
+sub vdm_article_url {
+    my ($id) = @_;
+    return undef unless defined($id) && !ref($id) && $id =~ /\A[1-9][0-9]{0,11}\z/;
+    return "https://www.viedemerde.fr/article/$id";
+}
+
+sub _article_url_id {
+    my ($url) = @_;
+    return undef unless defined($url) && !ref($url)
+        && $url =~ m{\Ahttps?://(?:www\.)?viedemerde\.fr/article/}i;
+    return $1 if $url =~ m{/article/([0-9]+)(?:[?#].*)?\z};
+    return vdm_item_id({ url => $url });
+}
+
+sub parse_vdm_article_document {
+    my ($html, %opts) = @_;
+    my $id = $opts{id};
+    return { ok => 0, error => 'invalid_id' } unless defined vdm_article_url($id);
+    return { ok => 0, error => 'invalid_html' }
+        unless defined($html) && !ref($html);
+    return { ok => 0, error => 'html_too_large' } if length($html) > MAX_FEED_BYTES;
+    return { ok => 0, error => 'nul_byte' } if index($html, "\0") >= 0;
+
+    my $tree = HTML::TreeBuilder->new;
+    $tree->ignore_unknown(0);
+    my ($story, $canonical_id, $mismatch);
+    eval {
+        $tree->parse_content($html);
+        for my $link ($tree->look_down(_tag => 'link')) {
+            next unless lc($link->attr('rel') // '') eq 'canonical';
+            $canonical_id = _article_url_id($link->attr('href'));
+            $mismatch = 1 unless defined($canonical_id) && "$canonical_id" eq "$id";
+            last;
+        }
+        unless ($mismatch) {
+            ARTICLE: for my $article ($tree->look_down(_tag => 'article')) {
+                my $marker = $article->look_down(sub {
+                    my $route = $_[0]->attr('data-route') // '';
+                    return $route =~ m{\A/api/v2/article/\Q$id\E/vote(?:/|\z)};
+                });
+                next unless $marker;
+                for my $node ($article->look_down(sub {
+                    my $tag = $_[0]->tag;
+                    return $tag eq 'span' || $tag eq 'a' || $tag eq 'p';
+                })) {
+                    my $candidate = _published_story(_clean_text($node->as_HTML, 4096));
+                    next unless length($candidate);
+                    next unless defined format_vdm_line(id => $id, story => $candidate);
+                    $story = $candidate;
+                    last ARTICLE;
+                }
+            }
+            # The official description contains the complete story. Only use
+            # it when the page itself proves the requested article identity.
+            if (!defined($story) && defined($canonical_id) && "$canonical_id" eq "$id") {
+                my $meta = $tree->look_down(_tag => 'meta', name => 'description');
+                my $candidate = $meta
+                    ? _published_story(_clean_text($meta->attr('content'), 4096)) : '';
+                $story = $candidate if length($candidate)
+                    && defined format_vdm_line(id => $id, story => $candidate);
+            }
+        }
+        1;
+    };
+    my $exception = $@;
+    $tree->delete;
+    return { ok => 0, error => 'parse_error' } if $exception;
+    return { ok => 0, error => 'article_id_mismatch' } if $mismatch;
+    return { ok => 0, error => 'article_not_found', id => "$id" } unless defined $story;
+    return { ok => 1, items => [ { id => "$id", story => $story } ] };
+}
+
+sub fetch_vdm_by_id {
+    my ($id, %opts) = @_;
+    my $url = vdm_article_url($id);
+    return { ok => 0, error => 'invalid_id' } unless defined $url;
+    my $fetcher = delete($opts{feed_fetcher}) || \&Mediabot::RSS::Fetcher::fetch_feed_once;
+    return { ok => 0, error => 'invalid_fetcher' } unless ref($fetcher) eq 'CODE';
+    my $res = eval {
+        $fetcher->($url, %opts, max_items => 1,
+            parser => sub { parse_vdm_article_document($_[0], id => $id) });
+    };
+    return { ok => 0, error => 'fetch_exception' }
+        unless ref($res) eq 'HASH';
+    return { %$res, ok => 0 } unless $res->{ok};
+    my $resolved = _article_url_id($res->{url} // $url);
+    return { ok => 0, error => 'article_id_mismatch' }
+        unless defined($resolved) && "$resolved" eq "$id";
+    my $parsed = $res->{feed};
+    return { ok => 0, error => 'invalid_article_result' }
+        unless ref($parsed) eq 'HASH' && $parsed->{ok}
+        && ref($parsed->{items}) eq 'ARRAY' && @{ $parsed->{items} } == 1
+        && defined($parsed->{items}[0]{id}) && "$parsed->{items}[0]{id}" eq "$id";
+    return { ok => 1, status => $res->{status}, url => $res->{url} // $url,
+        items => $parsed->{items} };
 }
 
 sub fetch_vdm_once {

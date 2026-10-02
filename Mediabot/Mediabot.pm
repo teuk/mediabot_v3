@@ -2881,7 +2881,7 @@ actualite|actualite [sujet] [en\|fr\|es]|public|Alias for actualites (accented f
 actu|actu [sujet] [en\|fr\|es]|public|Alias for actualites.
 news|news [sujet] [en\|fr\|es]|public|Alias for actualites.
 rss|rss <list|info|add|del|set|probe|show> ...|public|Native per-channel RSS/Atom feeds with automatic polling; first poll is silent. Changes require channel level 400+ or Administrator.
-vdm|vdm|public|Post one VDM from the official feed when +VDM is enabled on the channel.
+vdm|vdm [id]|public|Post one recent VDM or the exact numbered article when +VDM is enabled on the channel.
 dtc|dtc [id|search text]|public|Show a random, numbered, or searched DansTonChat quote when +DansTonChat is enabled.
 bashfr|bashfr [id|search text]|public|Alias for dtc.
 achievements|achievements [nick|list|all|top|progress [nick]]|public|Show achievements for yourself, a nick, the catalogue, the top unlocks, or how close you are to the next ones.

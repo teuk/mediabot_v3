@@ -6,13 +6,14 @@ use utf8;
 
 use Exporter qw(import);
 use HTML::Entities qw(decode_entities);
+use HTML::TreeBuilder;
 use URI::Escape qw(uri_escape_utf8 uri_unescape);
 
 use Mediabot::RSS::Fetcher ();
 
 our @EXPORT_OK = qw(
     dtc_random_url dtc_quote_url
-    extract_first_quote parse_random_quotes parse_search_ids
+    extract_first_quote parse_random_quotes parse_search_ids parse_quote_by_id
     strip_trailing_numeric_debris
     fetch_random fetch_by_id search_ids
 );
@@ -25,7 +26,7 @@ use constant MAX_SEARCH_RESULTS => 20;
 sub dtc_random_url { return 'https://danstonchat.com/random' }
 sub dtc_quote_url {
     my ($id) = @_;
-    return undef unless defined($id) && !ref($id) && $id =~ /\A[0-9]+\z/;
+    return undef unless defined($id) && !ref($id) && $id =~ /\A[1-9][0-9]{0,11}\z/;
     return "https://danstonchat.com/quote/$id.html";
 }
 
@@ -186,15 +187,82 @@ sub _fetch_html {
     return { ok => 1, html => $html, status => $res->{status}, url => $res->{url} };
 }
 
+
+sub _quote_url_id {
+    my ($url) = @_;
+    return undef unless defined($url) && !ref($url);
+    return $1 if $url =~ m{\A(?:https?://(?:www\.)?danstonchat\.com)?/quote/([0-9]+)\.html(?:[?#].*)?\z}i;
+    return undef;
+}
+
+sub parse_quote_by_id {
+    my ($html, $id) = @_;
+    return { ok => 0, error => 'invalid_id' } unless defined dtc_quote_url($id);
+    return { ok => 0, error => 'invalid_html' } unless defined($html) && !ref($html);
+    return { ok => 0, error => 'html_too_large' } if length($html) > MAX_HTML_BYTES;
+    return { ok => 0, error => 'nul_byte' } if index($html, "\0") >= 0;
+
+    my $tree = HTML::TreeBuilder->new;
+    $tree->ignore_unknown(0);
+    my ($text, $mismatch);
+    eval {
+        $tree->parse_content($html);
+        for my $link ($tree->look_down(_tag => 'link')) {
+            next unless lc($link->attr('rel') // '') eq 'canonical';
+            my $canonical_id = _quote_url_id($link->attr('href'));
+            $mismatch = 1 unless defined($canonical_id) && "$canonical_id" eq "$id";
+            last;
+        }
+        unless ($mismatch) {
+            my @blocks = $tree->look_down(sub {
+                my $class = $_[0]->attr('class') // '';
+                return $_[0]->tag eq 'div' && $class =~ /(?:\A|\s)entry-content(?:\s|\z)/;
+            });
+            for my $block (@blocks) {
+                my $article = $block->look_up(_tag => 'article');
+                my @ids;
+                if ($article) {
+                    for my $link ($article->look_down(_tag => 'a')) {
+                        my $found = _quote_url_id($link->attr('href'));
+                        push @ids, $found if defined $found;
+                    }
+                }
+                if (@ids) {
+                    next unless grep { "$_" eq "$id" } @ids;
+                }
+                else {
+                    # A single content block on an identity-checked detail
+                    # page is unambiguous; a list of unidentified cards is not.
+                    next unless @blocks == 1;
+                }
+                my $candidate = strip_trailing_numeric_debris(_clean_html_text($block->as_HTML));
+                next unless length($candidate);
+                $text = $candidate;
+                last;
+            }
+        }
+        1;
+    };
+    my $exception = $@;
+    $tree->delete;
+    return { ok => 0, error => 'parse_error' } if $exception;
+    return { ok => 0, error => 'quote_id_mismatch' } if $mismatch;
+    return { ok => 0, error => 'quote_not_found', id => "$id" } unless defined $text;
+    return { ok => 1, id => "$id", text => $text };
+}
+
 sub fetch_by_id {
     my ($id, %opts) = @_;
     my $url = dtc_quote_url($id);
     return { ok => 0, error => 'invalid_id' } unless defined $url;
     my $res = _fetch_html($url, %opts);
     return $res unless $res->{ok};
-    my $text = strip_trailing_numeric_debris(extract_first_quote($res->{html}));
-    return { ok => 0, error => 'quote_not_found', id => "$id" } unless length($text);
-    return { ok => 1, id => "$id", text => $text, url => $url };
+    my $resolved = _quote_url_id($res->{url} // $url);
+    return { ok => 0, error => 'quote_id_mismatch' }
+        unless defined($resolved) && "$resolved" eq "$id";
+    my $parsed = parse_quote_by_id($res->{html}, $id);
+    return $parsed unless $parsed->{ok};
+    return { %$parsed, url => $res->{url} // $url };
 }
 
 sub fetch_random {

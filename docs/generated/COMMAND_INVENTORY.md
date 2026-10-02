@@ -256,7 +256,7 @@ Source version line: `3.6dev`
 | `useradd` | admin | registry-public, registry-private | `useradd <handle> [-n] <hostmask> [level]` | Legacy alias for adduser. |  |
 | `userinfo` | admin | registry-public, registry-private | `userinfo <nick>` | Show information about a user. |  |
 | `users` | admin | registry-public, registry-private | `users` | List or count known users. |  |
-| `vdm` | public | registry-public | `vdm` | Post one VDM from the official feed when +VDM is enabled on the channel. |  |
+| `vdm` | public | registry-public | `vdm [id]` | Post one recent VDM or the exact numbered article when +VDM is enabled on the channel. |  |
 | `verify` | public | registry-public, registry-private | `verify` | Verify your authentication or account state. |  |
 | `version` | public | registry-public | `version` | Show bot version. |  |
 | `voice` | operator+ | registry-public, registry-private | `voice #channel [nick]` | Give voice on a channel. |  |

@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use utf8;
 
-use Mediabot::VDM::Source qw(fetch_vdm_once);
+use Mediabot::VDM::Source qw(fetch_vdm_once fetch_vdm_by_id vdm_article_url);
 
 sub new {
     my ($class, %args) = @_;
@@ -23,20 +23,25 @@ sub new {
         timeout      => $timeout,
         max_waiters  => $max_waiters,
         worker_class => $args{worker_class} || 'Mediabot::AsyncWorker',
-        fetch_cb     => ref($args{fetch_cb}) eq 'CODE' ? $args{fetch_cb} : \&fetch_vdm_once,
-        worker       => undef,
-        waiters      => [],
+        fetch_cb     => ref($args{fetch_cb}) eq 'CODE' ? $args{fetch_cb} : sub {
+            my (%opts) = @_;
+            return defined($opts{id}) ? fetch_vdm_by_id($opts{id}) : fetch_vdm_once();
+        },
+        max_workers  => 4,
+        jobs         => {},
     }, $class;
 }
 
 sub inflight {
     my ($self) = @_;
-    return $self->{worker} ? 1 : 0;
+    return keys(%{ $self->{jobs} }) ? 1 : 0;
 }
 
 sub waiter_count {
     my ($self) = @_;
-    return scalar @{ $self->{waiters} || [] };
+    my $count = 0;
+    $count += @{ $_->{waiters} } for values %{ $self->{jobs} };
+    return $count;
 }
 
 sub _clean_detail {
@@ -68,10 +73,10 @@ sub _normalize_worker_result {
 }
 
 sub _finish {
-    my ($self, $result) = @_;
-    $self->{worker} = undef;
-    my $waiters = delete($self->{waiters}) || [];
-    $self->{waiters} = [];
+    my ($self, $key, $job, $result) = @_;
+    return 0 unless $self->{jobs}{$key} && $self->{jobs}{$key} == $job;
+    delete $self->{jobs}{$key};
+    my $waiters = $job->{waiters};
 
     my $normalized = _normalize_worker_result($result);
     for my $cb (@$waiters) {
@@ -85,48 +90,54 @@ sub fetch {
     my ($self, %args) = @_;
     my $done = $args{on_done};
     return 0 unless ref($done) eq 'CODE';
-
+    my $id = $args{id};
+    return 0 if exists($args{id}) && !defined vdm_article_url($id);
+    my $key = defined($id) ? "id:$id" : 'feed';
     return 0 if $self->waiter_count >= $self->{max_waiters};
-    push @{ $self->{waiters} }, $done;
 
-    # Coalesce simultaneous callers onto the one bounded feed request.
-    return 1 if $self->{worker};
+    # Only callers asking for the same source may share a worker result.
+    if (my $job = $self->{jobs}{$key}) {
+        push @{ $job->{waiters} }, $done;
+        return 1;
+    }
+    return 0 if keys(%{ $self->{jobs} }) >= $self->{max_workers};
 
     my $worker_class = $self->{worker_class};
-    unless (defined($worker_class) && !ref($worker_class) && eval { $worker_class->can('start') }) {
-        pop @{ $self->{waiters} };
-        return 0;
-    }
+    return 0 unless defined($worker_class) && !ref($worker_class)
+        && eval { $worker_class->can('start') };
 
+    my $job = { waiters => [ $done ] };
+    $self->{jobs}{$key} = $job;
     my $fetch_cb = $self->{fetch_cb};
-    my $worker;
-    $worker = $worker_class->start(
+    my $worker = eval { $worker_class->start(
         loop       => $self->{loop},
-        label      => 'vdm feed',
+        label      => defined($id) ? "vdm article $id" : 'vdm feed',
         timeout    => $self->{timeout},
         max_output => 256 * 1024,
-        child      => sub { $fetch_cb->() },
+        child      => sub { $fetch_cb->(defined($id) ? (id => $id) : ()) },
         on_done    => sub {
             my ($result) = @_;
-            $self->_finish($result);
+            $self->_finish($key, $job, $result);
         },
-    );
+    ) };
 
     unless ($worker) {
-        my $cb = pop @{ $self->{waiters} };
-        eval { $cb->({ ok => 0, error => 'worker_setup' }); 1 } if $cb;
+        $self->_finish($key, $job, { ok => 0, error => 'worker_setup' });
         return 0;
     }
-
-    $self->{worker} = $worker;
+    $job->{worker} = $worker if exists $self->{jobs}{$key};
     return 1;
 }
 
 sub cancel {
     my ($self, $reason) = @_;
-    my $worker = $self->{worker} or return 0;
-    return 0 unless eval { $worker->can('cancel') };
-    return $worker->cancel($reason // 'vdm request cancelled') ? 1 : 0;
+    my $cancelled = 0;
+    for my $job (values %{ $self->{jobs} }) {
+        my $worker = $job->{worker} or next;
+        next unless eval { $worker->can('cancel') };
+        $cancelled++ if $worker->cancel($reason // 'vdm request cancelled');
+    }
+    return $cancelled ? 1 : 0;
 }
 
 1;
