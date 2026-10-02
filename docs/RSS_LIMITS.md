@@ -34,6 +34,33 @@ AntiFlood queue. Missing/corrupt/busy initialized pacing state holds RSS output.
 Manual `show` and `probe` previews on protected channels are private, so they do
 not bypass the public news cap.
 
+## Preview the latest article
+
+```text
+!rss latest LeMonde
+!rss #35+ans latest LeMonde
+!rss latest #35+ans LeMonde
+```
+
+`latest` reads the selected feed afresh and displays exactly one article with
+its title and link. It compares usable zoned publication dates among the first
+100 readable entries; ties preserve feed order. Without usable dates, it uses
+the first readable entry. The automatic per-poll `max` setting does not affect
+this preview, and disabled subscriptions can be tested without enabling them.
+
+The response goes to the **issuing channel**, even when the feed belongs to
+another destination. Thus `!rss #35+ans latest LeMonde` in the console replies
+in the console, not on #35+ans. If the issuing channel itself has RSS limits,
+the preview goes privately to the requester. Private commands also stay
+private. Feed/HTTP/format errors are private.
+
+Identify to Mediabot as User or higher. A 15-second cooldown applies to latest
+in the issuing channel, shared across feed choices. News fit in one IRC line.
+Fetching/parsing/shortening uses the existing asynchronous and safe HTTP path.
+The preview does not insert/acknowledge items, set polling timestamps, reserve
+news slots, or reset counters/baselines; the next automatic poll still uses
+its own durable deduplication and limits.
+
 ## Adjust, inspect, pause
 
 ```text
@@ -65,7 +92,7 @@ Both command orders work:
 !rss limit #35+ans gap=180 daily=3
 ```
 
-`list`, `info`, `add`, `del`, `set`, `show` and `limit` accept the channel-first
+`list`, `info`, `add`, `del`, `set`, `show`, `latest` and `limit` accept the channel-first
 form. `probe` remains URL-only. Without a channel, channel commands use the
 issuing channel. An explicit destination uses that channel's access rules,
 not the console's: identify to Mediabot and have destination channel level

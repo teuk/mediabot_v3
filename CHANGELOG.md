@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB810 — preview the latest RSS article where requested
+
+- Add `!rss latest Feed`, `!rss #channel latest Feed` and the legacy target
+  order for an authenticated, asynchronous one-article preview.
+- Prefer the newest usable publication date within the bounded feed horizon;
+  preserve feed order for ties and feeds without usable zoned dates.
+- Reply in the issuing console, privately on protected issuing channels, without
+  publishing to the selected feed's destination or changing polling/quota state.
+- Keep safe RSS HTTP handling, shared URL shortening, a 15-second command
+  cooldown and a single IRC line; preview disabled feeds without enabling them.
+- Document the preview and cover real command dispatch, dates, output targets,
+  failures, authentication and read-only state in isolated tests.
+
 ### MB809 — quiet channel-wide RSS news and console targeting
 
 - Accept `!rss #channel <subcommand> ...` alongside the existing command order,

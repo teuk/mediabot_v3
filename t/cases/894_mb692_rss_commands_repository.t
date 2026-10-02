@@ -129,7 +129,7 @@ return sub {
     $assert->like($mb,
         qr/^\s*rss\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::RSS::Commands::mbRss_ctx\(\$ctx\)\s*\},$/m,
         'mb692-894: m rss has one explicit route');
-    $assert->like($mb, qr/^rss\|rss \[\#channel\] <list\|info\|add\|del\|set\|probe\|show\|limit>/m,
+    $assert->like($mb, qr/^rss\|rss \[\#channel\] <list\|info\|add\|del\|set\|probe\|show\|limit\|latest>/m,
         'mb692-894: internal help documents the RSS family');
     $assert->like($mb,
         qr/^\s*news\s*=>\s*sub\s*\{\s*my \(\$ctx\) = \@_;\s*Mediabot::CommandAsync::run_ctx_async/m,

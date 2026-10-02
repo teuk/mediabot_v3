@@ -7,7 +7,7 @@ use utf8;
 use Mediabot::CommandAsync;
 use Mediabot::Helpers qw(botNotice botPrivmsg checkCmdCooldown checkUserChannelLevel logBot);
 use Mediabot::RSS qw(
-    normalize_feed_label canonical_feed_url validate_feed_url
+    normalize_feed_label canonical_feed_url validate_feed_url latest_feed_item
     format_rss_announcement format_rss_feed_list
     format_rss_feed_overview format_rss_feed_info_lines
 );
@@ -46,6 +46,7 @@ sub _syntax {
     botNotice($bot, $nick, 'rss limit [#channel] [gap=180] [daily=3] (minutes / rolling 24h; 0 = off)');
     botNotice($bot, $nick, 'rss probe <https://...>');
     botNotice($bot, $nick, 'rss show [#channel] <feed name>');
+    botNotice($bot, $nick, 'rss latest [#channel] <feed name> (one recent article; reply where requested)');
     botNotice($bot, $nick, 'Management: add/set/del/limit require channel level 400+ or Administrator.');
     botNotice($bot, $nick, 'Automatic polling: the first successful poll is silent; only later new items are announced.');
     return;
@@ -389,6 +390,46 @@ sub _show {
     );
 }
 
+sub _latest_worker {
+    my ($ctx, $channel, $label) = @_;
+    my $feed = eval { _repo($ctx)->get_feed($channel, $label) };
+    return _db_error($ctx, 'reading feed', $@) if $@;
+    return $ctx->reply_private("RSS feed '$label' not found on $channel.") unless $feed;
+    # A fresh one-shot read: no validators, inserts, polling timestamps, quota
+    # reservation or acknowledgement. Disabled subscriptions can be previewed.
+    my $res = Mediabot::RSS::Fetcher::fetch_feed_once($feed->{url}, max_items => 100);
+    return $ctx->reply_private("RSS [$feed->{label}] fetch failed: " . ($res->{error} // 'unknown') . '.')
+        unless $res->{ok};
+    my $item = latest_feed_item($res->{feed}{items});
+    return $ctx->reply_private("RSS [$feed->{label}] has no readable article with a link.") unless $item;
+    my $shorten = _url_shortener($ctx->bot);
+    my $line = format_rss_announcement(
+        label => $feed->{label}, title => $item->{title}, url => $shorten->($item->{url}), max_bytes => 400,
+    );
+    return $ctx->reply_private("RSS [$feed->{label}] article link cannot fit in one IRC line.")
+        unless defined($line) && length($line);
+    # The selected feed's channel is never an output target. On a protected
+    # issuing channel keep previews private; an unprotected console is public.
+    my $output_channel = $ctx->channel // '';
+    my $policy = $output_channel =~ /^[#&!+]/ ? eval { _pacing($ctx)->status($output_channel) } : {active => 1};
+    return _pacing_error($ctx, $@) unless $policy;
+    return $policy->{active} ? $ctx->reply_private($line) : $ctx->reply($line);
+}
+
+sub _latest {
+    my ($ctx, @args) = @_;
+    my $channel = _target_channel($ctx, \@args);
+    my $label = normalize_feed_label(join(' ', @args));
+    return botNotice($ctx->bot, $ctx->nick, 'Syntax: rss latest [#channel] <feed name>')
+        unless defined($channel) && defined($label);
+    return unless $ctx->require_level('User');
+    my $wait = checkCmdCooldown($ctx->bot, $ctx->channel // $ctx->nick, 'rsslatest', 15);
+    return botNotice($ctx->bot, $ctx->nick, "RSS latest cooldown: ${wait}s.") if $wait > 0;
+    return Mediabot::CommandAsync::run_ctx_async(
+        $ctx->bot, $ctx, 'rss latest', sub { _latest_worker($ctx, $channel, $label) }
+    );
+}
+
 sub mbRss_ctx {
     my ($ctx) = @_;
     my @args = @{ $ctx->args || [] };
@@ -410,6 +451,7 @@ sub mbRss_ctx {
     return _set($ctx, @args)   if $sub eq 'set';
     return _probe($ctx, @args) if $sub eq 'probe';
     return _show($ctx, @args)  if $sub eq 'show';
+    return _latest($ctx, @args) if $sub eq 'latest';
     return _syntax($ctx);
 }
 
