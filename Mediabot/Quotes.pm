@@ -549,7 +549,8 @@ sub mbQuoteSearch {
             my $qt = lc($_->{quotetext} // '');
             my $score = 0;
             $score += () = $qt =~ /\Q$_\E/gi for map { lc } @words;
-            { %$_, _score => $score };
+            # Force a hash reference: a bare block here flattens the row.
+            +{ %$_, _score => $score };
         } @rows;
         @scored = sort { $b->{_score} <=> $a->{_score} || $b->{id_quotes} <=> $a->{id_quotes} } @scored;
 

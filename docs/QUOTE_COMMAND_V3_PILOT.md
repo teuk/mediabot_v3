@@ -106,3 +106,29 @@ manifest capabilities and policy `on` for `#test`. A clean service restart must
 restore the package as ready with all five commands mounted and zero failures.
 This state is held by the core-owned API v3 boot ledger; source installation
 remains default-off and no production channel is promoted.
+
+## Quote text search (MB812)
+
+Use the configured public prefix, for example:
+
+```text
+!q s thirsan
+!q search normal
+!q s thirsan normal
+```
+
+With a bot configured for the `m` prefix, the same forms are `m q s thirsan`
+and `m q search normal`. All words must occur in the quote text on the current
+channel. This is a literal text search; `%`, `_`, `!` and regex punctuation
+remain data. It does not select quotes by the account that added them; use
+`!quote <nick>` for author lookup.
+
+A successful search replies publicly with the result count and up to ten ids,
+then the most relevant quote. Frequency ranks first, with the newest id breaking
+ties. No match produces an explicit message; more than fifty matches asks for
+a narrower query. No search text produces private syntax help. Searching does
+not change quotes or recall counters.
+
+MB812 repairs the historical handler used when quotes-v3 is absent, disabled,
+channel-off or observing. The authoritative v3 path retains the same behavior;
+no plugin activation or policy change is needed to install this correction.

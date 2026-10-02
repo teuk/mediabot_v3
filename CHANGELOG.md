@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB812 — return ranked quote search results
+
+- Fix the historical `q search` / `q s` ranking map to return one hash reference
+  per quote. Bare braces flattened matched rows and raised a strict-reference
+  exception before any public reply could be sent.
+- Preserve literal SQL matching, channel scope, frequency/newest-id ranking,
+  best-match excerpts and the existing result limits without changing quote data.
+- Exercise both the built-in registry handler and quotes-v3 read facade against
+  an isolated SQL database, covering aliases, anonymous authors, empty/large
+  results, Unicode, literal wildcard characters and unchanged recall counters.
+
 ### MB811 — display private RSS previews as normal notices
 
 - Remove the CTCP ACTION envelope from private `latest`, `show` and `probe`
