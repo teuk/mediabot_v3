@@ -56,6 +56,7 @@ use IO::Async::Timer::Periodic;
 use Time::HiRes ();
 use Mediabot::Scheduler;
 use Mediabot::RSS::Runtime;
+use Mediabot::RandomQuote::Runtime;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
 use utf8;
@@ -2448,6 +2449,15 @@ my $rss_runtime = Mediabot::RSS::Runtime->new(
 );
 $mediabot->{rss_runtime} = $rss_runtime;
 
+# MB813: persistent, per-channel quote attempts. Selection runs in isolated
+# workers; only the parent may send, after current JOIN/chanset revalidation.
+my $randomquote_runtime = Mediabot::RandomQuote::Runtime->new(bot=>$mediabot, loop=>$loop);
+$mediabot->{randomquote_runtime} = $randomquote_runtime;
+$scheduler->add(
+    name => 'randomquote_dispatch', interval => 30, first_interval => 30,
+    cb => sub { $randomquote_runtime->tick }, autostart => 1,
+);
+
 $scheduler->add(
     name           => 'rss_poll_dispatch',
     interval       => 15,
@@ -3201,74 +3211,6 @@ sub on_timer_tick {
                 $reconnect_timer->start;
             }
         }
-    }
-}
-
-# Check channels with chanset +RandomQuote
-if (defined($mediabot->{conf}->get('main.RANDOM_QUOTE'))) {
-    my $randomQuoteDelay = defined($mediabot->{conf}->get('main.RANDOM_QUOTE')) ? $mediabot->{conf}->get('main.RANDOM_QUOTE') : 10800;
-    unless ($randomQuoteDelay >= 900) {
-        $mediabot->{logger}->log(0,"Mediabot was not designed to spam channels, please set RANDOM_QUOTE to a value greater or equal than 900 seconds in [main] section of $CONFIG_FILE");
-    }
-    elsif ((time - $mediabot->getLastRandomQuote()) > $randomQuoteDelay ) {
-        my $sQuery = "SELECT CHANNEL.name FROM CHANNEL JOIN CHANNEL_SET ON CHANNEL_SET.id_channel=CHANNEL.id_channel JOIN CHANSET_LIST ON CHANSET_LIST.id_chanset_list=CHANNEL_SET.id_chanset_list WHERE CHANSET_LIST.chanset = 'RandomQuote'";
-        my $sth = $mediabot->{db}->ensure_connected()->prepare($sQuery);
-        unless ($sth && $sth->execute()) {
-            $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-        }
-        else {
-            while (my $ref = $sth->fetchrow_hashref()) {
-                my $curChannel = $ref->{'name'};
-                $mediabot->{logger}->log(4,"RandomQuote on $curChannel");
-
-                my $count_query = "
-                    SELECT COUNT(*) AS quote_count
-                    FROM QUOTES q
-                    JOIN CHANNEL c ON c.id_channel = q.id_channel
-                    WHERE c.name = ?
-                ";
-                my $sth_count = $mediabot->{db}->ensure_connected()->prepare($count_query);
-
-                unless ($sth_count && $sth_count->execute($curChannel)) {
-                    $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $count_query);
-                    next;
-                }
-
-                my $count_ref = $sth_count->fetchrow_hashref();
-                $sth_count->finish;
-
-                my $quote_count = int($count_ref->{quote_count} // 0);
-                next unless $quote_count > 0;
-
-                my $offset = int(rand($quote_count));
-
-                my $sQuery = "
-                    SELECT q.id_quotes, q.quotetext, u.nickname
-                    FROM QUOTES q
-                    JOIN CHANNEL c ON c.id_channel = q.id_channel
-                    JOIN USER u ON u.id_user = q.id_user
-                    WHERE c.name = ?
-                    ORDER BY q.id_quotes
-                    LIMIT 1 OFFSET ?
-                ";
-                my $sth2 = $mediabot->{db}->ensure_connected()->prepare($sQuery);
-
-                unless ($sth2 && $sth2->execute($curChannel, $offset)) {
-                    $mediabot->{logger}->log(1,"SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-                }
-                else {
-                    if (my $ref = $sth2->fetchrow_hashref()) {
-                        my $sQuoteId = $ref->{'id_quotes'};
-                        my $sQuote   = $ref->{'quotetext'};
-                        my $id_q = String::IRC->new($sQuoteId)->bold;
-                        $mediabot->botPrivmsg($curChannel,"[id: $id_q] $sQuote");
-                    }
-                }
-                $sth2->finish if $sth2;
-            }
-        }
-        $sth->finish;
-        $mediabot->setLastRandomQuote(time);
     }
 }
 

@@ -31,7 +31,7 @@ my @PUBLIC_CATALOGUE = qw(
     karmgraph triviastop karmawatch remindsnooze karmainfo triviareset
     triviatop pollextend karmahist roll flip choose morse abbrev compare
     heatmap monthstats define trivia triviascore active when achievements
-    achievs profil profile radar actualites actualite actu news rss vdm dtc
+    achievs profil profile radar actualites actualite actu news rss randomquote vdm dtc
     bashfr dashboard chanstats duel horoscope horo compat affinity quotegame
     qg mood milestone milestones ambiance leaderboard lb awards yearbook
     chronos chrono timeline features capabilities caps observatory obs recap
@@ -51,7 +51,7 @@ my @PRIVATE_CATALOGUE = qw(
     pass ident topic update debug status radiostatus radiomounts echo die nick
     addtimer remtimer timers register msg dump say act song play radioimport
     commands radioqueue radiopush radioskip radioflush adduser useradd deluser
-    users cstat login logout userinfo addhost addchan chanset purge part join
+    users cstat login logout userinfo addhost addchan chanset randomquote purge part join
     add del modinfo op deop invite voice devoice kick showcommands chaninfo
     chanlist channels channellist whoami auth verify access addcmd remcmd modcmd
     mvcmd chowncmd showcmd testcmd cmdvars chanstatlines whotalk whotalks countcmd topcmd popcmd
@@ -63,7 +63,7 @@ my @PRIVATE_CATALOGUE = qw(
 # The first four native handlers predated MB741. The new hailo operator
 # command and MB807 previews/variable guide have no legacy public handlers. All existing
 # migratable public built-ins retain their original migration eligibility.
-my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars);
+my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars randomquote);
 
 sub public_command_names {
     return @PUBLIC_CATALOGUE;

@@ -10,6 +10,23 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB813 — restore automatic quotes with per-channel frequency
+
+- Move RandomQuote from the broken file-scope attempt to a periodic scheduler,
+  gated on a live connection, the bot's JOIN and the current +RandomQuote flag.
+- Add public/private `randomquote [#channel] [status|every 60m|default]` with
+  private replies, authenticated Administrator or target channel level 450.
+  Accept minutes, hours or days from 15 minutes to seven days; keep chanset as
+  the activation switch.
+- Persist channel schedules and last accepted ids in private instance state,
+  retained across restarts/updates; attempt at most one quote per interval,
+  without catching up missed slots or retrying failed output immediately.
+- Select channel quotes, including anonymous authors, in bounded isolated
+  workers; revalidate JOIN generation, chanset and configuration before a
+  single sanitized UTF-8 PRIVMSG, preserving quote rows and recall counters.
+- Document configuration and exercise SQL selection, the real worker boundary,
+  state persistence, authorization, anti-burst and stale-callback cases.
+
 ### MB812 — return ranked quote search results
 
 - Fix the historical `q search` / `q s` ranking map to return one hash reference

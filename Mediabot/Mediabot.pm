@@ -23,6 +23,7 @@ use Mediabot::ScriptActionRunner;
 use Mediabot::Hailo;
 use Mediabot::Quotes;
 use Mediabot::RSS::Commands;
+use Mediabot::RandomQuote::Commands;
 use Mediabot::VDM::Runtime ();
 use Mediabot::DTC::Commands ();
 use Mediabot::LoginCommands;
@@ -2184,6 +2185,7 @@ sub _builtin_public_command_handlers {
         actu         => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
         news         => sub { my ($ctx) = @_; Mediabot::CommandAsync::run_ctx_async($ctx->bot, $ctx, 'actualites', sub { Mediabot::External::News::mbNews_ctx($ctx) }) },
         rss          => sub { my ($ctx) = @_; Mediabot::RSS::Commands::mbRss_ctx($ctx) },
+        randomquote  => sub { my ($ctx) = @_; Mediabot::RandomQuote::Commands::mbRandomQuote_ctx($ctx) },
         vdm          => sub { my ($ctx) = @_; Mediabot::VDM::Runtime::mbVdm_ctx($ctx) },
         dtc          => sub { my ($ctx) = @_; Mediabot::DTC::Commands::dispatch_ctx($ctx) },
         bashfr       => sub { my ($ctx) = @_; Mediabot::DTC::Commands::dispatch_ctx($ctx) },
@@ -2770,6 +2772,7 @@ pass|pass <newpass>|pass <oldpass> <newpass>|private|Set first password, or chan
 popcmd|popcmd|authorized|Show popular dynamic commands.
 purge|purge #channel|admin|Purge or reset channel runtime information.
 q|q [nick|search]|public|Display a quote.
+randomquote|randomquote [#channel] [status|every 60m|default]|public|Inspect or set the automatic quote frequency; Administrator or target channel level 450.
 qlog|qlog #channel <query>|admin|Search channel logs.
 radiomounts|radiomounts|public|List Icecast mounts.
 radiostatus|radiostatus|public|Show Icecast status.
@@ -3494,7 +3497,7 @@ sub _mbHelpSendChansetsTopic {
         "  +UrlTitle            : enable URL title fetching.",
         "  +Youtube             : enable YouTube URL details.",
         "  +YoutubeSearch       : enable YouTube search commands.",
-        "  +RandomQuote         : enable random quote behavior.",
+        "  +RandomQuote         : periodically publish a quote; randomquote #channel every 60m sets frequency.",
         "  +Claude              : enable Claude-related behavior if configured.",
         "  +NoColors            : strip colors from bot output where supported.",
         "  +AntiFlood           : enable channel anti-flood checks.",
@@ -3690,6 +3693,7 @@ sub mbHandleNickTriggered {
 # MB749: private built-ins use the same registry-native contract.
 sub _builtin_private_command_handlers {
     return (
+        randomquote => sub { my ($ctx) = @_; Mediabot::RandomQuote::Commands::mbRandomQuote_ctx($ctx) },
 
         # --- Legacy handlers (not yet migrated to Context) ---
         pass        => sub { my ($ctx) = @_; userPass_ctx($ctx) },

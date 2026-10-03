@@ -25,7 +25,7 @@ built-in catalogue lookup.
 | `private` | `registry` | Built-in handler stored in the registry |
 | `public` | `plugin-v3` | Mounted plugin handler stored in the registry |
 
-The catalogue currently contains 238 public and 94 private built-ins, all with
+The catalogue currently contains 242 public and 97 private built-ins, all with
 CODE handlers. The compatibility exports `legacy_public_adapter_names()` and
 `legacy_private_adapter_names()` remain for out-of-tree tooling but return
 empty lists.

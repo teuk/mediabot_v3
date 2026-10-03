@@ -79,3 +79,7 @@ node_modules/
 # MB809: core-owned RSS pacing lock and incomplete state writes
 .rss-pacing.json.lock
 .rss-pacing-*
+
+# MB813: per-channel automatic quote state locks and incomplete writes
+.randomquote.json.lock
+.randomquote-*

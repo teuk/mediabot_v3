@@ -8,11 +8,11 @@ Source version line: `3.6dev`
 
 | Measure | Count |
 | --- | ---: |
-| Internal help entries | 248 |
-| Registered public built-ins | 241 |
-| Registered private built-ins | 96 |
-| Direct public registry handlers | 241 |
-| Direct private registry handlers | 96 |
+| Internal help entries | 249 |
+| Registered public built-ins | 242 |
+| Registered private built-ins | 97 |
+| Direct public registry handlers | 242 |
+| Direct private registry handlers | 97 |
 | Compatibility dispatch tables | 0 |
 | Help parser anomalies | 0 |
 | Help-only entries | 0 |
@@ -206,6 +206,7 @@ Source version line: `3.6dev`
 | `radioqueue` | public | registry-public, registry-private | `radioqueue` | On +Radio, show current and three waiting tracks, with a bounded public/NOTICE budget. Outside +Radio, local Master-only control. |  |
 | `radioskip` | public | registry-public, registry-private | `radioskip` | Skip the current Liquidsoap queue item. Master-only. |  |
 | `radiostatus` | public | registry-public, registry-private | `radiostatus` | Show Icecast status. |  |
+| `randomquote` | public | registry-public, registry-private | `randomquote [#channel] [status\|every 60m\|default]` | Inspect or set the automatic quote frequency; Administrator or target channel level 450. |  |
 | `recap` | public | registry-public | `recap [30m\\|2h] [ai] [en\\|fr\\|es]` | Summarize what you missed on this channel (stats, or AI summary with 'ai'; the AI summary follows the channel language unless forced). |  |
 | `register` | private | registry-private | `register <owner> <password>` | Register the first owner account. |  |
 | `rehash` | master | registry-public, registry-private | `rehash` | Reload bot configuration. |  |

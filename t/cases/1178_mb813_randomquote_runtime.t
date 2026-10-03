@@ -1,0 +1,87 @@
+use strict;
+use warnings;
+use utf8;
+use Encode qw(encode);
+use MB813RandomQuoteFixture;
+use IO::Async::Loop;
+return sub {
+    my ($a)=@_;my $f=MB813RandomQuoteFixture->new;my ($r,$bot,$dbh)=@{$f}{qw(runtime bot dbh)};
+    my (@sent,@options);my $accept=1;
+    no warnings 'redefine';
+    local *Mediabot::Helpers::botPrivmsg=sub{push @sent,[$_[1],$_[2]];push @options,$_[3];return $accept};
+    $a->is($r->default_interval,10800,'mb813: absent legacy config falls back to three hours');
+    $bot->{conf}->set('main.RANDOM_QUOTE',900);
+    $a->is($r->default_interval,900,'mb813: existing valid config remains in seconds');
+    for my $bad (1,'oops',604801) {$bot->{conf}->set('main.RANDOM_QUOTE',$bad);$a->is($r->default_interval,10800,'mb813: unsafe default falls back');}
+    $bot->{conf}->set('main.RANDOM_QUOTE',900);
+    delete $bot->{_start_time};$a->is($r->tick,0,'mb813: inert before login');$bot->{_start_time}=1;
+    $bot->{irc}{connected}=0;$a->is($r->tick,0,'mb813: inert without connection');$bot->{irc}{connected}=1;
+    $bot->{wit_runtime_state}->mark_left('#test');$a->is($r->tick,0,'mb813: no attempt before JOIN');
+    $a->ok(!-e "$f->{dir}/state.json",'mb813: pre-JOIN tick has no schedule side effect');
+    $bot->{wit_runtime_state}->mark_joined('#test');$a->is($r->tick,0,'mb813: initial joined tick waits');
+    $f->{now}+=899;$a->is($r->tick,0,'mb813: quiet until due');$f->{now}++;
+    $a->is($r->tick,1,'mb813: due schedule starts worker');my $job=shift @MB813::Worker::jobs;
+    $a->is($job->{timeout},30,'mb813: bounded worker timeout');$a->is($job->{max_output},16384,'mb813: bounded worker output');
+    $a->is($r->tick,0,'mb813: no overlapping worker for channel');
+    MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>{id=>2,text=>"Anonymous\x01ACTION\x01\r\nquote"}}});
+    $a->is(scalar @sent,1,'mb813: sends one quote');$a->is($sent[0][0],'#test','mb813: output scoped to selected channel');
+    $a->unlike($sent[0][1],qr/[\x01\r\n]/,'mb813: normal PRIVMSG contains no CTCP/newline');
+    $a->ok($options[0]{no_defer},'mb813: rejected output cannot become a deferred burst');
+    $a->is($f->{state}->status('#test',900)->{last_id},2,'mb813: only accepted id recorded');
+    MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>{id=>2,text=>'duplicate'}}});
+    $a->is(scalar @sent,1,'mb813: duplicate worker callback sends nothing');
+    my $quote=$r->_select_quote($dbh,'#test',{last_id=>1});
+    $a->is($quote->{record}{id},2,'mb813: real SQL includes anonymous authors and excludes last id');
+    $a->is($quote->{record}{author},'Unknown','mb813: anonymous quote remains anonymous');
+    $a->is($r->_select_quote($dbh,'#other',{last_id=>3})->{record}{id},3,'mb813: single quote may repeat');
+    $a->ok(!$r->_select_quote($dbh,'#third',{})->{record},'mb813: empty channel stays quiet');
+    $a->is($dbh->selectrow_array('SELECT SUM(hits) FROM QUOTES'),0,'mb813: automatic selection preserves recall counters');
+    $f->{now}+=900;$r->tick;$job=shift @MB813::Worker::jobs;
+    MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>{id=>1,text=>'é🦆'x500}}});
+    $a->is(scalar @sent,2,'mb813: long Unicode quote is sent instead of dropped');
+    $a->ok(length(encode('UTF-8',$sent[-1][1]))<=400,'mb813: Unicode prefix/text/suffix fit wire budget');
+    $a->like($sent[-1][1],qr/\.\.\.\z/,'mb813: truncated quote has suffix');
+    my $next=sub{$f->{now}+=900;$a->is($r->tick,1,'mb813: next scheduled worker starts');return shift @MB813::Worker::jobs};
+    $job=$next->();$dbh->do('DELETE FROM CHANNEL_SET WHERE id_channel=1');
+    MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>{id=>1,text=>'disabled'}}});
+    $a->is(scalar @sent,2,'mb813: -RandomQuote blocks in-flight reply immediately');
+    $a->is($r->tick,0,'mb813: disabled channel starts no worker');$dbh->do('INSERT INTO CHANNEL_SET VALUES (1,1)');
+    $job=$next->();$bot->{wit_runtime_state}->mark_left('#test');$bot->{wit_runtime_state}->mark_joined('#test');
+    MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>{id=>1,text=>'stale JOIN'}}});
+    $a->is(scalar @sent,2,'mb813: PART/reJOIN invalidates old reply');
+    $job=$next->();$bot->{wit_runtime_state}->mark_disconnected;
+    MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>{id=>1,text=>'offline'}}});
+    $a->is(scalar @sent,2,'mb813: disconnected runtime blocks callback');
+    $bot->{wit_runtime_state}->mark_connected;$bot->{wit_runtime_state}->mark_joined('#test');
+    $job=$next->();$f->{state}->configure('#test',1800,900);
+    MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>{id=>1,text=>'old frequency'}}});
+    $a->is(scalar @sent,2,'mb813: new frequency invalidates pending reply');
+    $f->{now}+=1800;$r->tick;$job=shift @MB813::Worker::jobs;$accept=0;
+    MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>{id=>2,text=>'rejected'}}});
+    $a->is($f->{state}->status('#test',900)->{last_id},1,'mb813: rejected transport does not record id');
+    $a->is($r->tick,0,'mb813: failed output does not retry before interval');$accept=1;
+    $f->{now}+=1800;$r->tick;$job=shift @MB813::Worker::jobs;
+    MB813::Worker->complete($job,{ok=>0,error=>'timeout'});
+    $a->is($r->tick,0,'mb813: failed worker never causes synchronous fallback or immediate retry');
+    # Exercise the real fork boundary and isolated database connection, locally.
+    my $loop=IO::Async::Loop->new;my $done;
+    my $worker=Mediabot::AsyncWorker->start(loop=>$loop,timeout=>5,max_output=>16384,
+        child=>sub{$r->_child('#test',{last_id=>1})},on_done=>sub{$done=$_[0]});
+    for (1..100) {last if $done;$loop->loop_once(0.05)}
+    $a->ok($done && $done->{ok} && $done->{value}{ok},'mb813: real worker selects using isolated DB handle');
+    $a->is($done->{value}{record}{id},2,'mb813: isolated worker returns channel quote');
+    $a->is($dbh->selectrow_array('SELECT COUNT(*) FROM QUOTES'),3,'mb813: parent DB still usable and quote rows preserved');
+    # Pool is bounded even when several channels become due together.
+    my $pool=MB813RandomQuoteFixture->new;
+    $pool->{dbh}->do('INSERT INTO CHANNEL_SET VALUES (2,1),(3,1)');
+    $pool->{bot}{wit_runtime_state}->mark_joined('#third');
+    for my $ch ('#test','#other','#third') {$pool->{state}->configure($ch,900,10800)}
+    $pool->{now}+=900;
+    $a->is($pool->{runtime}->tick,2,'mb813: starts at most two workers concurrently');
+    $a->is($pool->{runtime}->tick,0,'mb813: saturated pool starts no extra worker');
+    $job=shift @MB813::Worker::jobs;MB813::Worker->complete($job,{ok=>1,value=>{ok=>1,record=>undef}});
+    $a->is($pool->{runtime}->tick,1,'mb813: freed worker slot allows remaining channel');
+    my $main=do{open my $fh,'<','mediabot.pl' or die $!;local $/;<$fh>};
+    $a->like($main,qr/name\s*=>\s*'randomquote_dispatch'.*?interval\s*=>\s*30.*?->tick/s,'mb813: periodic scheduler drives RandomQuote');
+    $a->unlike($main,qr/# Check channels with chanset \+RandomQuote/,'mb813: broken file-scope attempt removed');
+};
