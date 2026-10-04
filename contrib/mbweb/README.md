@@ -272,6 +272,27 @@ server-side lifetime even if an application cookie contains a later date.
 
 ---
 
+## Current account and channel authorization
+
+Protected HTML and JSON routes, including the authenticated home page, refresh
+account evidence synchronously. A missing account or invalid role revokes the
+session. Unknown roles do not grant access; cached role fields never replace a
+missing profile. Authorization/database failures return an unavailable response
+without rendering cached privileged data. Authenticated responses use no-store.
+API clients receive JSON 401 for missing/revoked authentication and JSON 503
+when authorization cannot be refreshed. The public landing page remains open.
+
+Owner/Master retain global channel and quote browsing plus read-only Users and
+Partyline views. Administrator/User quote rows, totals and channel selectors
+are restricted to channels linked to their account, matching channel visibility.
+Database identity and global user/channel counts remain Owner-only. Quotes with
+anonymous authors are preserved. A quote search treats %, _ and ! literally.
+
+MB814 adds twenty focused authorization/scope tests to the existing lane;
+`npm test` currently runs 68 tests. These adapter tests do not prove live MariaDB
+compatibility or authenticated browser acceptance; those remain dev checks.
+No new bot, channel, profile or quote editing control is enabled by this round.
+
 ## Request-security boundary
 
 Every `POST`, `PUT`, `PATCH` and `DELETE` request crosses one central

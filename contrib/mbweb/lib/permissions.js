@@ -1,14 +1,24 @@
 'use strict';
 
+// Only the four known Mediabot roles grant access. Null, booleans and
+// out-of-range values must never be coerced to Owner.
+function roleNumber(value, min, max) {
+  if (typeof value !== 'number' && typeof value !== 'string') return 999;
+  if (typeof value === 'string' && !/^[0-4]$/.test(value)) return 999;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= min && n <= max ? n : 999;
+}
+
 function globalLevel(user) {
   if (!user) return 999;
-  if (typeof user.global_level === 'number') return user.global_level;
-  if (typeof user.level === 'number') return user.level;
-  if (typeof user.id_user_level === 'number') {
-    // USER_LEVEL ids are usually 1..4, while semantic levels are 0..3.
-    return Math.max(0, user.id_user_level - 1);
+  if (user.global_level !== null && user.global_level !== undefined) {
+    return roleNumber(user.global_level, 0, 3);
   }
-  return 999;
+  if (user.level !== null && user.level !== undefined) {
+    return roleNumber(user.level, 0, 3);
+  }
+  const id = roleNumber(user.id_user_level, 1, 4);
+  return id === 999 ? 999 : id - 1;
 }
 
 function isOwner(user) {
@@ -28,7 +38,7 @@ function isUser(user) {
 }
 
 function can(user, action, context = {}) {
-  if (!user) return false;
+  if (!isUser(user)) return false;
 
   switch (action) {
     case 'view:dashboard':
@@ -38,11 +48,12 @@ function can(user, action, context = {}) {
       return isUser(user);
 
     case 'view:system':
-    case 'view:all_users':
     case 'use:partyline':
       return isOwner(user);
 
     case 'view:all_channels':
+    case 'view:all_users':
+    case 'view:partyline':
       return isMaster(user);
 
     case 'view:channel':

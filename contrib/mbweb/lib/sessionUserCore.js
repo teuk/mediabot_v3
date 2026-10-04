@@ -1,5 +1,7 @@
 'use strict';
 
+const { globalLevel } = require('./permissions');
+
 function publicSessionUser(user) {
   if (!user) return null;
 
@@ -13,7 +15,7 @@ function publicSessionUser(user) {
 }
 
 function roleNameFromLevel(level) {
-  const n = Number(level);
+  const n = globalLevel({ global_level: level });
   if (n === 0) return 'Owner';
   if (n === 1) return 'Master';
   if (n === 2) return 'Administrator';
@@ -25,16 +27,9 @@ function normalizeSessionUser(rawUser, profile, channels, levelCol) {
   const safeRaw = rawUser || {};
   const safeProfile = profile || {};
   const safeChannels = Array.isArray(channels) ? channels : [];
-  const idUserLevel = safeProfile.id_user_level
-    ?? safeRaw.id_user_level
-    ?? (levelCol ? safeRaw[levelCol] : null)
-    ?? null;
-
-  const semanticLevel = typeof safeProfile.global_level === 'number'
-    ? safeProfile.global_level
-    : Number.isFinite(Number(idUserLevel))
-      ? Math.max(0, Number(idUserLevel) - 1)
-      : 999;
+  // Fresh profile evidence is authoritative; cached/login role fields are not.
+  const idUserLevel = safeProfile.id_user_level ?? null;
+  const semanticLevel = globalLevel(safeProfile);
 
   return {
     id_user: safeRaw.id_user,
@@ -42,7 +37,7 @@ function normalizeSessionUser(rawUser, profile, channels, levelCol) {
     username: safeProfile.username || safeRaw.username,
     id_user_level: idUserLevel,
     global_level: semanticLevel,
-    global_role: safeProfile.global_role || roleNameFromLevel(semanticLevel),
+    global_role: semanticLevel === 999 ? 'Unknown' : (safeProfile.global_role || roleNameFromLevel(semanticLevel)),
     auth: safeProfile.auth ?? safeRaw.auth ?? null,
     tz: safeProfile.tz || null,
     birthday: safeProfile.birthday || null,

@@ -19,8 +19,8 @@ router.get('/api/quotes', requireFreshLogin, async (req, res) => {
     const perPage = parsePositiveInt(req.query.per_page, 50, { min: 1, max: 200 });
 
     const [result, channels] = await Promise.all([
-      getQuotes({ channel, search, page, perPage }),
-      getQuoteChannels()
+      getQuotes({ user: req.session.user, channel, search, page, perPage }),
+      getQuoteChannels({ user: req.session.user })
     ]);
 
     res.json({
@@ -48,8 +48,8 @@ router.get('/quotes', requireFreshLogin, async (req, res) => {
 
   try {
     [result, channels] = await Promise.all([
-      getQuotes({ channel, search, page, perPage }),
-      getQuoteChannels()
+      getQuotes({ user: req.session.user, channel, search, page, perPage }),
+      getQuoteChannels({ user: req.session.user })
     ]);
   } catch (err) {
     logError(console, 'quotes.page', err);

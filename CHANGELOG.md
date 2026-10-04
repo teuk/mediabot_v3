@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB814 — enforce current mbweb authorization and quote visibility
+
+- Reject missing, malformed and unknown roles instead of coercing them to Owner;
+  use current database profile evidence rather than cached session role fields.
+- Revoke removed accounts and refuse protected pages while authorization cannot
+  be refreshed. Keep transient database failures distinct from account removal.
+- Refresh the authenticated home page before building its dashboard; retain the
+  public landing page and restrict database identity/global counts to Owner.
+- Scope quote rows, totals and channel selectors to accessible channels for
+  Administrator/User accounts, retaining Owner/Master global browsing and
+  anonymous quotes. Search literal wildcard characters with explicit escaping.
+- Align the read-only Users and Partyline permission catalogue with the existing
+  Master-level routes, without adding any new business-data write control.
+- Add twenty deterministic regression tests using the real middleware,
+  repository and route handlers with bounded adapters; retain the existing lane.
+
 ### MB813 — restore automatic quotes with per-channel frequency
 
 - Move RandomQuote from the broken file-scope attempt to a periodic scheduler,

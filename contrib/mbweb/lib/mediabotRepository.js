@@ -1,7 +1,7 @@
 'use strict';
 
 const { pool, tableColumns, clearColumnCache } = require('./db');
-const { globalLevel } = require('./permissions');
+const { globalLevel, isMaster, isUser } = require('./permissions');
 const {
   CHANNEL_CAPABILITY_CHANSETS,
   normalizeCapabilityRows
@@ -235,6 +235,8 @@ async function getChannelById(idChannel) {
 
 async function userHasChannelAccess(idUser, idChannel) {
   const user = await getUserWithGlobalRole(idUser);
+
+  if (!isUser(user)) return false;
 
   if (globalLevel(user) <= 1) {
     return true;
@@ -523,7 +525,18 @@ async function getCommandCategories() {
 }
 
 
-async function getQuotes({ channel = null, search = null, page = 1, perPage = 50 } = {}) {
+function quoteScope(user) {
+  const id = user?.id_user;
+  if ((typeof id !== 'number' && typeof id !== 'string')
+      || !/^[1-9][0-9]*$/.test(String(id)) || !Number.isSafeInteger(Number(id))
+      || globalLevel(user) > 3) {
+    throw new Error('Quotes require a current authenticated account.');
+  }
+  return { idUser: Number(id), allChannels: isMaster(user) };
+}
+
+async function getQuotes({ user, channel = null, search = null, page = 1, perPage = 50 } = {}) {
+  const scope = quoteScope(user);
   channel = cleanRepoSearch(channel, 80);
   search = cleanRepoSearch(search);
   page = positiveInt(page, 1, { min: 1, max: 100000 });
@@ -531,77 +544,70 @@ async function getQuotes({ channel = null, search = null, page = 1, perPage = 50
 
   if (!(await tableExists('QUOTES'))) return { rows: [], total: 0 };
 
-  const quoteCols   = await getColumns('QUOTES');
+  const quoteCols = await getColumns('QUOTES');
   const channelCols = await getColumns('CHANNEL');
-  const userCols    = await getColumns('USER');
-
+  const userCols = await getColumns('USER');
   if (!quoteCols.length) return { rows: [], total: 0 };
 
-  const hasTs      = has(quoteCols, 'ts');
+  const hasTs = has(quoteCols, 'ts');
   const hasChannel = channelCols.length && has(quoteCols, 'id_channel');
-  const hasUser    = userCols.length    && has(quoteCols, 'id_user');
+  const hasUser = userCols.length && has(quoteCols, 'id_user');
+  if ((!scope.allChannels || channel) && !hasChannel) return { rows: [], total: 0 };
+  if (!scope.allChannels && !(await tableExists('USER_CHANNEL'))) return { rows: [], total: 0 };
 
   const conditions = [];
-  const params     = [];
-
-  if (channel && hasChannel) {
+  const params = [];
+  if (!scope.allChannels) {
+    conditions.push(`EXISTS (SELECT 1 FROM USER_CHANNEL uc
+      WHERE uc.id_user = ? AND uc.id_channel = q.id_channel)`);
+    params.push(scope.idUser);
+  }
+  if (channel) {
     conditions.push('c.name = ?');
     params.push(channel);
   }
-
   if (search) {
-    conditions.push('q.quotetext LIKE ?');
-    params.push(`%${search.replace(/[%_]/g, '\$&')}%`);
+    // Use an explicit escape character, independent of MySQL backslash modes.
+    conditions.push("q.quotetext LIKE ? ESCAPE '!'");
+    params.push(`%${search.replace(/[!%_]/g, '!$&')}%`);
   }
-
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  const countSql = `
-    SELECT COUNT(*) AS n
-    FROM QUOTES q
-    ${hasChannel ? 'JOIN CHANNEL c ON c.id_channel = q.id_channel' : ''}
-    ${hasUser    ? 'LEFT JOIN USER u ON u.id_user = q.id_user'     : ''}
-    ${where}
-  `;
-
-  const offset  = (Math.max(1, page) - 1) * perPage;
-
+  const joins = `${hasChannel ? 'JOIN CHANNEL c ON c.id_channel = q.id_channel' : ''}
+    ${hasUser ? 'LEFT JOIN USER u ON u.id_user = q.id_user' : ''}`;
+  const countSql = `SELECT COUNT(*) AS n FROM QUOTES q ${joins} ${where}`;
   const rowsSql = `
-    SELECT
-      q.id_quotes,
-      q.quotetext,
-      q.id_user,
-      ${hasTs      ? 'q.ts'                : 'NULL AS ts'},
+    SELECT q.id_quotes, q.quotetext, q.id_user,
+      ${hasTs ? 'q.ts' : 'NULL AS ts'},
       ${hasChannel ? 'c.name AS channel_name' : 'NULL AS channel_name'},
-      ${hasUser    ? 'u.nickname AS author_nick' : 'NULL AS author_nick'}
-    FROM QUOTES q
-    ${hasChannel ? 'JOIN CHANNEL c ON c.id_channel = q.id_channel' : ''}
-    ${hasUser    ? 'LEFT JOIN USER u ON u.id_user = q.id_user'     : ''}
-    ${where}
-    ORDER BY ${hasTs ? 'q.ts DESC' : 'q.id_quotes DESC'}
+      ${hasUser ? 'u.nickname AS author_nick' : 'NULL AS author_nick'}
+    FROM QUOTES q ${joins} ${where}
+    ORDER BY ${hasTs ? 'q.ts DESC,' : ''} q.id_quotes DESC
     LIMIT ? OFFSET ?
   `;
-
-  const [[countRow], [rows]] = await Promise.all([
+  const [countResult, rowsResult] = await Promise.all([
     pool.execute(countSql, params),
-    pool.execute(rowsSql,  [...params, perPage, offset])
+    pool.execute(rowsSql, [...params, perPage, (page - 1) * perPage])
   ]);
-
-  return { rows, total: Number(countRow[0]?.n || 0) };
+  const counts = resultRows(countResult, 'scoped quote count');
+  return { rows: resultRows(rowsResult, 'scoped quotes'), total: Number(counts[0]?.n || 0) };
 }
 
-async function getQuoteChannels() {
+async function getQuoteChannels({ user } = {}) {
+  const scope = quoteScope(user);
   if (!(await tableExists('QUOTES')) || !(await tableExists('CHANNEL'))) return [];
-
-  const [rows] = await pool.query(`
+  const quoteCols = await getColumns('QUOTES');
+  if (!has(quoteCols, 'id_channel')) return [];
+  if (!scope.allChannels && !(await tableExists('USER_CHANNEL'))) return [];
+  const where = scope.allChannels ? '' : `WHERE EXISTS (SELECT 1 FROM USER_CHANNEL uc
+    WHERE uc.id_user = ? AND uc.id_channel = q.id_channel)`;
+  const result = await pool.execute(`
     SELECT c.name, COUNT(q.id_quotes) AS n
-    FROM CHANNEL c
-    JOIN QUOTES q ON q.id_channel = c.id_channel
-    GROUP BY c.name
+    FROM CHANNEL c JOIN QUOTES q ON q.id_channel = c.id_channel
+    ${where}
+    GROUP BY c.id_channel, c.name
     ORDER BY n DESC, c.name ASC
-  `);
-
-  return rows;
+  `, scope.allChannels ? [] : [scope.idUser]);
+  return resultRows(result, 'scoped quote channels');
 }
 
 

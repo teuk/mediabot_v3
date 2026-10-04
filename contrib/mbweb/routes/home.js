@@ -7,10 +7,11 @@ const { isOwner, isMaster } = require('../lib/permissions');
 const { fmtUptime } = require('../lib/viewHelpers');
 const { fetchMetrics, metricVal } = require('../lib/metrics');
 const { getDashboardData } = require('../lib/dashboardData');
+const { refreshOptionalLogin } = require('../lib/sessionUser');
 
 const router = express.Router();
 
-router.get('/', async (req, res) => {
+router.get('/', refreshOptionalLogin, async (req, res) => {
   const user = req.session?.user || null;
 
   let data = {
@@ -59,7 +60,7 @@ router.get('/', async (req, res) => {
 
   const channelPreviewRows = user && data.myChannels.length ? data.myChannels.slice(0, 8) : [];
 
-  const summaryGrid = user ? `
+  const summaryGrid = user && isOwner(user) ? `
 <section class="mbw-grid">
   <article class="mbw-card">
     <h2>Base Mediabot</h2>
@@ -78,6 +79,14 @@ router.get('/', async (req, res) => {
     <h2>Channels</h2>
     <p class="mbw-big">${escapeHtml(data.counts.channels ?? 'n/a')}</p>
     <p>Entries in CHANNEL table.</p>
+  </article>
+</section>
+` : user ? `
+<section class="mbw-grid">
+  <article class="mbw-card">
+    <h2>Accessible channels</h2>
+    <p class="mbw-big">${escapeHtml(data.myChannels.length)}</p>
+    <p>Channels linked to your account.</p>
   </article>
 </section>
 ` : '';

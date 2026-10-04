@@ -4,6 +4,7 @@ const { safeBase } = require('./config');
 const { escapeHtml } = require('./html');
 const { csrfField } = require('./csrf');
 const {
+  can,
   isOwner,
   isMaster,
   isAdministrator
@@ -47,7 +48,7 @@ function renderPage(title, body, req) {
   ${isMaster(user) ? `
     <a class="mbw-nav-pill elevated" href="${safeBase('/network')}">Network</a>
     <a class="mbw-nav-pill elevated" href="${safeBase('/users')}">Users</a>
-    ${isMaster(user) ? `<a class="mbw-nav-pill elevated" href="${safeBase('/partyline')}">Partyline</a>` : ''}
+    ${can(user, 'view:partyline') ? `<a class="mbw-nav-pill elevated" href="${safeBase('/partyline')}">Partyline</a>` : ''}
     ${isOwner(user) ? `<a class="mbw-nav-pill elevated" href="${safeBase('/diagnostics')}">Diagnostics</a>` : ''}
   ` : ''}
 ` : ''}

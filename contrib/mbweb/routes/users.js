@@ -12,7 +12,7 @@ const { logError } = require('../lib/securityLog');
 const router = express.Router();
 
 router.get('/api/users', requireFreshLogin, async (req, res) => {
-  if (!isMaster(req.session.user)) {
+  if (!can(req.session.user, 'view:all_users')) {
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   }
 
@@ -46,7 +46,7 @@ router.get('/api/users', requireFreshLogin, async (req, res) => {
 });
 
 router.get('/users', requireFreshLogin, async (req, res) => {
-  if (!isMaster(req.session.user)) {
+  if (!can(req.session.user, 'view:all_users')) {
     return res.status(403).send(renderPage('Access denied', `
 <section class="mbw-card">
   <h1>Access denied</h1>

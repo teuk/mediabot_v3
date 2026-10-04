@@ -3,7 +3,7 @@
 const express = require('express');
 const { escapeHtml, renderPage } = require('../lib/render');
 const { requireFreshLogin } = require('../lib/sessionUser');
-const { isMaster } = require('../lib/permissions');
+const { can } = require('../lib/permissions');
 const { parsePositiveInt } = require('../lib/requestParams');
 const { metricVal } = require('../lib/metrics');
 const { getCachedMetrics } = require('../lib/integrationCache');
@@ -47,7 +47,7 @@ function runtimeFreshLabel(runtimeFile) {
 router.get('/partyline', requireFreshLogin, async (req, res) => {
   const user = req.session.user;
 
-  if (!isMaster(user)) {
+  if (!can(user, 'view:partyline')) {
     return res.status(403).send(renderPage('Forbidden',
       `<section class="mbw-card"><p class="error">Master level required.</p></section>`,
       req
