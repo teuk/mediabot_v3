@@ -1,29 +1,9 @@
 package Mediabot::External::News;
 
-# =============================================================================
-# mb613-B1: !actualites <sujet> — recherche d'actualites (Tavily, topic news)
-# puis synthese par Claude, dans LA LANGUE DU CANAL.
-#
-# Portage du news_teuk.tcl (Windrop) dans le moule mediabot :
-#   * Tavily fournit la matiere factuelle de la synthese ; Google News RSS
-#     fournit, quand disponible, les titres/date/editeur precis de la liste
-#     cliquable. Aucun titre de source n'est invente par le modele ;
-#   * la synthese passe par claudeAI, donc elle herite du modele, des quotas,
-#     du decoupage IRC et de la gestion d'erreur deja en place ;
-#   * la langue vient de l'API partagee mb609 (jeton force en|fr|es, sinon
-#     langue du canal, sinon main.LANG) : une seule regle de langue dans tout
-#     le bot.
-#
-# Deux exigences de terrain, tenues ici :
-#   1. « m actualites » SANS sujet doit donner les actualites du jour, pas un
-#      refus. La requete par defaut depend de la langue et la fenetre
-#      temporelle S'ELARGIT par paliers (jour -> 3 jours -> semaine) tant
-#      qu'on n'a pas de matiere : on ne rend jamais « rien a resumer ».
-#   2. Pas de vieux articles. Les resultats sont tries du plus recent au plus
-#      ancien, ceux qui depassent $MAX_AGE_DAYS sont ecartes DES QU'il reste
-#      assez de matiere fraiche, et la date de chaque source est affichee —
-#      l'utilisateur juge lui-meme.
-# =============================================================================
+# MB815: one evidence set for an IRC bulletin and its links. Fetch selected
+# dated press headlines first, enrich those exact articles when possible, and
+# execute the stateless AI request synchronously INSIDE the existing worker.
+# No nested async callback, no public waiting line and no conversation history.
 
 use strict;
 use warnings;
@@ -32,6 +12,9 @@ use Exporter 'import';
 use JSON::PP ();
 use POSIX qw(strftime);
 use URI::Escape qw(uri_escape_utf8);
+use Time::HiRes ();
+use Mediabot::External::NewsBulletin qw(clean_text safe_url story_overlap
+    matching_excerpt bulletin_prompt parse_summary summary_fallback);
 use Mediabot::URLShortener qw(make_bot_shortener format_event);
 
 our @EXPORT_OK = qw(mbNews_ctx _news_select_results _news_sources_line
@@ -156,22 +139,33 @@ sub _domain_of {
 sub _epoch_of {
     my ($raw) = @_;
     return undef unless defined $raw && !ref $raw && length $raw;
-    if ($raw =~ /(\d{4})-(\d{2})-(\d{2})/) {
-        my ($y, $m, $d) = ($1, $2, $3);
-        return eval { require Time::Local; Time::Local::timegm(0, 0, 12, $d, $m - 1, $y) };
+    require Time::Local;
+    my ($y, $m, $d, $h, $min, $sec, $zone);
+    if ($raw =~ /\A(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2}))?\z/) {
+        ($y, $m, $d, $h, $min, $sec, $zone) = ($1, $2, $3, $4, $5, $6, $7);
+        # A calendar-only date starts at midnight for freshness comparison.
+        # Assigning noon can wrongly classify this morning's article as future.
+        ($h, $min, $sec, $zone) = (0, 0, 0, 'Z') unless defined $h;
+        $m--;
     }
-    my %mon = (Jan=>0,Feb=>1,Mar=>2,Apr=>3,May=>4,Jun=>5,
-               Jul=>6,Aug=>7,Sep=>8,Oct=>9,Nov=>10,Dec=>11);
-    if ($raw =~ /(\d{1,2})\s+(\w{3})\w*\s+(\d{4})/ && defined $mon{ ucfirst lc $2 }) {
-        return eval { require Time::Local;
-                      Time::Local::timegm(0, 0, 12, $1, $mon{ ucfirst lc $2 }, $3) };
+    elsif ($raw =~ /\A(?:[A-Za-z]{3},\s*)?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+(GMT|UTC|[+-]\d{4})\z/) {
+        my %mon = (Jan=>0,Feb=>1,Mar=>2,Apr=>3,May=>4,Jun=>5,
+                   Jul=>6,Aug=>7,Sep=>8,Oct=>9,Nov=>10,Dec=>11);
+        return undef unless exists $mon{ucfirst lc $2};
+        ($d, $m, $y, $h, $min, $sec, $zone) = ($1, $mon{ucfirst lc $2}, $3, $4, $5, $6, $7);
     }
-    return undef;
+    else { return undef }
+    return undef if $y < 2000 || $y > 2100;
+    my $epoch = eval { Time::Local::timegm($sec, $min, $h, $d, $m, $y) };
+    return undef unless defined $epoch;
+    if ($zone =~ /\A([+-])(\d{2}):?(\d{2})\z/) {
+        return undef if $2 > 23 || $3 > 59;
+        $epoch -= ($1 eq '+' ? 1 : -1) * ($2 * 3600 + $3 * 60);
+    }
+    return $epoch;
 }
 
-# Tri du plus recent au plus ancien, puis ecartement des vieilleries — mais
-# SEULEMENT s'il reste assez de matiere fraiche. Mieux vaut un article de dix
-# jours annonce avec sa date qu'un silence.
+# Dated, specific articles only: stale or undated pages cannot become news.
 sub _news_select_results {
     my ($results, $now) = @_;
     $now ||= time();
@@ -181,11 +175,14 @@ sub _news_select_results {
         my $title = $r->{title};
         next unless defined $title && length $title;
         my $epoch = _epoch_of($r->{published_date});
+        # Clock-skew tolerance is for timestamps, not tomorrow's calendar date.
+        next if defined $epoch && $r->{published_date} =~ /\A\d{4}-\d{2}-\d{2}\z/
+            && $epoch > $now;
         push @clean, {
-            title   => $title,
+            title   => clean_text($title, 500),
             url     => $r->{url} // '',
             domain  => _domain_of($r->{url}),
-            content => substr(($r->{content} // ''), 0, $SNIPPET_MAX),
+            content => clean_text($r->{content}, 1800),
             epoch   => $epoch,
             age_d   => defined $epoch ? int(($now - $epoch) / 86400) : undef,
         };
@@ -194,10 +191,11 @@ sub _news_select_results {
         ( defined $b->{epoch} ? $b->{epoch} : 0 )
             <=> ( defined $a->{epoch} ? $a->{epoch} : 0 )
     } @clean;
-    # An undated result remains usable, but cannot count as "fresh": without
-    # a publication date we cannot prove that it is within MAX_AGE_DAYS.
-    my @fresh = grep { defined $_->{age_d} && $_->{age_d} <= $MAX_AGE_DAYS } @clean;
-    return (scalar @fresh >= $MIN_FRESH) ? \@fresh : \@clean;
+    # Undated and old results do not become current news through fallback.
+    my @fresh = grep { defined $_->{epoch} && $_->{epoch} <= $now + 3 * 3600
+        && $now - $_->{epoch} <= $MAX_AGE_DAYS * 86400
+        && safe_url($_->{url}) && !_news_press_title_is_generic($_->{title}) } @clean;
+    return \@fresh;
 }
 
 # Ligne « Sources: » construite depuis les resultats, jamais depuis le modele.
@@ -272,7 +270,7 @@ sub _news_google_rss_url {
 }
 
 sub _news_parse_google_rss {
-    my ($body, $limit) = @_;
+    my ($body, $limit, %opt) = @_;
     $limit ||= $MAX_ARTICLES;
     return [] unless defined $body && length $body;
 
@@ -289,6 +287,7 @@ sub _news_parse_google_rss {
         my ($link)   = $item =~ m{<link\b[^>]*>(.*?)</link>}si;
         my ($pubdate)= $item =~ m{<pubDate\b[^>]*>(.*?)</pubDate>}si;
         my ($source) = $item =~ m{<source\b[^>]*>(.*?)</source>}si;
+        my ($source_url) = $item =~ m{<source\b[^>]*\burl=["']([^"']+)["']}si;
         next unless defined $title && defined $link;
 
         for ($title, $link, $pubdate, $source) {
@@ -299,7 +298,8 @@ sub _news_parse_google_rss {
             s/\s+/ /g;
             s/^\s+|\s+$//g;
         }
-        next unless length($title) && $link =~ m{\Ahttps?://}i;
+        next unless length($title) && safe_url($link);
+        next if _news_press_title_is_generic($title);
         next if $seen_url{$link}++;
 
         # Google News appends " - Publisher" to the title even though the
@@ -307,7 +307,7 @@ sub _news_parse_google_rss {
         if (defined $source && length $source) {
             $title =~ s/\s+-\s+\Q$source\E\s*\z//i;
             my $sk = lc $source;
-            next if $seen_source{$sk}++;
+            next if !$opt{all_candidates} && $seen_source{$sk}++;
         }
 
         my $epoch = _epoch_of($pubdate);
@@ -316,6 +316,8 @@ sub _news_parse_google_rss {
             url    => $link,
             source => (defined $source && length $source) ? $source : 'source',
             domain => _domain_of($link),
+            source_domain => safe_url(_xml_unescape($source_url))
+                ? _domain_of(_xml_unescape($source_url)) : '',
             epoch  => $epoch,
             age_d  => defined $epoch ? int((time() - $epoch) / 86400) : undef,
         };
@@ -327,6 +329,7 @@ sub _news_press_title_is_generic {
     my ($title) = @_;
     return 1 unless defined $title && $title =~ /\S/;
     my $t = lc $title;
+    return 1 if $t =~ /(?:l[’']info\s+du\s+jour|brief\s+quotidien|journaux?\s+d[’']information)/;
     return 1 if $t =~ /\b(?:actualit(?:é|e)s?\s+du\s+jour|info(?:s)?\s+en\s+continu|fil\s+info|journal(?:\s+des)?\s+informations?)\b/;
     return 1 if $t =~ /\b(?:l['’]actu(?:alité)?\s+de\s+ce|en\s+direct\s*[:\-]|à\s+la\s+une\s*[:\-])\b/;
     return 1 if $t =~ /\b(?:latest\s+news|live\s+updates?|breaking\s+news\s+live|top\s+stories)\b/;
@@ -351,11 +354,16 @@ sub _news_select_press_articles {
         next if _news_press_title_is_generic($a->{title});
 
         my $url = $a->{url} // '';
-        next unless length $url && !$seen_url{$url}++;
+        my $domain = _domain_of($url);
+        next if grep { $domain eq $_ || $domain =~ /\.\Q$_\E\z/ } @NOISE_DOMAINS;
+        next unless safe_url($url) && !$seen_url{$url}++;
+        next if grep { my ($ratio, $common) = story_overlap($_->{title}, $a->{title});
+            $ratio >= 0.70 && $common >= 3 } @out;
         my $src = lc($a->{source} || $a->{domain} || '');
         next if length($src) && $seen_source{$src}++;
 
-        push @out, $a;
+        push @out, { %$a, title => clean_text($a->{title}, 500),
+            source => clean_text($a->{source} || $a->{domain}, 80) };
         last if @out >= $limit;
     }
     return \@out;
@@ -376,7 +384,7 @@ sub _news_fetch_google_articles {
         my $res = eval { $http->get($url) } || { success => 0 };
         next unless $res->{success};
 
-        my $raw = _news_parse_google_rss($res->{content} // '', $PRESS_SCAN_LIMIT);
+        my $raw = _news_parse_google_rss($res->{content} // '', $PRESS_SCAN_LIMIT, all_candidates => 1);
         my $max_age_s = $is_default
             ? $PRESS_DEFAULT_MAX_AGE_HOURS * 3600
             : (1, 3, $PRESS_TOPIC_MAX_AGE_DAYS)[$window] * 86400;
@@ -422,8 +430,23 @@ sub _news_shorturl_event {
     return;
 }
 
+sub _news_title_excerpt {
+    my ($title, $max_bytes) = @_;
+    $max_bytes = 64 unless defined $max_bytes;
+    return '' if $max_bytes < 8;
+    $title = clean_text($title, 500);
+    return $title if _utf8_bytes($title) <= $max_bytes;
+    my $excerpt = '';
+    for my $word (split /\s+/, $title) {
+        my $candidate = length($excerpt) ? "$excerpt $word" : $word;
+        last if _utf8_bytes($candidate . '…') > $max_bytes;
+        $excerpt = $candidate;
+    }
+    return length($excerpt) ? $excerpt . '…' : _cap_bytes($title, $max_bytes);
+}
+
 sub _news_article_segments {
-    my ($picked, $shortener) = @_;
+    my ($picked, $shortener, %opt) = @_;
 
     # Prefer three different publishers when Tavily gives enough variety;
     # if not, fill the remaining slots with additional articles.
@@ -457,9 +480,28 @@ sub _news_article_segments {
         # bytes for the useful title/link payload.
         my $prefix = "\x0314$when $publisher\x03";
         my $link   = "\x1f\x0312$short\x0f";
+        if ($opt{compact}) {
+            # A short, word-boundary title hint identifies each exact source.
+            # Spend at most 64 UTF-8 bytes; the URL always remains complete.
+            my $space = 370 - _utf8_bytes($prefix . '  ' . $link);
+            my $hint = _news_title_excerpt($title, $space < 64 ? $space : 64);
+            if (_utf8_bytes($prefix . ' ' . $link) <= 370) {
+                push @segments, $prefix . ' ' . (length($hint) ? "$hint " : '') . $link;
+            }
+            else {
+                # Oversized original URLs are omitted rather than clipped.
+                push @segments, $prefix . ' ' . _news_title_excerpt($title, 64);
+            }
+            next;
+        }
         my $overhead = _utf8_bytes($prefix . '  ' . $link);
-        my $tmax = 400 - $overhead;
-        $tmax = 40 if $tmax < 40;
+        my $tmax = 370 - $overhead;
+        if ($tmax < 20) {
+            # Never emit a clipped URL. The source/title remain useful when
+            # the original URL cannot fit a single IRC payload.
+            push @segments, $prefix . ' ' . _cap_bytes($title, 300);
+            next;
+        }
         my $seg = $prefix . ' ' . _cap_bytes($title, $tmax) . ' ' . $link;
         push @segments, $seg;
     }
@@ -494,6 +536,124 @@ sub _news_article_lines {
     return \@lines;
 }
 
+sub _news_tavily {
+    my ($api_key, $params, $deadline, $self) = @_;
+    my $timeout = int($deadline - Time::HiRes::time() - 14);
+    return undef if $timeout < 1;
+    $timeout = 4 if $timeout > 4;
+    my $http = Mediabot::External::_make_http(timeout => $timeout,
+        verify_SSL => 1, max_redirect => 0, max_size => 512 * 1024);
+    my $payload = eval { JSON::PP->new->utf8->canonical->encode({ %$params, api_key => $api_key }) };
+    return undef unless defined $payload;
+    my $res = eval { $http->request('POST', $TAVILY_URL, {
+        headers => { 'Content-Type' => 'application/json' }, content => $payload,
+    }) };
+    unless (ref($res) eq 'HASH' && $res->{success}) {
+        eval { $self->{logger}->log(2, 'news: discovery/enrichment unavailable') };
+        return undef;
+    }
+    my $data = eval { JSON::PP->new->utf8->decode($res->{content} || '') };
+    return undef unless ref($data) eq 'HASH' && ref($data->{results}) eq 'ARRAY';
+    return $data;
+}
+
+sub _news_synthesis_log {
+    my ($self, $code, $provider, $attempt, $status) = @_;
+    $code = 'unavailable' unless defined($code) && $code =~ /\A[a-z_]{1,32}\z/;
+    $provider = 'none' unless defined($provider) && $provider =~ /\A(?:anthropic|openai|gemini)\z/;
+    $attempt = $attempt && $attempt == 2 ? 2 : 1;
+    my $http = defined($status) && !ref($status) && "$status" =~ /\A[1-5]\d\d\z/
+        ? " status=$status" : '';
+    eval { $self->{logger}->log(2, "news: synthesis code=$code provider=$provider attempt=$attempt$http") };
+    return;
+}
+
+sub _news_synthesize {
+    my ($self, $system, $prompt, $articles, $deadline) = @_;
+    require Mediabot::AI::Client;
+    my $timeout = int($deadline - Time::HiRes::time() - 7);
+    if ($timeout < 1) {
+        _news_synthesis_log($self, 'budget_exhausted');
+        return undef;
+    }
+    $timeout = 12 if $timeout > 12;
+    # Choose one configured provider; do not stack provider/model timeout
+    # retries until the enclosing command worker kills the whole bulletin.
+    my ($provider) = grep {
+        my $key = eval { $self->{conf}->get("$_.API_KEY") };
+        defined($key) && !ref($key) && length($key)
+    } qw(anthropic openai gemini);
+    unless ($provider) {
+        _news_synthesis_log($self, 'not_configured');
+        return undef;
+    }
+    my $client = Mediabot::AI::Client->new(conf => $self->{conf},
+        http_factory => sub {
+            my %opt = @_;
+            my $left = int($deadline - Time::HiRes::time() - 7);
+            die "news time budget exhausted\n" if $left < 1;
+            $opt{timeout} = $left if $left < $opt{timeout};
+            $opt{max_redirect} = 0;
+            return Mediabot::External::_make_http(%opt);
+        });
+    my $request_prompt = $prompt;
+    for my $attempt (1 .. 2) {
+        $timeout = int($deadline - Time::HiRes::time() - 7);
+        if ($timeout < ($attempt == 2 ? 5 : 1)) {
+            _news_synthesis_log($self, 'budget_exhausted', $provider, $attempt);
+            last;
+        }
+        $timeout = 12 if $timeout > 12;
+        my $result = eval { $client->execute({ provider => $provider, purpose => 'news.bulletin',
+            system => $system, messages => [{ role => 'user', content => $request_prompt }],
+            temperature => 0.1, max_output_tokens => 600, timeout_seconds => $timeout,
+        }) };
+        unless (ref($result) eq 'HASH' && $result->{ok}) {
+            my %codes = (http_error => 'provider_http_error', parse_error => 'provider_parse_error',
+                invalid_request => 'invalid_request', not_configured => 'not_configured');
+            my $code = ref($result) eq 'HASH' && !ref($result->{error})
+                ? ($codes{$result->{error} || ''} || 'provider_failure') : 'provider_failure';
+            _news_synthesis_log($self, $code, $provider, $attempt,
+                ref($result) eq 'HASH' ? $result->{status} : undef);
+            last; # Do not retry an outage or consume the reserved link budget.
+        }
+        my $reason = 'answer_shape';
+        my $briefs = parse_summary($result->{answer}, $articles, sub { $reason = $_[0] });
+        if ($briefs) {
+            _news_synthesis_log($self, 'repaired', $provider, $attempt) if $attempt == 2;
+            return $briefs;
+        }
+        _news_synthesis_log($self, $reason, $provider, $attempt);
+        # One bounded fresh request may repair a rejected shape/length. It
+        # receives the same evidence, never the rejected response or history.
+        $request_prompt = $prompt . "\nEDITORIAL CORRECTION ($reason): "
+            . 'Return exactly the summary JSON schema. Cover every supplied id once in order. '
+            . 'Use short factual sentences, aiming for 320 UTF-8 bytes total; '
+            . 'keep numbers and qualifications from the cited evidence, without URLs or numbering.';
+    }
+    return undef;
+}
+
+sub _news_summary_lines {
+    my ($sections, $badge) = @_;
+    my @words = split /\s+/, join(' ', @$sections);
+    my @lines;
+    my $line = "$badge ";
+    for my $word (@words) {
+        # Provider text already has a word limit. Bound malformed headline
+        # tokens too, so an extractive fallback cannot exceed an IRC payload.
+        $word = _cap_bytes($word, 380) if _utf8_bytes($word) > 380;
+        my $candidate = $line . ($line =~ /\s\z/ ? '' : ' ') . $word;
+        if (_utf8_bytes($candidate) > 400) {
+            push @lines, $line;
+            $line = $word;
+        }
+        else { $line = $candidate }
+    }
+    push @lines, $line if length $line;
+    return \@lines;
+}
+
 # --- commande ----------------------------------------------------------------
 
 sub mbNews_ctx {
@@ -516,11 +676,7 @@ sub mbNews_ctx {
     my $reply_to = (defined $channel && $channel =~ /^#/) ? $channel : $nick;
     my $say = sub { Mediabot::Helpers::botPrivmsg($self, $reply_to, $_[0]) };
 
-    my $api_key = eval { $self->{conf}->get('tavily.API_KEY') };
-    unless (defined $api_key && !ref $api_key && length $api_key) {
-        Mediabot::Helpers::botNotice($self, $nick, _text($lang, 'nokey'));
-        return;
-    }
+    my $api_key = eval { $self->{conf}->get('tavily.API_KEY') } || '';
     if (defined $bad) {
         Mediabot::Helpers::botNotice($self, $nick,
             "Unsupported language '$bad' (en, fr, es) - using '$lang'.");
@@ -541,137 +697,75 @@ sub mbNews_ctx {
     # confirme.
     my $now = time();
 
-    $say->($is_default
-        ? _text($lang, 'headlines')
-        : sprintf(_text($lang, 'searching'), $subject));
-
-    # Recherche, avec elargissement par paliers : on ne rend jamais « rien a
-    # resumer » sans avoir tente la fenetre suivante.
-    my $http = Mediabot::External::_make_http(
-        timeout    => 12,
-        verify_SSL => 1,
-        max_size   => 1024 * 1024,
-    );
-    my ($picked, $last_status) = ([], 0);
-    for my $window (0 .. 2) {
-        my ($params, $days) = _news_search_params($lang, $query, $window);
-        my $payload = eval {
-            JSON::PP->new->utf8->canonical->encode({ %$params, api_key => $api_key })
-        } or last;
-        my $res = eval {
-            $http->request('POST', $TAVILY_URL, {
-                headers => { 'Content-Type' => 'application/json' },
-                content => $payload,
-            });
-        } // { success => 0, status => 0 };
-        $last_status = $res->{status} // 0;
-        unless ($res->{success}) {
-            eval { $self->{logger}->log(1,
-                "news: Tavily HTTP $last_status " . substr(($res->{content} // ''), 0, 200)) };
-            next;
-        }
-        my $data = eval { JSON::PP->new->utf8->decode($res->{content} // '{}') };
-        my $sel = _news_select_results(ref($data) eq 'HASH' ? $data->{results} : [], $now);
-        if (@$sel) {
-            $picked = $sel;
-            # Honor MIN_FRESH for real. A single dated result (or only
-            # undated/old material) is useful as a fallback, but it should not
-            # prevent the next, wider Tavily window from being attempted.
-            my $fresh_count = grep {
-                defined $_->{age_d} && $_->{age_d} <= $MAX_AGE_DAYS
-            } @$sel;
-            last if $fresh_count >= $MIN_FRESH || $window == 2;
+    my $deadline = Time::HiRes::time() + 34;
+    my $rss_http = Mediabot::External::_make_http(timeout => 3, max_size => 512 * 1024, verify_SSL => 1, max_redirect => 0);
+    my $press_articles = _news_fetch_google_articles($rss_http, $lang, $query, $is_default, $now);
+    my $picked = [];
+    if (!@$press_articles && length($api_key) && !ref($api_key)) {
+        # Discovery fallback only: precise, dated results, never homepages or
+        # undated pages dressed up as today's news. At most two short calls.
+        for my $window (0 .. 1) {
+            my ($params) = _news_search_params($lang, $query, $window);
+            my $data = _news_tavily($api_key, $params, $deadline, $self);
+            next unless $data;
+            my $sel = _news_select_results($data->{results}, $now);
+            my $candidate = _news_select_press_articles($sel, $now,
+                max_age_s => ($is_default ? 36 * 3600 : 7 * 86400));
+            $picked = $candidate if @$candidate > @$picked;
+            last if @$picked >= $MIN_FRESH;
         }
     }
-
-    unless (@$picked) {
-        if ($last_status && $last_status !~ /\A2/) {
-            $say->(sprintf(_text($lang, 'http'), $last_status));
-        }
-        else {
-            $say->(sprintf(_text($lang, 'empty'), ($is_default ? $query : $subject), 7));
-        }
+    my $display_articles = @$press_articles ? $press_articles : $picked;
+    unless (@$display_articles) {
+        $say->($lang eq 'fr' ? 'Aucun article récent et suffisamment précis disponible pour ce bulletin.'
+            : $lang eq 'es' ? 'No hay artículos recientes y suficientemente concretos para este boletín.'
+            : 'No sufficiently recent, specific articles are available for this bulletin.');
         return;
     }
 
-    # Precise visible article list, like news_teuk.tcl: Google News RSS is
-    # independent from Tavily and gives real press headlines instead of
-    # generic section/homepage labels. Failure is non-fatal: Tavily articles
-    # remain the deterministic fallback.
-    my $rss_http = Mediabot::External::_make_http(timeout => 5, max_size => 512 * 1024);
-    my $press_articles = _news_fetch_google_articles($rss_http, $lang, $query, $is_default, $now);
-    my $display_articles = @$press_articles ? $press_articles : $picked;
-
-    # Matiere pour le modele : titre, source, date, extrait.
-    my @block;
-    for my $r (@$picked) {
-        my $when = defined $r->{epoch} ? strftime('%Y-%m-%d', gmtime($r->{epoch})) : 'n/a';
-        push @block, "- $r->{title} [$r->{domain}, $when] $r->{content}";
-    }
-    my $lang_name = (Mediabot::External::Claude->can('ai_lang_name')
-        ? Mediabot::External::Claude::ai_lang_name($lang) : 'English');
-    my $prompt =
-        "You are summarising news dispatches for an IRC channel. Write in $lang_name, in at most "
-      . "2 lines of under 380 characters each. The PRECISE PRESS HEADLINES listed below, when "
-      . "present, define the visible article selection and therefore the events you may lead with. "
-      . "Keep the summary aligned with those clickable stories; do not introduce an unrelated "
-      . "Tavily-only event. Use Tavily snippets only to corroborate or add concrete context to those "
-      . "same events. LINE 1: the most recent and important selected development, with concrete facts "
-      . "(figures, names, places). LINE 2: another selected development or useful context. Attribute "
-      . "single-source claims explicitly. Invent no fact, date or source. No Markdown, no emoji, "
-      . "no lists, no preamble.\n\n"
-      . "Topic: $query\n\nTavily corroboration material:\n" . join("\n", @block);
-
-    if (@$press_articles) {
-        my @press = map {
-            my $when = defined $_->{epoch} ? strftime('%Y-%m-%d', gmtime($_->{epoch})) : 'n/a';
-            my $publisher = $_->{source} || $_->{domain} || 'source';
-            "- [$when] $publisher: $_->{title}";
-        } @$press_articles;
-        $prompt .= "\n\nPRECISE PRESS HEADLINES — these are the clickable stories "
-                 . "shown to the user; keep the synthesis on these events:\n"
-                 . join("\n", @press);
+    # Enrich only selected headlines and their own publishers. No broad,
+    # unrelated Tavily briefing can replace the selected events or citations.
+    if (@$press_articles && length($api_key) && !ref($api_key)) {
+        for my $a (@$display_articles) {
+            last if Time::HiRes::time() > $deadline - 14;
+            next unless $a->{source_domain};
+            my $data = _news_tavily($api_key, {
+                query => clean_text($a->{title}, 300), topic => 'general',
+                search_depth => 'advanced', max_results => 3,
+                time_range => $is_default ? 'day' : 'week',
+                include_domains => [$a->{source_domain}],
+                include_answer => JSON::PP::false, include_raw_content => JSON::PP::false,
+            }, $deadline, $self);
+            my $match = $data ? matching_excerpt($a, $data->{results}, $now) : undef;
+            if ($match) {
+                $a->{content} = $match->{content};
+                $a->{url} = $match->{url}; # Link the article actually used.
+            }
+        }
     }
 
-    my $badge = "\x0300,04" . _text($lang, 'badge') . "\x0f";
+    my ($system, $prompt) = bulletin_prompt($lang, $display_articles, $query, $now);
+    my $briefs = _news_synthesize($self, $system, $prompt, $display_articles, $deadline);
     my @lines;
-    my $summary_count = 0;
-    my $push_summary = sub {
-        my ($line) = @_;
-        return unless defined $line && $line =~ /\S/;
-        $line =~ s/^\s+|\s+$//g;
-        push @lines, ($summary_count++ == 0 ? "$badge $line" : $line);
-    };
-    my $emit = sub {
-        my ($text) = @_;
-        return unless defined $text && $text =~ /\S/;
-        for my $line (split /\n/, $text) {
-            next unless $line =~ /\S/;
-            last if @lines >= 2;
-            $push_summary->($line);
-        }
-    };
-    my $ok = eval {
-        Mediabot::External::Claude::claudeAI($self, $prompt, $nick, undef, $emit, $prompt);
-        1;
-    };
-    unless ($ok && @lines) {
-        eval { $self->{logger}->log(1, "news: synthesis failed: $@") } if $@;
-        # Repli utile plutot qu'un message d'echec : les titres eux-memes.
-        for my $r (@$picked) {
-            last if @lines >= 3;
-            $push_summary->("$r->{title} — $r->{domain}");
-        }
-    }
+    my $badge = "\x0300,04" . _text($lang, 'badge') . "\x0f";
+    $briefs ||= summary_fallback($lang, $display_articles);
+    push @lines, @{_news_summary_lines($briefs, $badge)};
     # URL shortening is presentation only. The private service validates the
     # destination binding; missing credentials or any mismatch keeps the exact
     # original article URL. Unconfigured legacy installs retain MB735 TinyURL
     # compatibility until they opt in to the private endpoint.
     my $shorten = make_bot_shortener(
         bot      => $self,
+        http     => Mediabot::External::_make_http(timeout => 2, max_size => 4096,
+            verify_SSL => 1, max_redirect => 0),
         on_event => sub { _news_shorturl_event($self, shift) },
     );
-    my $article_segments = _news_article_segments($display_articles, $shorten);
+    my $bounded_shorten = sub {
+        return $_[0] if Time::HiRes::time() > $deadline - 3;
+        return $shorten->($_[0]);
+    };
+    my $article_segments = _news_article_segments($display_articles, $bounded_shorten,
+        compact => 1);
     my $article_lines = _news_article_lines($article_segments, 400);
     if (@$article_lines) {
         push @lines, @$article_lines;
@@ -681,7 +775,9 @@ sub mbNews_ctx {
         push @lines, "$badge $sources" if length $sources;
     }
 
-    $say->($_) for @lines;
+    # A complete opening paragraph followed by packed publisher links. Source
+    # ids stay internal; neither the opening nor the references are numbered.
+    $say->(_cap_bytes($_, 400)) for @lines;
     return 1;
 }
 

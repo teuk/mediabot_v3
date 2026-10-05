@@ -52,9 +52,9 @@ return sub {
         'mb617-800: tous les liens restent presents');
 
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/External/News.pm' or die $!; local $/; <$fh> };
-    $assert->like($src, qr/use Mediabot::URLShortener qw\(make_bot_shortener format_event\).*?my \$shorten = make_bot_shortener\(.*?bot\s*=>\s*\$self.*?on_event\s*=>.*?_news_article_segments\(\$display_articles, \$shorten\)/s,
+    $assert->like($src, qr/use Mediabot::URLShortener qw\(make_bot_shortener format_event\).*?my \$shorten = make_bot_shortener\(.*?bot\s*=>\s*\$self.*?on_event\s*=>.*?_news_article_segments\(\$display_articles, \$bounded_shorten,\s*compact\s*=>/s,
         'mb736-800: le runtime construit les lignes article avec le client generique partage');
-    $assert->like($src, qr/if \(@\$article_lines\) \{\s*push \@lines, \@\$article_lines;\s*\}\s*else \{/s,
+    $assert->like($src, qr/if \(@\$article_lines\) \{.*?push \@lines, \@\$article_lines;\s*\}\s*else \{/s,
         'mb617-800: les lignes article sont privilegiees sur Sources:');
     $assert->like($src, qr/sub _news_shorturl_event \{.*?format_event\(\$event\)/s,
         'mb736-800: le worker news remonte le diagnostic ShortURL au logger parent');
@@ -62,10 +62,14 @@ return sub {
         'mb730-800: news n utilise plus le endpoint anonyme retire');
     $assert->like($src, qr/last if \@segments >= 3;/,
         'mb617-800: on borne le nombre d articles exposes');
-    $assert->like($src, qr/last if \@lines >= 2;/,
-        'mb617-800: la synthese reste bornee a deux lignes');
-    $assert->like($src, qr/my \$summary_count = 0;/,
-        'mb617-800: le badge ne doit ouvrir que la premiere ligne de synthese');
+    $assert->like($src, qr/push \@lines, \@\{_news_summary_lines\(\$briefs, \$badge\)\}/,
+        'mb815-800: un paragraphe de synthese avant ses references');
+    $assert->like($src, qr/my \$line = "\$badge "/,
+        'mb815-800: le badge ouvre seulement la premiere ligne');
+    $assert->like($src, qr/my \$article_lines = _news_article_lines\(\$article_segments, 400\)/,
+        'mb815-800: le runtime regroupe les liens selon le budget IRC');
+    $assert->unlike($src, qr/push \@\$article_lines, \(\$i \+ 1\) \. '\. '/,
+        'mb815-800: les references ne recoivent plus de numerotation');
     my $client = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/URLShortener.pm' or die $!; local $/; <$fh> };
     $assert->like($client, qr/timeout\s*=>\s*2.*?max_size\s*=>\s*4096/s,
         'mb736-800: le transport prive conserve un budget court et borne');

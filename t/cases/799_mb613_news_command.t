@@ -1,23 +1,6 @@
 # t/cases/799_mb613_news_command.t
-# =============================================================================
-# mb613 — !actualites <sujet> : recherche Tavily + synthese dans la langue du
-# canal, portage du news_teuk.tcl.
-#   [1] la commande est routee (4 alias, dont la forme accentuee) et passe
-#       par un worker : deux appels reseau ne doivent pas figer la boucle.
-#   [2] langue : jeton force puis langue du canal, via l'API PARTAGEE mb609
-#       (aucune regle de langue recopiee) ; textes de service par langue
-#       avec repli anglais.
-#   [3] SANS SUJET : une vraie requete d'actualites du jour, propre a la
-#       langue — jamais un refus « rien a resumer ».
-#   [4] FRAICHEUR : tri du plus recent au plus ancien, les resultats de plus
-#       de 7 jours ecartes DES QU'il reste assez de matiere fraiche, mais
-#       jamais au prix du silence.
-#   [5] la ligne « Sources: » est DETERMINISTE (domaine + date depuis les
-#       resultats), dedupliquee, bornee — le modele ne peut pas halluciner
-#       une source.
-#   [6] sans cle Tavily : la commande le dit et ne fait rien d'autre. Aucune
-#       cle n'est ecrite dans le depot.
-# =============================================================================
+# Legacy routing/language and source contracts, updated by MB815:
+# no public waiting line, dated evidence only, optional Tavily enrichment.
 
 use strict;
 use warnings;
@@ -28,6 +11,7 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
     package ConfN; sub new { bless { kv => $_[1] || {} }, $_[0] }
     sub get { $_[0]{kv}{ $_[1] } }
 }
+{ package HTTPN815; sub get { return { success => 0 } } }
 {
     package LogN; sub new { bless {}, shift } sub log { 1 }
 }
@@ -94,8 +78,8 @@ return sub {
         qr/noticias/, 'mb613-799: ... et en espagnol');
     $assert->is(Mediabot::External::News::_news_default_query('de'),
         'top news stories today', 'mb613-799: repli anglais');
-    $assert->like($src, qr/\$is_default\s*\?\s*_text\(\$lang, 'headlines'\)/,
-        'mb613-799: sans sujet, le bot annonce une recherche, pas un refus');
+    $assert->like($src, qr/my \$query = \$is_default \? _news_default_query\(\$lang\) : \$subject/,
+        'mb815-799: sans sujet, une recherche par defaut sans annonce publique');
 
     # les paliers s'elargissent VRAIMENT
     my (@days, @ranges);
@@ -133,25 +117,25 @@ return sub {
     my $only_old = Mediabot::External::News::_news_select_results([
         { title => 'vieux', url => 'https://old.example.com/a', published_date => $iso->(40) },
     ], $now);
-    $assert->is(scalar @$only_old, 1,
-        'mb613-799: mais on ne rend jamais le silence faute de frais');
+    $assert->is(scalar @$only_old, 0,
+        'mb613-799: les vieux articles ne sont plus presentes comme actualites');
     my $undated = Mediabot::External::News::_news_select_results([
         { title => 'sans date', url => 'https://x.example.com/a' },
         { title => 'daté', url => 'https://y.example.com/b', published_date => $iso->(2) },
     ], $now);
-    $assert->is(scalar @$undated, 2,
-        'mb613-799: un resultat sans date reste utilisable');
-    $assert->ok(!defined $undated->[1]{age_d} || $undated->[1]{age_d} >= 0,
+    $assert->is(scalar @$undated, 1,
+        'mb613-799: un resultat sans date est exclu du bulletin');
+    $assert->ok(!defined $undated->[0]{age_d} || $undated->[0]{age_d} >= 0,
         'mb613-799: un resultat sans date n est pas juge frais par defaut');
     my $one_fresh_plus_undated = Mediabot::External::News::_news_select_results([
         { title => 'frais', url => 'https://fresh.example/a', published_date => $iso->(1) },
         { title => 'sans date', url => 'https://unknown.example/b' },
         { title => 'ancien', url => 'https://old.example/c', published_date => $iso->(40) },
     ], $now);
-    $assert->is(scalar @$one_fresh_plus_undated, 3,
-        'mb613-799: un resultat sans date ne compte pas comme deuxieme resultat frais');
-    $assert->like($src, qr/last if \$fresh_count >= \$MIN_FRESH \|\| \$window == 2/,
-        'mb613-799: la boucle elargit vraiment tant que MIN_FRESH n est pas atteint');
+    $assert->is(scalar @$one_fresh_plus_undated, 1,
+        'mb613-799: seul le resultat frais et date reste utilisable');
+    $assert->like($src, qr/last if \@\$picked >= \$MIN_FRESH/,
+        'mb815-799: repli borne jusqu a assez de sources utilisables');
 
     # [5] ligne Sources deterministe
     my $line = Mediabot::External::News::_news_sources_line('fr', [
@@ -169,18 +153,19 @@ return sub {
     $assert->is(Mediabot::External::News::_news_sources_line('en', []), '',
         'mb613-799: aucune source -> aucune ligne');
 
-    # [6] sans cle : refus explicite, et rien dans le depot
+    # [6] sans cle : le flux RSS reste utilisable, aucun appel Tavily
     my @out;
     no warnings 'redefine';
     local *Mediabot::Helpers::botNotice  = sub { push @out, $_[2]; 1 };
     local *Mediabot::Helpers::botPrivmsg = sub { push @out, $_[2]; 1 };
+    local *Mediabot::External::_make_http = sub { bless {}, 'HTTPN815' };
     my $bot = bless { conf => ConfN->new({ 'main.LANG' => 'fr' }), logger => LogN->new },
         'Mediabot';
     Mediabot::External::News::mbNews_ctx(
         CtxN->new(bot => $bot, nick => 'teuk', channel => '#quebec', args => ['bitcoin']));
     $assert->is(scalar @out, 1, 'mb613-799: sans cle, une seule reponse');
-    $assert->like($out[0], qr/tavily\.API_KEY/,
-        'mb613-799: ... et elle dit quoi configurer');
+    $assert->like($out[0], qr/Aucun article récent/,
+        'mb815-799: un flux vide donne un resultat explicite sans exiger Tavily');
     $assert->ok($src !~ /tvly-/,
         'mb613-799: aucune cle API dans le code');
     my $conf = do { open my $fh, '<:encoding(UTF-8)', 'mediabot.sample.conf' or die $!;

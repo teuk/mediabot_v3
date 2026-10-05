@@ -1,6 +1,6 @@
 # t/cases/801_mb618_news_precise_rss_articles.t
 # =============================================================================
-# mb618 — Tavily nourrit la synthese, Google News RSS nourrit les liens precis.
+# mb618/MB815 — les articles precis alimentent les liens et la meme synthese.
 # =============================================================================
 use strict;
 use warnings;
@@ -79,11 +79,11 @@ XML
 
     my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/External/News.pm' or die $!; local $/; <$fh> };
     $assert->like($src, qr/my \$press_articles = _news_fetch_google_articles\(/,
-        'mb618-801: runtime tente le RSS apres Tavily');
+        'mb618-801: runtime tente le RSS avant le repli Tavily');
     $assert->like($src, qr/my \$display_articles = \@\$press_articles \? \$press_articles : \$picked;/,
         'mb618-801: Tavily reste le fallback de presentation');
     $assert->like($src, qr/_news_article_segments\(\$display_articles,/,
         'mb618-801: la charte consomme les articles RSS quand disponibles');
-    $assert->like($src, qr/(?:Precise press headlines from Google News RSS|PRECISE PRESS HEADLINES)/,
+    $assert->like($src, qr/bulletin_prompt\(\$lang, \$display_articles,/,
         'mb618-801: les titres precis enrichissent aussi la synthese');
 };

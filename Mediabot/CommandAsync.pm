@@ -36,6 +36,7 @@ use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
 
 use JSON::PP ();
 use Time::HiRes ();
+use Scalar::Util qw(refaddr weaken);
 
 our $MAX_INTENTS   = 60;
 our $MAX_WLOGS     = 40;   # mb585-B1: lignes de log du worker relayees au parent
@@ -43,6 +44,9 @@ our $TIMEOUT_S     = 45;
 our $KILL_AFTER_S  = 5;
 our $MAX_PAYLOAD   = 64 * 1024;
 our $DB_MAX_STMT_S = 40;   # SET SESSION max_statement_time (MariaDB, secondes)
+our $NEWS_OUTPUT_STEP = 1.5;
+our $NEWS_OUTPUT_MAX  = 60;
+our $NEWS_OUTPUT_TTL  = 120;
 
 # ---------------------------------------------------------------------------
 # mb585-B1: le logger de l'enfant ecrivait dans le filehandle herite, mais
@@ -116,7 +120,9 @@ sub _collect_intents_run {
 
 # Rejeu cote PARENT via les vrais helpers (AntiFlood/NoColors/file mb568).
 sub _replay_intents {
-    my ($self, $intents) = @_;
+    my ($self, $intents, $label, $expected_irc) = @_;
+    return _queue_news_intents($self, $intents, $expected_irc)
+        if defined($label) && $label eq 'actualites';
     for my $it (@{ $intents || [] }) {
         my ($kind, $target, $text) = @$it;
         next unless defined $target && length $target;
@@ -125,6 +131,128 @@ sub _replay_intents {
         elsif ($kind eq 'action')  { eval { Mediabot::Helpers::botAction($self, $target, $text) } }
     }
     return 1;
+}
+
+# News workers collect lines without touching IRC. Pace their PARENT replay,
+# including synchronous worker fallbacks, with one timer for the whole bot.
+# Timers are armed after each delivery: a late event loop never catches up by
+# releasing several expired timers in the same turn. All deliveries still go
+# through the normal AntiFlood/NoColors/badword/logging helpers above.
+sub _news_output_now {
+    return Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
+}
+
+sub _news_output_log {
+    my ($self, $reason) = @_;
+    eval { $self->{logger}->log(2, "CommandAsync: news output $reason") };
+    return;
+}
+
+sub _clear_news_output {
+    my ($self, $q, $reason) = @_;
+    if (my $timer = delete $q->{timer}) {
+        eval { $timer->stop };
+        eval { $q->{loop}->remove($timer) };
+    }
+    $q->{items} = [];
+    delete $self->{_news_output_q}
+        if $self->{_news_output_q} && refaddr($self->{_news_output_q}) == refaddr($q);
+    _news_output_log($self, $reason);
+    return 0;
+}
+
+sub _arm_news_output {
+    my ($self, $q, $delay) = @_;
+    return 1 if $q->{timer};
+    my $weak_self = $self;
+    weaken($weak_self);
+    my $timer;
+    my $ok = eval {
+        require IO::Async::Timer::Countdown;
+        $timer = IO::Async::Timer::Countdown->new(
+            delay => $delay,
+            on_expire => sub {
+                my ($expired_timer) = @_;
+                eval { $q->{loop}->remove($expired_timer) };
+                delete $q->{timer};
+                my $bot = $weak_self or return;
+                return unless $bot->{_news_output_q}
+                    && refaddr($bot->{_news_output_q}) == refaddr($q);
+                _drain_news_output($bot, $q);
+            },
+        );
+        $q->{timer} = $timer;
+        $q->{loop}->add($timer);
+        $timer->start;
+        1;
+    };
+    return $ok ? 1 : _clear_news_output($self, $q, 'timer_unavailable');
+}
+
+sub _drain_news_output {
+    my ($self, $q) = @_;
+    return _clear_news_output($self, $q, 'connection_changed')
+        unless $self->{irc} && refaddr($self->{irc}) == refaddr($q->{irc})
+            && eval { $self->{irc}->is_connected }
+            && !eval { $self->getQuit };
+    my $now = _news_output_now();
+    my $expired = 0;
+    while (@{$q->{items}} && $q->{items}[0]{expires} <= $now) {
+        shift @{$q->{items}}; $expired++;
+    }
+    _news_output_log($self, 'expired') if $expired;
+    return 1 unless @{$q->{items}};
+    my $wait = defined($q->{last_at}) ? $NEWS_OUTPUT_STEP - ($now - $q->{last_at}) : 0;
+    return _arm_news_output($self, $q, $wait) if $wait > 0;
+    my $item = shift @{$q->{items}};
+    _replay_intents($self, [$item->{intent}]);
+    $q->{last_at} = _news_output_now();
+    return @{$q->{items}} ? _arm_news_output($self, $q, $NEWS_OUTPUT_STEP) : 1;
+}
+
+sub _queue_news_intents {
+    my ($self, $intents, $expected_irc) = @_;
+    my $irc = $self->{irc};
+    unless ($irc && eval { $irc->is_connected }
+        && (!$expected_irc || refaddr($expected_irc) == refaddr($irc))) {
+        _news_output_log($self, 'connection_changed');
+        return 0;
+    }
+    my $loop = $self->{loop} || eval { $self->getLoop };
+    unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        # Never replace a missing scheduler with a public burst or a sleep.
+        _news_output_log($self, 'loop_unavailable');
+        return 0;
+    }
+    my @batch = map { [@$_] } grep {
+        ref($_) eq 'ARRAY' && @$_ == 3 && defined($_->[0]) && !ref($_->[0])
+            && $_->[0] =~ /\A(?:privmsg|notice|action)\z/
+            && defined($_->[1]) && !ref($_->[1]) && length($_->[1])
+            && defined($_->[2]) && !ref($_->[2])
+    } @{ $intents || [] };
+    return 1 unless @batch;
+    my $q = $self->{_news_output_q};
+    if ($q && (refaddr($q->{irc}) != refaddr($irc) || refaddr($q->{loop}) != refaddr($loop))) {
+        _clear_news_output($self, $q, 'connection_changed');
+        $q = undef;
+    }
+    $q ||= $self->{_news_output_q} = {items => [], irc => $irc, loop => $loop};
+    if (@{$q->{items}} + @batch > $NEWS_OUTPUT_MAX) {
+        _news_output_log($self, 'queue_full');
+        return 0; # Reject the whole new batch, preserving the pending order.
+    }
+    my $expires = _news_output_now() + $NEWS_OUTPUT_TTL;
+    push @{$q->{items}}, map { {intent => $_, expires => $expires} } @batch;
+    return $q->{timer} ? 1 : _drain_news_output($self, $q);
+}
+
+sub _run_sync {
+    my ($self, $label, $code) = @_;
+    return $code->() unless $label eq 'actualites';
+    my $irc = $self->{irc};
+    my ($intents, $truncated, $ok, $err) = _collect_intents_run($code);
+    die $err unless $ok;
+    return _replay_intents($self, $intents, $label, $irc);
 }
 
 # mb595-B1: instantanes de LECTURE pour l'operateur (.status) — memoire
@@ -183,6 +311,7 @@ sub run_ctx_async {
     my $nick    = eval { $ctx->nick }    // '';
     my $channel = eval { $ctx->channel } // '';
     my $lockkey = lc($channel || $nick || 'global');
+    my $news_irc = $label eq 'actualites' ? $self->{irc} : undef;
 
     # Un seul gros job par canal : proteger MariaDB et l'ordre des reponses.
     $self->{_cmd_async_jobs} ||= {};
@@ -203,7 +332,7 @@ sub run_ctx_async {
         $self->{_cmd_async_stats}{fallback_sync}++;
         eval { $self->{logger}->log(3,
             "CommandAsync: no async loop, running '$label' synchronously") };
-        return $code->();
+        return _run_sync($self, $label, $code);
     }
 
     require IO::Async::Stream;
@@ -214,14 +343,14 @@ sub run_ctx_async {
     unless (pipe($pipe, $child_write)) {
         $self->{_cmd_async_stats}{fallback_sync}++;
         eval { $self->{logger}->log(1, "CommandAsync: pipe failed: $!") };
-        return $code->();
+        return _run_sync($self, $label, $code);
     }
     my $pid = fork();
     unless (defined $pid) {
         $self->{_cmd_async_stats}{fallback_sync}++;
         eval { close $pipe }; eval { close $child_write };
         eval { $self->{logger}->log(1, "CommandAsync: fork failed: $!") };
-        return $code->();
+        return _run_sync($self, $label, $code);
     }
 
     if ($pid == 0) {
@@ -336,7 +465,7 @@ sub run_ctx_async {
         }
         if (ref($res) eq 'HASH' && $res->{ok}) {
             $self->{_cmd_async_stats}{completed}++;
-            _replay_intents($self, $res->{intents});
+            _replay_intents($self, $res->{intents}, $label, $news_irc);
             eval { Mediabot::Helpers::botNotice($self, $nick,
                 "$label: output truncated (too many lines for one run).") }
                 if $res->{truncated};
@@ -400,7 +529,7 @@ sub run_ctx_async {
         $cleanup->();
         eval { $self->{logger}->log(1,
             "CommandAsync: could not watch worker; running '$label' synchronously") };
-        return $code->();
+        return _run_sync($self, $label, $code);
     }
     return 1;
 }

@@ -34,16 +34,16 @@ return sub {
 
     my $arts = [
         { title => q{Mortalité infantile : l'IGAS alerte sur la hausse en France},
-          source => 'France Culture', url => 'https://g/1', epoch => $fresh1 },
+          source => 'France Culture', url => 'https://g.example/1', epoch => $fresh1 },
         { title => q{L'actu de ce vendredi : chaleur, grève et politique},
-          source => 'Liberation', url => 'https://g/2', epoch => $fresh1 },
+          source => 'Liberation', url => 'https://g.example/2', epoch => $fresh1 },
         { title => q{Le gouvernement annonce de nouvelles mesures pour les urgences},
-          source => 'Le Monde', url => 'https://g/3', epoch => $fresh2 },
+          source => 'Le Monde', url => 'https://g.example/3', epoch => $fresh2 },
         { title => q{ONU et guerre en Ukraine},
-          source => 'UNRIC', url => 'https://g/4', epoch => $old },
+          source => 'UNRIC', url => 'https://g.example/4', epoch => $old },
         { title => q{Guerre au Moyen-Orient : Donald Trump doit donner des nouvelles},
-          source => 'BFMTV', url => 'https://g/5', epoch => $ancient },
-        { title => q{Titre sans date}, source => 'SansDate', url => 'https://g/6', epoch => undef },
+          source => 'BFMTV', url => 'https://g.example/5', epoch => $ancient },
+        { title => q{Titre sans date}, source => 'SansDate', url => 'https://g.example/6', epoch => undef },
     ];
 
     my $sel = Mediabot::External::News::_news_select_press_articles(
@@ -65,8 +65,9 @@ return sub {
         'mb619-802: vitrine par defaut bornee a 36 heures');
     $assert->like($src, qr/_news_fetch_google_articles\(\$rss_http, \$lang, \$query, \$is_default, \$now\)/,
         'mb619-802: runtime sait si la requete est le flux par defaut');
-    $assert->like($src, qr/PRECISE PRESS HEADLINES.+clickable stories/s,
+    my $bulletin = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/External/NewsBulletin.pm' or die $!; local $/; <$fh> };
+    $assert->like($bulletin, qr/PRECISE PRESS HEADLINES.+clickable stories/s,
         'mb619-802: le prompt ancre la synthese sur les liens affiches');
-    $assert->like($src, qr/do not introduce an unrelated.+Tavily-only event/s,
+    $assert->like($bulletin, qr/Do not introduce an unrelated.+Tavily-only event/s,
         'mb619-802: un sujet Tavily sans lien visible ne peut plus parasiter le resume');
 };

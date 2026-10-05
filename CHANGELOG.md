@@ -10,6 +10,38 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB815 — turn interactive news into a completed, sourced bulletin
+
+- Remove the public search announcement from `news`, `actualites` and their
+  aliases; fetch precise dated press headlines before optional Tavily discovery.
+- Fix the nested asynchronous Claude call: execute the provider-neutral client
+  synchronously inside the existing isolated command worker, with no chat
+  history, persona or deferred output callback. Use one configured provider.
+- Summarize the same articles that supply the source links. Optional Tavily
+  enrichment requires a matching headline and publisher, and links to the
+  evidence actually used; unrelated discovery pages cannot enter the prompt.
+- Open with a coherent, compact news paragraph, then pack dated publisher links
+  to the same stories onto as few IRC lines as possible, with no list numbering
+  or repeated full titles. Target a 320-byte opening; preserve its complete text.
+- Include UTF-8 title hints of up to 64 bytes before the packed source URLs, preserving
+  complete URLs and word boundaries rather than repeating full headlines.
+- Pace news delivery in the parent process at 1.5-second intervals shared across
+  news requests. Keep normal output helpers, avoid catchup bursts and discard
+  expired or disconnected-connection output without changing other commands.
+- Accept a combined multi-source section within the total paragraph budget.
+  Log fixed rejection reasons and allow one bounded stateless correction of an
+  unusable model answer, reserving time for source links and output.
+- Validate ordered section source ids and complete coverage of selected stories,
+  section-bound numeric evidence and UTF-8 output limits; reject malformed/model URL/control
+  output. Preserve complete ordinary headline facts in an explicitly extractive
+  fallback paragraph followed by the same packed links, without duplicating titles.
+- Preserve exact publication times and zones, reject stale/undated/generic
+  material, deduplicate repeated stories and retain the parent alias cooldown.
+- Keep same-day calendar-only dates usable before noon and reject tomorrow;
+  make RSS regression timestamps independent of the host's locale.
+- Bound verified network operations and preserve time for synthesis and links;
+  add isolated regression coverage and a development acceptance procedure.
+
 ### MB814 — enforce current mbweb authorization and quote visibility
 
 - Reject missing, malformed and unknown roles instead of coercing them to Owner;

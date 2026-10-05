@@ -277,6 +277,7 @@ Documentation:
 - [Plugin architecture](docs/PLUGIN_ARCHITECTURE.md) — core boundaries, API v2 freeze and API v3 roadmap;
 - [Playful v3 pilot](docs/PLAYFUL_V3_PILOT.md) — first reversible command migration, supervised rollout and rollback;
 - [Quote Reads v3 pilot](docs/QUOTE_READ_V3_PILOT.md) — observe-first migration and exact rollback for the first database-backed commands;
+- [Interactive news](docs/INTERACTIVE_NEWS.md) — sourced bulletins, optional enrichment and development checks;
 - [Automatic quotes](docs/RANDOM_QUOTES.md) — per-channel RandomQuote activation, frequency and troubleshooting;
 - [Plugin API v3](docs/PLUGIN_API_V3.md) — strict packages, typed channel policy, versioned events, owned jobs, shared services, approved quote reads and an inert authorized-write gate;
 - [Short Content v3 pilot](docs/SHORT_CONTENT_V3_PILOT.md) — observe-first proof and rollback for the first external-content package;
