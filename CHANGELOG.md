@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB816 — rotate ready RSS feeds fairly on paced channels
+
+- Select automatic news in a stable per-channel circular rotation, rather than
+  giving every scarce publication slot to the fastest polling worker.
+- Retain one replaceable, bounded candidate per feed; await the channel's current
+  polls and recheck enabled state and the latest pending item before sending.
+  Skip empty, failed, disabled, deleted and superseded candidates.
+- Persist the reserved feed cursor atomically with the existing shared gap and
+  rolling quota. Preserve old pacing histories without a database migration;
+  keep conservative rejected-send accounting and immediate-only AntiFlood output.
+- Reconsider ready candidates on scheduler ticks even between polls, without a
+  catch-up timer or a change to ordinary unpaced RSS delivery.
+- Cover three-hour / six-per-day rotation, reversed worker completion, staggered
+  polls, rolling-quota restart continuity, failures and existing-state compatibility.
+
 ### MB815 — turn interactive news into a completed, sourced bulletin
 
 - Remove the public search announcement from `news`, `actualites` and their

@@ -15,8 +15,8 @@ Changing limits does not require deleting and recreating the feed.
 `gap=180` means at least 180 minutes between automatic RSS news on **the whole
 channel**, regardless of feed. `daily=3` allows at most three attempts in any
 rolling 24-hour window, rather than resetting at midnight. These are ceilings,
-not a promise of three news every day. A new item and a successful later poll
-are needed; the first successful poll remains silent.
+not a promise of three news every day. A recent pending item from a successful
+poll is needed; the first successful poll remains silent.
 
 `interval=30` checks the feed every 30 minutes. It does not promise publication
 every 30 minutes. With channel limits active, only one recent candidate per
@@ -24,9 +24,28 @@ feed is kept, even when a feed's historical `max` setting exceeds one. The
 remaining new entries and superseded pending entries are suppressed durably.
 No backlog is drained in a burst when the gap expires or the bot restarts.
 
+With channel limits active, available feeds take turns in a stable circular
+rotation. The feed label, SQL polling order and HTTP response speed do not give
+a source priority. The scheduler waits for that channel's in-flight polls to
+finish, then selects the next ready feed after the previous reserved turn.
+Empty, failed, deleted or disabled feeds do not hold a turn. A ready candidate
+can be selected even when its feed's next poll is not yet due.
+
+The rotation cursor is saved with the existing private pacing state, alongside
+the quota history. Restarting, updating or changing limits does not reset it.
+Existing state without a cursor is accepted and keeps its limits and history;
+its first turn establishes the cursor. After a restart, candidates are prepared
+again by successful polls. Only the newest known pending article per feed is
+eligible; a refreshed article replaces that feed's previous candidate.
+
+No extra command or database migration is required. With four continuously
+ready feeds and `gap=180 daily=6`, successive allowed slots cycle through those
+four sources, rather than letting the fastest source take every slot. A feed
+without news is skipped, so equal shares are conditional on availability.
+
 A slot is recorded before attempting the IRC send. A rejected send therefore
 consumes a slot conservatively. The item remains pending until replaced or a
-later allowed poll; acknowledgements still happen only after output acceptance.
+later allowed scheduler attempt; acknowledgements still happen only after output acceptance.
 Paced announcements use a single payload of at most 400 UTF-8 bytes; titles are
 trimmed to fit. If an unshortened URL cannot fit, the article is skipped rather
 than split into several lines. Paced announcements never enter the deferred

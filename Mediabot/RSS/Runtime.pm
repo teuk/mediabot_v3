@@ -39,6 +39,7 @@ sub new {
         worker_timeout => 0 + ($args{worker_timeout} // 60),
         output_delay  => $delay,
         inflight      => {},
+        inflight_channels => {},
         outq          => {},
         queued        => {},
         workers       => {},
@@ -78,7 +79,10 @@ sub tick {
     return 0 unless $bot->{_start_time};
 
     my $capacity = $self->{max_workers} - $self->inflight_count;
-    return 0 if $capacity <= 0;
+    if ($capacity <= 0) {
+        $self->_drain_ready_channels;
+        return 0;
+    }
 
     my $repo = eval { $self->_parent_repo };
     unless ($repo) {
@@ -95,6 +99,7 @@ sub tick {
     }
 
     my $started = 0;
+    local $self->{dispatching} = 1;
     for my $feed (@$due) {
         last if $started >= $capacity;
         next unless ref($feed) eq 'HASH';
@@ -103,6 +108,8 @@ sub tick {
         next if $self->{inflight}{$id};
         $started++ if $self->_start_feed_worker($feed);
     }
+    $self->{dispatching} = 0;
+    $self->_drain_ready_channels;
     return $started;
 }
 
@@ -188,10 +195,12 @@ sub _start_feed_worker {
     return 0 if $self->{inflight}{$id};
 
     $self->{inflight}{$id} = 1;
+    $self->{inflight_channels}{$id} = lc($feed->{channel} // "");
     my $worker_class = $self->{worker_class};
     unless (defined($worker_class) && !ref($worker_class)
         && eval { $worker_class->can('start') }) {
         delete $self->{inflight}{$id};
+        delete $self->{inflight_channels}{$id};
         $self->_log(1, "rss_poll_dispatch: worker class is unavailable");
         return 0;
     }
@@ -206,13 +215,19 @@ sub _start_feed_worker {
         on_done    => sub {
             my ($result) = @_;
             delete $self->{inflight}{$id};
+            delete $self->{inflight_channels}{$id};
             delete $self->{workers}{$id};
-            $self->_worker_done($feed, $result);
+            {
+                local $self->{dispatching} = 1;
+                $self->_worker_done($feed, $result);
+            }
+            $self->_drain_ready_channels;
         },
     );
 
     unless ($worker) {
         delete $self->{inflight}{$id};
+        delete $self->{inflight_channels}{$id};
         return 0;
     }
 
@@ -232,6 +247,8 @@ sub _record_parent_error {
 sub _worker_done {
     my ($self, $feed, $result) = @_;
     my $id = 0 + $feed->{id_rss_feed};
+    # A failed/empty/new-baseline poll must not leave an old prepared candidate.
+    $self->_drop_feed_candidate(lc($feed->{channel} // ""), $id);
 
     unless (ref($result) eq 'HASH' && $result->{ok} && ref($result->{value}) eq 'HASH') {
         my $detail = ref($result) eq 'HASH'
@@ -280,6 +297,33 @@ sub _worker_done {
     return 1;
 }
 
+# Paced channels retain a bounded, replaceable candidate per feed, never a
+# backlog of articles. Wait for this channel's current workers before choosing:
+# completion speed and SQL dispatch order must not decide who gets the slot.
+sub _drop_feed_candidate {
+    my ($self, $ckey, $feed_id) = @_;
+    my $q = $self->{outq}{$ckey} or return;
+    return unless $q->{paced};
+    my @keep;
+    for my $item (@{$q->{items}}) {
+        if ($item->{feed_id} == $feed_id) { delete $self->{queued}{$item->{qid}} }
+        else { push @keep, $item }
+    }
+    $q->{items} = \@keep;
+}
+sub _channel_busy {
+    my ($self, $ckey) = @_;
+    return 1 if $self->{dispatching};
+    return scalar grep {$_ eq $ckey} values %{$self->{inflight_channels}};
+}
+sub _drain_ready_channels {
+    my ($self) = @_;
+    for my $ckey (sort keys %{$self->{outq}}) {
+        my $q = $self->{outq}{$ckey};
+        next unless $q->{paced} && !$q->{timer} && !$self->_channel_busy($ckey);
+        $self->_drain_channel($ckey);
+    }
+}
 sub _enqueue_announcements {
     my ($self, %args) = @_;
     my $feed_id = $args{feed_id};
@@ -287,8 +331,20 @@ sub _enqueue_announcements {
     return 0 unless defined($feed_id) && $feed_id =~ /^\d+$/;
     return 0 unless defined($channel) && $channel =~ /^[#&!+]/;
     return 0 unless ref($args{items}) eq 'ARRAY';
-
-    my $q = ($self->{outq}{lc $channel} ||= { channel => $channel, items => [], timer => undef, draining => 0 });
+    my $policy = eval { $self->{pacing}->status($channel) };
+    return 0 unless $policy;
+    my $paced = $policy->{active} ? 1 : 0;
+    my $ckey = lc $channel;
+    my $q = ($self->{outq}{$ckey} ||= {
+        channel => $channel, items => [], timer => undef, draining => 0, paced => $paced,
+    });
+    # Changing mode discards prepared output from the old policy.
+    if ($q->{paced} != $paced) {
+        delete $self->{queued}{$_->{qid}} for @{$q->{items}};
+        if (my $timer = delete $q->{timer}) { eval { $self->{loop}->remove($timer) } }
+        $q->{items} = []; $q->{paced} = $paced;
+    }
+    $self->_drop_feed_candidate($ckey, $feed_id) if $paced;
     my $added = 0;
     for my $item (@{ $args{items} }) {
         next unless ref($item) eq 'HASH';
@@ -296,17 +352,20 @@ sub _enqueue_announcements {
         my $line = $item->{line};
         next unless defined($key) && $key =~ /^[0-9a-f]{64}$/i;
         next unless defined($line) && !ref($line) && length($line);
+        next if $paced && length(encode('UTF-8', $line)) > 400;
         my $qid = $feed_id . ':' . lc($key);
         next if $self->{queued}{$qid};
+        last if $paced && $self->queued_count >= 1000;
         $self->{queued}{$qid} = 1;
         push @{ $q->{items} }, {
             qid => $qid, feed_id => 0 + $feed_id, item_key => lc($key),
             line => $line, label => ($args{label} // ''),
         };
         $added++;
+        last if $paced;
     }
-
-    $self->_drain_channel(lc $channel) if $added && !$q->{draining} && !$q->{timer};
+    $self->_drain_channel($ckey) if $added && !$q->{draining} && !$q->{timer}
+        && (!$paced || !$self->_channel_busy($ckey));
     return $added;
 }
 
@@ -336,32 +395,78 @@ sub _drain_channel {
     my ($self, $ckey) = @_;
     my $q = $self->{outq}{$ckey} or return 0;
     return 0 if $q->{draining};
+    unless (@{$q->{items} || []}) {
+        delete $self->{outq}{$ckey};
+        return 0;
+    }
+    my $policy = eval { $self->{pacing}->status($q->{channel}) };
+    unless ($policy) {
+        $self->_log(1, "rss_poll_dispatch: pacing state unavailable; output held");
+        unless ($q->{paced}) {
+            delete $self->{queued}{$_->{qid}} for @{$q->{items}};
+            delete $self->{outq}{$ckey};
+        }
+        return 0;
+    }
+    my $paced = $policy->{active};
+    # Never release a protected cache as a legacy catch-up burst.
+    if ($q->{paced} && !$paced) {
+        delete $self->{queued}{$_->{qid}} for @{$q->{items}};
+        delete $self->{outq}{$ckey};
+        return 0;
+    }
+    my $repo = eval { $self->_parent_repo };
+    unless ($repo) {
+        unless ($paced) {
+            delete $self->{queued}{$_->{qid}} for @{$q->{items}};
+            delete $self->{outq}{$ckey};
+        }
+        return 0;
+    }
+    if ($paced) {
+        return 0 if $policy->{wait} || $self->_channel_busy($ckey);
+        return 0 unless eval { $self->{bot}{irc}->is_connected };
+        my (@ready, @drop);
+        for my $candidate (@{$q->{items}}) {
+            my ($enabled, $latest);
+            my $ok = eval {
+                $enabled = $repo->is_feed_enabled($candidate->{feed_id});
+                $latest = $repo->paced_pending_items($candidate->{feed_id}) if $enabled;
+                1;
+            };
+            return 0 unless $ok;
+            if ($enabled && $latest && @$latest
+                && $latest->[0]{item_key} eq $candidate->{item_key}
+                && length(encode('UTF-8', $candidate->{line})) <= 400) {
+                push @ready, $candidate;
+            }
+            else {
+                push @drop, $candidate->{qid};
+                $self->_log(3, "rss_poll_dispatch: dropped queued item for deleted/disabled feed=$candidate->{feed_id} or superseded article");
+            }
+        }
+        delete $self->{queued}{$_} for @drop;
+        $q->{items} = \@ready;
+        $q->{paced} = 1;
+        my $order = eval { $self->{pacing}->rotation_order($q->{channel},
+            [map {$_->{feed_id}} @ready]) };
+        return 0 unless $order;
+        my %rank; @rank{@$order} = (0 .. $#$order);
+        $q->{items} = [sort {$rank{$a->{feed_id}} <=> $rank{$b->{feed_id}}} @ready];
+    }
     my $item = shift @{ $q->{items} || [] };
     unless ($item) {
         delete $self->{outq}{$ckey};
         return 0;
     }
-
     $q->{draining} = 1;
     delete $self->{queued}{ $item->{qid} };
-
-    my $repo = eval { $self->_parent_repo };
-    my $policy = eval { $self->{pacing}->status($q->{channel}) };
-    my $paced = $policy && $policy->{active};
-    my $enabled = $repo ? eval { $repo->is_feed_enabled($item->{feed_id}) } : 0;
-    # State failures block output. Recheck limits immediately before delivery,
-    # including messages queued before an operator changes the policy.
-    if ($enabled && $policy) {
+    my $enabled = eval { $repo->is_feed_enabled($item->{feed_id}) };
+    if ($enabled) {
         my $allowed = !$paced;
         if ($paced) {
-            my $latest = eval { $repo->paced_pending_items($item->{feed_id}) };
-            my $current = $latest && @$latest && $latest->[0]{item_key} eq $item->{item_key};
-            my $connected = eval { $self->{bot}{irc}->is_connected };
-            my $one_line = length(encode('UTF-8', $item->{line})) <= 400;
-            if ($current && $connected && $one_line) {
-                my $slot = eval { $self->{pacing}->reserve($q->{channel}) };
-                $allowed = $slot && $slot->{allowed};
-            }
+            my $slot = eval { $self->{pacing}->reserve($q->{channel}, feed_id => $item->{feed_id}) };
+            $allowed = $slot && $slot->{allowed};
         }
         my $accepted = eval {
             $allowed ? Mediabot::Helpers::botPrivmsg($self->{bot}, $q->{channel}, $item->{line},
@@ -377,24 +482,20 @@ sub _drain_channel {
         }
         else {
             $self->_log(2, "rss_poll_dispatch: output rejected; item remains pending feed=$item->{feed_id} key=$item->{item_key}");
+            if ($paced) {
+                push @{$q->{items}}, $item;
+                $self->{queued}{$item->{qid}} = 1;
+            }
         }
-    }
-    elsif (!$policy) {
-        $self->_log(1, "rss_poll_dispatch: pacing state unavailable; output held");
     }
     else {
         $self->_log(3, "rss_poll_dispatch: dropped queued item for deleted/disabled feed=$item->{feed_id}");
     }
-
-    # No timer-driven catch-up on protected channels. Pending candidates are
-    # refreshed by a later poll; no delayed AntiFlood queue may bypass the gap.
-    if ($paced || !$policy) {
-        delete $self->{queued}{$_->{qid}} for @{$q->{items}};
-        $q->{items} = [];
-    }
     $q->{draining} = 0;
     if (@{ $q->{items} || [] }) {
-        $self->_arm_next($ckey);
+        # Only the scheduler may reconsider paced candidates. No per-item timer
+        # or deferred AntiFlood output can bypass the shared gap / daily quota.
+        $self->_arm_next($ckey) unless $paced;
     }
     else {
         delete $self->{outq}{$ckey};

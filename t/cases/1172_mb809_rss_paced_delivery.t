@@ -78,10 +78,11 @@ return sub {
     $a->ok($options[0]{no_defer},'mb809: paced output cannot enter delayed AntiFlood queue');
     $repo->insert_item(2,item809(10),announced=>0);
     $repo->insert_item(2,item809(11),announced=>0);
+    $repo->paced_pending_items(2);
     $enqueue->($runtime,2,item809(11),item809(10));
     $a->is(scalar @sent,1,'mb809: another feed cannot bypass channel cooldown');
-    $a->is($runtime->queued_count,0,'mb809: accumulated output is discarded from timer queue');
-    $a->is(scalar keys %{$runtime->{outq}},0,'mb809: no catch-up timer remains armed');
+    $a->is($runtime->queued_count,1,'mb809: only one replaceable candidate is retained per feed');
+    $a->ok(!$runtime->{outq}{'#35+ans'}{timer},'mb809: no catch-up timer remains armed');
     $a->is(scalar @{$repo->pending_items(2,100)},1,'mb809: only newest candidate retained durably');
     $response={ok=>1,status=>200,feed=>{items=>[item809(6),item809(7),item809(4)]}};
     $res=$poller->poll_feed($feed);

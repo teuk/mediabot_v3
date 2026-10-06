@@ -44,6 +44,9 @@ sub _validate {
         for my $stamp (@{$row->{history}}) {
             die 'invalid RSS pacing history' unless _number($stamp, 9999999999);
         }
+        # Optional in schema 1: existing quota histories need no migration.
+        die 'invalid RSS rotation cursor' if exists($row->{last_feed})
+            && (!_number($row->{last_feed}, 4294967295) || !$row->{last_feed});
     }
     return $state;
 }
@@ -133,8 +136,27 @@ sub configure {
         return ($self->_status($row), 1);
     });
 }
+sub rotation_order {
+    my ($self, $channel, $ids) = @_; my $key = _channel($channel);
+    die 'invalid RSS rotation candidates' unless ref($ids) eq 'ARRAY' && @$ids <= 1000;
+    my %seen;
+    for my $id (@$ids) {
+        die 'invalid RSS rotation feed' unless _number($id, 4294967295) && $id;
+        $seen{0 + $id} = 1;
+    }
+    return $self->_locked(0, sub {
+        my ($state) = @_;
+        my $row = $state->{channels}{lc $key} || {};
+        my $last = $row->{last_feed} // 0;
+        my @sorted = sort {$a <=> $b} keys %seen;
+        return [(grep {$_ > $last} @sorted), (grep {$_ <= $last} @sorted)];
+    });
+}
 sub reserve {
-    my ($self, $channel) = @_; my $key = _channel($channel);
+    my ($self, $channel, %args) = @_; my $key = _channel($channel);
+    die 'invalid RSS reservation option' if grep {$_ ne 'feed_id'} keys %args;
+    die 'invalid RSS reservation feed' if exists($args{feed_id})
+        && (!_number($args{feed_id}, 4294967295) || !$args{feed_id});
     return $self->_locked(1, sub {
         my ($state) = @_; my $row = $state->{channels}{lc $key};
         my $status = $self->_status($row);
@@ -144,6 +166,8 @@ sub reserve {
         $row->{history} = [grep {$_ > $now - 604800} @{$row->{history}}];
         push @{$row->{history}}, $now;
         splice @{$row->{history}}, 0, @{$row->{history}} - 300 if @{$row->{history}} > 300;
+        # The turn and the quota are committed together, before the IRC attempt.
+        $row->{last_feed} = 0 + $args{feed_id} if exists $args{feed_id};
         return ({%$status, allowed => 1}, 1);
     });
 }
