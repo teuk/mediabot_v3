@@ -114,9 +114,9 @@ return sub {
         'le ctx délègue le format DB et le signe à la sub testée');
     $assert->like($ctx, qr/if \(defined \$sign_name\) \{/,
         'gabarit AVEC signe conditionne a un birthday valide');
-    $assert->like($ctx, qr/Horoscope du \$date_key pour \$target/,
+    $assert->like($ctx, qr/compact_lines\(/,
         'gabarit SANS signe present (horoscope jamais refuse)');
-    $assert->like($ctx, qr/signe complice/,
+    $assert->like($ctx, qr/companion => \$complice/,
         'signe complice uniquement dans le gabarit avec signe');
 
     # Plus aucune reference interne (mb561)
@@ -129,7 +129,7 @@ return sub {
     # Le LCG local reste la source des tirages (contrat 659 en detail)
     $assert->like($ctx, qr/1103515245/, 'LCG local toujours en place');
 
-    # Les deux gabarits partagent le meme socle (conseil + chance)
-    my $conseil = () = $ctx =~ /Conseil : %s\. Méfiance : %s\./g;
-    $assert->ok($conseil == 2, 'ligne conseil presente dans les DEUX gabarits');
+    # MB817: both sign/no-sign paths use the same bounded compact formatter.
+    $assert->like($ctx, qr/number => \$chiffre, colour => \$couleur, luck => \$chance/,
+        'les deux gabarits conservent les details chance du jour');
 };

@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB817 — compact bilingual daily horoscopes
+
+- Reduce `horoscope`/`horo` to two UTF-8 bounded lines: the localized sign and
+  daily forecast, then lucky number, colour, luck and companion sign.
+  Remove repeated element slogans and the separate mood/advice/vibe sections.
+- Use one stateless synchronous translation request inside the existing command
+  worker. Keep conversation history, personas and pins out of the request;
+  malformed, wrong-language or unavailable translation selects a local fallback.
+- Provide twelve distinct FR/EN fallback card sets, stable by sign and day.
+  Retain birthday formats, sign aliases/precedence, Games gates, async dispatch,
+  private reply routing, daily lucky draws, consultation counters and metrics.
+- Bound external HTTP attempts and both IRC payloads; preserve valid UTF-8 and
+  reject external CTCP/control injection. Document development acceptance.
+
 ### MB816 — rotate ready RSS feeds fairly on paced channels
 
 - Select automatic news in a stable per-channel circular rotation, rather than

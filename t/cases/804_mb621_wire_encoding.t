@@ -89,15 +89,15 @@ return sub {
     Mediabot::UserCommands::mbHoroscope_ctx(
         CtxW->new(bot => $bot, nick => $nick_decoded, channel => '#test',
                   args => ['lion']));
-    $assert->ok(scalar @out >= 4, 'mb621-804: l horoscope a repondu');
+    $assert->ok(scalar @out == 2, 'mb621-804: l horoscope a repondu');
 
     my $wire = join "\n", map { _wire($_) } @out;
     $assert->ok($wire !~ /\xC3\x83|\xC3\x82/,
         'mb621-804: AUCUNE sequence de double encodage sur le fil');
     my $back = eval { decode('UTF-8', $wire, Encode::FB_CROAK()) };
     $assert->ok(defined $back, 'mb621-804: les octets emis sont de l UTF-8 valide');
-    $assert->like($back, qr/humeur \w+/, 'mb621-804: la ligne d en-tete est lisible');
-    $assert->like($back, qr/Côté projets/,
+    $assert->like($back, qr/♌ \x02Lion\x02/, 'mb621-804: la ligne d en-tete est lisible');
+    $assert->like($back, qr/Couleur/,
         'mb621-804: les accents du corps sortent justes');
     $assert->like($back, qr/♌ \x02Lion\x02/,
         'mb621-804: le glyphe du signe sort juste');

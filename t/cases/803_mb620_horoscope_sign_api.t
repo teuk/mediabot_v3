@@ -164,7 +164,7 @@ return sub {
         'mb620-803: CAS 1 — le signe donne est utilise');
     $assert->like($text, qr/Prevision du jour\./,
         'mb620-803: ... avec la prevision reelle');
-    $assert->like($text, qr/humeur \w/,
+    $assert->like($text, qr/Nombre \d/,
         'mb620-803: ... et les accents sortent propres');
     $assert->ok($text !~ /\x{c3}\x{83}/,
         'mb620-803: ... plus aucun double encodage a l ecran');

@@ -7200,7 +7200,7 @@ sub mbDuel_ctx {
 
 # ---------------------------------------------------------------------------
 # mbHoroscope_ctx --- !horoscope [nick]
-# Horoscope IRC déterministe en français. Seed = nick + date.
+# Horoscope IRC compact, FR/EN selon le canal. Seed = nick + date.
 # Compteur de consultations en mémoire (achievement star_gazer).
 # ---------------------------------------------------------------------------
 # mb561-B1: (jour, mois) -> (nom, glyphe, element) du signe, bornes standard.
@@ -7617,65 +7617,23 @@ sub mbHoroscope_ctx {
         };
     }
 
+    # MB817: two bounded lines. Keep the historical local draws and their
+    # order, so compacting the reply does not reshuffle daily lucky details.
+    my $complice;
     if (defined $sign_name) {
-        my $elan = $pick->($elans{$sign_element});
+        $pick->($elans{$sign_element});
         my @complices = grep { $_ ne $disp_sign } @autres_signes;
-        my $complice = $pick->(\@complices);
-        if ($horo_fr) {
-            botPrivmsg($self, $reply_to,
-                "$glyph \x02Horoscope du $date_key\x02 — $target, $sign_glyph \x02$disp_sign\x02 ($disp_element) · humeur $humeur");
-            botPrivmsg($self, $reply_to,
-                "  🔮 $elan.");
-            botPrivmsg($self, $reply_to, "  ✨ $api_line") if defined $api_line;
-            botPrivmsg($self, $reply_to,
-                "  Climat : $social. Côté projets : $projets. $event");
-            botPrivmsg($self, $reply_to,
-                sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
-            botPrivmsg($self, $reply_to,
-                sprintf("  🎲 Chiffre %d · 🎨 couleur %s · 🍀 chance %d%% · 💫 signe complice : %s",
-                    $chiffre, $couleur, $chance, $complice));
-        }
-        else {
-            botPrivmsg($self, $reply_to,
-                "$glyph \x02Horoscope for $date_key\x02 — $target, $sign_glyph \x02$disp_sign\x02 ($disp_element) · mood: $humeur");
-            botPrivmsg($self, $reply_to,
-                "  🔮 $elan.");
-            botPrivmsg($self, $reply_to, "  ✨ $api_line") if defined $api_line;
-            botPrivmsg($self, $reply_to,
-                "  Vibe: $social. On the work front: $projets. $event");
-            botPrivmsg($self, $reply_to,
-                sprintf("  Advice: %s. Beware of: %s.", $reco, $attention));
-            botPrivmsg($self, $reply_to,
-                sprintf("  🎲 Number %d · 🎨 colour %s · 🍀 luck %d%% · 💫 kindred sign: %s",
-                    $chiffre, $couleur, $chance, $complice));
-        }
+        $complice = $pick->(\@complices);
     }
-    else {
-        if ($horo_fr) {
-            botPrivmsg($self, $reply_to,
-                "$glyph \x02Horoscope du $date_key pour $target\x02 — humeur $humeur");
-            botPrivmsg($self, $reply_to,
-                "  Climat : $social. Côté projets : $projets. $event");
-            botPrivmsg($self, $reply_to,
-                sprintf("  Conseil : %s. Méfiance : %s.", $reco, $attention));
-            botPrivmsg($self, $reply_to,
-                sprintf("  🎲 Chiffre %d · 🎨 couleur %s · 🍀 chance %d%% · 💡 %s",
-                    $chiffre, $couleur, $chance,
-                    "signe inconnu : essaie \x02!horoscope lion\x02 ou \x02!birthday set\x02"));
-        }
-        else {
-            botPrivmsg($self, $reply_to,
-                "$glyph \x02Horoscope for $date_key — $target\x02 — mood: $humeur");
-            botPrivmsg($self, $reply_to,
-                "  Vibe: $social. On the work front: $projets. $event");
-            botPrivmsg($self, $reply_to,
-                sprintf("  Advice: %s. Beware of: %s.", $reco, $attention));
-            botPrivmsg($self, $reply_to,
-                sprintf("  🎲 Number %d · 🎨 colour %s · 🍀 luck %d%% · 💡 %s",
-                    $chiffre, $couleur, $chance,
-                    "sign unknown: try \x02!horoscope leo\x02 or \x02!birthday set\x02"));
-        }
-    }
+    my $forecast = Mediabot::External::Horoscope::clean_text($api_line);
+    $forecast //= Mediabot::External::Horoscope::local_forecast(
+        $api_slug, $date_key, ($horo_fr ? 'fr' : 'en')) if defined $api_slug;
+    my $lines = Mediabot::External::Horoscope::compact_lines(
+        lang => ($horo_fr ? 'fr' : 'en'), target => $target, date => $date_key,
+        sign => $disp_sign, glyph => $sign_glyph, forecast => $forecast,
+        number => $chiffre, colour => $couleur, luck => $chance,
+        companion => $complice);
+    botPrivmsg($self, $reply_to, $_) for @$lines;
 
     # mb610-B1: le compteur passe au registre PERSISTANT des achievements
     # (le compteur memoire reste pour les instances sans systeme

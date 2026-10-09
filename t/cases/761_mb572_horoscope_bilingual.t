@@ -89,13 +89,13 @@ return sub {
     $assert->ok($sel_pos > -1 && $draw_pos > $sel_pos,
         'la selection de langue precede les tirages');
 
-    for my $frag ('Horoscope du \$date_key', 'Climat : ', 'Conseil : %s\. Méfiance : %s\.',
-                  'chance %d%%') {
-        $assert->like($ctx, qr/$frag/, "gabarit FR: $frag");
+    $assert->like($ctx, qr/lang => \(\$horo_fr \? 'fr' : 'en'\)/,
+        'gabarit compact choisit explicitement FR ou EN');
+    my $format = _slurp_761(File::Spec->catfile('Mediabot', 'External', 'Horoscope.pm'));
+    for my $frag ('Nombre %d', 'Couleur %s', 'Chance %d%%', 'Complice ',
+                  'Lucky number %d', 'Colour %s', 'Luck %d%%', 'Kindred sign ') {
+        $assert->like($format, qr/\Q$frag\E/, "detail compact bilingue: $frag");
     }
-    for my $frag ('Horoscope for \$date_key', 'Vibe: ', 'Advice: %s\. Beware of: %s\.',
-                  'luck %d%%', 'kindred sign: %s') {
-        $assert->like($ctx, qr/$frag/, "gabarit EN: $frag");
-    }
-    $assert->like($ctx, qr/mood: \$humeur/, 'gabarit EN: mood');
+    $assert->unlike($ctx, qr/botPrivmsg\(.*(?:Climat|Vibe|Conseil|Advice)/,
+        'les anciennes lignes supplementaires ne sont plus emises');
 };
