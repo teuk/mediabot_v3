@@ -25,6 +25,7 @@ use Mediabot::AI::ConversationExclusion ();
 use Mediabot::AI::ConversationDryRun ();
 use Mediabot::AI::ConversationEmission ();
 use Mediabot::AI::ConversationSender ();
+use Mediabot::AI::MetaRuntime ();
 use Mediabot::AI ();
 use Mediabot::Spark::State ();
 use Mediabot::Spark::Observer ();
@@ -3569,6 +3570,8 @@ sub on_message_NICK {
     # Track last seen on NICK change + purge Claude history for old nick
     {
         my ($sNick_n, $sIdent_n, $sHost_n) = $mediabot->getMessageNickIdentHost($message);
+        Mediabot::AI::MetaRuntime::note_rename(
+            $mediabot,$old_nick,$new_nick,$sIdent_n,$sHost_n);
         # mb377-B1: a NICK change preserves the IRC connection. Move any
         # authenticated session to the new live nickname so a later QUIT/PART/
         # KICK can close the correct session and clear persistent USER.auth.
@@ -4280,7 +4283,15 @@ sub _on_message_PRIVMSG_body {
             @tArgs = split(/\s+/,$what);
             if (defined($sCommand) && ($sCommand ne "")) {
                 $sCommand =~ tr/A-Z/a-z/;
-                $mediabot->chatGPT($message,$who,$where,@tArgs);
+                return undef if $from_conversation_bot;
+                my $meta_handled = eval {
+                    Mediabot::AI::MetaRuntime::handle($mediabot,$message,$who,$where,@tArgs)
+                };
+                if ($@) {
+                    $mediabot->{logger}->log(1, 'META_AI request rejected safely');
+                    return undef;
+                }
+                $mediabot->chatGPT($message,$who,$where,@tArgs) unless $meta_handled;
             }
         }
         elsif ( $what =~ /https?:\/\//i ) {

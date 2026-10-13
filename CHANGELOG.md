@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB818 — collective addressed AI and researched conversations
+
+- Add an opt-in `mediabot: <question>` collective runtime: configured OpenAI,
+  Claude and Gemini contributors start concurrently, followed by one synthesis.
+- Add private restart-persistent channel context with distinct speaker labels,
+  observed nick changes, inactivity expiry and personal `/forget`.
+- Ground current questions in bounded shared Tavily search/page extracts, or
+  native OpenAI Responses web search with actual citation metadata.
+- Keep replies within two paced IRC lines; revalidate generation/configuration
+  before delivery and retain only completed accepted exchanges.
+- Support modern Responses and Claude payloads while preserving legacy routes;
+  add an offline checker with an explicit paid live-probe option.
+- Default the pilot off; require a channel allowlist and existing `+chatGPT`.
+
 ### MB817 — compact bilingual daily horoscopes
 
 - Reduce `horoscope`/`horo` to two UTF-8 bounded lines: the localized sign and

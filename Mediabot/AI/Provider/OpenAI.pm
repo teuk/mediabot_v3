@@ -26,7 +26,8 @@ sub _require_scalar {
 }
 
 sub build_payload {
-    my ($request) = @_;
+    my ($request, $options) = @_;
+    $options ||= {};
 
     my $error = validate_request($request);
     croak "invalid AI request: $error" if defined $error;
@@ -40,6 +41,30 @@ sub build_payload {
     my $model = _require_scalar('model', $request->{model});
     croak 'max_output_tokens is required'
         unless exists $request->{max_output_tokens};
+
+    if (($options->{api_style} // '') eq 'responses') {
+        my %payload = (
+            model => $model,
+            input => $request->{messages},
+            max_output_tokens => int($request->{max_output_tokens}),
+            store => JSON::PP::false,
+        );
+        $payload{instructions} = $request->{system} if defined $request->{system};
+        if ($model =~ /^gpt-[56]/) {
+            $payload{reasoning} = { effort => 'low' };
+        }
+        elsif (exists $request->{temperature}) {
+            $payload{temperature} = 0 + $request->{temperature};
+        }
+        if ($options->{web_search}) {
+            my $tool = { type => 'web_search', search_context_size => 'low' };
+            $tool->{filters} = { allowed_domains => $options->{web_domains} }
+                if ref($options->{web_domains}) eq 'ARRAY' && @{$options->{web_domains}};
+            $payload{tools} = [$tool];
+            $payload{tool_choice} = 'required';
+        }
+        return encode_json(\%payload);
+    }
 
     my @messages;
     push @messages, {
@@ -82,6 +107,19 @@ sub extract_answer {
     my ($content) = @_;
 
     my $data = eval { decode_json($content // '') };
+    if (ref($data) eq 'HASH' && ref($data->{output}) eq 'ARRAY') {
+        my @text;
+        for my $item (@{$data->{output}}) {
+            next unless ref($item) eq 'HASH' && ($item->{type} // '') eq 'message'
+                && ref($item->{content}) eq 'ARRAY';
+            for my $part (@{$item->{content}}) {
+                push @text, $part->{text} if ref($part) eq 'HASH'
+                    && ($part->{type} // '') eq 'output_text'
+                    && defined($part->{text}) && !ref($part->{text});
+            }
+        }
+        return @text ? join('', @text) : undef;
+    }
     return undef unless ref($data) eq 'HASH'
         && ref($data->{choices}) eq 'ARRAY'
         && ref($data->{choices}[0]) eq 'HASH'
@@ -90,6 +128,32 @@ sub extract_answer {
         && length($data->{choices}[0]{message}{content});
 
     return $data->{choices}[0]{message}{content};
+}
+
+sub extract_sources {
+    my ($content) = @_;
+    my $data = eval { decode_json($content // '') };
+    return [] unless ref($data) eq 'HASH' && ref($data->{output}) eq 'ARRAY';
+    return [] unless grep {ref($_) eq 'HASH' && ($_->{type}//'') eq 'web_search_call'
+        && ($_->{status}//'') eq 'completed'} @{$data->{output}};
+    my (%seen, @sources);
+    for my $item (@{$data->{output}}) {
+        next unless ref($item) eq 'HASH' && ($item->{type} // '') eq 'message'
+            && ref($item->{content}) eq 'ARRAY';
+        for my $part (@{$item->{content}}) {
+            next unless ref($part) eq 'HASH' && ref($part->{annotations}) eq 'ARRAY';
+            for my $citation (@{$part->{annotations}}) {
+                next unless ref($citation) eq 'HASH' && ($citation->{type} // '') eq 'url_citation';
+                my $url = $citation->{url};
+                next unless defined($url) && !ref($url) && length($url) <= 2048
+                    && $url =~ m{\Ahttps?://[A-Za-z0-9.-]+(?:/[^\s\x00-\x1f]*)?\z}
+                    && !$seen{$url}++;
+                push @sources, { url => $url, title => substr($citation->{title} // '', 0, 160) };
+                return \@sources if @sources >= 8;
+            }
+        }
+    }
+    return \@sources;
 }
 
 sub extract_error {

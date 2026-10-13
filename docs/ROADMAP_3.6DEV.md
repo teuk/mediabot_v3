@@ -64,3 +64,11 @@ Mediabot itself, with revalidated actor/channel rights, CSRF, explicit results,
 rate limits and audit events. Start with RSS pacing and RandomQuote, then quote
 management and selected chansets. A generic SQL editor, arbitrary partyline
 command input and shell execution are outside this sequence.
+
+## MB818 collective AI pilot
+
+The addressed conversation pilot combines concurrent contributors, a single
+synthesis, scoped persistent memory and bounded current-source research. It is
+disabled by default. Validate provider access, French/English delivery,
+multi-participant follow-ups, generation cancellation, restart and `/forget`
+on dev before a source commit or another instance update. See [META_AI](META_AI.md).

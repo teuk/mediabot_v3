@@ -48,7 +48,12 @@ sub build_payload {
     $payload{system} = "$request->{system}"
         if exists($request->{system}) && defined($request->{system});
     $payload{temperature} = 0 + $request->{temperature}
-        if exists $request->{temperature};
+        if exists $request->{temperature} && $model !~ /^claude-(?:sonnet|opus|haiku|fable)-5/;
+
+    if (($request->{purpose}//'') =~ /^meta_/ && $model =~ /^claude-(?:sonnet|opus|haiku)-5/) {
+        $payload{output_config}={effort=>'low'};
+        $payload{thinking}={type=>'between_tools'} if $model eq 'claude-sonnet-5-5';
+    }
 
     return encode_json(\%payload);
 }

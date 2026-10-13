@@ -286,7 +286,13 @@ sub _provider_plan {
             return (undef, 'invalid_request') if defined $error;
 
             my $payload = eval {
-                Mediabot::AI::Provider::OpenAI::build_payload($adapted)
+                $api_url =~ m{/responses\z}
+                ? Mediabot::AI::Provider::OpenAI::build_payload($adapted, {
+                    api_style => 'responses',
+                    web_search => ($request->{purpose} // '') eq 'meta_web'
+                        && $self->_conf_int('openai.WEB_SEARCH', 0, 0, 1),
+                })
+                : Mediabot::AI::Provider::OpenAI::build_payload($adapted)
             };
             return (undef, 'provider_build_failed') unless defined($payload) && !$@;
 
@@ -511,6 +517,9 @@ sub _run_plan {
                     provider_fallback => $provider_index ? 1 : 0,
                     model_fallback    => $attempt_index ? 1 : 0,
                     attempted         => [@attempted],
+                    ($provider eq 'openai' && @{
+                        Mediabot::AI::Provider::OpenAI::extract_sources($body)
+                    } ? (sources => Mediabot::AI::Provider::OpenAI::extract_sources($body)) : ()),
                 };
             }
 
