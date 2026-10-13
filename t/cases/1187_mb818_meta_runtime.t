@@ -128,7 +128,7 @@ is(scalar(keys %{$runtime->{jobs}}),0,'failed research releases its channel job'
 is(scalar(@sent),0,'uncited initial synthesis emits no IRC message');
 final($client,4,'Corrected sourced answer',[1]);
 $timers[0][1]->();
-like($bot->{logger}{lines}[-1],qr/^META_AI completed contributors=3 web=1 degraded=0 citation_repair=1$/,
+like($bot->{logger}{lines}[-1],qr/^META_AI completed contributors=3 web=1 degraded=0 citation_repair=1 shorturls=0$/,
     'successful correction exposes only bounded completion metadata');
 is(scalar(@{history($dir)}),1,'only corrected delivered answer is committed to memory');
 unlike(join(' ',@{$bot->{logger}{lines}}),qr/Alice|Corrected sourced answer|example\.org/,

@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB819 — clearer collective replies and compact source links
+
+- Give researched replies up to two answer lines and one compact sources line,
+  with the existing 400-byte payload limit and 1.5-second pacing on every line.
+- Present verified citations through the configured private ShortURL service;
+  reuse its shared cache, destination checks and circuit in an isolated worker.
+  Format accepted aliases in light blue (IRC colour 12) and underline, resetting
+  after each link. Unavailable shortening preserves original-source fallback.
+- Normalize accidental serialized line-break/bullet artifacts in provider prose;
+  keep incoming questions, evidence, meaningful quoted escapes and legacy paths.
+- Request concrete details, distinguish confirmed declarations from speculation,
+  and avoid vague filler. Keep strict citation validation and its one correction.
+- Revalidate generation/configuration/forget before delayed presentation and each
+  delivery; retain only complete replies. Report private-service readiness and
+  bounded shortening/completion diagnostics without keys or conversation text.
+
 ### MB818 — collective addressed AI and researched conversations
 
 - Repair live researched replies that omitted their evidence IDs: require a

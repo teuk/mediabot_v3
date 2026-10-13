@@ -592,6 +592,9 @@ sub make_bot_shortener {
         );
     }
 
+    # New researched AI presentation may select only the configured private
+    # service. Existing RSS/news callers retain their historical default.
+    return $passthrough if exists($opts{allow_legacy}) && !$opts{allow_legacy};
     my $legacy_key = _bot_config($bot, 'tinyurl.API_KEY');
     my $legacy_state = _bot_config($bot, 'tinyurl.STATE_FILE');
     return $passthrough unless length($legacy_key);

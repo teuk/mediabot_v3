@@ -16,12 +16,13 @@ use Mediabot::AI::MetaPolicy qw(settings fold clean safe_url);
 use Mediabot::AI::MetaMemory;
 use Mediabot::AI::MetaWeb;
 use Mediabot::AI::MetaChat;
+use Mediabot::AI::MetaReply qw(clean_answer shorten_sources display_urls shorturl_ready);
 
 sub new {
     my ($class,%args)=@_;
     return bless {bot=>$args{bot},clock=>$args{clock}||sub {time},
         jobs=>{},rate=>{},memories=>{},client_factory=>$args{client_factory},
-        web_start=>$args{web_start},schedule_cb=>$args{schedule_cb}},$class;
+        web_start=>$args{web_start},schedule_cb=>$args{schedule_cb},shorten_start=>$args{shorten_start}},$class;
 }
 sub _signature {
     my ($self,$cfg)=@_;
@@ -100,14 +101,53 @@ sub _emit {
     $pump->();
 }
 sub _source_line {
-    my ($sources,$lang)=@_;my $line=$lang eq 'fr'?'Sources : ':'Sources: ';my $count=0;
+    my ($sources,$lang,$urls)=@_;my $line=$lang eq 'fr'?'Sources : ':'Sources: ';my $count=0;
+    $urls={} unless ref($urls) eq 'HASH';
     for my $source (@$sources) {
         next unless ref($source) eq 'HASH';my $url=safe_url($source->{url});next unless $url;
+        if (defined($urls->{$url}) && $urls->{$url} ne $url) {
+            # IRC colour 12 is light blue; underline and reset are scoped to
+            # this verified private-service alias, never to the separator.
+            $url="\x0312\x1f".$urls->{$url}."\x0f";
+        }
         my $candidate=$line.($count?' | ':'').$url;
         next if length(encode('UTF-8',$candidate))>400;
         $line=$candidate;last if ++$count>=2;
     }
     return $count ? $line : undef;
+}
+sub _present_sources {
+    my ($self,$sources,$done)=@_;my $finished=0;
+    my $complete=sub {return if $finished++;$done->($_[0])};
+    if ($self->{shorten_start}) {
+        my $ok=eval {$self->{shorten_start}->($sources,$complete);1};
+        $complete->({}) unless $ok;return;
+    }
+    unless (shorturl_ready($self->{bot})) {$complete->({});return}
+    my $loop=Mediabot::AI::Transport::usable_loop($self->{bot});
+    unless ($loop) {$complete->({});return}
+    require Mediabot::AsyncWorker;
+    my $worker=Mediabot::AsyncWorker->start(loop=>$loop,label=>'meta source presentation',
+        timeout=>7,max_output=>16*1024,
+        child=>sub {shorten_sources(bot=>$self->{bot},sources=>$sources)},
+        on_done=>sub {
+            my ($record)=@_;
+            my $value=ref($record) eq 'HASH' && $record->{ok} && ref($record->{value}) eq 'HASH'?$record->{value}:{};
+            if (ref($record) ne 'HASH' || !$record->{ok}) {
+                eval {$self->{bot}{logger}->log(0,'[WARN] META_AI shorturl worker_failed')};
+            }
+            for my $event (@{ref($value->{events}) eq 'ARRAY'?$value->{events}:[]}) {
+                next unless ref($event) eq 'HASH';
+                my %kinds=map {$_=>1} qw(failure circuit_open recovery state_error configuration_error);
+                my %categories=map {$_=>1} qw(transport rate_limit auth client service contract destination_mismatch invalid_alias invalid_config);
+                my $kind=!ref($event->{kind}) && $kinds{$event->{kind}//''}?$event->{kind}:'unknown';
+                my $category=!ref($event->{category}) && $categories{$event->{category}//''}?$event->{category}:'unknown';
+                my $status=defined($event->{status}) && !ref($event->{status}) && $event->{status}=~/^\d{1,3}$/?$event->{status}:0;
+                eval {$self->{bot}{logger}->log(0,'META_AI shorturl event='.$kind.' category='.$category.' status='.$status)};
+            }
+            $complete->($value);
+        });
+    $complete->({}) unless $worker;
 }
 sub _ask {
     my ($self,$message,$nick,$channel,$prompt,$cfg)=@_;
@@ -182,16 +222,26 @@ sub _ask {
             $self->_notice($nick,$lang,$error =~ /web/ ? 'web':'failed');return;
         }
         my $sources=ref($result->{sources}) eq 'ARRAY'?$result->{sources}:[];
-        my $source_line=@$sources?_source_line($sources,$lang):undef;
-        if (@$sources && !defined($source_line)) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'web');return}
-        my $chunks=format_ai_reply($result->{answer},max_lines=>@$sources?1:2,wrap_bytes=>400,truncation_suffix=>' …');
-        push @$chunks,$source_line if defined $source_line;
-        $self->_emit($channel,$chunks,$cfg,$alive,sub {
-            my ($sent)=@_;
-            eval {$memory->commit_turn($ticket,$sent)} if defined $sent;
-            delete $self->{jobs}{$key};
-            eval {$bot->{logger}->log(0,'META_AI completed contributors='.scalar(@{$result->{contributors}||[]}).' web='.($result->{web_used}?1:0).' degraded='.($result->{degraded}?1:0).' citation_repair='.($result->{citation_repair}?1:0))};
-        });
+        my $deliver=sub {
+            my ($presentation)=@_;
+            unless ($alive->()) {delete $self->{jobs}{$key};return}
+            my $base=eval {$bot->{conf}->get('shorturl.PUBLIC_BASE_URL')}//'';
+            my $urls=display_urls($sources,$presentation,$base);
+            my $source_line=@$sources?_source_line($sources,$lang,$urls):undef;
+            if (@$sources && !defined($source_line)) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'web');return}
+            my $chunks=format_ai_reply(clean_answer($result->{answer}),max_lines=>2,wrap_bytes=>400,truncation_suffix=>' …');
+            unless (@$chunks) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'failed');return}
+            push @$chunks,$source_line if defined $source_line;
+            $self->_emit($channel,$chunks,$cfg,$alive,sub {
+                my ($sent)=@_;
+                eval {$memory->commit_turn($ticket,$sent)} if defined $sent;
+                delete $self->{jobs}{$key};
+                my $shortened=grep {$urls->{$_} ne $_} keys %$urls;
+                eval {$bot->{logger}->log(0,defined($sent)?'META_AI completed contributors='.scalar(@{$result->{contributors}||[]}).' web='.($result->{web_used}?1:0).' degraded='.($result->{degraded}?1:0).' citation_repair='.($result->{citation_repair}?1:0).' shorturls='.$shortened:'[WARN] META_AI delivery_aborted')};
+            });
+        };
+        if (@$sources) {$self->_present_sources($sources,$deliver)}
+        else {$deliver->({})}
     };
     my $ok=eval {$engine->submit(messages=>$ticket->{messages},prompt=>$prompt,
         language=>$lang,on_done=>$done);1};

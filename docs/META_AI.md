@@ -75,8 +75,8 @@ provider failure, empty answer or malformed synthesis remains a failed reply;
 no uncited current answer enters IRC or conversation memory.
 
 `META_AI completed` and `META_AI failed` metadata are available at the normal
-log level. Successful completions show contributor count, web use, degradation
-and whether one citation correction was used. Failure codes distinguish
+log level. Successful completions show contributor count, web use, degradation,
+whether one citation correction was used, and accepted shorturl count. Failure codes distinguish
 `web_missing_citations`, `unsupported_web_answer` and `web_synthesis_failed`.
 No prompt, answer, source content, nickname, hostmask or API key is logged.
 
@@ -152,9 +152,33 @@ and endpoint configuration if that account requires migration.
 
 ## Delivery, cost and failures
 
-Replies use at most two IRC messages of 400 UTF-8 bytes. A researched answer
-reserves the second line for up to two source URLs that fit the byte budget.
+Stable replies use at most two IRC messages. Researched replies allow up to
+two answer messages plus one compact sources message. Every payload remains
+within 400 UTF-8 bytes, including link colour and underline controls. The
+synthesis aims for at most 650 characters and concrete details rather than
+introductory filler; it must distinguish confirmed status from speculation and
+state when the evidence does not establish the requested detail. Those are model
+instructions, not a guarantee of factual correctness; verify live answer quality.
 Long answers are truncated; not every retrieved source can be displayed.
+
+The sources message uses up to two evidence URLs actually selected by synthesis.
+An isolated presentation worker reuses the configured `[shorturl]` service,
+shared cache, exact destination binding and failure circuit, with at most two
+shortening attempts and a seven-second worker deadline. These are presentation
+requests, not additional AI or search calls. Meta AI opts out of the historical
+TinyURL fallback; existing RSS/news callers retain that compatibility. Missing
+or failed private-service shortening preserves exact original-source URLs when
+they fit the normal byte budget. A source line that cannot fit remains a failure
+rather than an uncited answer. Configure the existing teuk.org service using
+`shorturl.API_URL`, `shorturl.PUBLIC_BASE_URL` and its private credential; keys
+stay in the instance configuration and never enter model requests or logs.
+
+Accepted private-service aliases use light blue (IRC colour 12), underline and
+a reset after each link. Separators and answer text retain their normal style.
+Accidental literal line-break/bullet escape artifacts are flattened in provider
+prose before output and memory retention; incoming prompts and evidence are not
+rewritten. Quoted escape notation and ambiguous code/path sequences remain intact.
+`meta_ai_check.pl` reports private-service readiness without exposing its key.
 Lines are 1.5 seconds apart by default. The sender's flood rejection cancels the
 reply instead of deferring it outside the generation checks. Generation,
 activation and memory tickets are revalidated before each line.

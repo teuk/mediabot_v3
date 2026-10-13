@@ -9,6 +9,7 @@ use Mediabot::AI qw(provider_configured);
 use Mediabot::AI::Client;
 use Mediabot::AI::Request qw(build_request);
 use Mediabot::AI::MetaPolicy qw(settings clean);
+use Mediabot::AI::MetaReply qw(shorturl_ready);
 my ($file,$live,$help)=('mediabot.conf',0,0);
 GetOptions('conf=s'=>\$file,'live'=>\$live,'help'=>\$help) or exit 2;
 if ($help) {print "Usage: perl tools/meta_ai_check.pl --conf mediabot.conf [--live]\n";
@@ -49,6 +50,8 @@ if ($configured<$cfg->{min_providers}) {print "[KO] Fewer than $cfg->{min_provid
 print "Web: $cfg->{web} | Tavily key=",(length(clean($conf->get('tavily.API_KEY'),500))?'configured':'missing'),
     " | native OpenAI fallback=",(provider_configured($conf,'openai')?'available for live acceptance':'unconfigured'),"\n";
 print "Legacy OpenAI model: ",clean($conf->get('openai.MODEL')//'gpt-4o-mini',120),"\n";
+print 'ShortURL: ',(shorturl_ready({conf=>$conf})?'configured (private service)':'unconfigured/invalid; original-source fallback'),
+    " | researched replies: up to 2 answer lines + 1 sources line\n";
 print "No general OpenAI key-expiry deadline is established; check the account and active model separately.\n";
 print "[OK] ",($live?'Provider acceptance checks':'Offline check')," completed. Nothing deployed, sent to IRC or written to memory.\n" unless $failures;
 exit($failures?1:0);
