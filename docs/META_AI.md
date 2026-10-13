@@ -6,6 +6,59 @@ a synthesis compares their drafts. Agreement is not treated as evidence.
 The feature starts **disabled**, and requires both an explicit pilot-channel
 allowlist and that channel's existing `+chatGPT` setting.
 
+## Natural questions about Mediabot (MB820)
+
+Within an enabled pilot channel, addressed FR/EN questions can read the bot's
+own knowledge without asking a provider to invent an answer:
+
+```text
+mediabot: quelle est la syntaxe de la commande addcmd ?
+mediabot: how do I use rss?
+mediabot: est-ce que le chanset +Hailo est positionné sur ce channel ?
+mediabot: is +Spark enabled on #i/o?
+mediabot: quand fais-tu des appels à Claude ?
+mediabot: quel est ton modèle chez OpenAI ?
+```
+
+| Question | Source | Visibility and access |
+| --- | --- | --- |
+| Syntax of one public built-in | Actual running `CommandRegistry` help metadata | Public, like `!help`; describing a privileged command does not grant execution rights |
+| State of one chanset | Bound read-only `CHANNEL` / `CHANSET_LIST` / `CHANNEL_SET` lookup | Caller-only NOTICE; bot login plus current Administrator+ or channel level ≥450 |
+| Collective models | Safe configured provider/model labels | Public; no keys, endpoints, private configuration or account data |
+| Training cutoff | No verified cutoff exists in configuration | Explicitly unverified; web retrieval is distinguished from model training |
+
+Authentication uses the normal observed IRC hostmask resolver with its identity
+cache bypassed, then fresh database role/auth/channel-access reads. IRC operator
+status, nickname, a claimed role in a question or an old cached user do not grant
+access. Deleted accounts, logout, unknown roles, database failures and insufficient
+rights fail closed. Cross-channel reads require the same authorization on the
+explicit target and remain private. Access is checked again before each delayed
+private line; a revoked right cancels the remaining output.
+
+Local replies have the same channel/instance per-minute limits, generation and
+activation gates, 400-byte payload cap and 1.5-second pacing as collective replies.
+They incur no provider request or paid daily budget, and do not enter the shared
+conversation memory. Protected data never enters provider prompts, shared
+history or completion metadata. A second participant cannot obtain a previous
+private answer through a follow-up. Ask each state question explicitly.
+
+This is a bounded consultation surface: one named built-in or chanset per question.
+Ambiguous/unknown requests ask for clarification. Plugin/custom-command templates,
+user/account listings, secrets, arbitrary configuration keys and command execution
+are outside it. Natural mutation requests only explain the normal `!chanset`
+command; they never change a flag. Standard commands retain their own permission
+checks. The help catalogue's level label is explanatory metadata, not an access
+decision; some commands also enforce ownership, subcommand or channel rights.
+
+Normal provider requests also receive safe runtime facts so they do not mistake
+Mediabot for a single model. Successful contributors for a turn are distinguished
+from configured ones; an outage or synthesis fallback remains possible. Future
+periods are not treated as already observed, dated sources after the current UTC
+day are excluded, and numeric reference markers are removed from answer prose
+while the validated sources line remains. These instructions and date checks
+reduce misleading answers; they do not prove that every source supports every
+sentence. Live acceptance remains necessary.
+
 ## Conversation and identity
 
 Only questions explicitly addressed to the bot and successfully delivered

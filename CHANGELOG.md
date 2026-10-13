@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB820 — local command knowledge and permission-bound channel questions
+
+- Answer natural FR/EN command syntax questions from the running built-in
+  registry, without model guesses, command execution or database mutations.
+- Inspect one chanset only after current observed-identity authentication and
+  fresh database authorization: Administrator+ or level 450 on the target
+  channel. Send protected results privately, recheck access before paced
+  delivery, and keep them out of providers and shared conversation memory.
+- Explain collective providers and exact configured model labels from safe
+  runtime facts; do not invent a training cutoff or claim Claude is never used.
+- Correct retrospective questions about future periods, reject future-dated
+  research evidence and prioritize official French cybersecurity sources.
+  Keep existing citation validation, compact links, byte limits and pacing.
+
 ### MB819 — clearer collective replies and compact source links
 
 - Give researched replies up to two answer lines and one compact sources line,

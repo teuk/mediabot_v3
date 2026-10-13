@@ -17,6 +17,7 @@ use Mediabot::AI::MetaMemory;
 use Mediabot::AI::MetaWeb;
 use Mediabot::AI::MetaChat;
 use Mediabot::AI::MetaReply qw(clean_answer shorten_sources display_urls shorturl_ready);
+use Mediabot::AI::MetaKnowledge ();
 
 sub new {
     my ($class,%args)=@_;
@@ -81,11 +82,12 @@ sub _alive {
     return eval {$memory->current($ticket)} ? 1:0;
 }
 sub _emit {
-    my ($self,$channel,$chunks,$cfg,$alive,$complete)=@_;
+    my ($self,$channel,$chunks,$cfg,$alive,$complete,$sender)=@_;
     my $index=0;my @sent;my $pump;
     $pump=sub {
         unless ($alive->()) {$complete->(undef);$pump=undef;return}
-        my $ok=eval {Mediabot::Helpers::botPrivmsg($self->{bot},$channel,$chunks->[$index],{no_defer=>1})};
+        my $ok=eval {$sender ? $sender->($chunks->[$index])
+            : Mediabot::Helpers::botPrivmsg($self->{bot},$channel,$chunks->[$index],{no_defer=>1})};
         unless ($ok) {$complete->(undef);$pump=undef;return}
         push @sent,$chunks->[$index++];
         if ($index>=@$chunks) {$complete->(join(' ',@sent));$pump=undef;return}
@@ -248,6 +250,46 @@ sub _ask {
     $done->({ok=>0,error=>'failed'}) unless $ok;
     return 1;
 }
+sub _local {
+    my ($self,$message,$nick,$channel,$prompt,$cfg,$plan)=@_;
+    my $bot=$self->{bot};my $key=fold($channel);
+    my $lang=Mediabot::Helpers::channel_lang($bot,$channel);
+    if (exists($self->{jobs}{$key}) || keys(%{$self->{jobs}})>=$cfg->{max_jobs}) {
+        $self->_notice($nick,$lang,'busy');return 1;
+    }
+    my $generation=eval {$bot->{wit_runtime_state}->capture_generation($channel)};
+    return 1 unless defined $generation;
+    my $now=$self->{clock}->();
+    for my $bucket ($key,'__global__') {
+        $self->{rate}{$bucket}=[grep {$_<=$now && $now-$_<60} @{$self->{rate}{$bucket}||[]}];
+    }
+    if (@{$self->{rate}{$key}}>=$cfg->{rate_max} || @{$self->{rate}{__global__}}>=$cfg->{global_rate_max}) {
+        $self->_notice($nick,$lang,'rate');return 1;
+    }
+    push @{$self->{rate}{$key}},$now;push @{$self->{rate}{__global__}},$now;
+    my $result=eval {Mediabot::AI::MetaKnowledge::answer(bot=>$bot,plan=>$plan,channel=>$channel,
+        message=>$message,language=>$lang,settings=>$cfg)};
+    unless (ref($result) eq 'HASH' && length($result->{text}//'')) {$self->_notice($nick,$lang,'failed');return 1}
+    my $signature=$self->_signature($cfg);
+    my $alive=sub {
+        my $current=settings($bot->{conf});
+        return 0 unless $signature eq $self->_signature($current) && $self->_enabled($current,$channel);
+        my $gen=eval {$bot->{wit_runtime_state}->capture_generation($channel)};
+        return 0 unless defined($gen) && $gen==$generation;
+        return 0 if $result->{guard} && !$result->{guard}->();
+        return 1;
+    };
+    my $chunks=format_ai_reply(clean_answer($result->{text}),max_lines=>2,wrap_bytes=>400,truncation_suffix=>' …');
+    $self->{jobs}{$key}=1;
+    my $sender=$result->{private} ? sub {Mediabot::Helpers::botNotice($bot,$nick,$_[0]);1}:undef;
+    $self->_emit($channel,$chunks,$cfg,$alive,sub {
+        delete $self->{jobs}{$key};
+        # Protected results never enter shared memory, provider payloads or logs.
+        my ($sent)=@_;
+        eval {$bot->{logger}->log(0,defined($sent)?'META_AI local completed private='.($result->{private}?1:0):'[WARN] META_AI local delivery_aborted')};
+    },$sender);
+    return 1;
+}
 sub handle {
     my ($bot,$message,$nick,$channel,@words)=@_;
     my $cfg=settings($bot->{conf});
@@ -257,6 +299,8 @@ sub handle {
     unless (length($prompt) && length($prompt)<=4000) {
         $runtime->_notice($nick,Mediabot::Helpers::channel_lang($bot,$channel),'failed');return 1;
     }
+    my $plan=$prompt eq '/forget' ? undef : Mediabot::AI::MetaKnowledge::plan($bot,$prompt,$runtime->{clock}->());
+    return $runtime->_local($message,$nick,$channel,$prompt,$cfg,$plan) if $plan;
     return $runtime->_ask($message,$nick,$channel,$prompt,$cfg);
 }
 sub note_rename {

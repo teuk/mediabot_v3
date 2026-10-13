@@ -51,7 +51,7 @@ sub settings {
     }
     my @domains = grep { /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i }
         split /[\s,]+/, $get->('PREFERRED_DOMAINS',
-        'nist.gov cern.ch nasa.gov esa.int insee.fr service-public.gouv.fr legifrance.gouv.fr who.int reuters.com bbc.com franceinfo.fr developers.openai.com platform.claude.com ai.google.dev');
+        'nist.gov cern.ch nasa.gov esa.int insee.fr service-public.gouv.fr legifrance.gouv.fr cyber.gouv.fr cybermalveillance.gouv.fr who.int reuters.com bbc.com franceinfo.fr developers.openai.com platform.claude.com ai.google.dev');
     splice @domains, 32 if @domains > 32;
     return {
         enabled => $int->('ENABLED',0,0,1), channels => \%channels,
