@@ -12,6 +12,12 @@ release. The current development line is `3.6dev`.
 
 ### MB818 — collective addressed AI and researched conversations
 
+- Repair live researched replies that omitted their evidence IDs: require a
+  scoped OpenAI Responses JSON schema, make at most one citation correction
+  on the successful synthesis provider, and keep invalid references rejected.
+- Log bounded completion/failure metadata at the normal log level without
+  prompts, answers, source extracts, identities or credentials.
+
 - Add an opt-in `mediabot: <question>` collective runtime: configured OpenAI,
   Claude and Gemini contributors start concurrently, followed by one synthesis.
 - Add private restart-persistent channel context with distinct speaker labels,

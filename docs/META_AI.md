@@ -55,6 +55,31 @@ action in this feature. URL checks reject credentials, literal private IPs,
 single-label/local hosts and non-web schemes. Page retrieval is delegated to
 Tavily; the bot does not fetch arbitrary model-generated destinations itself.
 
+## Researched reply format and missing citations
+
+A researched synthesis must return a JSON answer with a nonempty `source_ids`
+array pointing to the evidence supplied for that question. Compatible OpenAI
+Responses models use a strict `text.format` JSON schema for `meta_synthesis_web`
+and `meta_citation_repair`. The runtime independently checks IDs against the
+actual evidence; the schema alone is not a factual verification mechanism.
+The old May 2024 GPT-4o snapshot and fine-tuned model IDs retain the prompt-only
+contract. Stable replies, native web searches and legacy commands keep their
+existing formats. See the official [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
+
+If a successful, parsed synthesis omits references, the bot requests **one**
+format correction from that same provider using the original conversation,
+drafts and source extracts. It never attaches arbitrary fetched links to an
+uncited answer and does not repeat contributors or Tavily research. Invented
+IDs and malformed citation fields are rejected immediately. A second omission,
+provider failure, empty answer or malformed synthesis remains a failed reply;
+no uncited current answer enters IRC or conversation memory.
+
+`META_AI completed` and `META_AI failed` metadata are available at the normal
+log level. Successful completions show contributor count, web use, degradation
+and whether one citation correction was used. Failure codes distinguish
+`web_missing_citations`, `unsupported_web_answer` and `web_synthesis_failed`.
+No prompt, answer, source content, nickname, hostmask or API key is logged.
+
 ## Configuration reference
 
 Add one `[meta_ai]` section to the **development** configuration. Existing API
@@ -136,7 +161,7 @@ activation and memory tickets are revalidated before each line.
 
 Three contributors plus a normal synthesis mean four paid AI requests per
 question, with search/extraction or a native web call for researched questions.
-Fallbacks can add attempts. Question limits bound request volume, not a currency
+Fallbacks can add attempts; a missing-citation correction can add one synthesis call. Question limits bound request volume, not a currency
 budget; set spending limits in provider accounts too. One failed contributor
 can leave a useful answer; the bounded contributor count and degraded flag are
 logged without prompts, responses, hostmasks or keys. If all contributors fail,

@@ -175,6 +175,10 @@ sub _ask {
         unless ($alive->()) {delete $self->{jobs}{$key};return}
         unless (ref($result) eq 'HASH' && $result->{ok}) {
             delete $self->{jobs}{$key};my $error=ref($result) eq 'HASH'?$result->{error}//'failed':'failed';
+            my %known=map {$_=>1} qw(failed all_providers_failed web_disabled_for_current_question
+                web_unavailable synthesis_failed web_synthesis_failed web_missing_citations unsupported_web_answer);
+            $error='failed' unless !ref($error) && $known{$error};
+            eval {$bot->{logger}->log(0,'[WARN] META_AI failed code='.$error)};
             $self->_notice($nick,$lang,$error =~ /web/ ? 'web':'failed');return;
         }
         my $sources=ref($result->{sources}) eq 'ARRAY'?$result->{sources}:[];
@@ -186,7 +190,7 @@ sub _ask {
             my ($sent)=@_;
             eval {$memory->commit_turn($ticket,$sent)} if defined $sent;
             delete $self->{jobs}{$key};
-            eval {$bot->{logger}->log(3,'META_AI completed contributors='.scalar(@{$result->{contributors}||[]}).' web='.($result->{web_used}?1:0).' degraded='.($result->{degraded}?1:0))};
+            eval {$bot->{logger}->log(0,'META_AI completed contributors='.scalar(@{$result->{contributors}||[]}).' web='.($result->{web_used}?1:0).' degraded='.($result->{degraded}?1:0).' citation_repair='.($result->{citation_repair}?1:0))};
         });
     };
     my $ok=eval {$engine->submit(messages=>$ticket->{messages},prompt=>$prompt,

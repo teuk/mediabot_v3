@@ -56,6 +56,23 @@ sub build_payload {
         elsif (exists $request->{temperature}) {
             $payload{temperature} = 0 + $request->{temperature};
         }
+        # Web synthesis must return its evidence IDs, not merely valid JSON.
+        # Scope this contract to MB818 research; legacy and native web calls
+        # retain their existing payloads. Runtime still validates each ID
+        # against the actual evidence supplied for this particular question.
+        if (($request->{purpose}//'') =~ /\Ameta_(?:synthesis_web|citation_repair)\z/
+            && $model =~ /\Agpt-(?:4o(?:-|\z)|[56])/
+            && $model ne 'gpt-4o-2024-05-13') {
+            $payload{text}={format=>{
+                type=>'json_schema',name=>'mediabot_web_answer',strict=>JSON::PP::true,
+                schema=>{type=>'object',additionalProperties=>JSON::PP::false,
+                    properties=>{
+                        answer=>{type=>'string'},
+                        source_ids=>{type=>'array',minItems=>1,maxItems=>3,
+                            items=>{type=>'integer',enum=>[1,2,3]}},
+                    },required=>['answer','source_ids']},
+            }};
+        }
         if ($options->{web_search}) {
             my $tool = { type => 'web_search', search_context_size => 'low' };
             $tool->{filters} = { allowed_domains => $options->{web_domains} }

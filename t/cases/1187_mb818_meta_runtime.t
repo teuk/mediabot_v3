@@ -115,4 +115,22 @@ is(scalar(@{$client->{calls}}),4,'rate refusal does not call providers');
 open my $source,'<','mediabot.pl' or die $!;local $/;my $main=<$source>;close $source;
 like($main,qr/MetaRuntime::handle\(\$mediabot,\$message,\$who,\$where/,'actual addressed IRC route calls the collective runtime');
 like($main,qr/MetaRuntime::note_rename/,'actual IRC nick event preserves observed identity changes');
+
+($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','latest update?');drafts($client,0,1);
+$client->{calls}[3]{done}->({ok=>0,error=>'http_error',status=>503});
+like($bot->{logger}{lines}[-1],qr/^\[WARN\] META_AI failed code=web_synthesis_failed$/,
+    'failed research synthesis leaves a bounded diagnostic code');
+like($notices[-1][1],qr/vérifier/,'research synthesis failure has a research-specific notice');
+is(scalar(@{history($dir)}),0,'failed research is not saved to conversation history');
+is(scalar(keys %{$runtime->{jobs}}),0,'failed research releases its channel job');
+
+($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','latest update?');drafts($client,0,1);final($client,3,'Uncited draft',[]);
+is(scalar(@sent),0,'uncited initial synthesis emits no IRC message');
+final($client,4,'Corrected sourced answer',[1]);
+$timers[0][1]->();
+like($bot->{logger}{lines}[-1],qr/^META_AI completed contributors=3 web=1 degraded=0 citation_repair=1$/,
+    'successful correction exposes only bounded completion metadata');
+is(scalar(@{history($dir)}),1,'only corrected delivered answer is committed to memory');
+unlike(join(' ',@{$bot->{logger}{lines}}),qr/Alice|Corrected sourced answer|example\.org/,
+    'diagnostic metadata excludes identity, answer and source URLs');
 done_testing;
