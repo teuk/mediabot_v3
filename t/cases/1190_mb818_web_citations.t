@@ -39,7 +39,7 @@ is($client->{calls}[3]{request}{provider},'openai','correction stays on successf
 is($$searches,1,'correction does not repeat search');
 is_deeply($client->{calls}[3]{request}{messages},$client->{calls}[2]{request}{messages},'correction preserves conversation context');
 like($client->{calls}[3]{request}{system},qr/selected from \[1, 2\]/,'correction states the exact supplied ID set');
-$client->{calls}[3]{done}->({ok=>1,provider=>'openai',answer=>encode_json({answer=>'A supported analysis.',source_ids=>[2]})});
+$client->{calls}[3]{done}->({ok=>1,provider=>'openai',answer=>encode_json({answer=>'A supported analysis.',source_ids=>[2],basis=>'supported',support=>[{source_id=>2,quote=>'Independent context about institutions.'}]})});
 is(scalar(@$results),1,'corrected answer completes only once');
 ok($results->[0]{ok} && $results->[0]{web_used},'corrected answer is researched');
 is_deeply($results->[0]{sources},[$sources->[1]],'only evidence actually selected by synthesis is linked');
@@ -86,7 +86,7 @@ for my $model (qw(gpt-4o gpt-4o-mini gpt-6.1-sol)) {
         ok($format->{strict},'schema adherence is explicit');
         is($format->{schema}{properties}{source_ids}{minItems},1,'researched schema prohibits an empty source array');
         is_deeply($format->{schema}{properties}{source_ids}{items}{enum},[1,2,3],'schema has only bounded evidence IDs');
-        is_deeply($format->{schema}{required},[qw(answer source_ids)],'answer and references are required');
+        is_deeply($format->{schema}{required},[qw(answer source_ids basis support)],'answer, references, basis and quoted evidence are required');
         ok(!$format->{schema}{additionalProperties},'unexpected schema fields are prohibited');
         ok(!$p->{store},'structured output retains remote-storage opt-out');
     }

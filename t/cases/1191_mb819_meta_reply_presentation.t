@@ -30,7 +30,9 @@ unlike(clean_answer('Un fait.\\\\n- Un autre fait.\\r\\n- Dernier fait.'),qr/\\[
 is(clean_answer('Chemin C:\\new et motif "\\n".'),'Chemin C:\\new et motif "\\n".','ambiguous code/path escapes remain meaningful');
 unlike(clean_answer("clair\x01ACTION\x00\x03".'12' ."\\n fin"),qr/[\x00-\x1f]/,'normalization strips externally supplied IRC controls');
 my $dir=tempdir(CLEANUP=>1);my $long1='https://one.example.org/'.('first-article-'x30);my $long2='https://two.example.org/'.('second-article-'x30);
-my $sources=[{id=>1,url=>$long1},{id=>2,url=>$long2},{id=>3,url=>'https://third.example.org/article'}];
+my $sources=[{id=>1,url=>$long1,text=>'A first verified statement with concrete detail.'},
+ {id=>2,url=>$long2,text=>'A second verified statement with independent detail.'},
+ {id=>3,url=>'https://third.example.org/article',text=>'A third verified statement with concrete detail.'}];
 my $short_key='a' x 64;
 my $conf=bless {'shorturl.API_URL'=>'https://teuk.org/shorturl/api/v1/links','shorturl.PUBLIC_BASE_URL'=>'https://teuk.org/shorturl/',
  'shorturl.API_KEY'=>$short_key,'shorturl.STATE_FILE'=>"$dir/short-cache.json"},'MB819Conf';
@@ -93,7 +95,9 @@ sub ask {Mediabot::AI::MetaRuntime::handle($_[0],['Alice','ident','public.exampl
 sub synthesize {
  my ($c,$text)=@_;
  for my $i (0..1) {$c->{calls}[$i]{done}->({ok=>1,answer=>encode_json({answer=>'Draft',needs_web=>1,query=>'official positions'})})}
- $c->{calls}[2]{done}->({ok=>1,provider=>'openai',answer=>encode_json({answer=>$text,source_ids=>[1,2]})});
+ $c->{calls}[2]{done}->({ok=>1,provider=>'openai',answer=>encode_json({answer=>$text,source_ids=>[1,2],basis=>'supported',support=>[
+  {source_id=>1,quote=>'A first verified statement with concrete detail.'},
+  {source_id=>2,quote=>'A second verified statement with independent detail.'}]})});
 }
 sub history_count {my ($tmp)=@_;open my $f,'<:raw',"$tmp/memory.json" or die $!;local $/;my $s=decode_json(<$f>);return scalar map {@{$_->{turns}}} values %{$s->{rooms}};}
 my ($b,$client,$runtime,$tmp)=fixture();ask($b);synthesize($client,'Un fait concret et sa réserve. 'x23);

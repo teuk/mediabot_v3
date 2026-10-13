@@ -181,7 +181,7 @@ for my $i (0..1) {$client->{calls}[$i]{done}->({ok=>1,answer=>encode_json({answe
 like($client->{calls}[2]{request}{system},qr/openai \(gpt-4o\).*anthropic \(claude-sonnet-5-5\)/s,'normal synthesis receives safe truthful runtime facts');
 unlike($client->{calls}[2]{request}{system},qr/Future false evidence/,'future dated source cannot support current synthesis');
 like($client->{calls}[2]{request}{system},qr/Future periods have not happened/,'synthesis has explicit date premise guard');
-$client->{calls}[2]{done}->({ok=>1,answer=>encode_json({answer=>'Current fact. [1]',source_ids=>[1]})});
+$client->{calls}[2]{done}->({ok=>1,answer=>encode_json({answer=>'Current fact. [1]',source_ids=>[1],basis=>'supported',support=>[{source_id=>1,quote=>'Current evidence.'}]})});
 is($results[0]{answer},'Current fact.','numeric reference noise is removed only after ID validation path');
 is(scalar(@{$results[0]{sources}}),1,'validated citation is preserved despite clean answer prose');
 done_testing;

@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB821 — concrete researched answers with checked source passages
+
+- Choose contextual research queries in configured provider order rather than
+  callback arrival order; keep a second contributor's query for one bounded
+  broader search. Prefer configured subject-specific official sites.
+- Filter publication dates for recent/today/week requests and explicit
+  publication years; rank relevance/date/domain, preserve unknown dates, and
+  select useful page passages beyond navigation-heavy prefixes.
+- Keep unverified factual drafts out of researched synthesis. Require one or
+  two displayed evidence IDs, an explicit evidence status and exact supporting
+  passages checked against the selected extracts. Missing fields get at most
+  one correction; invented IDs/passages fail. Insufficient evidence yields an
+  honest limitation rather than a confident draft with a cosmetic disclaimer.
+- Request dated named examples, mechanisms and consequences; distinguish
+  frequency from impact and publication dates from incident dates.
+- Rebalance very short trailing IRC lines without dropping words or changing
+  pacing, compact source links or the validated local command/access surface.
+
 ### MB820 — local command knowledge and permission-bound channel questions
 
 - Answer natural FR/EN command syntax questions from the running built-in

@@ -60,7 +60,7 @@ for my $index (0..2) {$client->{calls}[$index]{done}->({ok=>1,answer=>encode_jso
 like($web_queries[0],qr/ExampleSoft/,'model-generated standalone query resolves a follow-up subject');
 is_deeply($client->{calls}[0]{request}{messages},\@history,'contributors share multi-speaker history');
 like($client->{calls}[3]{request}{system},qr/Official release/,'actual extracted source evidence enters synthesis');
-$client->{calls}[3]{done}->({ok=>1,answer=>encode_json({answer=>'The latest stable release is 9.4.',source_ids=>[1]})});
+$client->{calls}[3]{done}->({ok=>1,answer=>encode_json({answer=>'The latest stable release is 9.4.',source_ids=>[1],basis=>'supported',support=>[{source_id=>1,quote=>'The latest stable release is version 9.4, published today.'}]})});
 ok($results[0]{web_used},'answer carries actual research status');
 is_deeply($results[0]{sources},$sources,'output links are tied to supplied source IDs');
 
@@ -92,8 +92,8 @@ is(scalar(@{$client->{calls}}),3,'total outage causes no retry storm');
 my (@http_calls,@tls);my $responses=[
     {success=>1,status=>200,content=>encode_json({results=>[
         {url=>'https://127.0.0.1/private',title=>'unsafe',content=>'x'x80},
-        {url=>'https://www.example.org/releases',title=>'Official',content=>'A searchable excerpt with enough concrete information for grounding.',published_date=>'2026-10-13'},
-        {url=>'https://other.example.org/releases',title=>'Another source',content=>'A second searchable excerpt with independent source information.'} ]})},
+        {url=>'https://www.example.org/releases',title=>'ExampleSoft release',content=>'A searchable excerpt with enough concrete information for grounding.',published_date=>'2026-10-13'},
+        {url=>'https://other.example.org/releases',title=>'ExampleSoft update',content=>'A second searchable excerpt with independent source information.'} ]})},
     {success=>1,status=>200,content=>encode_json({results=>[
         {url=>'https://www.example.org/releases',raw_content=>'A read page with sufficient detail. '.('Concrete evidence. 'x12)},
         {url=>'https://rogue.example.org/injected',raw_content=>'Unrequested content. 'x50} ]})},

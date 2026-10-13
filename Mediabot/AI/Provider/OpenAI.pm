@@ -68,9 +68,14 @@ sub build_payload {
                 schema=>{type=>'object',additionalProperties=>JSON::PP::false,
                     properties=>{
                         answer=>{type=>'string'},
-                        source_ids=>{type=>'array',minItems=>1,maxItems=>3,
+                        source_ids=>{type=>'array',minItems=>1,maxItems=>2,
                             items=>{type=>'integer',enum=>[1,2,3]}},
-                    },required=>['answer','source_ids']},
+                        basis=>{type=>'string',enum=>[qw(supported partial insufficient)]},
+                        support=>{type=>'array',minItems=>1,maxItems=>2,
+                            items=>{type=>'object',additionalProperties=>JSON::PP::false,
+                                properties=>{source_id=>{type=>'integer',enum=>[1,2,3]},quote=>{type=>'string'}},
+                                required=>['source_id','quote']}},
+                    },required=>['answer','source_ids','basis','support']},
             }};
         }
         if ($options->{web_search}) {

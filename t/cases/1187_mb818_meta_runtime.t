@@ -45,7 +45,8 @@ sub drafts {my ($client,$start,$web)=@_;for my $i ($start..$start+2) {
     $client->{calls}[$i]{done}->({ok=>1,answer=>encode_json({answer=>'Draft',needs_web=>$web?1:0,query=>'official latest update'})});
 }}
 sub final {my ($client,$index,$answer,$ids)=@_;$client->{calls}[$index]{done}->({ok=>1,
-    answer=>encode_json({answer=>$answer,source_ids=>$ids//[]})});}
+    answer=>encode_json({answer=>$answer,source_ids=>$ids//[],basis=>'supported',
+        support=>[map {{source_id=>$_,quote=>'A verified page excerpt.'}} @{$ids//[]}]})});}
 sub history {my ($dir)=@_;return [] unless -e "$dir/state.json";
     open my $fh,'<:raw',"$dir/state.json" or die $!;local $/;my $state=decode_json(<$fh>);close $fh;
     return [map {@{$_->{turns}}} values %{$state->{rooms}}];}
@@ -128,7 +129,7 @@ is(scalar(keys %{$runtime->{jobs}}),0,'failed research releases its channel job'
 is(scalar(@sent),0,'uncited initial synthesis emits no IRC message');
 final($client,4,'Corrected sourced answer',[1]);
 $timers[0][1]->();
-like($bot->{logger}{lines}[-1],qr/^META_AI completed contributors=3 web=1 degraded=0 citation_repair=1 shorturls=0$/,
+like($bot->{logger}{lines}[-1],qr/^META_AI completed contributors=3 web=1 degraded=0 citation_repair=1 anchors=1 shorturls=0$/,
     'successful correction exposes only bounded completion metadata');
 is(scalar(@{history($dir)}),1,'only corrected delivered answer is committed to memory');
 unlike(join(' ',@{$bot->{logger}{lines}}),qr/Alice|Corrected sourced answer|example\.org/,

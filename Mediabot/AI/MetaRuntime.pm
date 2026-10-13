@@ -16,7 +16,7 @@ use Mediabot::AI::MetaPolicy qw(settings fold clean safe_url);
 use Mediabot::AI::MetaMemory;
 use Mediabot::AI::MetaWeb;
 use Mediabot::AI::MetaChat;
-use Mediabot::AI::MetaReply qw(clean_answer shorten_sources display_urls shorturl_ready);
+use Mediabot::AI::MetaReply qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready);
 use Mediabot::AI::MetaKnowledge ();
 
 sub new {
@@ -197,12 +197,12 @@ sub _ask {
             config_overrides=>\%overrides,provider_order=>\@order)};
     unless ($client) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'failed');return 1}
     my $web=Mediabot::AI::MetaWeb->new(api_key=>eval {$bot->{conf}->get('tavily.API_KEY')} // '',
-        domains=>$cfg->{domains});
+        domains=>$cfg->{domains},clock=>$self->{clock});
     my $web_start=$self->{web_start} || sub {
-        my ($query,$done)=@_;require Mediabot::AsyncWorker;
+        my ($query,$done,$plan)=@_;require Mediabot::AsyncWorker;
         my $worker=Mediabot::AsyncWorker->start(loop=>Mediabot::AI::Transport::usable_loop($bot),
             label=>'meta research',timeout=>27,max_output=>64*1024,
-            child=>sub {$web->search($query)},on_done=>sub {
+            child=>sub {$web->search($query,plan=>$plan)},on_done=>sub {
                 my ($result)=@_;$done->(ref($result) eq 'HASH' && $result->{ok} ? $result->{value}:{ok=>0});
             });
         $done->({ok=>0}) unless $worker;
@@ -218,7 +218,8 @@ sub _ask {
         unless (ref($result) eq 'HASH' && $result->{ok}) {
             delete $self->{jobs}{$key};my $error=ref($result) eq 'HASH'?$result->{error}//'failed':'failed';
             my %known=map {$_=>1} qw(failed all_providers_failed web_disabled_for_current_question
-                web_unavailable synthesis_failed web_synthesis_failed web_missing_citations unsupported_web_answer);
+                web_unavailable synthesis_failed web_synthesis_failed web_missing_citations unsupported_web_answer
+                web_missing_evidence web_evidence_mismatch);
             $error='failed' unless !ref($error) && $known{$error};
             eval {$bot->{logger}->log(0,'[WARN] META_AI failed code='.$error)};
             $self->_notice($nick,$lang,$error =~ /web/ ? 'web':'failed');return;
@@ -231,7 +232,7 @@ sub _ask {
             my $urls=display_urls($sources,$presentation,$base);
             my $source_line=@$sources?_source_line($sources,$lang,$urls):undef;
             if (@$sources && !defined($source_line)) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'web');return}
-            my $chunks=format_ai_reply(clean_answer($result->{answer}),max_lines=>2,wrap_bytes=>400,truncation_suffix=>' …');
+            my $chunks=format_meta_reply($result->{answer});
             unless (@$chunks) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'failed');return}
             push @$chunks,$source_line if defined $source_line;
             $self->_emit($channel,$chunks,$cfg,$alive,sub {
@@ -239,7 +240,9 @@ sub _ask {
                 eval {$memory->commit_turn($ticket,$sent)} if defined $sent;
                 delete $self->{jobs}{$key};
                 my $shortened=grep {$urls->{$_} ne $_} keys %$urls;
-                eval {$bot->{logger}->log(0,defined($sent)?'META_AI completed contributors='.scalar(@{$result->{contributors}||[]}).' web='.($result->{web_used}?1:0).' degraded='.($result->{degraded}?1:0).' citation_repair='.($result->{citation_repair}?1:0).' shorturls='.$shortened:'[WARN] META_AI delivery_aborted')};
+                my $anchors=defined($result->{evidence_anchors}) && !ref($result->{evidence_anchors})
+                    && $result->{evidence_anchors}=~/^[0-2]$/?$result->{evidence_anchors}:0;
+                eval {$bot->{logger}->log(0,defined($sent)?'META_AI completed contributors='.scalar(@{$result->{contributors}||[]}).' web='.($result->{web_used}?1:0).' degraded='.($result->{degraded}?1:0).' citation_repair='.($result->{citation_repair}?1:0).' anchors='.$anchors.' shorturls='.$shortened:'[WARN] META_AI delivery_aborted')};
             });
         };
         if (@$sources) {$self->_present_sources($sources,$deliver)}

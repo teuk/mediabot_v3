@@ -92,10 +92,28 @@ resolving follow-up references from the history. Stable questions can avoid a
 web call. Detection is heuristic; verify it during live acceptance.
 
 Tavily Search first prefers `PREFERRED_DOMAINS`, then can broaden the search.
-At most two searches and one extraction batch are made, with up to three public
-HTTP(S) sources. Page extracts and search snippets remain distinct evidence.
-Publication dates are retained when supplied, never fabricated from retrieval
-time. Source excerpts are bounded and treated as untrusted data.
+MB821 chooses contributor queries in configured order, independent of callback
+arrival order. Short follow-up fallback queries retain the previous user subject,
+excluding speaker labels and previous assistant claims. Subject-specific official
+sites (e.g. ANSSI) are preferred only if already in the operator's domain list.
+If restricted results are stale or irrelevant, one broader attempt uses the next
+contributor query. At most two searches and one extraction batch are made, with
+up to three public HTTP(S) sources; this is not an open-ended research loop.
+
+Recent examples use a rolling 30-day publication window; today and this week
+use the current UTC day and seven-day window. An explicitly requested publication
+year gets that calendar interval. An incident year or "latest stable version"
+does not imply that publication window. The API publication filter and local
+date checks exclude stale/future dated results; ISO and documented RFC date
+formats are normalized. Unknown dates remain unknown, not retrieval timestamps.
+Ranking uses bounded query overlap, configured domains and publication dates;
+this heuristic is not proof that a result is relevant or editorially independent.
+
+Extraction includes the query and bounded page chunks; local passage selection
+keeps matching sentences/paragraphs beyond navigation-heavy prefixes, within
+40,000 inspected and 5,000 retained characters. Page extracts and search snippets
+remain distinct untrusted evidence; publication, incident and retrieval dates
+are not interchangeable. Missing dates and gaps must be stated in the synthesis.
 
 The synthesis must select existing source IDs; invented IDs fail. URLs come
 from retrieved source metadata, never model-generated text. If shared search
@@ -110,27 +128,47 @@ Tavily; the bot does not fetch arbitrary model-generated destinations itself.
 
 ## Researched reply format and missing citations
 
-A researched synthesis must return a JSON answer with a nonempty `source_ids`
-array pointing to the evidence supplied for that question. Compatible OpenAI
+A researched synthesis must return a JSON answer with one or two `source_ids`
+pointing to the evidence supplied for that question, a `basis` value
+(`supported`, `partial` or `insufficient`) and one `support` entry per selected
+ID containing that ID and a verbatim 12–240-character passage. Compatible OpenAI
 Responses models use a strict `text.format` JSON schema for `meta_synthesis_web`
 and `meta_citation_repair`. The runtime independently checks IDs against the
-actual evidence; the schema alone is not a factual verification mechanism.
+actual evidence and each passage's presence in the selected text, allowing only
+whitespace/Unicode/typographic quote normalization. A quote that exists is an
+evidence anchor, **not proof of logical entailment or factual correctness**.
+Models still judge relevance, completeness, interpretation and evidence status.
+Unverified contributor answers are excluded from researched synthesis; their
+research directions and the conversation remain context rather than evidence.
 The old May 2024 GPT-4o snapshot and fine-tuned model IDs retain the prompt-only
 contract. Stable replies, native web searches and legacy commands keep their
 existing formats. See the official [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
 
-If a successful, parsed synthesis omits references, the bot requests **one**
+If a successful, parsed synthesis omits references/evidence fields or selects
+more citations than the two-link presentation can show, the bot requests **one**
 format correction from that same provider using the original conversation,
 drafts and source extracts. It never attaches arbitrary fetched links to an
 uncited answer and does not repeat contributors or Tavily research. Invented
-IDs and malformed citation fields are rejected immediately. A second omission,
+IDs, invented supporting text and malformed evidence fields are rejected
+immediately. A second omission,
 provider failure, empty answer or malformed synthesis remains a failed reply;
-no uncited current answer enters IRC or conversation memory.
+no uncited current answer enters IRC or conversation memory. `partial` puts a
+qualification at the start; `insufficient` replaces the draft with a localized
+statement that the requested detail is not established, while retaining the
+checked source links. No new critique call is added to normal valid responses.
+
+Native OpenAI web fallback still uses its completed-tool citation metadata;
+it does not provide extract anchors to this local validator. It is instructed
+to give concrete dated facts and limitations, and cannot exceed two sources.
+Native citations and locally matched extract anchors are different assurance
+levels. Live acceptance must cover both provider compatibility and answer quality.
 
 `META_AI completed` and `META_AI failed` metadata are available at the normal
 log level. Successful completions show contributor count, web use, degradation,
-whether one citation correction was used, and accepted shorturl count. Failure codes distinguish
-`web_missing_citations`, `unsupported_web_answer` and `web_synthesis_failed`.
+whether one citation correction was used, matched anchor count (`anchors=0` for
+stable/native replies) and accepted shorturl count. Failure codes distinguish
+`web_missing_citations`, `unsupported_web_answer`, `web_missing_evidence`,
+`web_evidence_mismatch` and `web_synthesis_failed`.
 No prompt, answer, source content, nickname, hostmask or API key is logged.
 
 ## Configuration reference
@@ -212,7 +250,10 @@ synthesis aims for at most 650 characters and concrete details rather than
 introductory filler; it must distinguish confirmed status from speculation and
 state when the evidence does not establish the requested detail. Those are model
 instructions, not a guarantee of factual correctness; verify live answer quality.
-Long answers are truncated; not every retrieved source can be displayed.
+Long answers are truncated; shared synthesis selects at most two supporting
+sources so no selected third citation is silently hidden. Plain two-line answers
+with a very short tail are reflowed at a sentence/word boundary without content
+loss; styled replies retain the normal formatter.
 
 The sources message uses up to two evidence URLs actually selected by synthesis.
 An isolated presentation worker reuses the configured `[shorturl]` service,
