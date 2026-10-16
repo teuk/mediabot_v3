@@ -56,13 +56,13 @@ sub history {my ($dir)=@_;return [] unless -e "$dir/state.json";
     return [map {@{$_->{turns}}} values %{$state->{rooms}}];}
 my ($bot,$client,$runtime,$dir)=fixture();
 $bot->{conf}{'meta_ai.ENABLED'}=0;
-ok(!ask($bot,'Alice','#test','a question'),'disabled mode preserves legacy route');
+ok(!ask($bot,'Alice','#test','traduis ce texte en anglais'),'disabled mode preserves legacy route');
 is(scalar(@{$client->{calls}}),0,'disabled mode makes no API call');
 $bot->{conf}{'meta_ai.ENABLED'}=1;$chanset=0;
-ok(!ask($bot,'Alice','#test','a question'),'existing channel chatGPT gate is respected');
+ok(!ask($bot,'Alice','#test','traduis ce texte en anglais'),'existing channel chatGPT gate is respected');
 $chanset=1;
-ok(!ask($bot,'Alice','#elsewhere','a question'),'allowlist blocks unlisted channels');
-ok(ask($bot,'Alice','#TEST','a question'),'case-folded allowed channel starts collective mode');
+ok(!ask($bot,'Alice','#elsewhere','traduis ce texte en anglais'),'allowlist blocks unlisted channels');
+ok(ask($bot,'Alice','#TEST','traduis ce texte en anglais'),'case-folded allowed channel starts collective mode');
 is(scalar(@{$client->{calls}}),3,'runtime launches three independent contributor requests');
 ask($bot,'Bob','#test','a follow-up');
 like($notices[-1][1],qr/déjà en cours/,'another participant cannot start an overlapping job in the same channel');
@@ -81,32 +81,32 @@ is(scalar(keys %{$runtime->{jobs}}),0,'delivery releases channel job');
 ask($bot,'Bob','#test','and for me?');
 like($client->{calls}[4]{request}{messages}[0]{content},qr/^speaker1 \(Alice\):/,'prior participant is labelled in shared context');
 like($client->{calls}[4]{request}{messages}[-1]{content},qr/^speaker2 \(Bob\):/,'different participant has a distinct stable label');
-$bot->{wit_runtime_state}{generation}=2;drafts($client,4,0);final($client,7,'Late answer');
+$bot->{wit_runtime_state}{generation}=2;drafts($client,4,0);final($client,7,'Late answer',[1]);
 is(scalar(@sent),2,'response from an old connection/channel generation is discarded');
 is(scalar(keys %{$runtime->{jobs}}),0,'discarded response releases its job');
 
-($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','a question');drafts($client,0,0);final($client,3,'Long response. 'x70);
+($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','traduis ce texte en anglais');drafts($client,0,0);final($client,3,'Long response. 'x70);
 $bot->{conf}{'meta_ai.ENABLED'}=0;$timers[0][1]->();
 is(scalar(@sent),1,'disabling the mode cancels the pending second line');
 is(scalar(@{history($dir)}),0,'partially delivered answer is not saved as a complete exchange');
 
-($bot,$client,$runtime,$dir)=fixture();$accepted=0;ask($bot,'Alice','#test','a question');drafts($client,0,0);final($client,3,'Rejected answer');
+($bot,$client,$runtime,$dir)=fixture();$accepted=0;ask($bot,'Alice','#test','traduis ce texte en anglais');drafts($client,0,0);final($client,3,'Rejected answer');
 is(scalar(@sent),0,'flood refusal sends no line');
 is(scalar(@{history($dir)}),0,'flood-refused answer never enters memory');
 is(scalar(keys %{$runtime->{jobs}}),0,'flood refusal releases the job');
 
 ($bot,$client,$runtime,$dir)=fixture();$runtime->{client_factory}=sub {die 'private exception'};
-ask($bot,'Alice','#test','a question');
+ask($bot,'Alice','#test','traduis ce texte en anglais');
 is(scalar(keys %{$runtime->{jobs}}),0,'client construction failure cannot wedge the channel');
 unlike($notices[-1][1],qr/private exception/,'private setup error is not exposed to IRC');
 
-($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','Alice detail');drafts($client,0,0);final($client,3,'Alice reply');
-ask($bot,'Bob','#test','Bob detail');drafts($client,4,0);final($client,7,'Bob reply');
+($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','mon mot repère : Alice');drafts($client,0,0);final($client,3,'Alice reply');
+ask($bot,'Bob','#test','mon mot repère : Bob');drafts($client,4,0);final($client,7,'Bob reply');
 Mediabot::AI::MetaRuntime::note_rename($bot,'Alice','Alicia','ident','public.example.org');
 $bot->{conf}{'meta_ai.ENABLED'}=0;
 ok(ask($bot,'Alicia','#test','/forget'),'participant can erase their history even after mode is disabled');
 is(scalar(@{history($dir)}),1,'forget removes only the renamed participant’s exchanges');
-is(history($dir)->[0]{prompt},'Bob detail','other participant history is preserved');
+is(history($dir)->[0]{prompt},'mon mot repère : Bob','other participant history is preserved');
 is(scalar(@{$client->{calls}}),8,'forget makes no provider call');
 
 ($bot,$client,$runtime,$dir)=fixture();$lang='en';ask($bot,'Alice','#test','latest update?');drafts($client,0,1);final($client,3,'Verified current update.',[1]);
@@ -114,7 +114,7 @@ is(scalar(@sent),1,'web answer precedes its sources');
 $timers[0][1]->();like($sent[1][1],qr/^Sources: https:\/\/www.example.org\/news/,'only verified supplied URL appears in source line');
 ok(!grep($_->[1]=~/[\x00\r\n\x01]/,@sent),'answers contain no CTCP framing or embedded IRC line breaks');
 
-($bot,$client,$runtime,$dir)=fixture();$bot->{conf}{'meta_ai.RATE_MAX'}=1;ask($bot,'Alice','#test','first');drafts($client,0,0);final($client,3,'Done');
+($bot,$client,$runtime,$dir)=fixture();$bot->{conf}{'meta_ai.RATE_MAX'}=1;ask($bot,'Alice','#test','calcule 2+2');drafts($client,0,0);final($client,3,'Done');
 ask($bot,'Bob','#test','second');like($notices[-1][1],qr/limite/,'channel rate budget applies across participants');
 is(scalar(@{$client->{calls}}),4,'rate refusal does not call providers');
 open my $source,'<','mediabot.pl' or die $!;local $/;my $main=<$source>;close $source;

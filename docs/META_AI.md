@@ -86,21 +86,31 @@ apply. Keep pilot-channel participants informed about this shared context.
 
 ## Research
 
-### General lookups, beyond current news (MB822)
+### Open-domain requests, beyond news and topic lists (MB826)
 
-Research is not restricted to events after a model's training cutoff. In `auto`
-mode, named CVEs, software selection and free/licence questions, explicit web
-requests and technical documentation/configuration questions trigger external
-verification even if every contributor draft says `needs_web=false`.
-Stable basic facts and creative questions do not force a search. The rules are
-bounded FR/EN heuristics; contributors may request research for other uncertain
-facts. This is Tavily general web search, not a Google Search browser session.
+In `WEB_MODE=auto`, addressed informational requests use general web research
+by default. A request need not start with a question word or contain a topic
+such as CVE/software, the word "recent", or an explicit search instruction.
+Statements and fragments such as "Paris Lyon en train", "je voudrais comprendre
+les marées" and "the author of this book" are eligible even if all contributors
+return `needs_web=false`. Profiles such as CVE/software/documentation tune the
+research; they do not define which subjects the bot can handle.
+
+Acknowledgements, personal keyword/name recall, creative or user-text tasks,
+and simple calculations/conversions do not force public research. Contributors
+can still request verification when external facts are needed. This distinction
+is heuristic: it does not promise perfect intent understanding or an answer to
+every question. Search uses Tavily general search with native OpenAI fallback,
+not a Google browser session. No routing provider call or editorial retry is
+added; existing request budgets and IRC pacing remain in effect.
 
 ```text
+mediabot: je voudrais comprendre pourquoi la mer monte et descend
+mediabot: Paris Lyon en train
+mediabot: la différence entre une liseuse et une tablette
+mediabot: je cherche les règles officielles du go
+mediabot: les horaires du musée aujourd’hui
 mediabot: quel est le détail de CVE-2024-3094 ?
-mediabot: et quelles versions sont corrigées ?
-mediabot: quel logiciel gratuit pour assembler des PDF sous Linux ?
-mediabot: cherche la documentation officielle pour configurer cette API
 ```
 
 The CVE example is a lookup request, not a claim about current exploitation.
@@ -124,19 +134,15 @@ operator's preferred domains do not exclude other projects or vendor advisories.
 General/current questions now use the same soft preference: no first search
 is confined to institutional/news domains. A project, museum, tool, transport
 operator or other relevant site can be returned immediately. No arbitrary 30-day lower bound applies to a CVE reference
-or project licence page; explicit recent/publication-date requests retain their
+or project licence page; explicit recent-news/publication-date requests retain their
 date filters. Older or undated documentation can therefore remain useful.
 All existing passage, citation, shorturl, byte and pacing checks still apply.
 
-`WEB_MODE=auto` starts research for natural factual questions, current wording
-or when a contributor asks for external verification. The requester does not
-need to say "Google", "recent" or "search". Questions beginning with who, what,
-where, how, why, which and their French equivalents can use the general web.
-Contributors propose a standalone search query, resolving follow-up references
-from the history. Greetings, remembered user keywords and creative/translation
-requests do not force a web call. A factual reference question may research even a stable fact;
-there is no training-cutoff test. Detection is heuristic; verify it during
-live acceptance.
+`WEB_MODE=auto` researches informational requests by default across subjects and
+FR/EN wording. Contributors propose standalone search queries resolving actual
+follow-up references; acknowledgements between a question and its follow-up are
+skipped. Independent new questions keep their own subject. Neither speaker
+labels nor earlier assistant claims become the fallback query.
 
 Tavily Search first prefers `PREFERRED_DOMAINS`, then can broaden the search.
 MB821 chooses contributor queries in configured order, independent of callback
@@ -149,9 +155,12 @@ than two selected pages overlap the query, one broader attempt uses the next
 contributor query. At most two searches and one extraction batch are made, with
 up to three public HTTP(S) sources; this is not an open-ended research loop.
 
-Recent examples use a rolling 30-day publication window; today and this week
-use the current UTC day and seven-day window. An explicitly requested publication
-year gets that calendar interval. An incident year or "latest stable version"
+Explicit recent news/reports/examples use a rolling 30-day publication window;
+today/this-week publication requests use the current UTC day/seven-day window.
+A current fact (opening hours, timetable, rules, price or forecast) does not
+require a page published in that window: older official reference pages remain
+eligible. Current validity and publication recency are different questions.
+An explicitly requested publication year gets that calendar interval. An incident year or "latest stable version"
 does not imply that publication window. The API publication filter and local
 date checks exclude stale/future dated results; ISO and documented RFC date
 formats are normalized. Unknown dates remain unknown, not retrieval timestamps.
@@ -438,7 +447,7 @@ and endpoint configuration if that account requires migration.
 
 ## Delivery, cost and failures
 
-Stable replies use at most two IRC messages. Researched replies allow up to
+Conversation-only replies use at most two IRC messages. Researched replies allow up to
 two answer messages plus one compact sources message. Every payload remains
 within 400 UTF-8 bytes, including link colour and underline controls. The
 synthesis aims for at most 650 characters and concrete details rather than
@@ -478,7 +487,7 @@ Fallbacks can add attempts; an evidence correction can add one synthesis call. Q
 budget; set spending limits in provider accounts too. One failed contributor
 can leave a useful answer; the bounded contributor count and degraded flag are
 logged without prompts, responses, hostmasks or keys. If all contributors fail,
-there is no extra retry cascade. A failed stable synthesis can use a surviving
+there is no extra retry cascade. A failed conversation-only synthesis can use a surviving
 draft and is marked degraded. Research failures are explicit.
 
 Adding a fourth provider requires the shared registry, its adapter/client plan
@@ -525,3 +534,40 @@ Gemini references: [troubleshooting and retry policy](https://ai.google.dev/gemi
 [advertised models](https://ai.google.dev/api/models). Configure a fallback only
 after its explicit live probe succeeds. Source deployment changes no private
 provider model, key, channel allowlist or enabled flag.
+
+## Useful compact answers (MB826)
+
+The researched synthesis and native web fallback share one editorial contract.
+They must address the requested parts and essential constraints, lead with the
+answer, and use available room for a concrete supported detail, condition or
+limitation. Comparisons explain the distinction and deciding criterion; how-to
+answers give an action and its prerequisite; recommendations explain why an
+option fits and the relevant trade-off. Definitions explain what something is
+and what it is used for. A simple request can still get a short answer.
+
+The contract discourages generic endings such as "available on the official
+website" when the source line already supplies that destination. It preserves
+that information when finding the official destination is the actual request.
+It asks models to distinguish core/optional features, local/cloud-dependent
+capabilities and free/paid extras when relevant, and to cover all parts rather
+than spending the whole reply on an introduction. No local text-replacement
+filter deletes legitimate factual sentences to enforce style.
+
+These are model instructions, not proof that every generated statement is
+correct. Fixture-backed tests verify actual provider payloads, real worker IPC,
+proof resolution, Unicode qualifiers and unchanged delivery budgets; real prose
+quality still needs live acceptance. Existing partial/insufficient evidence
+handling, unknown-ID rejection and MB820 private authorization remain intact.
+
+Acceptance should include varied subjects and informal requests, for example:
+
+- `mediabot: je voudrais comprendre les marées, avec un exemple concret`
+- `mediabot: la différence entre une liseuse et une tablette pour lire dehors`
+- `mediabot: les horaires du musée des Confluences aujourd’hui`
+- `mediabot: comment préparer un risotto sans vin ?`
+- `mediabot: une randonnée accessible en Bretagne avec des enfants`
+
+Judge relevance, coverage, practical detail, conditions, source quality and
+compactness. Do not judge success only by the presence of links. An ambiguous
+request should get a concise useful clarification, not invented context. A
+source can be old and still be relevant; recency must not be fabricated.

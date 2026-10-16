@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB826 — open-domain requests and useful compact answers
+
+- Research addressed informational requests by default, including statements,
+  fragments and informal French/English wording, beyond topic/keyword lists.
+  Keep personal recall, acknowledgements, creative/text tasks and simple
+  calculations on their contextual route unless contributors need verification.
+- Use one shared editorial contract for researched and native fallback replies:
+  cover requested parts/constraints, lead with the answer and use remaining
+  space for a supported practical detail, condition or limitation, not filler.
+- Keep older official reference pages eligible for current facts; apply recent
+  publication windows to explicitly recent news/reports/examples, not opening
+  hours, timetables or other current-reference questions.
+- Resolve short follow-ups through intervening acknowledgements while keeping
+  independent new topics separate from prior user/assistant claims.
+- Preserve provider parallelism and Gemini recovery, MB824 source validation,
+  MB820 rights, private memory, shorturls and the existing two-line answer budget.
+  Add no routing model call or editorial retry. Live prose quality remains an
+  acceptance step, not something asserted by fixture-backed integration tests.
+
 ### MB825 — General factual questions and explicit Gemini model recovery
 
 - Route natural French/English factual questions to general web research without

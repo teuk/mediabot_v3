@@ -28,22 +28,22 @@ for my $url ('http://127.0.0.1/x','https://localhost/x','https://foo.local/x',
 }
 my (@results,@web_queries);my $client=MB818ChatClient->new;
 my $engine=Mediabot::AI::MetaChat->new(client=>$client,conf=>$conf,settings=>$cfg,clock=>sub {1791892800},
-    web_start=>sub {die 'stable request must not fetch the web'});
-my @messages=({role=>'user',content=>'speaker1: mass of proton?'});
-ok($engine->submit(prompt=>'mass of proton?',messages=>\@messages,language=>'fr',on_done=>sub {push @results,shift}),'ensemble is submitted');
+    web_start=>sub {die 'pure calculation must not fetch the web'});
+my @messages=({role=>'user',content=>'speaker1: calcule 2+2'});
+ok($engine->submit(prompt=>'calcule 2+2',messages=>\@messages,language=>'fr',on_done=>sub {push @results,shift}),'ensemble is submitted');
 is(scalar(@{$client->{calls}}),3,'all three providers are launched before any response is completed');
 is_deeply([map {$_->{request}{provider}} @{$client->{calls}}],[qw(openai anthropic gemini)],'three independent providers participate');
 for my $index (2,0,1) {
-    $client->{calls}[$index]{done}->({ok=>1,answer=>encode_json({answer=>'1.67e-27 kg',needs_web=>JSON::PP::false,query=>''})});
+    $client->{calls}[$index]{done}->({ok=>1,answer=>encode_json({answer=>'4',needs_web=>JSON::PP::false,query=>''})});
     is(scalar(@results),0,'contributors do not individually emit IRC replies');
 }
 is(scalar(@{$client->{calls}}),4,'one synthesis starts only after the contributors finish');
 like($client->{calls}[3]{request}{system},qr/Agreement between models is not evidence/,'synthesis does not treat model consensus as proof');
 is($client->{calls}[3]{request}{provider},'auto','synthesis keeps provider fallback available');
-$client->{calls}[3]{done}->({ok=>1,answer=>encode_json({answer=>'La masse du proton vaut environ 1,67e-27 kg.',source_ids=>[]})});
+$client->{calls}[3]{done}->({ok=>1,answer=>encode_json({answer=>'Le résultat est 4.',source_ids=>[]})});
 is(scalar(@results),1,'exactly one final response is produced');
 is(scalar(@{$results[0]{contributors}}),3,'final result retains bounded contributor metadata');
-ok(!$results[0]{web_used},'stable answer is not falsely labelled as browsed');
+ok(!$results[0]{web_used},'pure calculation is not falsely labelled as browsed');
 $client->{calls}[1]{done}->({ok=>1,answer=>'late duplicate'});
 is(scalar(@results),1,'duplicate callbacks cannot revive a completed request');
 

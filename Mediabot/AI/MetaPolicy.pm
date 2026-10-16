@@ -4,7 +4,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::AI qw(normalize_provider);
-our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind is_followup parse_object);
+our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind is_followup is_acknowledgement parse_object);
 use JSON::PP ();
 
 sub fold { my $s = lc($_[0] // ''); $s =~ tr/[]\\^/{}|~/; return $s }
@@ -36,11 +36,27 @@ sub is_followup {
     my $s=lc clean($_[0],500);
     return $s =~ /(?:\A(?:et\b|and\b|what about\b|qu.en est|pour (?:celui|celle|eux)|under\b)|\b(?:celui|celle|ceux|celles|leurs|those|these|its|them|ça|cela)\b)/ ? 1:0;
 }
+sub is_acknowledgement {
+    my $s=lc clean($_[0],2000);
+    my $social=qr/(?:salut|bonjour|bonsoir|hello|hi|hey|coucou|merci(?: beaucoup| pour (?:ta|votre|la) réponse)?|thanks(?: a lot| for (?:your|the) answer)?|thank you|ça va|comment vas.tu|tu vas bien|how are you|how.s it going|tu es là|are you there|ok(?:ay)?|oui|non|yes|no|parfait|super|très bien|tres bien|bien reçu|bien recu|d.accord|got it|great|nice|c.est (?:parfait|clair|bien)|ça (?:marche|roule)|je te remercie|j.ai compris)/;
+    return $s =~ /\A$social(?:[\s!?.,:;]+$social)*\s*[!?.,:;)]*\z/ ? 1:0;
+}
 sub _conversation_only {
     my ($s)=@_;
-    return 1 if $s =~ /\A(?:salut|bonjour|bonsoir|hello|hi|merci|thanks|thank you|ça va|comment vas.tu|how are you)\s*[!?.,]*\z/;
-    return 1 if $s =~ /(?:\b(?:mon|ma|mes|my|our)\s+(?:mot|code|repère|repere|surnom|nom|préférence|preference|word|keyword|nickname|name)\b|\b(?:je viens de dire|t.ai dit|did i (?:say|tell)|i just (?:said|told)|remember my)\b)/;
+    return 1 if !length($s) || is_acknowledgement($s);
+    # Personal recall is conversation context, not a public search target.
+    # 'mon code Python' and 'my name server' are ordinary factual requests.
+    return 1 if $s =~ /(?:\b(?:mot (?:repère|repere)|repère|repere|code (?:secret|repère|repere)|keyword|codeword)\b)/
+        && $s =~ /(?:\b(?:mon|ma|mes|my|our|ton|ta|your)\b|confirme|confirm|retiens|remember)/;
+    return 1 if $s =~ /(?:\b(?:je (?:m.appelle|suis né)|mon (?:nom|prénom|prenom|surnom) est|my (?:name|nickname) is)\b|\b(?:t.ai dit|je viens de dire|did i (?:say|tell)|i just (?:said|told)|remember my)\b)/;
+    return 1 if $s =~ /\A(?:my word (?:is|was)|what is my word|mon mot (?:est|était|etait))\b/;
+    return 1 if $s =~ /\A(?:quel est mon (?:nom|prénom|prenom|surnom)|what is my (?:name|nickname)|tu (?:te souviens|me connais)|do you remember)\b/;
     return 1 if $s =~ /\A(?:écris|ecris|rédige|redige|invente|raconte|traduis|traduire|corrige|reformule|résume|resume|write|compose|invent|translate|rewrite|summari[sz]e)\b/;
+    return 1 if $s =~ /\A(?:peux.tu|tu peux|tu pourrais|can you|could you|would you)\s+(?:(?:me|m[’'])\s*)?(?:écrire|ecrire|rédiger|rediger|inventer|raconter|traduire|corriger|reformuler|résumer|resumer|write|compose|invent|translate|rewrite|summari[sz]e)\b/;
+    return 1 if $s =~ /\A[\d\s.,+*\/()^%=-]+[?]?\z/;
+    return 1 if $s =~ /\A(?:calcule|calculer|calculate|compute|combien font)\s+[\d\s.,+*\/()^%=-]+[?]?\z/;
+    my $unit=qr/(?:km|m|cm|mm|mètres?|m[eè]tres?|kilom[eè]tres?|miles?|kg|g|grammes?|kilogrammes?|lb|lbs|pounds?|litres?|liters?|ml|cl|celsius|fahrenheit)/;
+    return 1 if $s =~ /\A(?:convertis|convert|convertir)\s+[+-]?[\d.,]+\s*$unit\s+(?:en|in|to)\s+$unit\s*[?.]?\z/;
     return 0;
 }
 sub research_kind {
@@ -60,10 +76,12 @@ sub research_kind {
     return 'general';
 }
 sub wants_web {
-    my ($s) = @_;
-    return 0 if _conversation_only(lc clean($s,2000));
-    return 1 if research_kind($s) ne 'general';
-    return clean($s) =~ /(?:aujourd.hui|actuel\w*|récent\w*|recent\w*|derni[eè]r\w*|maintenant|cette semaine|en ce moment|today|currently|current|latest|this week|now|prix|price|météo|weather|président|president|premier ministre|prime minister|ceo|horaire|schedule|version|résultat|result|202[6-9]|\b20[3-9]\d\b)/i ? 1 : 0;
+    my $s=lc clean($_[0],2000);
+    return 0 if _conversation_only($s);
+    # Addressed informational requests are researched by default, including
+    # fragments and informal wording. Topic profiles tune research, not access
+    # to it. Contributors may additionally request verification for local tasks.
+    return $s =~ /[\p{L}\p{N}]/ ? 1:0;
 }
 sub settings {
     my ($conf) = @_;

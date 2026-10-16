@@ -67,7 +67,7 @@ sub _notice {
         not_enough_providers=>['Le mode collectif nécessite au moins deux providers configurés.','Collective mode needs at least two configured providers.'],
         memory=>['La mémoire de conversation est indisponible. La question n’a pas été envoyée.','Conversation memory is unavailable. The question was not sent.'],
         forgotten=>['Tes échanges avec le bot ont été effacés de ce canal.','Your exchanges with the bot were removed from this channel.'],
-        web=>['Je n’ai pas pu vérifier les informations actuelles sur le web. Réessaie un peu plus tard.','I could not verify the current information on the web. Please try again later.'],
+        web=>['Je n’ai pas pu vérifier les informations nécessaires sur le web. Réessaie un peu plus tard.','I could not verify the information needed on the web. Please try again later.'],
         failed=>['Je n’ai pas obtenu de réponse exploitable. Réessaie un peu plus tard.','I could not obtain a usable answer. Please try again later.'],
     );
     my $pair=$text{$reason}||$text{failed};

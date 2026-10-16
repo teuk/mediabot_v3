@@ -7,7 +7,7 @@ use POSIX qw(strftime);
 use Time::Local qw(timegm);
 use Unicode::Normalize qw(NFC);
 use Date::Parse qw(str2time);
-use Mediabot::AI::MetaPolicy qw(clean safe_url research_kind is_followup);
+use Mediabot::AI::MetaPolicy qw(clean safe_url research_kind is_followup is_acknowledgement);
 our @EXPORT_OK=qw(research_plan select_sources select_passages validate_support);
 
 sub _date {
@@ -53,6 +53,7 @@ sub research_plan {
             $context=clean($message->{content},500);
             $context =~ s/\Aspeaker\d+(?: \([^)]*\))?:\s*//;
             $context =~ s{https?://\S+}{}g;
+            if (is_acknowledgement($context)) {$context='';next}
             last;
         }
     }
@@ -82,10 +83,14 @@ sub research_plan {
         }
     }
     my $period=lc $prompt;my $start;
+    # Recency of the answer is not recency of the page's publication. Opening
+    # hours, rules, prices and reference facts can use older official pages.
+    my $publication_request=$period =~ /(?:actualité|actualite|\bnews\b|articles?|rapports?|reports?|études?|etudes?|studies|incidents?|\bcas\b|\bcases?\b|exemples?|examples?|publications?|publié|publie|published|paru|released|quoi de neuf|what.s new)/;
+
     my $days=$period =~ /(?:aujourd.hui|\btoday\b)/?0
         :$period =~ /(?:cette semaine|\bthis week\b)/?7
         :$period =~ /(?:ce mois|\bthis month\b|récent|recent|récemment|recemment)/?30:undef;
-    if (defined $days) {
+    if (defined($days) && $publication_request) {
         my ($y,$m,$d)=split /-/,$date;
         $start=strftime('%Y-%m-%d',gmtime(timegm(0,0,12,$d,$m-1,$y)-86400*$days));
     }
