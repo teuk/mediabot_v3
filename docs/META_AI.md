@@ -167,9 +167,61 @@ action in this feature. URL checks reject credentials, literal private IPs,
 single-label/local hosts and non-web schemes. Page retrieval is delegated to
 Tavily; the bot does not fetch arbitrary model-generated destinations itself.
 
-## Researched reply format and evidence correction
+## Retrieved proof passages and researched replies
 
-A researched synthesis must return a JSON answer with one or two `source_ids`
+MB824's IRC runtime selects proof passages by identifier instead of asking the
+synthesis model to reproduce their text. After research and date checks, the
+program builds a local catalogue from the actual retrieved source text:
+
+- Up to three sources, 5,000 normalized characters per source, at most 40
+  passages per source, each 12–240 characters. Small overlaps retain details
+  at chunk boundaries; no passage spans the extractor's non-contiguous joins.
+- Each `passage_id` is bound to its source identity, destination and content.
+  Identical source content can produce identical IDs; resolution always uses
+  only the current question's catalogue, never a global or historical lookup.
+- The model returns `answer`, one or two `source_ids`, `basis`, and `support`
+  entries containing `source_id` plus one supplied `passage_id` for each source.
+  It returns no free-text proof. The local program resolves those IDs to exact
+  retrieved text, verifies that source snapshots have not changed, then applies
+  the unchanged literal `validate_support` check.
+
+For compatible OpenAI Responses models, `meta_synthesis_passages` and
+`meta_passage_repair` use strict structured outputs whose `passage_id` enum
+contains only the actual catalogue IDs for that request. The provider-neutral
+request validates that bounded ID list before payload creation. Claude/Gemini
+select from the same catalogue in their prompt and face the same local checks;
+neutral catalogue metadata does not become an unsupported API field.
+
+Unknown IDs, a passage belonging to another source, invented top-level source
+IDs or changed source snapshots are final failures. Missing/malformed selection
+fields can receive one format correction with the same catalogue and actual
+synthesis provider; contributors and research are not repeated. Normal valid
+selections add no new request. Free-text quotes are never silently matched,
+translated or replaced to rescue an invalid selection.
+
+The accepted event is:
+
+```text
+META_AI evidence=passage_ids action=accepted
+```
+
+`unknown_passage` and `source_changed` events identify rejected catalogue
+bindings. Exact passage existence and destination binding are mechanical
+checks, **not proof that every answer claim follows from that passage**. The
+model still judges relevance, completeness and semantic support; malicious or
+poorly extracted page text remains untrusted. `partial` and `insufficient`
+statuses preserve the existing limited-answer behavior. Shorturls, two answer
+lines plus a source line, delivery pacing, private memory and command access
+checks retain their existing behavior.
+
+### Direct-engine quote compatibility
+
+Direct callers constructing `MetaChat` without the runtime's `passage_ids`
+mode retain the earlier quote contract below. There is no implicit fallback
+from a failed catalogue selection to that contract. Native web search retains
+its separate tool-citation assurance level.
+
+In that compatibility mode a researched synthesis returns one or two `source_ids`
 pointing to the evidence supplied for that question, a `basis` value
 (`supported`, `partial` or `insufficient`) and one `support` entry per selected
 ID containing that ID and a verbatim 12–240-character passage. Compatible OpenAI

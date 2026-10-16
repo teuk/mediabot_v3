@@ -177,10 +177,11 @@ sub _log_event {
             .' error='.$error.' category='.$category.' retries='.$retries;
     }
     elsif (($event->{kind}//'') eq 'evidence') {
-        my %reasons=map {$_=>1} qw(missing invalid mismatch invalid_ids missing_citations too_many_citations);
+        my %reasons=map {$_=>1} qw(missing invalid mismatch invalid_ids missing_citations too_many_citations
+            unknown_passage source_changed passage_ids);
         my $reason=!ref($event->{reason}) && $reasons{$event->{reason}//''}?$event->{reason}:'unknown';
         my $action=defined($event->{action}) && !ref($event->{action})
-            && $event->{action}=~/\A(?:retry|rejected)\z/?$event->{action}:'unknown';
+            && $event->{action}=~/\A(?:retry|rejected|accepted)\z/?$event->{action}:'unknown';
         $line='META_AI evidence='.$reason.' action='.$action;
     }
     eval {$self->{bot}{logger}->log(0,$line)} if defined $line;
@@ -244,7 +245,7 @@ sub _ask {
     };
     my $engine=Mediabot::AI::MetaChat->new(conf=>$bot->{conf},settings=>$cfg,
         client=>$client,web=>$web,web_start=>$web_start,clock=>$self->{clock},
-        on_event=>sub {$self->_log_event($_[0])});
+        on_event=>sub {$self->_log_event($_[0])},evidence_mode=>'passage_ids');
     my $completed=0;
     my $done=sub {
         my ($result)=@_;return if $completed++;

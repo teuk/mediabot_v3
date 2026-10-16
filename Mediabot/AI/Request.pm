@@ -25,6 +25,7 @@ my %ALLOWED_FIELD = map { $_ => 1 } qw(
     max_output_tokens
     temperature
     timeout_seconds
+    passage_ids
 );
 
 sub _plain_scalar {
@@ -61,6 +62,17 @@ sub validate_request {
         my $purpose = _clean_short_scalar($request->{purpose}, 64);
         return 'purpose must be a short identifier'
             unless defined($purpose) && $purpose =~ /^[a-z][a-z0-9_.-]*\z/i;
+    }
+    my $passage_contract=($request->{purpose}//'')=~/\Ameta_(?:synthesis_passages|passage_repair)\z/;
+    return 'passage_ids require a passage selection purpose' if exists($request->{passage_ids}) && !$passage_contract;
+    if ($passage_contract) {
+        my $ids=$request->{passage_ids};my %seen;
+        return 'passage_ids must contain 1..120 distinct catalogue identifiers'
+            unless ref($ids) eq 'ARRAY' && @$ids && @$ids<=120;
+        for my $id (@$ids) {
+            return 'invalid catalogue identifier' unless _plain_scalar($id)
+                && $id=~/\As[1-3]p[1-9][0-9]?-[0-9a-f]{12}\z/ && !$seen{$id}++;
+        }
     }
 
     if (exists $request->{model} && defined $request->{model}) {
@@ -167,6 +179,7 @@ sub build_request {
         if exists $args{temperature};
     $request{timeout_seconds} = int($args{timeout_seconds})
         if exists $args{timeout_seconds};
+    $request{passage_ids} = [@{$args{passage_ids}}] if exists $args{passage_ids};
 
     return \%request;
 }

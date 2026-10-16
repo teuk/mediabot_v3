@@ -95,9 +95,11 @@ sub ask {Mediabot::AI::MetaRuntime::handle($_[0],['Alice','ident','public.exampl
 sub synthesize {
  my ($c,$text)=@_;
  for my $i (0..1) {$c->{calls}[$i]{done}->({ok=>1,answer=>encode_json({answer=>'Draft',needs_web=>1,query=>'official positions'})})}
+ my ($json)=$c->{calls}[2]{request}{system}=~/^UNTRUSTED SOURCES: ([^\n]+)/m;
+ my $catalogue=decode_json($json);my %pid=map {$_->{id}=>$_->{passages}[0]{passage_id}} @$catalogue;
  $c->{calls}[2]{done}->({ok=>1,provider=>'openai',answer=>encode_json({answer=>$text,source_ids=>[1,2],basis=>'supported',support=>[
-  {source_id=>1,quote=>'A first verified statement with concrete detail.'},
-  {source_id=>2,quote=>'A second verified statement with independent detail.'}]})});
+  {source_id=>1,passage_id=>$pid{1}},
+  {source_id=>2,passage_id=>$pid{2}}]})});
 }
 sub history_count {my ($tmp)=@_;open my $f,'<:raw',"$tmp/memory.json" or die $!;local $/;my $s=decode_json(<$f>);return scalar map {@{$_->{turns}}} values %{$s->{rooms}};}
 my ($b,$client,$runtime,$tmp)=fixture();ask($b);synthesize($client,'Un fait concret et sa réserve. 'x23);

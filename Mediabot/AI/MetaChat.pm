@@ -11,6 +11,7 @@ use Mediabot::AI::MetaPolicy qw(clean parse_object wants_web safe_url);
 use Mediabot::AI::MetaReply qw(clean_answer);
 use Mediabot::AI::MetaKnowledge qw(runtime_facts);
 use Mediabot::AI::MetaEvidence qw(research_plan validate_support);
+use Mediabot::AI::MetaPassages qw(build_catalogue resolve_support);
 
 sub _dated_sources {
     my ($sources,$date)=@_;
@@ -26,6 +27,7 @@ sub new {
     my ($class,%args)=@_;
     return bless {client=>$args{client},conf=>$args{conf},settings=>$args{settings},
         web=>$args{web},web_start=>$args{web_start},on_event=>$args{on_event},
+        evidence_mode=>($args{evidence_mode}//'') eq 'passage_ids'?'passage_ids':'quotes',
         clock=>$args{clock}||sub {time}},$class;
 }
 sub _event {
@@ -33,10 +35,11 @@ sub _event {
     eval {$self->{on_event}->($event)} if ref($self->{on_event}) eq 'CODE';
 }
 sub _request {
-    my ($self,$provider,$purpose,$system,$messages)=@_;
+    my ($self,$provider,$purpose,$system,$messages,$passage_ids)=@_;
     return build_request(provider=>$provider,purpose=>$purpose,system=>$system,
         messages=>$messages,max_output_tokens=>$self->{settings}{tokens},
-        timeout_seconds=>$self->{settings}{timeout});
+        timeout_seconds=>$self->{settings}{timeout},
+        (defined($passage_ids)?(passage_ids=>$passage_ids):()));
 }
 sub submit {
     my ($self,%args)=@_;my $done=$args{on_done};my $cfg=$self->{settings};
@@ -129,7 +132,10 @@ sub submit {
 sub _synthesize {
     my ($self,$args,$drafts,$failures,$sources,$date,$finish,$repair_attempted)=@_;
     my $cfg=$self->{settings};
-    my $source_text=JSON::PP->new->canonical->encode($sources);
+    my $by_passage=@$sources && $self->{evidence_mode} eq 'passage_ids';
+    my $catalogue=$by_passage?build_catalogue($sources):undef;
+    if ($by_passage && !$catalogue) {$finish->({ok=>0,error=>'web_unavailable'});return}
+    my $source_text=JSON::PP->new->canonical->encode($by_passage?$catalogue->{sources}:$sources);
     # Unverified factual drafts must not compete with retrieved evidence.
     # Contributors still supply independent research directions. Stable
     # questions retain their full comparative drafts.
@@ -155,7 +161,9 @@ sub _synthesize {
         'Keep the answer under 650 characters for at most two IRC lines. A separate compact sources line is added for researched replies. Never include URLs in the answer.',
         'Do not print numeric source markers such as [1] or [2] in answer prose: the separate source_ids field carries the references.',
         (@$sources ? 'Research requires a nonempty source_ids array. Select the supplied numeric IDs actually supporting your answer; never use an empty array or manufacture references.' : ()),
-        (@$sources
+        ($by_passage
+            ? 'Return only JSON: {"answer":"answer without URLs","source_ids":[one or two supporting source IDs],"basis":"supported|partial|insufficient","support":[{"source_id":ID,"passage_id":"one exact passage_id listed under this source"}]}. Select the supplied passage IDs supporting your answer. Do not copy, translate or regenerate proof text. Do not return quote fields. Each selected source_id needs exactly one passage_id belonging to that source. Passage IDs from the conversation or another source are invalid; use only this supplied catalogue. A valid ID proves the passage exists, not that every claim is supported: revise unsupported claims and state limitations with partial or insufficient basis.'
+            : @$sources
             ? 'Return only JSON: {"answer":"answer without URLs","source_ids":[one or two supporting IDs],"basis":"supported|partial|insufficient","support":[{"source_id":ID,"quote":"exact verbatim 12-240 character passage from that source text"}]}. Every selected ID needs one exact passage. Quote supporting facts, not unrelated navigation. If the requested detail is not established, set basis=insufficient. Never invent a passage or paraphrase it inside quote.'
             : 'Return only JSON: {"answer":"answer without URLs","source_ids":[]}. Natural tone, direct response and respect the conversation language; do not add generic disclaimers to ordinary stable questions.'),
         "UNTRUSTED DRAFTS: $draft_text", "UNTRUSTED SOURCES: $source_text";
@@ -166,7 +174,12 @@ sub _synthesize {
         if ($repair) {
             $$repair_attempted=1;
             my $ids=join(', ',map {$_->{id}} @$sources);
-            $instructions.="\nEVIDENCE CORRECTION: the preceding synthesis failed evidence validation (".($reason//'missing')."). "
+            $instructions.=$by_passage
+                ? "\nPASSAGE SELECTION CORRECTION: rebuild the complete answer from the same supplied catalogue. "
+                    ."Use one or two source_ids selected from [$ids], a basis value and exactly one support entry per selected source_id. "
+                    .'Copy only the supplied passage_id belonging to that source; never generate a quote or invent a reference. '
+                    .'The rejected answer is not evidence. Remove unsupported claims and use basis=insufficient when the requested detail is not established.'
+                : "\nEVIDENCE CORRECTION: the preceding synthesis failed evidence validation (".($reason//'missing')."). "
                 ."Return the complete JSON object with a nonempty source_ids array selected from [$ids]. "
                 .'Rebuild the answer from the same supplied source text; the rejected answer is not evidence. '
                 .'Copy each support quote as one contiguous, verbatim 12-240 character passage from the text of its own source_id. '
@@ -176,8 +189,10 @@ sub _synthesize {
                 .'Return at most two source_ids, a basis value and one verbatim 12-240 character support passage per selected source. '
                 .'Do not invent facts, references or predictions.';
         }
-        my $purpose=$repair?'meta_citation_repair':@$sources?'meta_synthesis_web':'meta_synthesis';
-        my $request=$self->_request($provider,$purpose,$instructions,$args->{messages});
+        my $purpose=$by_passage?($repair?'meta_passage_repair':'meta_synthesis_passages')
+            :$repair?'meta_citation_repair':@$sources?'meta_synthesis_web':'meta_synthesis';
+        my $request=$self->_request($provider,$purpose,$instructions,$args->{messages},
+            $by_passage?[sort keys %{$catalogue->{lookup}}]:undef);
         my $called=0;
         my $callback=sub {
             my ($result)=@_;return if $called++;
@@ -203,7 +218,18 @@ sub _synthesize {
                 $self->_event({kind=>'evidence',reason=>'invalid_ids',action=>'rejected'});
                 $launch=undef;$finish->({ok=>0,error=>'unsupported_web_answer',evidence_error=>'invalid_ids'});return;
             }
-            my $support_error=@$sources && @cited && @cited<=2?validate_support($parsed,\@cited):undef;
+            my $support_error;
+            if (@$sources && @cited && @cited<=2) {
+                if ($by_passage) {
+                    my ($resolved,$error)=resolve_support($parsed,\@cited,$catalogue);
+                    $support_error=$error;$parsed=$resolved if $resolved;
+                }
+                else {$support_error=validate_support($parsed,\@cited)}
+            }
+            if (defined($support_error) && $support_error=~/\A(?:unknown_passage|source_changed)\z/) {
+                $self->_event({kind=>'evidence',reason=>$support_error,action=>'rejected'});
+                $launch=undef;$finish->({ok=>0,error=>'unsupported_web_answer',evidence_error=>$support_error});return;
+            }
             if (@$sources && (!@cited || @cited>2 || defined($support_error))) {
                 my $reason=!@cited?'missing_citations':@cited>2?'too_many_citations':$support_error;
                 $self->_event({kind=>'evidence',reason=>$reason,action=>$repair?'rejected':'retry'});
@@ -230,9 +256,11 @@ sub _synthesize {
                 $answer=(($args->{language}//'en') eq 'fr'?'Informations partielles : ':'Partial evidence: ').$answer;
             }
             $launch=undef;
+            $self->_event({kind=>'evidence',reason=>'passage_ids',action=>'accepted'}) if $by_passage;
             $finish->({ok=>1,answer=>$answer,sources=>\@cited,contributors=>[map {$_->{provider}} @$drafts],
                 degraded=>@$failures || $fallback ? 1:0,web_used=>@$sources?1:0,citation_repair=>$repair?1:0,
-                evidence_anchors=>@$sources?scalar(@{$parsed->{support}}):0});
+                evidence_anchors=>@$sources?scalar(@{$parsed->{support}}):0,
+                evidence_method=>$by_passage?'passage_ids':@$sources?'quotes':'none'});
         };
         my $ok=eval {$self->{client}->submit($request,on_done=>$callback);1};
         $callback->({ok=>0}) unless $ok;

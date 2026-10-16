@@ -46,7 +46,11 @@ sub drafts {my ($client,$start,$web)=@_;for my $i ($start..$start+2) {
 }}
 sub final {my ($client,$index,$answer,$ids)=@_;$client->{calls}[$index]{done}->({ok=>1,
     answer=>encode_json({answer=>$answer,source_ids=>$ids//[],basis=>'supported',
-        support=>[map {{source_id=>$_,quote=>'A verified page excerpt.'}} @{$ids//[]}]})});}
+        support=>[map {
+            my $id=$_;my ($json)=$client->{calls}[$index]{request}{system}=~/^UNTRUSTED SOURCES: ([^\n]+)/m;
+            my $catalogue=decode_json($json);my ($source)=grep {$_->{id}==$id} @$catalogue;
+            +{source_id=>$id,passage_id=>$source->{passages}[0]{passage_id}}
+        } @{$ids//[]}]})});}
 sub history {my ($dir)=@_;return [] unless -e "$dir/state.json";
     open my $fh,'<:raw',"$dir/state.json" or die $!;local $/;my $state=decode_json(<$fh>);close $fh;
     return [map {@{$_->{turns}}} values %{$state->{rooms}}];}
@@ -153,8 +157,8 @@ is(scalar(@{history($dir)}),0,'repeated mismatched evidence cannot enter memory'
 is(scalar(keys %{$runtime->{jobs}}),0,'final evidence rejection releases the channel job');
 like($bot->{logger}{lines}[-1],qr/failed code=web_evidence_mismatch contributors=2 degraded=1 web_attempted=1 citation_repair=1$/,
     'failure metadata retains successful contributors, degradation, web attempt and correction');
-like(join('\n',@{$bot->{logger}{lines}}),qr/META_AI evidence=mismatch action=retry.*META_AI evidence=mismatch action=rejected/s,
-    'first and final evidence rejection reasons are distinguishable');
+like(join('\n',@{$bot->{logger}{lines}}),qr/META_AI evidence=invalid action=retry.*META_AI evidence=invalid action=rejected/s,
+    'free-text quote instead of requested passage selection is rejected, even after one correction');
 unlike(join(' ',@{$bot->{logger}{lines}},map {$_->[1]} @notices),qr/PRIVATE_UNGROUNDED_CLAIM|invented source passage|Alice|example\.org/,
     'provider and evidence logs/notices contain no rejected content or identities');
 

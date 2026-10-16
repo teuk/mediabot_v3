@@ -369,7 +369,7 @@ sub _provider_plan {
                 timeout => 0 + $timeout,
                 headers => $headers,
                 payload => $payload,
-                transient_retry => ($request->{purpose}//'') =~ /\Ameta_(?:draft|synthesis|synthesis_web|citation_repair|probe)\z/ ? 1:0,
+                transient_retry => ($request->{purpose}//'') =~ /\Ameta_(?:draft|synthesis|synthesis_web|citation_repair|synthesis_passages|passage_repair|probe)\z/ ? 1:0,
             }],
         }, undef);
     }

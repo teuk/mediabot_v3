@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB824 — select retrieved proof passages instead of regenerating quotes
+
+- Build a bounded source/content-bound catalogue of short retrieved passages.
+  The IRC research synthesis selects catalogue IDs; local code supplies the
+  exact text and checks it with the unchanged literal evidence validator.
+  Unknown, cross-source and changed-source references cannot be accepted.
+- Scope OpenAI structured-output choices to actual current catalogue IDs;
+  Claude/Gemini select from the same prompt and face identical local checks.
+  Keep one format correction, existing provider budgets and the parallel
+  contributor flow. Valid source selection needs no quote-recopy retry.
+- Preserve the legacy direct MetaChat quote contract, native web citation
+  behavior, shorturls, IRC pacing, private memory and local command rights.
+  A selected passage proves source existence, not semantic correctness;
+  unsupported claims still require a partial/insufficient evidence status.
+
 ### MB823 — bounded evidence regeneration and provider diagnostics
 
 - Withhold malformed or unmatched support passages and allow one complete

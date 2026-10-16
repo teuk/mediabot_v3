@@ -60,9 +60,11 @@ sub build_payload {
         # Scope this contract to MB818 research; legacy and native web calls
         # retain their existing payloads. Runtime still validates each ID
         # against the actual evidence supplied for this particular question.
-        if (($request->{purpose}//'') =~ /\Ameta_(?:synthesis_web|citation_repair)\z/
+        if (($request->{purpose}//'') =~ /\Ameta_(?:synthesis_web|citation_repair|synthesis_passages|passage_repair)\z/
             && $model =~ /\Agpt-(?:4o(?:-|\z)|[56])/
             && $model ne 'gpt-4o-2024-05-13') {
+            my $passages=($request->{purpose}//'') =~ /\Ameta_(?:synthesis_passages|passage_repair)\z/;
+            my $proof=$passages?'passage_id':'quote';
             $payload{text}={format=>{
                 type=>'json_schema',name=>'mediabot_web_answer',strict=>JSON::PP::true,
                 schema=>{type=>'object',additionalProperties=>JSON::PP::false,
@@ -73,8 +75,9 @@ sub build_payload {
                         basis=>{type=>'string',enum=>[qw(supported partial insufficient)]},
                         support=>{type=>'array',minItems=>1,maxItems=>2,
                             items=>{type=>'object',additionalProperties=>JSON::PP::false,
-                                properties=>{source_id=>{type=>'integer',enum=>[1,2,3]},quote=>{type=>'string'}},
-                                required=>['source_id','quote']}},
+                                properties=>{source_id=>{type=>'integer',enum=>[1,2,3]},
+                                    $proof=>$passages?{type=>'string',enum=>[@{$request->{passage_ids}}]}:{type=>'string'}},
+                                required=>['source_id',$proof]}},
                     },required=>['answer','source_ids','basis','support']},
             }};
         }
