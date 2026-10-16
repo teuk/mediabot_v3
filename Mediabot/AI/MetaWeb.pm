@@ -42,7 +42,7 @@ sub search {
             exclude_domains=>[qw(facebook.com instagram.com tiktok.com pinterest.com)]);
         $parameters{include_domains}=$plan->{domains} if $restricted && @{$plan->{domains}||[]};
         $parameters{include_domains_mode}='prefer'
-            if exists($parameters{include_domains}) && ($plan->{domain_mode}//'restrict') eq 'prefer';
+            if exists($parameters{include_domains}) && ($plan->{domain_mode}//'prefer') eq 'prefer';
         if (defined($plan->{start_date})) {
             $parameters{start_date}=$plan->{start_date};
             $parameters{filter_by_published_date}=JSON::PP::true;
@@ -55,7 +55,7 @@ sub search {
         push @rows,@batch;
         $sources=select_sources(\@rows,$plan);
         my $useful=grep {$_->{_hits} && (!defined($plan->{start_date}) || $_->{date_status} eq 'dated')} @$sources;
-        last if (@$sources>=2 && $useful) || !$restricted;
+        last if (@$sources>=2 && $useful>=2) || !$restricted;
     }
     return {ok=>0,error=>'web_no_evidence'} unless @$sources;
     my $extracted=$self->_post('extract',{urls=>[map {$_->{url}} @$sources],

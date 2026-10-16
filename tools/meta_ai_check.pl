@@ -15,8 +15,8 @@ my ($file,$live,$help,$only,$model,$list)=('mediabot.conf',0,0,'','',0);
 GetOptions('conf=s'=>\$file,'live'=>\$live,'help'=>\$help,'provider=s'=>\$only,
     'model=s'=>\$model,'list-gemini-models'=>\$list) or exit 2;
 if ($help) {print "Usage: perl tools/meta_ai_check.pl --conf mediabot.conf [--live] [--provider gemini] [--model ID]\n";
-    print "Default: offline configuration check. --live: one small paid test per selected contributor; Gemini may retry once within its request deadline; no IRC, web search or memory write.\n";
-    print "--provider checks that provider even when absent from meta_ai.PROVIDERS; --model is probe-only and requires --provider.\n";
+    print "Default: offline configuration check. --live: one small paid test per selected contributor; Gemini may recover once within its request deadline using the configured fallback model or the same model; no IRC, web search or memory write.\n";
+    print "--provider checks that provider even when absent from meta_ai.PROVIDERS; --model is probe-only, requires --provider and disables model fallback to isolate the selected model.\n";
     print "--live --list-gemini-models lists up to 100 advertised text-generation models from Google's fixed endpoint; listing is not an access/billing guarantee.\n";exit 0}
 if (length($only)) {$only=normalize_provider($only)//'';die "[KO] Unknown explicit provider.\n" unless $only && $only ne 'auto'}
 die "[KO] --model requires --provider and a valid model ID.\n"
@@ -75,7 +75,10 @@ print "Mode: ",($cfg->{enabled}?'enabled':'disabled')," | pilot channels: ",scal
 print "Limits: $cfg->{rate_max}/min/channel; $cfg->{global_rate_max}/min/instance; $cfg->{daily_limit}/UTC day\n";
 my %overrides=('openai.API_URL'=>'https://api.openai.com/v1/responses',
     'openai.FALLBACK_MODEL'=>'','gemini.THINKING_LEVEL'=>'LOW',
+    'gemini.FALLBACK_MODEL'=>length($model)?'':$cfg->{gemini_fallback},
     map {($_.'.MODEL'=>$cfg->{models}{$_})} keys %{$cfg->{models}});
+if (length($cfg->{gemini_fallback}) && $cfg->{gemini_fallback} !~ /\Agemini-[A-Za-z0-9._-]{1,110}\z/) {die "[KO] Invalid meta_ai.GEMINI_FALLBACK_MODEL.\n"}
+print "Gemini fallback: ",length($cfg->{gemini_fallback})?$cfg->{gemini_fallback}:'disabled (same-model transient retry)',"\n";
 my $client=Mediabot::AI::Client->new(conf=>$conf,config_overrides=>\%overrides);
 for my $provider (length($only)?($only):@{$cfg->{providers}}) {
     my $model=$cfg->{models}{$provider};
@@ -90,7 +93,7 @@ for my $provider (length($only)?($only):@{$cfg->{providers}}) {
         system=>'Reply briefly.',messages=>[{role=>'user',content=>'Reply with OK.'}],
         max_output_tokens=>1024,timeout_seconds=>$cfg->{timeout}));
     if ($result->{ok}) {print "[OK] $provider live response received.",
-        $provider eq 'gemini'?' retries='.(0+($result->{transient_retries}//0)):'',"\n"}
+        $provider eq 'gemini'?' model='.clean($result->{model},120).' model_fallback='.(0+($result->{model_fallback}//0)).' retries='.(0+($result->{transient_retries}//0)):'',"\n"}
     else {
         my $code=clean($result->{error},80);$code='request_failed' unless $code =~ /^[a-z0-9_]+$/;
         my $status=0+($result->{status}//0);

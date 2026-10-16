@@ -361,6 +361,18 @@ sub _provider_plan {
         };
         return (undef, 'invalid_config') unless defined($api_url) && !$@;
 
+        my $recover = ($request->{purpose}//'') =~ /\Ameta_(?:draft|synthesis|synthesis_web|citation_repair|synthesis_passages|passage_repair|probe)\z/ ? 1:0;
+        my $fallback = $recover ? $self->_conf_string('gemini.FALLBACK_MODEL','') : '';
+        my $fallback_attempt;
+        if (length($fallback) && $fallback ne $model) {
+            return (undef,'invalid_config') unless $fallback =~ /\Agemini-[A-Za-z0-9._-]{1,110}\z/;
+            my $fallback_request = _copy_request_for_provider($adapted,'gemini',model=>$fallback);
+            my $fallback_payload = eval {Mediabot::AI::Provider::Gemini::build_payload(
+                $fallback_request,{thinking_level=>$thinking_level})};
+            my $fallback_url = eval {Mediabot::AI::Provider::Gemini::build_url($base_url,$fallback)};
+            return (undef,'provider_build_failed') unless defined($fallback_payload) && defined($fallback_url) && !$@;
+            $fallback_attempt={model=>$fallback,payload=>$fallback_payload,api_url=>$fallback_url};
+        }
         return ({
             provider => 'gemini',
             attempts => [{
@@ -369,7 +381,8 @@ sub _provider_plan {
                 timeout => 0 + $timeout,
                 headers => $headers,
                 payload => $payload,
-                transient_retry => ($request->{purpose}//'') =~ /\Ameta_(?:draft|synthesis|synthesis_web|citation_repair|synthesis_passages|passage_repair|probe)\z/ ? 1:0,
+                transient_retry => $recover,
+                ($fallback_attempt ? (transient_fallback=>$fallback_attempt) : ()),
             }],
         }, undef);
     }
@@ -442,17 +455,18 @@ sub _attempt {
 
     my $retry=$provider eq 'gemini' && $attempt->{transient_retry};
     my $deadline=Time::HiRes::time()+$attempt->{timeout};
-    my ($res,$body,$first_category);my $retries=0;
+    my ($res,$body,$first_category);my $retries=0;my $active=$attempt;
     for my $turn (0..($retry?1:0)) {
         my $remaining=$deadline-Time::HiRes::time();
         last if $turn && $remaining<0.2;
         my $timeout=$retry ? ($turn?$remaining:$remaining/2):$attempt->{timeout};
         $retries=$turn;
+        $active={%$attempt,%{$attempt->{transient_fallback}}} if $turn && $attempt->{transient_fallback};
         $res = Mediabot::AI::Transport::post_json(
-        api_url      => $attempt->{api_url},
+        api_url      => $active->{api_url},
         timeout      => $timeout,
-        headers      => $attempt->{headers},
-        payload      => $attempt->{payload},
+        headers      => $active->{headers},
+        payload      => $active->{payload},
         http_factory => $http_factory,
     );
         $body = Mediabot::AI::Transport::decode_content($res);
@@ -463,10 +477,13 @@ sub _attempt {
         $first_category=$category;
         # This runs in the provider worker (or the explicit CLI probe), never
         # the IRC loop. Both attempts and the short backoff share one budget.
-        last if $deadline-Time::HiRes::time()<0.45;
-        Time::HiRes::sleep(0.25);
+        my $delay=0.75 + rand(0.25);
+        last if $deadline-Time::HiRes::time()<$delay+0.2;
+        Time::HiRes::sleep($delay);
     }
     $res->{transient_retries}=$retries;
+    $res->{effective_model}=$active->{model};
+    $res->{model_fallback}=($active ne $attempt)?1:0;
     $res->{first_failure_category}=$first_category if defined($first_category);
     my $answer;
     if ($res->{success}) {
@@ -507,6 +524,7 @@ sub _failure_result {
         $result->{failure_category}=Mediabot::AI::Provider::Gemini::failure_category(
             $result->{status},$args{error_type},$args{error_code},$result->{reason},$args{failure_body});
         $result->{transient_retries}=0+($res->{transient_retries}//0);
+        $result->{first_failure_category}=$res->{first_failure_category}//'none';
     }
 
     return $result;
@@ -533,17 +551,20 @@ sub _run_plan {
                 $provider, $attempt, $http_factory
             );
 
+            push @attempted, "$provider:$res->{effective_model}"
+                if $res->{model_fallback};
             if ($res->{success} && defined($answer) && length($answer)) {
                 return {
                     ok                => 1,
                     provider          => $provider,
-                    model             => $attempt->{model},
+                    model             => $res->{effective_model}//$attempt->{model},
                     answer            => $answer,
                     status            => 0 + ($res->{status} // 0),
                     provider_fallback => $provider_index ? 1 : 0,
-                    model_fallback    => $attempt_index ? 1 : 0,
+                    model_fallback    => ($attempt_index || $res->{model_fallback}) ? 1 : 0,
                     attempted         => [@attempted],
-                    ($provider eq 'gemini' ? (transient_retries=>0+($res->{transient_retries}//0)):()),
+                    ($provider eq 'gemini' ? (transient_retries=>0+($res->{transient_retries}//0),
+                        first_failure_category=>$res->{first_failure_category}//'none'):()),
                     ($provider eq 'openai' && @{
                         Mediabot::AI::Provider::OpenAI::extract_sources($body)
                     } ? (sources => Mediabot::AI::Provider::OpenAI::extract_sources($body)) : ()),
@@ -567,11 +588,11 @@ sub _run_plan {
 
             $last_failure = _failure_result(
                 provider          => $provider,
-                model             => $attempt->{model},
+                model             => $res->{effective_model}//$attempt->{model},
                 error             => $error,
                 response          => $res,
                 provider_fallback => $provider_index,
-                model_fallback    => $attempt_index,
+                model_fallback    => $attempt_index || $res->{model_fallback},
                 attempted         => [@attempted],
                 error_type        => $error_type,
                 error_code        => $error_code,

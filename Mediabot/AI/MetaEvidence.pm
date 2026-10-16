@@ -7,7 +7,7 @@ use POSIX qw(strftime);
 use Time::Local qw(timegm);
 use Unicode::Normalize qw(NFC);
 use Date::Parse qw(str2time);
-use Mediabot::AI::MetaPolicy qw(clean safe_url research_kind);
+use Mediabot::AI::MetaPolicy qw(clean safe_url research_kind is_followup);
 our @EXPORT_OK=qw(research_plan select_sources select_passages validate_support);
 
 sub _date {
@@ -56,12 +56,13 @@ sub research_plan {
             last;
         }
     }
-    my $fallback=clean((length($context)?"$context — ":'').$prompt,500);
+    my $followup=is_followup($prompt);
+    my $fallback=clean(($followup && length($context)?"$context — ":'').$prompt,500);
     my $kind=research_kind($prompt);
     # Resolve short follow-ups from the previous user question only. Assistant
     # claims and model-proposed identifiers cannot replace the user's target.
     my $target=$prompt;
-    if ($kind eq 'general' && length($prompt)<120 && $prompt =~ /(?:\A(?:et|and|what about|qu.en est|pour|under|on)\b|\b(?:celui|celle|ceux|celles|leurs|those|these|its|them)\b)/i) {
+    if ($followup && length($prompt)<160 && length($context)) {
         $target="$context $prompt";$kind=research_kind($target);
     }
     my %ids;my @ids;
@@ -107,7 +108,7 @@ sub research_plan {
     @specific=grep {$configured{$_}} @specific;
     @specific=grep {$configured{$_}} qw(cve.org nvd.nist.gov cisa.gov cert.ssi.gouv.fr) if $kind eq 'cve';
     return {query=>$query,alternate_query=>$alternate,as_of=>$date,end_date=>$end,
-        kind=>$kind,identifiers=>\@ids,domain_mode=>$kind eq 'general'?'restrict':'prefer',
+        kind=>$kind,identifiers=>\@ids,domain_mode=>'prefer',
         (defined($start)?(start_date=>$start):()),domains=>@specific?\@specific:\@domains};
 }
 sub select_sources {

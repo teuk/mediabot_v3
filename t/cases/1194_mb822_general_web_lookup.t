@@ -14,7 +14,7 @@ for my $prompt ('quel est le détail de CVE-2024-99999 ?', 'What does CVE-2024-9
     'cherche sur le web la documentation officielle') {
     ok(wants_web($prompt),"general lookup requires evidence: $prompt");
 }
-for my $prompt ('quelle est la masse du proton ?', 'what is two plus two?', 'write a short poem') {
+for my $prompt ('merci !', 'quel est mon mot repère ?', 'write a short poem') {
     ok(!wants_web($prompt),'stable or creative question does not force research');
 }
 is(research_kind('quel soft gratuit pour assembler des PDF ?'),'software','software selection has an explicit profile');

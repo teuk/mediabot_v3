@@ -121,23 +121,31 @@ is downloaded, installed or executed by this consultation feature.
 All Search calls explicitly use `topic=general`. Technical/reference/software
 lookups use Tavily `include_domains_mode=prefer` on the first attempt so an
 operator's preferred domains do not exclude other projects or vendor advisories.
-An ordinary general/current question retains the existing restricted-first,
-then-broader policy. No arbitrary 30-day lower bound applies to a CVE reference
+General/current questions now use the same soft preference: no first search
+is confined to institutional/news domains. A project, museum, tool, transport
+operator or other relevant site can be returned immediately. No arbitrary 30-day lower bound applies to a CVE reference
 or project licence page; explicit recent/publication-date requests retain their
 date filters. Older or undated documentation can therefore remain useful.
 All existing passage, citation, shorturl, byte and pacing checks still apply.
 
-`WEB_MODE=auto` starts research for current wording or when a contributor asks
-for external verification. Contributors propose a standalone search query,
-resolving follow-up references from the history. Stable questions can avoid a
-web call. Detection is heuristic; verify it during live acceptance.
+`WEB_MODE=auto` starts research for natural factual questions, current wording
+or when a contributor asks for external verification. The requester does not
+need to say "Google", "recent" or "search". Questions beginning with who, what,
+where, how, why, which and their French equivalents can use the general web.
+Contributors propose a standalone search query, resolving follow-up references
+from the history. Greetings, remembered user keywords and creative/translation
+requests do not force a web call. A factual reference question may research even a stable fact;
+there is no training-cutoff test. Detection is heuristic; verify it during
+live acceptance.
 
 Tavily Search first prefers `PREFERRED_DOMAINS`, then can broaden the search.
 MB821 chooses contributor queries in configured order, independent of callback
 arrival order. Short follow-up fallback queries retain the previous user subject,
 excluding speaker labels and previous assistant claims. Subject-specific official
 sites (e.g. ANSSI) are preferred only if already in the operator's domain list.
-If restricted results are stale or irrelevant, one broader attempt uses the next
+An independent new question does not inherit the previous user topic in its
+fallback query. Genuine referential follow-ups retain that subject. If fewer
+than two selected pages overlap the query, one broader attempt uses the next
 contributor query. At most two searches and one extraction batch are made, with
 up to three public HTTP(S) sources; this is not an open-ended research loop.
 
@@ -309,6 +317,7 @@ The source package never rewrites a private configuration.
 | `OPENAI_MODEL` | `gpt-6.1-sol` | OpenAI contributor/synthesis model. The new route uses `/v1/responses`, low reasoning for GPT-5/6 and no unsupported sampling fields. |
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | Claude contributor/synthesis model; low effort for Claude 5, `between_tools` for Sonnet 5.5. Earlier adapters keep their sampling contract. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini contributor/synthesis model; LOW thinking for supported models. |
+| `GEMINI_FALLBACK_MODEL` | empty | Optional explicitly validated Gemini text model for the existing second transient attempt; never an extra third call. |
 | `SYNTHESIZER` | `openai` | Preferred synthesis provider; existing automatic provider fallback remains available. |
 | `TIMEOUT` | `25` | `5..45` seconds per HTTP attempt; existing worker deadline adds three seconds. |
 | `MAX_TOKENS` | `2048` | `512..8192` output-token budget per AI request, including reasoning where applicable. |
@@ -350,8 +359,11 @@ perl tools/meta_ai_check.pl --conf mediabot.conf --provider gemini --live
 ```
 
 `--live` performs a small paid test. A meta/probe Gemini request can retry once
-after a 0.25-second delay for an overload/server failure or recognized connection/
-timeout failure. Both attempts share the original request timeout; the first
+after a 0.75–1-second jittered delay for an overload/server failure or recognized connection/
+timeout failure. If private `[meta_ai] GEMINI_FALLBACK_MODEL` names a different, validated Gemini
+text model, the second attempt uses it. Empty means retry the same model. This
+is a model change within Google, never a silent switch to another company.
+Both attempts share the original request timeout; the first
 gets half the available budget, the second gets only the remainder. Normal IRC
 execution stays in the existing asynchronous provider worker, with the same
 worker deadline. There is no retry on access, quota, bad model/request, DNS/TLS,
@@ -366,6 +378,18 @@ and does not prove that generation, quota or billing works for a listed model:
 perl tools/meta_ai_check.pl --conf mediabot.conf --live --list-gemini-models
 perl tools/meta_ai_check.pl --conf mediabot.conf --provider gemini --model MODEL_ID --live
 ```
+
+The `--model` override applies only to that probe and disables fallback so
+that success cannot conceal failure of the model being tested. The offline
+check prints the configured fallback. A successful live check and runtime
+provider metadata report the effective model, `model_fallback`, retry count and
+original transient category. Logs omit prompts, answers, credentials and raw
+error messages. A persistent HTTP 503 still means an upstream availability
+failure; this change does not guarantee three successful contributors.
+
+Meta JSON purposes request `application/json` from Gemini. Deprecated sampling
+parameters are omitted for Gemini 3.6+ and newer generations; older model
+temperature contracts remain unchanged.
 
 The model override applies only to that probe. Known Gemini 2.5 models use their
 supported `thinkingBudget` contract: LOW is 0 for Flash/Flash-Lite, 128 for Pro;
@@ -478,3 +502,26 @@ instance's model, nor of its retirement in that particular table.
 - [Gemini models](https://ai.google.dev/gemini-api/docs/models)
 - [Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search)
 - [Tavily Extract](https://docs.tavily.com/documentation/api-reference/endpoint/extract)
+
+## General-question acceptance (MB825)
+
+Use varied subjects on an enabled channel, for example:
+
+- `mediabot: où trouver les horaires du musée des Confluences ?`
+- `mediabot: quel outil gratuit pour découper une vidéo sous Linux ?`
+- `mediabot: what is the difference between an e-reader and a tablet?`
+- `mediabot: à quoi sert Home Assistant ?`
+- `mediabot: et sous Windows ?` after the software question.
+
+Check that the answer addresses the actual task, sources support it, and
+shorturls/pacing remain compact. A museum page need not be a recent article.
+The goal is a sourced answer to general factual questions, not a guarantee
+that every result is complete, that opening hours are current, or that an
+accepted passage proves every generated claim. Validate those qualities live.
+Command help and protected channel state still use MB820 local authorization;
+web research never executes bot commands or grants rights.
+
+Gemini references: [troubleshooting and retry policy](https://ai.google.dev/gemini-api/docs/troubleshooting),
+[advertised models](https://ai.google.dev/api/models). Configure a fallback only
+after its explicit live probe succeeds. Source deployment changes no private
+provider model, key, channel allowlist or enabled flag.

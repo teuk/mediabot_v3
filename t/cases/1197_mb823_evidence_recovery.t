@@ -118,7 +118,7 @@ my $runtime=Mediabot::AI::MetaRuntime->new(bot=>{logger=>$logger});
 my $private='PRIVATE_METADATA_MUST_NOT_LEAK';
 $runtime->_log_event({kind=>'provider',provider=>$private,outcome=>$private,status=>"503\n$private",
     error=>$private,failure_category=>$private,transient_retries=>99,answer=>$private});
-is($logger->{lines}[-1],'META_AI provider=unknown outcome=unknown status=0 error=unknown category=unknown retries=0',
+is($logger->{lines}[-1],'META_AI provider=unknown outcome=unknown status=0 error=unknown category=unknown retries=0 model=unknown model_fallback=0 recovery_from=none',
     'untrusted result metadata is allowlisted before logging');
 $runtime->_log_event({kind=>'evidence',reason=>$private,action=>$private,quote=>$private});
 is($logger->{lines}[-1],'META_AI evidence=unknown action=unknown','evidence event cannot smuggle private data');

@@ -4,7 +4,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::AI qw(normalize_provider);
-our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind parse_object);
+our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind is_followup parse_object);
 use JSON::PP ();
 
 sub fold { my $s = lc($_[0] // ''); $s =~ tr/[]\\^/{}|~/; return $s }
@@ -32,18 +32,36 @@ sub parse_object {
     my $obj = eval { JSON::PP->new->decode($text) };
     return ref($obj) eq 'HASH' ? $obj : undef;
 }
+sub is_followup {
+    my $s=lc clean($_[0],500);
+    return $s =~ /(?:\A(?:et\b|and\b|what about\b|qu.en est|pour (?:celui|celle|eux)|under\b)|\b(?:celui|celle|ceux|celles|leurs|those|these|its|them|ça|cela)\b)/ ? 1:0;
+}
+sub _conversation_only {
+    my ($s)=@_;
+    return 1 if $s =~ /\A(?:salut|bonjour|bonsoir|hello|hi|merci|thanks|thank you|ça va|comment vas.tu|how are you)\s*[!?.,]*\z/;
+    return 1 if $s =~ /(?:\b(?:mon|ma|mes|my|our)\s+(?:mot|code|repère|repere|surnom|nom|préférence|preference|word|keyword|nickname|name)\b|\b(?:je viens de dire|t.ai dit|did i (?:say|tell)|i just (?:said|told)|remember my)\b)/;
+    return 1 if $s =~ /\A(?:écris|ecris|rédige|redige|invente|raconte|traduis|traduire|corrige|reformule|résume|resume|write|compose|invent|translate|rewrite|summari[sz]e)\b/;
+    return 0;
+}
 sub research_kind {
     my $s=lc clean($_[0],2000);
+    return 'general' if _conversation_only($s);
     return 'cve' if $s =~ /\bcve[- ]20\d{2}[- ]\d{4,10}\b/;
     return 'software' if $s =~ /(?:logiciel|\bsoft\b|software|\bapp(?:lication)?s?\b|\boutil|\btools?\b|programme|alternative)/
         && $s =~ /(?:gratuit|free|open.?source|libre|recommand|recommend|conseill|conseil|meilleur|\bbest\b|alternativ|quel|which|what|choisir|choos)/;
     return 'documentation' if $s =~ /(?:document(?:ation)?|\bapi\b|\bconfigur\w*|\binstall\w*)/
         && $s =~ /(?:comment|how|syntaxe|syntax|param[eè]tre|parameter|option|officiel|official|vérif|verif|check|cherch|search|\bfind\b)/;
     return 'lookup' if $s =~ /(?:sur (?:le )?(?:web|net|internet)|\b(?:google|recherche web|web search)\b|\b(?:cherche|recherche|vérifie|verifie|search|look up|lookup)\b)/;
+    # A factual question may be timeless and still need a search. Do not make
+    # users add 'recent', a CVE number or an explicit search command.
+    return 'lookup' if $s =~ /\A(?:à quoi|a quoi|qui|que|quoi|quel(?:le)?s?|où|ou se|comment|pourquoi|combien|quand|qu.est.ce|est.ce que|what|who|where|which|how|why|when|can you (?:tell|find|explain|recommend)|peux.tu (?:me )?(?:dire|trouver|expliquer|conseiller))\b/;
+    return 'lookup' if $s =~ /\A(?:donne.moi|explique|décris|decris|détaille|detaille|tell me|explain|describe|find me|recommend)\b/;
+    return 'lookup' if $s =~ m{https?://}i;
     return 'general';
 }
 sub wants_web {
     my ($s) = @_;
+    return 0 if _conversation_only(lc clean($s,2000));
     return 1 if research_kind($s) ne 'general';
     return clean($s) =~ /(?:aujourd.hui|actuel\w*|récent\w*|recent\w*|derni[eè]r\w*|maintenant|cette semaine|en ce moment|today|currently|current|latest|this week|now|prix|price|météo|weather|président|president|premier ministre|prime minister|ceo|horaire|schedule|version|résultat|result|202[6-9]|\b20[3-9]\d\b)/i ? 1 : 0;
 }
@@ -67,6 +85,7 @@ sub settings {
     return {
         enabled => $int->('ENABLED',0,0,1), channels => \%channels,
         providers => \@providers, min_providers => $int->('MIN_PROVIDERS',2,1,3),
+        gemini_fallback => $get->('GEMINI_FALLBACK_MODEL',''),
         models => { openai=>$get->('OPENAI_MODEL','gpt-6.1-sol'),
             anthropic=>$get->('CLAUDE_MODEL','claude-sonnet-5-5'),
             gemini=>$get->('GEMINI_MODEL','gemini-3.8-flash') },

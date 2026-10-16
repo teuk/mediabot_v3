@@ -7,7 +7,7 @@ use IPC::Open3;
 use Symbol qw(gensym);
 my $tmp=tempdir(CLEANUP=>1);my $conf="$tmp/bot.conf";
 open my $fh,'>',$conf or die $!;
-print {$fh} "[meta_ai]\nPROVIDERS=openai anthropic\n[openai]\nAPI_KEY=YOUR_OPENAI_TEST_KEY\n[anthropic]\nAPI_KEY=YOUR_CLAUDE_TEST_KEY\n[gemini]\nAPI_KEY=YOUR_GEMINI_TEST_KEY\n";
+print {$fh} "[meta_ai]\nPROVIDERS=openai anthropic\nGEMINI_FALLBACK_MODEL=gemini-test-spare\n[openai]\nAPI_KEY=YOUR_OPENAI_TEST_KEY\n[anthropic]\nAPI_KEY=YOUR_CLAUDE_TEST_KEY\n[gemini]\nAPI_KEY=YOUR_GEMINI_TEST_KEY\n";
 close $fh;chmod 0600,$conf;
 open $fh,'>',"$tmp/MB822ProbeBootstrap.pm" or die $!;
 print {$fh} <<'MODULE';
@@ -25,7 +25,9 @@ no warnings 'redefine';
         error_type=>'UNTRUSTED_PRIVATE_TOKEN',error_message=>'DO_NOT_PRINT_BODY',reason=>'DO_NOT_PRINT_REASON'}}
     die 'model override not propagated' if $ENV{MB822_OVERRIDE}
         && $self->{config_overrides}{'gemini.MODEL'} ne 'gemini-2.5-flash';
-    return {ok=>1,status=>200,answer=>'DO_NOT_PRINT_ANSWER',transient_retries=>1};
+    die 'model probe used a fallback' if $ENV{MB822_OVERRIDE}
+        && length($self->{config_overrides}{'gemini.FALLBACK_MODEL'}//'');
+    return {ok=>1,status=>200,model=>$self->{config_overrides}{'gemini.MODEL'},answer=>'DO_NOT_PRINT_ANSWER',transient_retries=>1};
 };
 *HTTP::Tiny::get=sub {
     my ($self,$url,$opts)=@_;
@@ -55,7 +57,7 @@ like($text,qr/\[gemini\] model=/,'explicit check includes Gemini');
 unlike($text,qr/\[openai\] model=|\[anthropic\] model=/,'other providers are not retried');
 ($exit,$text)=check('--provider','gemini','--live');
 is($exit,0,'one-provider live check can succeed');
-like($text,qr/live response received[.] retries=1/,'recovery is visible without HTTP bodies');
+like($text,qr/live response received[.].*retries=1/,'recovery is visible without HTTP bodies');
 {local $ENV{MB822_OVERRIDE}=1;($exit,$text)=check('--provider','gemini','--model','gemini-2.5-flash','--live')}
 is($exit,0,'explicit model override reaches only the in-memory probe client');
 like($text,qr/\[gemini\] model=gemini-2.5-flash/,'chosen probe model is reported');

@@ -74,7 +74,7 @@ sub build_payload {
         maxOutputTokens => int($request->{max_output_tokens}),
     );
     $generation{temperature} = 0 + $request->{temperature}
-        if exists $request->{temperature};
+        if exists($request->{temperature}) && $request->{model} !~ /\Agemini-(?:[4-9]|[1-9][0-9]|3[.](?:[6-9]|[1-9][0-9]))(?:[.-]|$)/i;
 
     if (exists $options->{thinking_level}) {
         my $level = uc _require_scalar(
@@ -90,6 +90,9 @@ sub build_payload {
             $generation{thinkingConfig} = { thinkingLevel => $level };
         }
     }
+
+    $generation{responseMimeType} = 'application/json'
+        if ($request->{purpose}//'') =~ /\Ameta_(?:draft|synthesis|synthesis_web|citation_repair|synthesis_passages|passage_repair)\z/;
 
     my %payload = (
         contents         => \@contents,

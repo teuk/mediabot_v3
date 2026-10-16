@@ -21,7 +21,7 @@ my $conf=MB818ChatConf->new({'openai.API_KEY'=>'openai-configured','anthropic.AP
 my $cfg=settings($conf);
 ok(wants_web('qui est le président actuel ?'),'current office forces research');
 ok(wants_web('what is the latest release?'),'latest release forces research');
-ok(!wants_web('what is the mass of a proton?'),'stable wording does not blindly force research');
+ok(wants_web('what is the mass of a proton?'),'natural factual wording can request reference evidence without news keywords');
 for my $url ('http://127.0.0.1/x','https://localhost/x','https://foo.local/x',
              'https://user:pass@site.org/x',"https://site.org/x\nraw",'file:///etc/passwd') {
     ok(!defined(safe_url($url)),'non-public or non-web URL rejected');

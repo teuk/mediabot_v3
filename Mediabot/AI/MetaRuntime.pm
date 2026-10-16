@@ -173,8 +173,15 @@ sub _log_event {
                 ?$event->{failure_category}:'unknown';
         my $retries=defined($event->{transient_retries}) && !ref($event->{transient_retries})
             && $event->{transient_retries}=~/\A[01]\z/?$event->{transient_retries}:0;
+        my $model=defined($event->{model}) && !ref($event->{model})
+            && $event->{model}=~/\A[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\z/?$event->{model}:'unknown';
+        my $fallback=defined($event->{model_fallback}) && !ref($event->{model_fallback})
+            && $event->{model_fallback} eq '1'?1:0;
+        my $first=!ref($event->{first_failure_category})
+            && $categories{$event->{first_failure_category}//''}?$event->{first_failure_category}:'none';
         $line='META_AI provider='.$provider.' outcome='.$outcome.' status='.$status
-            .' error='.$error.' category='.$category.' retries='.$retries;
+            .' error='.$error.' category='.$category.' retries='.$retries
+            .' model='.$model.' model_fallback='.$fallback.' recovery_from='.$first;
     }
     elsif (($event->{kind}//'') eq 'evidence') {
         my %reasons=map {$_=>1} qw(missing invalid mismatch invalid_ids missing_citations too_many_citations
@@ -224,6 +231,7 @@ sub _ask {
     push @{$self->{rate}{$key}},$now;push @{$self->{rate}{__global__}},$now;
     my $signature=$self->_signature($cfg);$self->{jobs}{$key}=1;
     my %overrides=('openai.API_URL'=>'https://api.openai.com/v1/responses',
+        'gemini.FALLBACK_MODEL'=>$cfg->{gemini_fallback},
         'openai.WEB_SEARCH'=>1,'openai.FALLBACK_MODEL'=>'','gemini.THINKING_LEVEL'=>'LOW',
         map {($_.'.MODEL'=>$cfg->{models}{$_})} keys %{$cfg->{models}});
     my @order=($cfg->{synthesizer},grep {$_ ne $cfg->{synthesizer}} @providers);

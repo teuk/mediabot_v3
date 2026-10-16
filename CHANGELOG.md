@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB825 — General factual questions and explicit Gemini model recovery
+
+- Route natural French/English factual questions to general web research without
+  requiring news vocabulary, CVE identifiers or an explicit search command.
+- Use soft domain preferences for every research kind, keep independent questions
+  free of the previous topic, and broaden weak results within the two-search cap.
+- Retain conversation keyword recall, creative requests, MB820 authorization,
+  MB824 passage validation, private memory and paced shorturl presentation.
+- Allow an explicitly configured Gemini spare to use the existing second
+  transient attempt under the original deadline; report the actual model and
+  recovery category without exposing response content. Isolated `--model` probes
+  disable fallback. No model is selected or activated by deploying source.
+- Request JSON for Gemini meta output and omit deprecated sampling parameters
+  on Gemini 3.6+; keep legacy purposes and older sampling behavior.
+- Add varied non-news question and real client/model-recovery regression coverage.
+
 ### MB824 — select retrieved proof passages instead of regenerating quotes
 
 - Build a bounded source/content-bound catalogue of short retrieved passages.
