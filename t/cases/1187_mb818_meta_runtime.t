@@ -119,7 +119,7 @@ like($main,qr/MetaRuntime::note_rename/,'actual IRC nick event preserves observe
 
 ($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','latest update?');drafts($client,0,1);
 $client->{calls}[3]{done}->({ok=>0,error=>'http_error',status=>503});
-like($bot->{logger}{lines}[-1],qr/^\[WARN\] META_AI failed code=web_synthesis_failed$/,
+like($bot->{logger}{lines}[-1],qr/^\[WARN\] META_AI failed code=web_synthesis_failed contributors=3 degraded=0 web_attempted=1 citation_repair=0$/,
     'failed research synthesis leaves a bounded diagnostic code');
 like($notices[-1][1],qr/vérifier/,'research synthesis failure has a research-specific notice');
 is(scalar(@{history($dir)}),0,'failed research is not saved to conversation history');
@@ -134,4 +134,35 @@ like($bot->{logger}{lines}[-1],qr/^META_AI completed contributors=3 web=1 degrad
 is(scalar(@{history($dir)}),1,'only corrected delivered answer is committed to memory');
 unlike(join(' ',@{$bot->{logger}{lines}}),qr/Alice|Corrected sourced answer|example\.org/,
     'diagnostic metadata excludes identity, answer and source URLs');
+
+($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','latest update?');
+$client->{calls}[0]{done}->({ok=>1,status=>200,answer=>encode_json({answer=>'Draft',needs_web=>1})});
+$client->{calls}[1]{done}->({ok=>1,status=>200,answer=>encode_json({answer=>'Draft',needs_web=>1})});
+$client->{calls}[2]{done}->({ok=>0,status=>503,error=>'http_error',failure_category=>'service_unavailable',transient_retries=>1});
+like(join('\n',@{$bot->{logger}{lines}}),qr/META_AI provider=gemini outcome=api_failure status=503 error=http_error category=service_unavailable retries=1/,
+    'actual runtime names the unavailable contributor with bounded API metadata');
+my $bad=encode_json({answer=>'PRIVATE_UNGROUNDED_CLAIM',source_ids=>[1],basis=>'supported',
+    support=>[{source_id=>1,quote=>'A completely invented source passage.'}]});
+$client->{calls}[3]{done}->({ok=>1,provider=>'openai',answer=>$bad});
+is(scalar(@sent),0,'initial mismatched evidence cannot reach IRC');
+is(scalar(@{history($dir)}),0,'initial mismatched evidence cannot enter memory');
+is(scalar(keys %{$runtime->{jobs}}),1,'one correction retains the existing channel job');
+$client->{calls}[4]{done}->({ok=>1,provider=>'openai',answer=>$bad});
+is(scalar(@sent),0,'repeated mismatched evidence cannot reach IRC');
+is(scalar(@{history($dir)}),0,'repeated mismatched evidence cannot enter memory');
+is(scalar(keys %{$runtime->{jobs}}),0,'final evidence rejection releases the channel job');
+like($bot->{logger}{lines}[-1],qr/failed code=web_evidence_mismatch contributors=2 degraded=1 web_attempted=1 citation_repair=1$/,
+    'failure metadata retains successful contributors, degradation, web attempt and correction');
+like(join('\n',@{$bot->{logger}{lines}}),qr/META_AI evidence=mismatch action=retry.*META_AI evidence=mismatch action=rejected/s,
+    'first and final evidence rejection reasons are distinguishable');
+unlike(join(' ',@{$bot->{logger}{lines}},map {$_->[1]} @notices),qr/PRIVATE_UNGROUNDED_CLAIM|invented source passage|Alice|example\.org/,
+    'provider and evidence logs/notices contain no rejected content or identities');
+
+($bot,$client,$runtime,$dir)=fixture();ask($bot,'Alice','#test','latest update?');drafts($client,0,1);
+$client->{calls}[3]{done}->({ok=>1,provider=>'anthropic',answer=>$bad});
+final($client,4,'The corrected answer.',[1]);
+is(scalar(@sent),1,'validated regenerated answer starts normal paced delivery');
+$timers[0][1]->();
+is(scalar(@{history($dir)}),1,'only fully delivered regenerated answer enters memory');
+unlike(history($dir)->[0]{answer},qr/PRIVATE_UNGROUNDED_CLAIM/,'rejected first synthesis is not retained');
 done_testing;

@@ -151,6 +151,40 @@ sub _present_sources {
         });
     $complete->({}) unless $worker;
 }
+sub _log_event {
+    my ($self,$event)=@_;
+    return unless ref($event) eq 'HASH';
+    my $line;
+    if (($event->{kind}//'') eq 'provider') {
+        my $provider=defined($event->{provider}) && !ref($event->{provider})
+            && $event->{provider}=~/\A(?:openai|anthropic|gemini)\z/?$event->{provider}:'unknown';
+        my $outcome=defined($event->{outcome}) && !ref($event->{outcome})
+            && $event->{outcome}=~/\A(?:usable|empty_draft|api_failure)\z/?$event->{outcome}:'unknown';
+        my $status=defined($event->{status}) && !ref($event->{status})
+            && $event->{status}=~/\A[0-5]?\d{1,2}\z/?0+$event->{status}:0;
+        my %errors=map {$_=>1} qw(http_error parse_error not_configured invalid_config invalid_request
+            provider_build_failed provider_failed async_unavailable worker_failed worker_launch_failed);
+        my $error=$outcome eq 'usable' || $outcome eq 'empty_draft'?'none'
+            :!ref($event->{error}) && $errors{$event->{error}//''}?$event->{error}:'unknown';
+        my %categories=map {$_=>1} qw(quota access model request output_budget service_unavailable
+            server_error timeout tls dns connection transport empty_output);
+        my $category=$outcome eq 'usable' || $outcome eq 'empty_draft'?'none'
+            :!ref($event->{failure_category}) && $categories{$event->{failure_category}//''}
+                ?$event->{failure_category}:'unknown';
+        my $retries=defined($event->{transient_retries}) && !ref($event->{transient_retries})
+            && $event->{transient_retries}=~/\A[01]\z/?$event->{transient_retries}:0;
+        $line='META_AI provider='.$provider.' outcome='.$outcome.' status='.$status
+            .' error='.$error.' category='.$category.' retries='.$retries;
+    }
+    elsif (($event->{kind}//'') eq 'evidence') {
+        my %reasons=map {$_=>1} qw(missing invalid mismatch invalid_ids missing_citations too_many_citations);
+        my $reason=!ref($event->{reason}) && $reasons{$event->{reason}//''}?$event->{reason}:'unknown';
+        my $action=defined($event->{action}) && !ref($event->{action})
+            && $event->{action}=~/\A(?:retry|rejected)\z/?$event->{action}:'unknown';
+        $line='META_AI evidence='.$reason.' action='.$action;
+    }
+    eval {$self->{bot}{logger}->log(0,$line)} if defined $line;
+}
 sub _ask {
     my ($self,$message,$nick,$channel,$prompt,$cfg)=@_;
     my $bot=$self->{bot};my $lang=Mediabot::Helpers::channel_lang($bot,$channel);
@@ -209,7 +243,8 @@ sub _ask {
         return $worker?1:0;
     };
     my $engine=Mediabot::AI::MetaChat->new(conf=>$bot->{conf},settings=>$cfg,
-        client=>$client,web=>$web,web_start=>$web_start,clock=>$self->{clock});
+        client=>$client,web=>$web,web_start=>$web_start,clock=>$self->{clock},
+        on_event=>sub {$self->_log_event($_[0])});
     my $completed=0;
     my $done=sub {
         my ($result)=@_;return if $completed++;
@@ -221,7 +256,13 @@ sub _ask {
                 web_unavailable synthesis_failed web_synthesis_failed web_missing_citations unsupported_web_answer
                 web_missing_evidence web_evidence_mismatch);
             $error='failed' unless !ref($error) && $known{$error};
-            eval {$bot->{logger}->log(0,'[WARN] META_AI failed code='.$error)};
+            my $contributors=ref($result) eq 'HASH' && ref($result->{contributors}) eq 'ARRAY'
+                ? scalar(grep {!ref($_) && /\A(?:openai|anthropic|gemini)\z/} @{$result->{contributors}}):0;
+            my $line='[WARN] META_AI failed code='.$error.' contributors='.$contributors
+                .' degraded='.(ref($result) eq 'HASH' && $result->{degraded}?1:0)
+                .' web_attempted='.(ref($result) eq 'HASH' && $result->{web_attempted}?1:0)
+                .' citation_repair='.(ref($result) eq 'HASH' && $result->{citation_repair}?1:0);
+            eval {$bot->{logger}->log(0,$line)};
             $self->_notice($nick,$lang,$error =~ /web/ ? 'web':'failed');return;
         }
         my $sources=ref($result->{sources}) eq 'ARRAY'?$result->{sources}:[];

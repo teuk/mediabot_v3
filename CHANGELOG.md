@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB823 — bounded evidence regeneration and provider diagnostics
+
+- Withhold malformed or unmatched support passages and allow one complete
+  regeneration from the same synthesis provider and the same evidence. Check
+  the replacement with the unchanged validator; reject a second failure and
+  keep invented top-level source IDs as immediate failures. Normal valid
+  replies add no call; contributor/search requests are not repeated.
+- Log each contributor's usable/empty/API outcome with bounded provider,
+  HTTP status, error/category and Gemini retry count, without private content.
+  Separate malformed support from an unmatched quote in evidence events.
+- Retain contributor/degradation and web/correction attempt metadata on final
+  failures. Preserve private memory, paced delivery, local command rights,
+  source matching, shorturls and the existing Gemini models/retry budget.
+
 ### MB822 — general web lookups and bounded Gemini recovery
 
 - Research named CVEs, software choices, licence claims and technical

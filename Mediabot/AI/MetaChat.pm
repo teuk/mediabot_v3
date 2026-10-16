@@ -25,7 +25,12 @@ sub _dated_sources {
 sub new {
     my ($class,%args)=@_;
     return bless {client=>$args{client},conf=>$args{conf},settings=>$args{settings},
-        web=>$args{web},web_start=>$args{web_start},clock=>$args{clock}||sub {time}},$class;
+        web=>$args{web},web_start=>$args{web_start},on_event=>$args{on_event},
+        clock=>$args{clock}||sub {time}},$class;
+}
+sub _event {
+    my ($self,$event)=@_;
+    eval {$self->{on_event}->($event)} if ref($self->{on_event}) eq 'CODE';
 }
 sub _request {
     my ($self,$provider,$purpose,$system,$messages)=@_;
@@ -53,7 +58,17 @@ sub submit {
         'Never claim to have browsed. Your draft is not a verified source. Do not invent URLs or references.',
         'Return only JSON: {"answer":"brief draft, at most 900 characters","needs_web":true or false,"query":"standalone search query resolving references using the conversation"}.';
     my %pending=map {$_=>1} @providers;my @drafts;my @failures;my $launching=1;my $finished=0;
-    my $finish=sub {return if $finished++; $done->($_[0])};
+    my $web_attempted=0;my $repair_attempted=0;
+    my $finish=sub {
+        return if $finished++;
+        my %result=%{$_[0]};
+        $result{contributors}=[map {$_->{provider}} @drafts] unless exists $result{contributors};
+        $result{degraded}=@failures?1:0 unless exists $result{degraded};
+        $result{provider_failures}=[@failures];
+        $result{web_attempted}=$web_attempted;
+        $result{citation_repair}=$repair_attempted unless exists $result{citation_repair};
+        $done->(\%result);
+    };
     my $after=sub {
         return if $finished || $launching || keys %pending;
         unless (@drafts) {$finish->({ok=>0,error=>'all_providers_failed'});return}
@@ -67,36 +82,42 @@ sub submit {
             $finish->({ok=>0,error=>'web_disabled_for_current_question'});return;
         }
         if ($needs) {
+            $web_attempted=1;
             my $query=$plan->{query};
             my $web_completed=0;
             my $started=eval {$self->{web_start}->($query,sub {
                 my ($web)=@_;return if $web_completed++;
                 if (ref($web) eq 'HASH' && $web->{ok} && ref($web->{sources}) eq 'ARRAY' && @{$web->{sources}}) {
                     my $sources=_dated_sources($web->{sources},$date);
-                    if (@$sources) {$self->_synthesize(\%args,\@drafts,\@failures,$sources,$date,$finish)}
+                    if (@$sources) {$self->_synthesize(\%args,\@drafts,\@failures,$sources,$date,$finish,\$repair_attempted)}
                     else {$self->_native_web(\%args,\@drafts,\@failures,$date,$finish)}
                 }
                 else {$self->_native_web(\%args,\@drafts,\@failures,$date,$finish)}
             },$plan)};
             $self->_native_web(\%args,\@drafts,\@failures,$date,$finish) unless $started || $web_completed;
         }
-        else {$self->_synthesize(\%args,\@drafts,\@failures,[],$date,$finish)}
+        else {$self->_synthesize(\%args,\@drafts,\@failures,[],$date,$finish,\$repair_attempted)}
     };
     for my $provider (@providers) {
         my $request=$self->_request($provider,'meta_draft',$system,$args{messages});
         my $callback=sub {
             my ($result)=@_;return if $finished || !delete($pending{$provider});
+            my $outcome='api_failure';
             if (ref($result) eq 'HASH' && $result->{ok}) {
                 my $parsed=parse_object($result->{answer});
                 my $draft=clean_answer($parsed ? $parsed->{answer}:$result->{answer},900);
                 if (length $draft) {
+                    $outcome='usable';
                     push @drafts,{provider=>$provider,answer=>$draft,
                         needs_web=>$parsed && $parsed->{needs_web} ? 1:0,
                         query=>$parsed ? clean($parsed->{query},500):''};
                 }
-                else {push @failures,$provider}
+                else {$outcome='empty_draft';push @failures,$provider}
             }
             else {push @failures,$provider}
+            $self->_event({kind=>'provider',provider=>$provider,outcome=>$outcome,
+                map {($_=>ref($result) eq 'HASH'?$result->{$_}:undef)}
+                    qw(status error failure_category transient_retries)});
             $after->();
         };
         my $launched=eval {$self->{client}->submit($request,on_done=>$callback);1};
@@ -106,7 +127,7 @@ sub submit {
     return 1;
 }
 sub _synthesize {
-    my ($self,$args,$drafts,$failures,$sources,$date,$finish)=@_;
+    my ($self,$args,$drafts,$failures,$sources,$date,$finish,$repair_attempted)=@_;
     my $cfg=$self->{settings};
     my $source_text=JSON::PP->new->canonical->encode($sources);
     # Unverified factual drafts must not compete with retrieved evidence.
@@ -143,13 +164,17 @@ sub _synthesize {
         my ($provider,$repair,$reason)=@_;
         my $instructions=$system;
         if ($repair) {
+            $$repair_attempted=1;
             my $ids=join(', ',map {$_->{id}} @$sources);
-            $instructions.="\nCITATION CORRECTION: the preceding synthesis omitted its evidence IDs. "
+            $instructions.="\nEVIDENCE CORRECTION: the preceding synthesis failed evidence validation (".($reason//'missing')."). "
                 ."Return the complete JSON object with a nonempty source_ids array selected from [$ids]. "
-                .'Use the same evidence. If it does not establish an answer, say what remains uncertain and cite the evidence for that limitation. '
+                .'Rebuild the answer from the same supplied source text; the rejected answer is not evidence. '
+                .'Copy each support quote as one contiguous, verbatim 12-240 character passage from the text of its own source_id. '
+                .'Do not translate, paraphrase, change case or insert ellipses inside quotes. '
+                .'Revise or remove claims not established by those passages; do not merely attach an unrelated valid quote to an unchanged claim. '
+                .'If the evidence does not establish the requested detail, set basis=insufficient and cite an exact passage illustrating the limitation. '
                 .'Return at most two source_ids, a basis value and one verbatim 12-240 character support passage per selected source. '
                 .'Do not invent facts, references or predictions.';
-            $instructions.=' Evidence format correction: '.($reason//'missing citations').'.';
         }
         my $purpose=$repair?'meta_citation_repair':@$sources?'meta_synthesis_web':'meta_synthesis';
         my $request=$self->_request($provider,$purpose,$instructions,$args->{messages});
@@ -174,22 +199,27 @@ sub _synthesize {
                 next if $seen{$id}++;
                 push @cited,$valid{$id};
             }
-            if (@$sources && $invalid) {$launch=undef;$finish->({ok=>0,error=>'unsupported_web_answer'});return}
-            my $support_error=@$sources && @cited && @cited<=2?validate_support($parsed,\@cited):undef;
-            if (@$sources && defined($support_error) && $support_error ne 'missing') {
-                $launch=undef;$finish->({ok=>0,error=>'web_evidence_mismatch'});return;
+            if (@$sources && $invalid) {
+                $self->_event({kind=>'evidence',reason=>'invalid_ids',action=>'rejected'});
+                $launch=undef;$finish->({ok=>0,error=>'unsupported_web_answer',evidence_error=>'invalid_ids'});return;
             }
+            my $support_error=@$sources && @cited && @cited<=2?validate_support($parsed,\@cited):undef;
             if (@$sources && (!@cited || @cited>2 || defined($support_error))) {
+                my $reason=!@cited?'missing_citations':@cited>2?'too_many_citations':$support_error;
+                $self->_event({kind=>'evidence',reason=>$reason,action=>$repair?'rejected':'retry'});
                 if (!$repair) {
-                    # One format correction on the successful synthesis provider.
+                    # One complete regeneration on the successful synthesis provider.
                     # Do not rerun contributors, search, or turn absent IDs into
-                    # fabricated citations. A second omission remains a failure.
+                    # fabricated citations. The identical validator checks the new
+                    # response; a second failure remains final.
                     my $preferred=normalize_provider($result->{provider}//$cfg->{synthesizer});
                     $preferred=$cfg->{synthesizer} unless defined($preferred) && $preferred ne 'auto'
                         && provider_configured($self->{conf},$preferred);
-                    $launch->($preferred,1,@cited?'missing evidence or too many references':'missing citations');return;
+                    $launch->($preferred,1,$reason);return;
                 }
-                $launch=undef;$finish->({ok=>0,error=>@cited?'web_missing_evidence':'web_missing_citations'});return;
+                my $error=defined($support_error) && $support_error ne 'missing'
+                    ? 'web_evidence_mismatch':@cited?'web_missing_evidence':'web_missing_citations';
+                $launch=undef;$finish->({ok=>0,error=>$error,evidence_error=>$reason});return;
             }
             if (@$sources && $parsed->{basis} eq 'insufficient') {
                 $answer=($args->{language}//'en') eq 'fr'

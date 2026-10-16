@@ -130,8 +130,17 @@ is(scalar(@{$client->{calls}}),3,'normal grounded response adds no new AI reques
 for my $bad ({source_ids=>[99]}, {support=>[{source_id=>1,quote=>'A completely invented supporting passage.'}]}, {basis=>'certain'}) {
     ($client,$out,$queries)=fixture821();
     $client->{calls}[2]{done}->({ok=>1,provider=>'openai',answer=>encode_json(grounded821('Claim',%$bad))});
-    ok(!$out->[0]{ok},'invalid source/quote/basis is withheld, never silently turned into a sourced success');
-    is(scalar(@{$client->{calls}}),3,'invented or malformed evidence gets no correction loop');
+    if (exists $bad->{source_ids}) {
+        ok(!$out->[0]{ok},'invented source identity is rejected immediately');
+        is(scalar(@{$client->{calls}}),3,'invented source identity gets no correction');
+    }
+    else {
+        is(scalar(@$out),0,'bad passage/basis is withheld while one regeneration is pending');
+        is(scalar(@{$client->{calls}}),4,'one bounded regeneration can correct passage or basis');
+        $client->{calls}[3]{done}->({ok=>1,provider=>'openai',answer=>encode_json(grounded821('Claim',%$bad))});
+        ok(!$out->[0]{ok},'a second invalid passage/basis is still rejected by the same validator');
+        is(scalar(@{$client->{calls}}),4,'bad evidence cannot start an unbounded correction loop');
+    }
 }
 ($client,$out,$queries)=fixture821();
 $client->{calls}[2]{done}->({ok=>1,provider=>'anthropic',answer=>encode_json({answer=>'Claim',source_ids=>[1]})});

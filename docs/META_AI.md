@@ -167,7 +167,7 @@ action in this feature. URL checks reject credentials, literal private IPs,
 single-label/local hosts and non-web schemes. Page retrieval is delegated to
 Tavily; the bot does not fetch arbitrary model-generated destinations itself.
 
-## Researched reply format and missing citations
+## Researched reply format and evidence correction
 
 A researched synthesis must return a JSON answer with one or two `source_ids`
 pointing to the evidence supplied for that question, a `basis` value
@@ -185,14 +185,18 @@ The old May 2024 GPT-4o snapshot and fine-tuned model IDs retain the prompt-only
 contract. Stable replies, native web searches and legacy commands keep their
 existing formats. See the official [Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
 
-If a successful, parsed synthesis omits references/evidence fields or selects
-more citations than the two-link presentation can show, the bot requests **one**
-format correction from that same provider using the original conversation,
-drafts and source extracts. It never attaches arbitrary fetched links to an
-uncited answer and does not repeat contributors or Tavily research. Invented
-IDs, invented supporting text and malformed evidence fields are rejected
-immediately. A second omission,
-provider failure, empty answer or malformed synthesis remains a failed reply;
+If a successful, parsed synthesis omits references/evidence fields, selects
+more citations than the two-link presentation can show, or returns a malformed
+or unmatched supporting passage, the bot withholds it and requests **one**
+complete regeneration from that same provider using the original conversation
+and the same source extracts. The new prompt requires rebuilding the claims
+from exact contiguous source passages, without translating, paraphrasing or
+inserting ellipses in quotes. The rejected answer is not sent back as evidence.
+The identical validator must accept the new result; no quote is silently fixed,
+no arbitrary links are attached, and contributors/search are not repeated.
+Invented or malformed top-level source IDs are still rejected immediately.
+A second bad passage, invalid evidence field, omission, provider failure,
+empty answer or malformed synthesis remains a failed reply;
 no uncited current answer enters IRC or conversation memory. `partial` puts a
 qualification at the start; `insufficient` replaces the draft with a localized
 statement that the requested detail is not established, while retaining the
@@ -210,6 +214,32 @@ whether one citation correction was used, matched anchor count (`anchors=0` for
 stable/native replies) and accepted shorturl count. Failure codes distinguish
 `web_missing_citations`, `unsupported_web_answer`, `web_missing_evidence`,
 `web_evidence_mismatch` and `web_synthesis_failed`.
+Failure metadata retains contributor count and degradation even when the final
+answer is rejected; `web_attempted=1` records research without falsely claiming
+the rejected answer was verified. `citation_repair=1` records a correction attempt
+even if it ultimately fails. The generic `web_evidence_mismatch` error covers
+both malformed support and an unmatched quote; the evidence event distinguishes them.
+
+Per-question events identify each configured contributor independently:
+
+```text
+META_AI provider=gemini outcome=api_failure status=503 error=http_error category=service_unavailable retries=1
+META_AI evidence=mismatch action=retry
+META_AI evidence=mismatch action=rejected
+```
+
+`outcome` distinguishes `usable`, `empty_draft` and `api_failure`. Provider,
+outcome, error and category are closed allowlists; HTTP status and retry count
+are bounded. Evidence reasons distinguish `missing`, `invalid`, `mismatch`,
+`invalid_ids`, `missing_citations` and `too_many_citations`. A retry event is a
+single additional synthesis request, not a new Gemini/provider retry policy.
+View the metadata on nbot with:
+
+```bash
+sudo -n journalctl -u mediabot@nbot.service --since '10 minutes ago' --no-pager -o cat |
+  rg 'META_AI (provider=|evidence=|completed|failed)'
+```
+
 No prompt, answer, source content, nickname, hostmask or API key is logged.
 
 ## Configuration reference
@@ -368,7 +398,7 @@ activation and memory tickets are revalidated before each line.
 
 Three contributors plus a normal synthesis mean four paid AI requests per
 question, with search/extraction or a native web call for researched questions.
-Fallbacks can add attempts; a missing-citation correction can add one synthesis call. Question limits bound request volume, not a currency
+Fallbacks can add attempts; an evidence correction can add one synthesis call. Question limits bound request volume, not a currency
 budget; set spending limits in provider accounts too. One failed contributor
 can leave a useful answer; the bounded contributor count and degraded flag are
 logged without prompts, responses, hostmasks or keys. If all contributors fail,
