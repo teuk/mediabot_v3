@@ -1,0 +1,294 @@
+# IRC network statistics and public dashboards (MB827)
+
+Mediabot can record the aggregate counts announced by `/LUSERS` and display
+an interactive dashboard on a web server. The bot never needs IRC operator
+privileges. It exports no nicknames, channel names, hostmasks or message content.
+
+## What is measured
+
+| IRC numeric | Dashboard field | Meaning |
+| --- | --- | --- |
+| 251 | `users` | Sum of the explicitly announced visible and invisible users |
+| 251 | `visible_users`, `invisible_users` | The two actual counts; never inferred from a different total |
+| 251 | `servers` | Network server count as announced by the answering server |
+| 252 | `operators` | IRC operators reported online, not channel operators |
+| 253 | `unknown_connections` | Unknown connections on the answering server |
+| 254 | `channels` | Channels formed, as reported by the network |
+| 255 | `local_users`, `local_servers` | Clients and server links on the answering server |
+| 265 | `local_users`, `local_users_max` | Current and maximum local clients; explicit 265 takes precedence |
+| 266 | `global_users`, `users_max` | Current and maximum global users announced by the server |
+
+A network may hide or restrict some counters. Omitted numerics are **unknown**,
+not zero; a numeric explicitly containing zero is stored as zero. The service
+cannot reveal hidden counts the IRC server does not supply. If 251's visible +
+invisible sum differs from 266, both observations are retained with their scope.
+If no supported 251 is available, a valid 266 can supply the total without a
+fabricated visibility breakdown. Maximum counts are the IRC server's reported
+peaks, not the dashboard's retention-window maximum.
+
+Numerics are assembled within one reply burst, after at least two seconds of
+quiet. A new 251 or a disconnect clears the unfinished previous cycle. A sample
+requires the 255/266 end of the reply and a valid user total. Late replies are
+bounded; fields from older replies are never used to fill a new observation.
+The existing Prometheus gauges, partyline `.lusers` and polling remain available.
+
+## Dashboard
+
+- Dark, responsive panels, numeric cards, visible/invisible curves, channels,
+  IRC operators, servers, local clients and unknown connections.
+- 1 hour, 6 hours, 24 hours, 7 days, 30 days or 90 days; automatic refresh every
+  60 seconds; per-series toggles and pointer tooltips with exact observations.
+- A screen-reader-friendly observation table and detailed current counters.
+- True min/max/mean across samples in the selected period; long graphs show
+  at most 601 real last observations per time bucket, never invented averages.
+- Missing values and collection gaps remain gaps. Old data is marked stale,
+  instead of being labelled live or being periodically copied as new data.
+- Time labels use the visitor's browser timezone. Stored epochs are UTC.
+- No external JavaScript, CDN, tracking, Grafana or Prometheus dependency.
+  This is a standalone dashboard inspired by monitoring tools, not Grafana.
+
+Open `contrib/network-stats/preview.html` locally for the visual design. It is
+self-contained and clearly labelled **simulated data**, not an IRC history.
+History starts at activation; no historical figures are manufactured.
+
+## Simple installation: one Mediabot and one web server
+
+Only two optional bot settings are needed:
+
+```ini
+[network_stats]
+ENABLED=1
+OUTPUT_FILE=var/network-stats.json
+```
+
+The path is relative to the bot's working directory. The default polling remains
+`main.LUSERS_REFRESH=300` (five minutes, bounded 60–3600; zero disables polling).
+The exporter itself performs no DNS, HTTP or SQL work on the IRC event loop.
+Its atomic snapshot is private to the bot account (0600).
+
+Run the independent Python 3 standard-library hub on loopback behind the web
+server's existing HTTPS vhost. Install `network_stats.py` and `static/` into a
+root-owned application directory. The hub needs one writable directory for its
+SQLite database. Generate a random, per-instance publisher token with
+`secrets.token_urlsafe(36)`; keep it out of Git and store only its SHA256 in the
+hub's private configuration. For example, with your real paths and generated
+credential values substituted:
+
+```json
+{
+  "bind": "127.0.0.1",
+  "port": 9409,
+  "database": "/var/lib/mediabot-network-stats/history.sqlite3",
+  "streams": {
+    "my-network": {
+      "label": "My IRC network",
+      "token_sha256": "YOUR_GENERATED_SHA256_HEX_VALUE"
+    }
+  }
+}
+```
+
+Publisher configuration, readable only by the bot account:
+
+```json
+{
+  "url": "http://127.0.0.1:9409/network-stats-api/ingest/my-network",
+  "token": "YOUR_GENERATED_PUBLISHER_TOKEN",
+  "snapshot": "/home/mediabot/mediabot_v3/var/network-stats.json",
+  "state": "/var/lib/mediabot-network-stats-publisher/my-network.sqlite3"
+}
+```
+
+Run `python3 -B network_stats.py serve --config /absolute/hub.json` as a
+separate unprivileged account. Run `python3 -B network_stats.py publish --config
+/absolute/publisher.json` as the bot account on a 30-second systemd timer. Both are separate
+from the bot's lifecycle. For a remote URL, HTTPS with normal certificate and
+hostname verification is mandatory; redirects and proxy environment settings
+are refused. HTTP is allowed only to a literal loopback address.
+
+Proxy exactly `/<stream>`, `/network-stats-api/` and `/network-stats-assets/` to
+the loopback hub, preserving the paths. Do not expose the hub listener, SQLite
+file, private config or source directory as a document root. No port on the bot
+host needs to be opened for incoming telemetry.
+
+For a single bot, the same setup helper can generate the configs and services
+for one stream instead of the Teuk two-host profile:
+
+```bash
+sudo -n python3 -B contrib/network-stats/setup.py hub \
+  --site-url https://irc.example.org \
+  --stream 'network=Our IRC network' --local-instance network \
+  --apache-vhost /etc/apache2/sites-available/YOUR_TLS_VHOST.conf
+```
+
+This is a read-only plan. Repeat with `--apply` after review. The vhost's
+`ServerName` must match `--site-url`; the page is then `/network`. The helper
+expects the Unix bot account `mediabot`; deployments under another account can
+adapt the explicit service/config templates. Repeat `--stream SLUG=LABEL` for
+more streams. Private file paths are generated, never stored in the bot config.
+
+## Teuk.org dev + EpikNet on nbot
+
+| Host | Role | Output |
+| --- | --- | --- |
+| `teuk.org` | Dev bot + local publisher + dashboard hub | `https://teuk.org/mbdev` |
+| `nbot.soyou.rocks` | EpikNet bot + outgoing HTTPS publisher | `https://teuk.org/epiknet` on teuk.org |
+
+The supplied setup helper implements this profile. Source installation and all
+required tests come first. The source package does **not** activate anything,
+edit private configuration or restart a running bot.
+
+### 1. Inspect the web host
+
+As `mediabot` on **teuk.org**:
+
+```bash
+(
+  set -Eeuo pipefail
+  cd /home/mediabot/mediabot_v3
+  sudo -n python3 -B contrib/network-stats/setup.py audit
+)
+```
+
+Identify the actual TLS vhost file from `apache2ctl -S`; do not guess a filename.
+The helper accepts exactly one TLS `:443` vhost with `ServerName teuk.org` in the
+selected file. Ambiguous multi-vhost files require a reviewed manual Include.
+Existing `/mbdev`, `/epiknet`, `/network-stats-api` or `/network-stats-assets`
+applications must be moved or explicitly reviewed before using these paths.
+
+Preview, replacing the path with the verified vhost file:
+
+```bash
+sudo -n python3 -B contrib/network-stats/setup.py hub \
+  --apache-vhost /etc/apache2/sites-available/YOUR_TEUK_TLS_VHOST.conf
+```
+
+Only after reviewing the plan, repeat with `--apply`. The helper:
+
+- Backs up managed files privately under `/var/backups/mediabot-network-stats-*`.
+- Installs a dedicated `mbnetstats` account and loopback hub under
+  `/opt/mediabot-network-stats`; SQLite lives under
+  `/var/lib/mediabot-network-stats` and survives repository updates/reboots.
+- Generates independent tokens for `mbdev` and `epiknet`; reruns retain the
+  existing credentials and history. A missing publisher token must be restored
+  from its private backup; it cannot be reconstructed from the hash.
+- Installs the local dev publisher and systemd timer as `mediabot`.
+- Adds one scoped Include to the existing TLS vhost, validates Apache and the
+  units, starts the hub, then checks both public data URLs through HTTPS.
+- On failure, restores managed files and the previous active service state;
+  keeps history databases and the recovery backup. A newly created system
+  account or enabled Apache proxy module can remain unused after rollback.
+
+`setup.py` manages `mediabot-network-stats.service` and
+`mediabot-network-publish-<instance>.service/.timer`; it does not stop or change
+`mediabot@dev.service`, `mediabot@nbot.service`, mbweb or another web application.
+The setup is separate from `commit.sh` and is run again when dashboard code is
+updated; the bot updater never deploys the web host's application automatically.
+
+### 2. Activate the dev export using the native config writer
+
+Avoid manual live edits: Mediabot can save its in-memory configuration. On
+teuk.org, use the exact running dev instance and its real config path. Verify
+`systemctl cat mediabot@dev.service` and `/etc/default/mediabot-dev` first.
+Substitute its real configuration filename below if different:
+
+```bash
+(
+  set -Eeuo pipefail
+  cd /home/mediabot/mediabot_v3
+  sudo -n systemctl stop mediabot@dev.service
+  trap 'sudo -n systemctl start mediabot@dev.service' EXIT
+  cp -p mediabot.conf "mediabot.conf.before-network-stats-$(date +%Y%m%d_%H%M%S)"
+  perl -I. -MMediabot::Conf -e '
+    my $c=Mediabot::Conf->new({},"mediabot.conf");
+    $c->set("network_stats.ENABLED",1);
+    $c->set("network_stats.OUTPUT_FILE","var/network-stats.json");
+    $c->save;
+    my $r=Mediabot::Conf->new({},"mediabot.conf");
+    die "Cannot reread setting\n" unless $r->get("network_stats.ENABLED")==1;
+    print "[OK] Network stats export configured.\n";
+  '
+)
+```
+
+After the bot reconnects, a fresh reply and one publisher timer cycle should
+populate `/mbdev`. Start/reload behavior depends on the actual verified unit.
+The setup helper cannot know a private instance's filename from a source archive.
+
+### 3. Install the EpikNet publisher on nbot
+
+The hub creates `/home/mediabot/network-stats-epiknet.private.json`, owner
+`mediabot`, mode 0600. Transfer this **private** file to nbot through your existing
+SSH route. Never attach it to chat, publish it via the website or commit it.
+It contains only the per-stream publishing token and aggregate snapshot paths.
+
+Commit the tested source with `commit.sh`, then update nbot with `!update now`.
+On **nbot**, as `mediabot`, preview the publisher install:
+
+```bash
+(
+  set -Eeuo pipefail
+  cd /home/mediabot/mediabot_v3
+  sudo -n python3 -B contrib/network-stats/setup.py publisher \
+    --instance epiknet \
+    --publisher-config /home/mediabot/network-stats-epiknet.private.json
+)
+```
+
+Repeat with `--apply`. Activate `[network_stats]` through the same native config
+writer procedure, using **`mediabot@nbot.service`**. The private publisher file
+is installed at `/etc/mediabot-network-stats/epiknet.publisher.json`. No incoming
+port, shared database, shell account on teuk.org or SSH key is needed at runtime.
+An old snapshot is never resent with a new timestamp.
+
+### 4. Verify the actual end-to-end path
+
+For each instance, inspect its export and publisher service locally. These
+commands contain no credentials:
+
+```bash
+stat -c '%U:%G %a %n' /home/mediabot/mediabot_v3/var/network-stats.json
+systemctl --no-pager status mediabot-network-publish-epiknet.timer
+sudo -n journalctl -u mediabot-network-publish-epiknet.service -n 15 --no-pager
+curl --fail --silent --show-error https://teuk.org/epiknet/data?range=1h
+```
+
+Use `mbdev` on teuk.org. Compare a fresh `/LUSERS` reply to the latest observation,
+check missing-vs-zero numerics and the actual network label, then verify that
+both graphs accumulate independently. Stop a publisher briefly in an isolated
+acceptance window, let it retry, and confirm no cross-instance samples or
+unacknowledged losses. Do not interrupt a production bot for a dashboard test.
+A dashboard response alone does not prove live collection; confirm an increasing
+sample timestamp and matching current IRC counts.
+
+## Persistence, bounds and operation
+
+- Snapshot: private `var/network-stats.json`; regenerated after reconnect/update.
+  It is a current observation, not the historical database. Do not rely on the
+  updater retaining this replaceable snapshot; the durable history/outbox live
+  outside the repository.
+- Publisher: SQLite outbox outside the repo, kept for up to 30 days / 10,000
+  observations. It captures the latest export per run, retries bounded batches
+  of 256 and deletes only after an exact successful acknowledgment. Very fast
+  manual refreshes between publisher runs can coalesce into one observation.
+- Hub: 90-day retention, at most 50,000 samples per stream, at most 16 streams.
+  Defaults produce 288 samples/day per bot. Queries are parameterized; public
+  responses include only configured display labels and aggregate values.
+- One successful burst creates one observation, not one row for every numeric.
+  The independent publisher keeps network latency off the IRC loop.
+- Credentials are per stream; one publisher cannot write the other stream.
+  Rotate a token by replacing its private publisher file and matching hub hash,
+  then restart the hub. Service logs contain counts/error classes only.
+- Back up the SQLite history using SQLite's backup API while live, or stop the
+  hub before copying the database and its WAL. Keep private configs separately.
+- Inspect `mediabot-network-stats.service` for hub errors; the `/health` endpoint
+  is `/network-stats-api/health`. Stale status uses observation age, not web uptime.
+
+## Validation
+
+Run `python3 -B contrib/network-stats/test_network_stats.py` for real loopback
+HTTP/SQLite/publisher tests. `perl t/test_commands.pl --filter mb827 --progress`
+also runs these tests and the actual core numeric/export integration. Use the
+full project suite before committing. The visual preview is fixture data; only
+host-side collection, TLS reverse proxy and a live `/LUSERS` comparison establish
+production acceptance.

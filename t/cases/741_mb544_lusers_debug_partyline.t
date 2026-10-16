@@ -75,7 +75,7 @@ return sub {
     my @l3 = $logger->at_level(3);
     $assert->ok(@l3 == 4, 'log: une ligne niveau 3 par numeric utile');
     my ($l251) = grep { $_->[1] =~ /^LUSERS 251:/ } @l3;
-    $assert->like(($l251->[1] || ''), qr/^LUSERS 251: servers=2 users=10$/,
+    $assert->like(($l251->[1] || ''), qr/^LUSERS 251: invisible_users=3 servers=2 users=10 visible_users=7$/,
         'log 251: paires cle=valeur triees');
     my ($l266) = grep { $_->[1] =~ /^LUSERS 266:/ } @l3;
     $assert->like(($l266->[1] || ''), qr/users=812 users_max=1024/,

@@ -66,6 +66,13 @@ sub new {
     $self->_declare('mediabot_network_channels',       'gauge',   'Channels formed on the IRC network (LUSERS)');
     $self->_declare('mediabot_network_servers',        'gauge',   'Servers on the IRC network (LUSERS)');
     $self->_declare('mediabot_network_operators',      'gauge',   'IRC operators online on the network (LUSERS)');
+    $self->_declare('mediabot_network_visible_users', 'gauge', 'Visible users reported by the network (LUSERS)');
+    $self->_declare('mediabot_network_invisible_users', 'gauge', 'Invisible users reported by the network (LUSERS)');
+    $self->_declare('mediabot_network_unknown_connections', 'gauge', 'Unknown connections on the answering server (LUSERS)');
+    $self->_declare('mediabot_network_local_users', 'gauge', 'Users on the answering server (LUSERS)');
+    $self->_declare('mediabot_network_local_users_max', 'gauge', 'Maximum users on the answering server (LUSERS)');
+    $self->_declare('mediabot_network_local_servers', 'gauge', 'Server links on the answering server (LUSERS)');
+    $self->_declare('mediabot_network_global_users', 'gauge', 'Global current users explicitly reported by numeric 266 (LUSERS)');
     $self->_declare('mediabot_irc_reconnect_total',    'counter', 'Total IRC reconnect attempts');
     $self->_declare('mediabot_irc_login_total',        'counter', 'Total successful IRC login events');
     $self->_declare('mediabot_current_channels',       'gauge',   'Current number of joined channels');

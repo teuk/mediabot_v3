@@ -1952,7 +1952,9 @@ sub on_message_005;
 sub on_message_RPL_CHANNELMODEIS;
 sub on_message_251;
 sub on_message_252;
+sub on_message_253;
 sub on_message_254;
+sub on_message_255;
 sub on_message_265;
 sub on_message_266;
 sub on_message_RPL_WHOISUSER;
@@ -2916,7 +2918,9 @@ sub _build_irc {
         on_message_RPL_CHANNELMODEIS     => \&on_message_RPL_CHANNELMODEIS,
         on_message_251                   => \&on_message_251,
         on_message_252                   => \&on_message_252,
+        on_message_253                   => \&on_message_253,
         on_message_254                   => \&on_message_254,
+        on_message_255                   => \&on_message_255,
         on_message_265                   => \&on_message_265,
         on_message_266                   => \&on_message_266,
         on_message_RPL_WHOISUSER         => \&on_message_RPL_WHOISUSER,
@@ -3114,6 +3118,7 @@ sub on_timer_tick {
     # mb550-B1: measure our own lateness first — any blocked loop shows here.
     eval { $mediabot->note_tick_for_stall_detection(5); };
     # mb543-B1: keep the network gauges fresh (throttled inside).
+    eval { $mediabot->flush_network_stats(); };
     eval { $mediabot->maybe_request_lusers(); };
     # mb599-B1: plugin cron heartbeat — emits plugin_cron_observed once per
     # minute (no-op without listeners). Eval-guarded like every observer.
@@ -3255,6 +3260,7 @@ sub on_message_NOTICE {
 }
 
 sub on_login {
+    eval { $mediabot->_network_stats_exporter->reset; };
     my ( $self, $message, $hints ) = @_;
 
     $mediabot->{logger}->log(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
@@ -4981,7 +4987,9 @@ sub _on_lusers_numeric {
 }
 sub on_message_251 { my ($self,$message,$hints) = @_; _on_lusers_numeric('251', $message, $hints); }
 sub on_message_252 { my ($self,$message,$hints) = @_; _on_lusers_numeric('252', $message, $hints); }
+sub on_message_253 { my ($self,$message,$hints) = @_; _on_lusers_numeric('253', $message, $hints); }
 sub on_message_254 { my ($self,$message,$hints) = @_; _on_lusers_numeric('254', $message, $hints); }
+sub on_message_255 { my ($self,$message,$hints) = @_; _on_lusers_numeric('255', $message, $hints); }
 sub on_message_265 { my ($self,$message,$hints) = @_; _on_lusers_numeric('265', $message, $hints); }
 sub on_message_266 { my ($self,$message,$hints) = @_; _on_lusers_numeric('266', $message, $hints); }
         

@@ -29,6 +29,8 @@ Mediabot helps IRC communities **run, remember and understand their channels**. 
   <a href="https://github.com/teuk/mediabot_v3/discussions"><strong>Ask a question</strong></a>
 </p>
 
+Network history and public dashboards: [NETWORK_STATS.md](docs/NETWORK_STATS.md).
+
 ## What Mediabot provides
 
 | Area | Capabilities |

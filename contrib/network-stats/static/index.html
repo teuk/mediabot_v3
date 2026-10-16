@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0c1019"><title>Mediabot · Statistiques réseau IRC</title>
+<link rel="stylesheet" href="/network-stats-assets/dashboard.css">
+<script defer src="/network-stats-assets/dashboard.js"></script>
+</head>
+<body>
+<header><a class="brand" href="#main" aria-label="Mediabot statistiques"><span class="brand-icon">M<span>·</span></span><span>MEDIABOT<small>NETWORK OBSERVATORY</small></span></a><nav id="networks" aria-label="Réseaux"></nav><div class="status" id="status" role="status"><i></i><span>Connexion aux données…</span></div></header>
+<main id="main">
+<section class="heading"><div><p class="eyebrow">IRC / TÉLÉMÉTRIE RÉSEAU</p><h1 id="title">Statistiques réseau</h1><p class="subtitle" id="subtitle">Les compteurs du réseau, au fil du temps.</p></div><div class="controls"><div class="periods" role="group" aria-label="Période"><button data-range="1h">1 h</button><button data-range="6h">6 h</button><button data-range="24h" aria-pressed="true">24 h</button><button data-range="7d">7 j</button><button data-range="30d">30 j</button><button data-range="90d">90 j</button></div><button id="refresh" class="refresh" title="Actualiser les données" aria-label="Actualiser">↻</button></div></section>
+<div class="notice" id="notice" role="status" hidden></div>
+<section class="cards" aria-label="Dernier échantillon" id="cards"></section>
+<section class="charts" aria-label="Évolution des compteurs"><article class="panel wide"><div class="panel-heading"><div><h2>Population du réseau</h2><p>Utilisateurs annoncés par le serveur IRC</p></div><span class="badge">LUSERS / 251 · 266</span></div><div class="legend" id="users-legend"></div><div class="plot"><canvas id="users" aria-label="Évolution des utilisateurs" role="img"></canvas><div class="tooltip" hidden></div></div><p class="chart-meta" id="users-meta"></p></article>
+<article class="panel"><div class="panel-heading"><div><h2>Canaux formés</h2><p>Nombre de canaux signalés par le réseau</p></div><span class="badge">254</span></div><div class="legend" id="channels-legend"></div><div class="plot"><canvas id="channels" aria-label="Évolution du nombre de canaux" role="img"></canvas><div class="tooltip" hidden></div></div><p class="chart-meta" id="channels-meta"></p></article>
+<article class="panel"><div class="panel-heading"><div><h2>Infrastructure</h2><p>Opérateurs IRC et serveurs</p></div><span class="badge">251 · 252</span></div><div class="legend" id="infrastructure-legend"></div><div class="plot"><canvas id="infrastructure" aria-label="Évolution des opérateurs et serveurs" role="img"></canvas><div class="tooltip" hidden></div></div><p class="chart-meta" id="infrastructure-meta"></p></article>
+<article class="panel"><div class="panel-heading"><div><h2>Serveur de connexion</h2><p>Utilisateurs locaux et connexions inconnues</p></div><span class="badge">253 · 255 · 265</span></div><div class="legend" id="local-legend"></div><div class="plot"><canvas id="local" aria-label="Évolution des compteurs locaux" role="img"></canvas><div class="tooltip" hidden></div></div><p class="chart-meta" id="local-meta"></p></article>
+<article class="panel details"><div class="panel-heading"><div><h2>Dernière observation</h2><p>Valeurs exactes reçues, sans extrapolation</p></div><span class="badge">INSTANTANÉ</span></div><div class="split" id="split"></div><table><caption class="sr-only">Compteurs détaillés du dernier échantillon</caption><tbody id="details"></tbody></table></article></section>
+<section class="method"><span class="method-mark">i</span><div><h2>Ce que montrent ces graphiques</h2><p>Compteurs agrégés de <code>/LUSERS</code>, tels que le serveur les annonce au bot. Les restrictions du réseau peuvent limiter leur portée. « Invisible » désigne le mode utilisateur IRC, sans identifier les personnes. Une donnée absente reste inconnue ; les interruptions de collecte apparaissent comme des trous.</p><p id="resolution">Historique : 90 jours. Affichage en heure locale du navigateur.</p><details><summary>Consulter les observations affichées</summary><div class="table-scroll"><table id="observations"><caption>Dernière observation réelle de chaque intervalle d’affichage</caption><thead><tr><th>Date</th><th>Utilisateurs</th><th>Visibles</th><th>Invisibles</th><th>Canaux</th><th>Opérateurs</th><th>Serveurs</th></tr></thead><tbody></tbody></table></div></details></div></section>
+<footer><span><b>Mediabot</b> · Network Observatory</span><span id="updated">Actualisation automatique toutes les 60 secondes</span></footer>
+</main>
+</body></html>

@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB827 — persistent IRC network statistics and public dashboards
+
+- Export a settled aggregate LUSERS observation independently of Prometheus:
+  visible/invisible users, channels, IRC operators, network servers, local
+  clients/server links, unknown connections and advertised local/global peaks.
+  Keep unsupported fields unknown and isolate consecutive reply bursts.
+- Add a standalone Python standard-library history hub and responsive dark
+  dashboards with selectable periods, real observations, min/max/mean, tooltips,
+  per-series toggles, stale states, gap handling and an accessible data table.
+- Publish locally or from a remote bot over verified HTTPS using per-instance
+  credentials and a durable, acknowledged outbox. Retain history outside the
+  bot repository for 90 days; keep outbound network I/O off the IRC event loop.
+- Provide a scoped Apache/systemd setup for teuk.org /mbdev and /epiknet fed by
+  nbot, plus generic single-instance configuration and a simulated visual preview.
+  Source installation does not enable collection, deploy services or edit private
+  config. Real host/TLS/current-count acceptance remains a separate step.
+- Preserve existing LUSERS polling, metrics, partyline, AI providers and commands;
+  add numeric-burst, real HTTP/SQLite/outbox and installation boundary tests.
+
 ### MB826 — open-domain requests and useful compact answers
 
 - Research addressed informational requests by default, including statements,

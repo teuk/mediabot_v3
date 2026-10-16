@@ -9,6 +9,7 @@ use Mediabot::Auth;
 use Mediabot::User;
 use Mediabot::Channel;
 use Mediabot::Conf;
+use Mediabot::NetworkStats qw(parse_numeric);
 use Mediabot::Log;
 use Mediabot::Context;
 use Mediabot::Command;
@@ -609,6 +610,13 @@ sub update_network_metrics_from_numeric {
         }
     }
 
+    # MB827: additional aggregate counts, independent of metrics enablement.
+    my $extra = parse_numeric($numeric, $args, $text);
+    for my $field (qw(visible_users invisible_users unknown_connections local_users local_users_max local_servers global_users)) {
+        $set->('mediabot_network_' . $field, $extra->{$field}) if exists $extra->{$field};
+    }
+    eval { $self->_network_stats_exporter->observe($numeric, $args, $text); };
+
     # mb544-B1: les details du LUSERS en debug 3 — une ligne par numeric
     # ayant extrait quelque chose, avec les paires cle=valeur.
     if (%updated && $self->{logger}) {
@@ -620,6 +628,23 @@ sub update_network_metrics_from_numeric {
     }
 
     return \%updated;
+}
+
+# MB827: no network I/O on the IRC loop; a separate publisher handles delivery.
+sub _network_stats_exporter {
+    my ($self) = @_;
+    return $self->{network_stats_exporter} ||= Mediabot::NetworkStats->new(
+        conf=>$self->{conf}, logger=>$self->{logger});
+}
+
+sub flush_network_stats {
+    my ($self) = @_;
+    my $exporter = $self->_network_stats_exporter;
+    unless ($self->{irc} && eval { $self->{irc}->is_connected }) {
+        $exporter->reset;
+        return 0;
+    }
+    return $exporter->flush;
 }
 
 # mb544-B1: instantane du cache reseau (copie) pour la partyline et les
