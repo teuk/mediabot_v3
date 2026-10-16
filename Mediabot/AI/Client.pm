@@ -5,6 +5,7 @@ use warnings;
 
 use Carp qw(croak);
 use HTTP::Tiny;
+use Time::HiRes ();
 use JSON::PP qw(decode_json);
 
 use Mediabot::AI qw(known_providers normalize_provider provider_configured);
@@ -368,6 +369,7 @@ sub _provider_plan {
                 timeout => 0 + $timeout,
                 headers => $headers,
                 payload => $payload,
+                transient_retry => ($request->{purpose}//'') =~ /\Ameta_(?:draft|synthesis|synthesis_web|citation_repair|probe)\z/ ? 1:0,
             }],
         }, undef);
     }
@@ -438,15 +440,34 @@ sub _openai_fallback_worthy {
 sub _attempt {
     my ($provider, $attempt, $http_factory) = @_;
 
-    my $res = Mediabot::AI::Transport::post_json(
+    my $retry=$provider eq 'gemini' && $attempt->{transient_retry};
+    my $deadline=Time::HiRes::time()+$attempt->{timeout};
+    my ($res,$body,$first_category);my $retries=0;
+    for my $turn (0..($retry?1:0)) {
+        my $remaining=$deadline-Time::HiRes::time();
+        last if $turn && $remaining<0.2;
+        my $timeout=$retry ? ($turn?$remaining:$remaining/2):$attempt->{timeout};
+        $retries=$turn;
+        $res = Mediabot::AI::Transport::post_json(
         api_url      => $attempt->{api_url},
-        timeout      => $attempt->{timeout},
+        timeout      => $timeout,
         headers      => $attempt->{headers},
         payload      => $attempt->{payload},
         http_factory => $http_factory,
     );
-
-    my $body = Mediabot::AI::Transport::decode_content($res);
+        $body = Mediabot::AI::Transport::decode_content($res);
+        last unless $retry && !$turn && !$res->{success};
+        my ($type,$code)=Mediabot::AI::Provider::Gemini::extract_error($body);
+        my $category=Mediabot::AI::Provider::Gemini::failure_category($res->{status},$type,$code,$res->{reason},$body);
+        last unless $category =~ /\A(?:service_unavailable|server_error|timeout|connection)\z/;
+        $first_category=$category;
+        # This runs in the provider worker (or the explicit CLI probe), never
+        # the IRC loop. Both attempts and the short backoff share one budget.
+        last if $deadline-Time::HiRes::time()<0.45;
+        Time::HiRes::sleep(0.25);
+    }
+    $res->{transient_retries}=$retries;
+    $res->{first_failure_category}=$first_category if defined($first_category);
     my $answer;
     if ($res->{success}) {
         $answer = $provider eq 'anthropic'
@@ -481,6 +502,11 @@ sub _failure_result {
     for my $key (qw(error_type error_code error_message)) {
         $result->{$key} = $args{$key}
             if defined($args{$key}) && !ref($args{$key}) && length($args{$key});
+    }
+    if (($args{provider}//'') eq 'gemini') {
+        $result->{failure_category}=Mediabot::AI::Provider::Gemini::failure_category(
+            $result->{status},$args{error_type},$args{error_code},$result->{reason},$args{failure_body});
+        $result->{transient_retries}=0+($res->{transient_retries}//0);
     }
 
     return $result;
@@ -517,6 +543,7 @@ sub _run_plan {
                     provider_fallback => $provider_index ? 1 : 0,
                     model_fallback    => $attempt_index ? 1 : 0,
                     attempted         => [@attempted],
+                    ($provider eq 'gemini' ? (transient_retries=>0+($res->{transient_retries}//0)):()),
                     ($provider eq 'openai' && @{
                         Mediabot::AI::Provider::OpenAI::extract_sources($body)
                     } ? (sources => Mediabot::AI::Provider::OpenAI::extract_sources($body)) : ()),
@@ -549,6 +576,7 @@ sub _run_plan {
                 error_type        => $error_type,
                 error_code        => $error_code,
                 error_message     => $error_message,
+                failure_body      => $provider eq 'gemini'?$body:undef,
             );
 
             my $has_more_models = $attempt_index < $#{ $provider_plan->{attempts} };

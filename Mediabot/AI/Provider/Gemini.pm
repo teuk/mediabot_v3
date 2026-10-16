@@ -19,6 +19,7 @@ our @EXPORT_OK = qw(
     extract_diagnostic
     extract_error
     user_error_message
+    failure_category
 );
 
 sub _require_scalar {
@@ -81,7 +82,13 @@ sub build_payload {
         );
         croak 'invalid Gemini thinking level'
             unless $level =~ /\A(?:LOW|MEDIUM|HIGH)\z/;
-        $generation{thinkingConfig} = { thinkingLevel => $level };
+        if ($request->{model} =~ /\Agemini-2[.]5-/i) {
+            my %budget=(LOW=>($request->{model}=~/\bpro\b/i?128:0),MEDIUM=>1024,HIGH=>4096);
+            $generation{thinkingConfig} = { thinkingBudget => $budget{$level} };
+        }
+        elsif ($request->{model} !~ /\Agemini-2[.]0-/i) {
+            $generation{thinkingConfig} = { thinkingLevel => $level };
+        }
     }
 
     my %payload = (
@@ -224,6 +231,30 @@ sub extract_error {
     );
 }
 
+sub failure_category {
+    my ($status,$type,$code,$reason,$body)=@_;
+    $status=0 unless defined($status) && !ref($status) && "$status" =~ /\A\d{1,3}\z/;
+    my $tc=lc join(' ',map {defined($_) && !ref($_)?substr($_,0,100):''} ($type,$code));
+    return 'quota' if $status==429 || $status==402 || $tc =~ /resource_exhausted/;
+    return 'access' if $status==401 || $status==403 || $tc =~ /unauthenticated|permission_denied/;
+    return 'model' if $status==404 || $tc =~ /not_found/;
+    return 'request' if $status==400 || $tc =~ /invalid_argument|failed_precondition/;
+    return 'output_budget' if $tc =~ /max_tokens|output_budget_exhausted/;
+    return 'service_unavailable' if $status==503 || $tc =~ /\bunavailable\b/;
+    return 'server_error' if $status==500 || $status==502;
+    return 'timeout' if $status==504 || $tc =~ /deadline_exceeded/;
+    if ($status==0 || $status==599) {
+        my $detail=lc join(' ',map {defined($_) && !ref($_)?substr($_,0,1000):''} ($reason,$body));
+        return 'tls' if $detail =~ /\b(?:tls|ssl)\b|certificate|certificat/;
+        return 'dns' if $detail =~ /getaddrinfo|resolve|name or service|name resolution|nodename/;
+        return 'timeout' if $detail =~ /timed?\s*out|timeout|deadline/;
+        return 'connection' if $detail =~ /connect|connection|network|socket|broken pipe/;
+        return 'transport';
+    }
+    return 'response' if $status>=200 && $status<300;
+    return 'http_error';
+}
+
 sub user_error_message {
     my ($status, $type, $code) = @_;
     $status = 0 unless defined($status) && "$status" =~ /^\d+\z/;
@@ -246,7 +277,7 @@ sub user_error_message {
     if ($tc =~ /max_tokens|output_budget_exhausted/) {
         return 'Gemini used its response budget before producing visible text; retry shortly.';
     }
-    if ($status == 0) {
+    if ($status == 0 || $status == 599) {
         return 'Could not reach Gemini; check DNS, TLS, firewall and gemini.API_URL.';
     }
     if ($status >= 500) {

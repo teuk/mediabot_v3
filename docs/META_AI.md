@@ -86,6 +86,47 @@ apply. Keep pilot-channel participants informed about this shared context.
 
 ## Research
 
+### General lookups, beyond current news (MB822)
+
+Research is not restricted to events after a model's training cutoff. In `auto`
+mode, named CVEs, software selection and free/licence questions, explicit web
+requests and technical documentation/configuration questions trigger external
+verification even if every contributor draft says `needs_web=false`.
+Stable basic facts and creative questions do not force a search. The rules are
+bounded FR/EN heuristics; contributors may request research for other uncertain
+facts. This is Tavily general web search, not a Google Search browser session.
+
+```text
+mediabot: quel est le détail de CVE-2024-3094 ?
+mediabot: et quelles versions sont corrigées ?
+mediabot: quel logiciel gratuit pour assembler des PDF sous Linux ?
+mediabot: cherche la documentation officielle pour configurer cette API
+```
+
+The CVE example is a lookup request, not a claim about current exploitation.
+Requested CVE IDs are retained in both search queries; a contributor cannot
+substitute another identifier. Short follow-ups can resolve the prior **user**
+question. Source rows without any requested ID in their title, text or URL are
+excluded. This guards identity, not factual entailment. Synthesis asks for the
+affected product/versions, conditions/impact, and documented fixes or mitigation,
+distinguishing CVSS metadata from evidence of active exploitation. Unknown
+versions or exploitation status remain unknown.
+
+Software answers should name one or two tools, their task/platform fit and a
+material limitation. Free-of-charge, open source, trials and freemium restrictions
+are distinct claims to verify from official project/licence documentation.
+Essential missing platform/requirements should prompt clarification. No software
+is downloaded, installed or executed by this consultation feature.
+
+All Search calls explicitly use `topic=general`. Technical/reference/software
+lookups use Tavily `include_domains_mode=prefer` on the first attempt so an
+operator's preferred domains do not exclude other projects or vendor advisories.
+An ordinary general/current question retains the existing restricted-first,
+then-broader policy. No arbitrary 30-day lower bound applies to a CVE reference
+or project licence page; explicit recent/publication-date requests retain their
+date filters. Older or undated documentation can therefore remain useful.
+All existing passage, citation, shorturl, byte and pacing checks still apply.
+
 `WEB_MODE=auto` starts research for current wording or when a contributor asks
 for external verification. Contributors propose a standalone search query,
 resolving follow-up references from the history. Stable questions can avoid a
@@ -207,8 +248,56 @@ The file is limited to 4 MiB, 128 rooms and 256 actors per room. Access uses a
 nonblocking lock, so another writer cannot stall the IRC event loop.
 
 Default preferred domains: `nist.gov cern.ch nasa.gov esa.int insee.fr
-service-public.gouv.fr legifrance.gouv.fr who.int reuters.com bbc.com
+service-public.gouv.fr legifrance.gouv.fr cyber.gouv.fr cybermalveillance.gouv.fr
+cve.org nvd.nist.gov cisa.gov cert.ssi.gouv.fr who.int reuters.com bbc.com
 franceinfo.fr developers.openai.com platform.claude.com ai.google.dev`.
+
+## Gemini acceptance and transient failures (MB822)
+
+An HTTP::Tiny 599 alone is not a verdict about model access, billing or a retired
+model. The checker prints the actual HTTP status plus a bounded category for
+DNS, TLS, timeout, connection, unidentified transport, access, quota, model,
+request, service overload, or exhausted visible-output budget. It prints no raw
+provider error message, body, API key or network exception text.
+
+To check Gemini even when the instance currently lists only OpenAI and Claude:
+
+```bash
+perl tools/meta_ai_check.pl --conf mediabot.conf --provider gemini
+perl tools/meta_ai_check.pl --conf mediabot.conf --provider gemini --live
+```
+
+`--live` performs a small paid test. A meta/probe Gemini request can retry once
+after a 0.25-second delay for an overload/server failure or recognized connection/
+timeout failure. Both attempts share the original request timeout; the first
+gets half the available budget, the second gets only the remainder. Normal IRC
+execution stays in the existing asynchronous provider worker, with the same
+worker deadline. There is no retry on access, quota, bad model/request, DNS/TLS,
+unidentified 599 or a successful response without visible text. Legacy standalone
+Gemini purposes keep their single-attempt behavior. Overload can still persist.
+
+An optional listing uses Google's fixed authenticated model endpoint, at most
+100 advertised entries, and reports truncation. It excludes non-text model names
+and does not prove that generation, quota or billing works for a listed model:
+
+```bash
+perl tools/meta_ai_check.pl --conf mediabot.conf --live --list-gemini-models
+perl tools/meta_ai_check.pl --conf mediabot.conf --provider gemini --model MODEL_ID --live
+```
+
+The model override applies only to that probe. Known Gemini 2.5 models use their
+supported `thinkingBudget` contract: LOW is 0 for Flash/Flash-Lite, 128 for Pro;
+MEDIUM is 1024 and HIGH is 4096. Known 2.0 models omit thinking configuration;
+other model IDs retain the `thinkingLevel` contract. No fallback model is chosen
+silently. A successful probe does not enable Gemini: after live validation, add
+it explicitly to private `[meta_ai] PROVIDERS` and, if needed, set `GEMINI_MODEL`.
+Use the normal instance restart/update procedure and test actual concurrent
+contribution. Source deployment never rewrites those private values.
+
+API references: [Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+[Gemini API errors](https://ai.google.dev/gemini-api/docs/generate-content/api-errors),
+[Gemini thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking),
+[Gemini models](https://ai.google.dev/api/models).
 
 ## Operator sequence
 

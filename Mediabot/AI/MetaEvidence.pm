@@ -7,7 +7,7 @@ use POSIX qw(strftime);
 use Time::Local qw(timegm);
 use Unicode::Normalize qw(NFC);
 use Date::Parse qw(str2time);
-use Mediabot::AI::MetaPolicy qw(clean safe_url);
+use Mediabot::AI::MetaPolicy qw(clean safe_url research_kind);
 our @EXPORT_OK=qw(research_plan select_sources select_passages validate_support);
 
 sub _date {
@@ -57,9 +57,29 @@ sub research_plan {
         }
     }
     my $fallback=clean((length($context)?"$context — ":'').$prompt,500);
+    my $kind=research_kind($prompt);
+    # Resolve short follow-ups from the previous user question only. Assistant
+    # claims and model-proposed identifiers cannot replace the user's target.
+    my $target=$prompt;
+    if ($kind eq 'general' && length($prompt)<120 && $prompt =~ /(?:\A(?:et|and|what about|qu.en est|pour|under|on)\b|\b(?:celui|celle|ceux|celles|leurs|those|these|its|them)\b)/i) {
+        $target="$context $prompt";$kind=research_kind($target);
+    }
+    my %ids;my @ids;
+    while ($target =~ /\bCVE[- ](20\d{2})[- ](\d{4,10})\b/gi) {
+        my $id="CVE-$1-$2";push @ids,$id unless $ids{$id}++;last if @ids>=3;
+    }
     my $query=$queries[0]//$fallback;
     my $alternate=$queries[1]//$fallback;
     $alternate=$query unless length($alternate);
+    if (@ids) {
+        my $prefix=join(' ',@ids);
+        for ($query,$alternate) {
+            # Retain the exact requested CVE even when contributors return a
+            # generic query or substitute a different vulnerability number.
+            s/\bCVE[- ]20\d{2}[- ]\d{4,10}\b//gi;
+            $_=clean("$prefix $_",500);
+        }
+    }
     my $period=lc $prompt;my $start;
     my $days=$period =~ /(?:aujourd.hui|\btoday\b)/?0
         :$period =~ /(?:cette semaine|\bthis week\b)/?7
@@ -85,7 +105,9 @@ sub research_plan {
     @specific=qw(nasa.gov) if $topic =~ /\bnasa\b/;
     my %configured=map {$_=>1} @domains;
     @specific=grep {$configured{$_}} @specific;
+    @specific=grep {$configured{$_}} qw(cve.org nvd.nist.gov cisa.gov cert.ssi.gouv.fr) if $kind eq 'cve';
     return {query=>$query,alternate_query=>$alternate,as_of=>$date,end_date=>$end,
+        kind=>$kind,identifiers=>\@ids,domain_mode=>$kind eq 'general'?'restrict':'prefer',
         (defined($start)?(start_date=>$start):()),domains=>@specific?\@specific:\@domains};
 }
 sub select_sources {
@@ -102,6 +124,10 @@ sub select_sources {
         next if defined($date) && ($date gt ($plan->{end_date}//$plan->{as_of}) || $date gt $plan->{as_of}
             || (defined($plan->{start_date}) && $date lt $plan->{start_date}));
         my $title=clean($row->{title},140);my ($host)=$url =~ m{^https?://([^/]+)}i;
+        if (@{$plan->{identifiers}||[]}) {
+            my $identity="$title $text $url";
+            next unless grep {$identity =~ /(?<![A-Za-z0-9])\Q$_\E(?![A-Za-z0-9])/i} @{$plan->{identifiers}};
+        }
         $host=lc($host//'');$host =~ s/^www\.//;
         my $primary=grep {$host eq $_ || $host =~ /\.\Q$_\E\z/} @{$plan->{domains}||[]};
         my $hits=_hits("$title $text",$terms);

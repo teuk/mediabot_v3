@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB822 — general web lookups and bounded Gemini recovery
+
+- Research named CVEs, software choices, licence claims and technical
+  documentation even when model drafts say the question needs no current news.
+  Keep stable basic facts and creative requests on their existing route.
+- Preserve requested CVE identifiers across contributor queries and short
+  follow-ups; reject source rows about a different identifier. General technical
+  and software searches use broad web results with soft domain preferences,
+  without a publication window unless the question requests one.
+- Retain the existing source-passage validation, two-link presentation, paced
+  IRC delivery, private memory and MB820 read-only command/authorization surface.
+- Retry Gemini meta/probe transient service or recognized connection/timeout
+  failures at most once within the existing request/worker budget. Preserve
+  HTTP status and distinguish DNS/TLS/transport, access, quota, model, request
+  and output-budget failures; unknown 599 failures are not blindly retried.
+- Add explicit provider/model probes and a bounded advertised-model listing.
+  Support known Gemini 2.5 thinking budgets without changing configured models
+  or re-enabling a provider in any private instance configuration.
+
 ### MB821 — concrete researched answers with checked source passages
 
 - Choose contextual research queries in configured provider order rather than

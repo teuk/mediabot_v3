@@ -37,10 +37,12 @@ sub search {
     my @rows;my $sources=[];
     for my $restricted (1,0) {
         my $search_query=$restricted?$query:clean($plan->{alternate_query}//$query,500);
-        my %parameters=(query=>$search_query,search_depth=>'advanced',max_results=>5,
+        my %parameters=(query=>$search_query,topic=>'general',search_depth=>'advanced',max_results=>5,
             include_answer=>JSON::PP::false,include_published_date=>JSON::PP::true,
             exclude_domains=>[qw(facebook.com instagram.com tiktok.com pinterest.com)]);
         $parameters{include_domains}=$plan->{domains} if $restricted && @{$plan->{domains}||[]};
+        $parameters{include_domains_mode}='prefer'
+            if exists($parameters{include_domains}) && ($plan->{domain_mode}//'restrict') eq 'prefer';
         if (defined($plan->{start_date})) {
             $parameters{start_date}=$plan->{start_date};
             $parameters{filter_by_published_date}=JSON::PP::true;

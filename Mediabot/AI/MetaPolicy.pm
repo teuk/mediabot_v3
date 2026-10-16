@@ -4,7 +4,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::AI qw(normalize_provider);
-our @EXPORT_OK = qw(settings fold clean safe_url wants_web parse_object);
+our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind parse_object);
 use JSON::PP ();
 
 sub fold { my $s = lc($_[0] // ''); $s =~ tr/[]\\^/{}|~/; return $s }
@@ -32,8 +32,19 @@ sub parse_object {
     my $obj = eval { JSON::PP->new->decode($text) };
     return ref($obj) eq 'HASH' ? $obj : undef;
 }
+sub research_kind {
+    my $s=lc clean($_[0],2000);
+    return 'cve' if $s =~ /\bcve[- ]20\d{2}[- ]\d{4,10}\b/;
+    return 'software' if $s =~ /(?:logiciel|\bsoft\b|software|\bapp(?:lication)?s?\b|\boutil|\btools?\b|programme|alternative)/
+        && $s =~ /(?:gratuit|free|open.?source|libre|recommand|recommend|conseill|conseil|meilleur|\bbest\b|alternativ|quel|which|what|choisir|choos)/;
+    return 'documentation' if $s =~ /(?:document(?:ation)?|\bapi\b|\bconfigur\w*|\binstall\w*)/
+        && $s =~ /(?:comment|how|syntaxe|syntax|param[eè]tre|parameter|option|officiel|official|vérif|verif|check|cherch|search|\bfind\b)/;
+    return 'lookup' if $s =~ /(?:sur (?:le )?(?:web|net|internet)|\b(?:google|recherche web|web search)\b|\b(?:cherche|recherche|vérifie|verifie|search|look up|lookup)\b)/;
+    return 'general';
+}
 sub wants_web {
     my ($s) = @_;
+    return 1 if research_kind($s) ne 'general';
     return clean($s) =~ /(?:aujourd.hui|actuel\w*|récent\w*|recent\w*|derni[eè]r\w*|maintenant|cette semaine|en ce moment|today|currently|current|latest|this week|now|prix|price|météo|weather|président|president|premier ministre|prime minister|ceo|horaire|schedule|version|résultat|result|202[6-9]|\b20[3-9]\d\b)/i ? 1 : 0;
 }
 sub settings {
@@ -51,7 +62,7 @@ sub settings {
     }
     my @domains = grep { /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i }
         split /[\s,]+/, $get->('PREFERRED_DOMAINS',
-        'nist.gov cern.ch nasa.gov esa.int insee.fr service-public.gouv.fr legifrance.gouv.fr cyber.gouv.fr cybermalveillance.gouv.fr who.int reuters.com bbc.com franceinfo.fr developers.openai.com platform.claude.com ai.google.dev');
+        'nist.gov cve.org nvd.nist.gov cisa.gov cert.ssi.gouv.fr cern.ch nasa.gov esa.int insee.fr service-public.gouv.fr legifrance.gouv.fr cyber.gouv.fr cybermalveillance.gouv.fr who.int reuters.com bbc.com franceinfo.fr developers.openai.com platform.claude.com ai.google.dev');
     splice @domains, 32 if @domains > 32;
     return {
         enabled => $int->('ENABLED',0,0,1), channels => \%channels,
