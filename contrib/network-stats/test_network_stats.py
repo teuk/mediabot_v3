@@ -4,6 +4,7 @@ import http.client
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import sqlite3
 import ssl
@@ -16,9 +17,44 @@ import types
 import unittest
 from unittest.mock import patch
 from urllib.request import build_opener, ProxyHandler
+from urllib.error import URLError
 
 import network_stats as n
 import setup
+
+
+def generate_tls_fixture(root):
+    """Generate a local test certificate independently of runner OpenSSL config."""
+    cert=root/'cert.pem';key=root/'key.pem';config=root/'openssl-test.cnf'
+    config.write_text('''[req]
+prompt=no
+distinguished_name=dn
+x509_extensions=server_ext
+[dn]
+CN=localhost
+[server_ext]
+subjectAltName=DNS:localhost
+basicConstraints=critical,CA:TRUE
+keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign
+extendedKeyUsage=serverAuth
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always
+''',encoding='ascii')
+    # Set both startup and req configuration for this subprocess only. CI Perl
+    # toolchains may advertise an OpenSSL config outside the system installation.
+    environment=dict(os.environ,OPENSSL_CONF=str(config))
+    try:
+        subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes',
+            '-sha256','-config',str(config),'-keyout',str(key),'-out',str(cert),
+            '-days','1'],check=True,capture_output=True,text=True,
+            timeout=15,env=environment)
+    except subprocess.CalledProcessError as exc:
+        detail=(exc.stderr or '').strip()[-2000:]
+        raise RuntimeError(f'OpenSSL test certificate generation failed (exit {exc.returncode}): {detail}') from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError('OpenSSL test certificate generation exceeded 15 seconds') from None
+    return cert,key
+
 
 class StatsTest(unittest.TestCase):
     def setUp(self):
@@ -67,9 +103,23 @@ class StatsTest(unittest.TestCase):
         self.assertEqual(srv.history.query('mbdev','1h')['samples'],0)
 
     def test_real_tls_verification_and_queued_retry(self):
-        cert=self.root/'cert.pem';key=self.root/'key.pem'
-        subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-keyout',str(key),'-out',str(cert),
-            '-days','1','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost'],check=True,capture_output=True)
+        self.assert_real_tls_verification_and_queued_retry()
+
+    def test_real_tls_with_missing_ambient_openssl_configuration(self):
+        missing=str(self.root/'missing-system-openssl.cnf')
+        with patch.dict(os.environ,{'OPENSSL_CONF':missing}):
+            self.assert_real_tls_verification_and_queued_retry()
+            self.assertEqual(os.environ['OPENSSL_CONF'],missing)
+
+    def test_real_tls_with_malformed_ambient_openssl_configuration(self):
+        invalid=self.root/'invalid-system-openssl.cnf'
+        invalid.write_text('this is not a valid openssl configuration\n',encoding='ascii')
+        with patch.dict(os.environ,{'OPENSSL_CONF':str(invalid)}):
+            self.assert_real_tls_verification_and_queued_retry()
+            self.assertEqual(os.environ['OPENSSL_CONF'],str(invalid))
+
+    def assert_real_tls_verification_and_queued_retry(self):
+        cert,key=generate_tls_fixture(self.root)
         srv=n.Server(('127.0.0.1',0),self.cfg)
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(cert,key)
         srv.socket=context.wrap_socket(srv.socket,server_side=True)
@@ -77,10 +127,14 @@ class StatsTest(unittest.TestCase):
         self.addCleanup(srv.server_close);self.addCleanup(srv.shutdown)
         cfg=self.publisher_cfg(srv);cfg['url']=cfg['url'].replace('http://127.0.0.1','https://localhost')
         Path(cfg['snapshot']).write_bytes(n.encode(self.s))
-        with self.assertRaises(OSError):n.publish(cfg)
+        with self.assertRaises(URLError) as rejected:n.publish(cfg)
+        self.assertIsInstance(rejected.exception.reason,ssl.SSLCertVerificationError)
+        with sqlite3.connect(cfg['state']) as db:self.assertEqual(db.execute('SELECT count(*) FROM queue').fetchone()[0],1)
+        self.assertEqual(srv.history.query('mbdev','1h')['samples'],0)
         trusted=build_opener(ProxyHandler({}),n.NoRedirect(),n.HTTPSHandler(context=ssl.create_default_context(cafile=str(cert))))
         self.assertEqual(n.publish(cfg,opener=trusted),1)
         self.assertEqual(srv.history.query('mbdev','1h')['samples'],1)
+        with sqlite3.connect(cfg['state']) as db:self.assertEqual(db.execute('SELECT count(*) FROM queue').fetchone()[0],0)
 
     def test_unknown_path_traversal_and_ranges(self):
         srv=self.server()

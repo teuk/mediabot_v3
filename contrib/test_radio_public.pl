@@ -450,7 +450,7 @@ my @calls;
         $INC{'String/IRC.pm'}=__FILE__ unless eval { require String::IRC; 1 };
     }
     require Mediabot::External::YouTube;
-    no warnings 'redefine';
+    no warnings qw(redefine once);
     local *Mediabot::External::YouTube::getYoutubeDetails=sub { die 'Unexpected YouTube request' };
     my $r={title=>'Gloria Estefan — Gloria Estefan, Miami Sound Machine - Conga',
         placement=>'waiting',position=>2,duration_seconds=>320,mp3=>42,

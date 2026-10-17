@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB828 — reproducible offline TLS fixtures in CI
+
+- Generate the network-statistics test certificate from an explicit local
+  OpenSSL configuration, scoped to that subprocess, with bounded execution and
+  useful failure diagnostics instead of relying on the runner's default config.
+- Exercise real HTTPS rejection, durable queued retry and successful verified
+  delivery with normal, missing and malformed ambient OpenSSL configuration.
+  Keep certificate verification enabled in the publisher and all existing tests.
+- Scope the intentional YouTube test stub's `once` warning suppression to its
+  existing block; preserve the assertion that no YouTube request is made.
+
 ### MB827 — persistent IRC network statistics and public dashboards
 
 - Export a settled aggregate LUSERS observation independently of Prometheus:
