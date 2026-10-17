@@ -1,5 +1,12 @@
 # Mediabot v3 configuration wizard
 
+Runtime configuration saves use the checked atomic-publication contract in
+[`MAINTENANCE_20261018.md`](MAINTENANCE_20261018.md): private temporary content,
+preserved POSIX owner/group/mode, nonblocking writer locks and stale-revision
+refusal. A conflict requires reload followed by explicit reapplication; pending
+`set` values remain in memory after a failed save. Continue stopping the instance
+before operator-side edits. The wizard has its own documented merge/backup flow.
+
 `./configure` is the supported configuration and installation entry point for
 both fresh and existing Mediabot v3 installations.
 

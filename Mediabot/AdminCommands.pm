@@ -706,6 +706,24 @@ sub _openai_notice_profiles {
     botNotice($self, $nick, "Usage: openai profile <dev|compact|safe|default>");
 }
 
+sub _configuration_save_failed {
+    my ($self, $nick, $error) = @_;
+    my $reason = 'save_rejected';
+    if (defined($error) && !ref($error)) {
+        if ($error =~ /\AConf->save\(\): configuration changed on disk;/) {
+            $reason = 'revision_conflict';
+        }
+        elsif ($error =~ /\AConf->save\(\): atomic save failed \((writer lock|hardlinked configuration|configuration permissions|configuration values|temporary file|serialization|temporary file sync|publication)\)/) {
+            ($reason = $1) =~ s/ /_/g;
+        }
+    }
+    eval { $self->{logger}->log(1, "CONFIG_SAVE failed reason=$reason") }
+        if $self->{logger};
+    botNotice($self, $nick,
+        'Configuration save failed. Pending values remain in memory; check the server log before retrying or reloading.');
+    return 0;
+}
+
 sub _openai_apply_profile {
     my ($self, $nick, $profile_name) = @_;
 
@@ -738,7 +756,8 @@ sub _openai_apply_profile {
         $self->{conf}->set($spec->{key}, $clean_or_error);
     }
 
-    $self->{conf}->save();
+    my $saved = eval { $self->{conf}->save(); };
+    return _configuration_save_failed($self, $nick, $@) unless $saved;
 
     botNotice($self, $nick, "OpenAI profile '$profile_name' applied: $profile->{label}");
     botNotice($self, $nick, "OpenAI/tellme: profile values are used immediately for future requests.");
@@ -956,7 +975,8 @@ sub openai_ctx {
         my $spec = _openai_param_spec()->{$name};
 
         $self->{conf}->set($spec->{key}, $clean_or_error);
-        $self->{conf}->save();
+        my $saved = eval { $self->{conf}->save(); };
+        return _configuration_save_failed($self, $nick, $@) unless $saved;
 
         botNotice($self, $nick, "OpenAI $name set to $clean_or_error");
         botNotice($self, $nick, "OpenAI/tellme: new value is used immediately for future requests.");
@@ -976,7 +996,8 @@ sub openai_ctx {
         my $spec = _openai_param_spec()->{$name};
 
         $self->{conf}->set($spec->{key}, $spec->{default});
-        $self->{conf}->save();
+        my $saved = eval { $self->{conf}->save(); };
+        return _configuration_save_failed($self, $nick, $@) unless $saved;
 
         botNotice($self, $nick, "OpenAI $name reset to default $spec->{default}");
 
@@ -1041,7 +1062,8 @@ sub debug_ctx {
 
     # --- Persist config + update runtime logger immediately ---
     $conf->set("main.MAIN_PROG_DEBUG", $level);
-    $conf->save();
+    my $saved = eval { $conf->save(); };
+    return _configuration_save_failed($self, $nick, $@) unless $saved;
 
     # Keep backward compatibility with existing logger structure
     $self->{logger}->{debug_level} = $level;

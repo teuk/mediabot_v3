@@ -7,6 +7,8 @@ cache/
 mp3/
 commit.sh
 *.conf
+*.conf.lock
+.mediabot-conf-*
 config/
 *.crt
 *.db

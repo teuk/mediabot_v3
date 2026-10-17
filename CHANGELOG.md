@@ -10,6 +10,27 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB834 — Atomic configuration saves and stale-writer protection (2026-10-18)
+
+- Prepare configuration changes in a private same-directory temporary file,
+  check serialization and file sync, then publish the complete replacement.
+  Preserve owner, group and mode; a failed write or interrupted process no
+  longer truncates the active configuration.
+- Serialize cooperating saves with a private nonblocking sidecar lock and
+  reject stale file revisions, observed operator edits and retargeted paths.
+  Keep stable symbolic configurations; refuse ambiguous multiple hardlinks.
+- Propagate bounded save failures instead of ignoring a false dependency
+  result. Retain pending in-memory values for explicit retry or reload.
+- Use scoped strict quoting to preserve literal commas, quotes, backslashes,
+  whitespace and list items on re-read; reject structural control characters
+  rather than publishing malformed INI content.
+- Catch save failures in Owner-only OpenAI/debug administration, report a
+  private failure instead of success and keep dependency exception text out
+  of notices/logs. Update the live debug logger only after persistence succeeds.
+- Exercise real I/O failures, SIGKILL, competing processes, metadata, aliases
+  and conflict recovery. Keep configuration syntax, command rights, providers,
+  dashboards, databases and running services unchanged by source installation.
+
 ### MB833 — Historical views and meaningful network-period comparison (2026-10-17)
 
 - Browse retained network history, return to live data and share fixed-endpoint

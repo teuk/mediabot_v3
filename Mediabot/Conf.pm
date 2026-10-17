@@ -3,6 +3,12 @@ package Mediabot::Conf;
 use strict;
 use warnings;
 use Config::Simple;
+use Cwd qw(abs_path);
+use Digest::SHA ();
+use Fcntl qw(:DEFAULT :flock S_ISREG);
+use File::Basename qw(dirname);
+use File::Temp qw(tempfile);
+use IO::Handle ();
 
 sub new {
     my ($class, $conf_ref, $file, %args) = @_;
@@ -34,15 +40,20 @@ sub reload {
     die "Conf->reload(): configuration file '$file' is not readable\n"
         unless -r $file;
 
+    my $before = _file_revision($file);
     my $cfg = Config::Simple->new(filename => $file);
     die "Conf->reload(): failed to parse configuration file '$file'\n"
         unless $cfg;
 
     my %fresh = $cfg->vars();
+    my $after = _file_revision($file);
+    die "Conf->reload(): configuration changed while reading; retry reload\n"
+        unless _same_revision($before, $after);
 
     # Commit only after the complete replacement state has been prepared.
     $self->{_cfg}  = $cfg;
     $self->{_conf} = \%fresh;
+    $self->{_revision} = $after;
 
     # A changed file may contain a different invalid/clamped value.  Let the
     # diagnostic deduplicator report the new state once after the reload.
@@ -129,13 +140,133 @@ sub _get_int_diag {
 sub set {
     my ($self, $key, $value) = @_;
     $self->{_conf}{$key} = $value;
-    $self->{_cfg}->param($key => $value) if $self->{_cfg};
+    # Config::Simple normalizes array elements in place. Keep that operation
+    # away from the caller's input and the pending public value mirror.
+    $self->{_cfg}->param($key => ref($value) eq 'ARRAY' ? [@$value] : $value)
+        if $self->{_cfg};
 }
 
 sub save {
     my ($self) = @_;
     return unless $self->{_cfg} and $self->{_file};
-    $self->{_cfg}->write($self->{_file});
+
+    # MB834: never let Config::Simple truncate the active configuration. A
+    # stable sidecar lock serializes cooperating writers across inode swaps;
+    # a revision check also rejects stale objects and observed operator edits.
+    my $base = $self->{_revision};
+    die "Conf->save(): reload required before saving\n" unless $base;
+    my ($lock, $tmp);
+    my $stage = 'revision';
+    my $ok = eval {
+        die unless _same_revision($base, _file_revision($self->{_file}));
+        $stage = 'hardlinked configuration';
+        die unless $base->{links} == 1;
+        $stage = 'configuration permissions';
+        die unless -w $base->{path};
+
+        $stage = 'writer lock';
+        my $lock_path = $base->{path} . '.lock';
+        sysopen($lock, $lock_path, O_RDWR|O_CREAT|O_NOFOLLOW|O_NONBLOCK, 0600) or die;
+        my @held = stat($lock);
+        my @named = lstat($lock_path);
+        die unless @held && @named && S_ISREG($held[2]) && $held[3] == 1
+            && $held[0] == $named[0] && $held[1] == $named[1];
+        # Nonblocking: an IRC command must not stall the event loop waiting
+        # for another process. Root-side tools leave the lock usable by the
+        # configuration owner on the next ordinary bot save.
+        flock($lock, LOCK_EX|LOCK_NB) or die;
+        _preserve_owner($lock, $base);
+        chmod(0600, $lock) or die;
+
+        $stage = 'revision';
+        die unless _same_revision($base, _file_revision($self->{_file}));
+        $stage = 'configuration values';
+        my %values = %{$self->{_conf}};
+        for my $key (keys %values) {
+            die if $key =~ /[\x00\r\n]/;
+            my @items = ref($values{$key}) eq 'ARRAY' ? @{$values{$key}} : ($values{$key});
+            die if grep { ref($_) || (defined($_) && /[\x00\r\n]/) } @items;
+        }
+        $stage = 'temporary file';
+        my ($fh, $name) = tempfile('.mediabot-conf-XXXXXX',
+            DIR => dirname($base->{path}), UNLINK => 0);
+        $tmp = $name;
+        chmod(0600, $fh) or die;
+        close($fh) or die;
+
+        $stage = 'serialization';
+        {
+            # Use the dependency's own strict quoting only for this write.
+            # Otherwise a literal comma becomes a list on the next read.
+            local $Config::Simple::USEQQ = 1;
+            $self->{_cfg}->write($tmp) or die;
+        }
+        $stage = 'temporary file sync';
+        sysopen(my $completed, $tmp, O_RDWR|O_NOFOLLOW) or die;
+        _preserve_owner($completed, $base);
+        chmod($base->{mode}, $completed) or die;
+        $completed->sync or die;
+        close($completed) or die;
+
+        my $next = _file_revision($tmp);
+        $next->{path} = $base->{path};
+        $stage = 'revision';
+        die unless _same_revision($base, _file_revision($self->{_file}));
+        $stage = 'publication';
+        rename($tmp, $base->{path}) or die;
+        undef $tmp;
+        $self->{_revision} = $next;
+        1;
+    };
+
+    # Keep diagnostics bounded: dependency exceptions can contain configuration
+    # values. Pending set() values stay in memory for explicit retry or reload.
+    unlink $tmp if defined($tmp) && -e $tmp;
+    close $lock if defined($lock) && defined(fileno($lock));
+    unless ($ok) {
+        die "Conf->save(): configuration changed on disk; reload before saving\n"
+            if $stage eq 'revision';
+        die "Conf->save(): atomic save failed ($stage)\n";
+    }
+    return 1;
+}
+
+sub _file_revision {
+    my ($file) = @_;
+    my $path = abs_path($file);
+    die "Conf: configuration path unavailable\n" unless defined $path;
+    sysopen(my $fh, $path, O_RDONLY|O_NOFOLLOW|O_NONBLOCK)
+        or die "Conf: configuration read failed\n";
+    my @before = stat($fh);
+    die "Conf: configuration is not a regular file\n"
+        unless @before && S_ISREG($before[2]);
+    my $sha = Digest::SHA->new(256);
+    $sha->addfile($fh);
+    my @after = stat($fh);
+    close($fh) or die "Conf: configuration read failed\n";
+    die "Conf: configuration changed while reading\n"
+        unless @after && join(':', @before[0..5,7,9,10]) eq join(':', @after[0..5,7,9,10]);
+    return {path=>$path, device=>$after[0], inode=>$after[1],
+        mode=>$after[2]&07777, links=>$after[3], uid=>$after[4], gid=>$after[5],
+        digest=>$sha->hexdigest};
+}
+
+sub _same_revision {
+    my ($left, $right) = @_;
+    for my $key (qw(path device inode mode links uid gid digest)) {
+        return 0 unless defined($left->{$key}) && defined($right->{$key})
+            && $left->{$key} eq $right->{$key};
+    }
+    return 1;
+}
+
+sub _preserve_owner {
+    my ($fh, $base) = @_;
+    my @st = stat($fh);
+    die unless @st;
+    if ($st[4] != $base->{uid} || $st[5] != $base->{gid}) {
+        chown($base->{uid}, $base->{gid}, $fh) or die;
+    }
 }
 
 sub all {
@@ -210,8 +341,25 @@ object.
 
 =head2 save
 
-Writes all pending changes back to the original configuration file. Has no effect
-if the object was not constructed with a file path.
+Atomically publishes pending changes through a private temporary file in the
+target directory, with a nonblocking writer lock, pre-publication file sync and
+preserved owner/group/mode. Returns true after publication. Has no effect if the
+object was not constructed with a file path.
+
+Uses scoped strict Config::Simple quoting so literal punctuation, whitespace
+and list boundaries survive a reread. Physical CR/LF/NUL and nested references
+are refused on save rather than published as malformed configuration.
+
+Dies with a bounded error on failure. A changed, deleted or retargeted file
+requires C<reload> followed by explicit reapplication of the intended values;
+a stale object cannot silently overwrite another writer. Failure preserves
+pending C<set> values in memory for retry or reload. Stable symbolic config
+paths remain links; files with several hardlinks are refused on save.
+
+The persistent sidecar C<E<lt>resolved-configE<gt>.lock> is private. Both the
+configuration and its directory must permit the write. Coordinated writers use
+this lock; external editors should still stop the instance first. Atomic rename
+protects against partial publication, not every filesystem/power-loss scenario.
 
 =head2 all
 
