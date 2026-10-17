@@ -40,6 +40,13 @@ turn a development commit into an nbot deployment.
 
 ## Source and runtime boundary
 
+MB829 records a cross-cutting maintenance round in
+[the dated maintenance review](MAINTENANCE_20261017.md): equivalent nick changes,
+reentrant one-shot events, fresh dashboard membership, deterministic privacy
+tests and statistics setup permissions. The review also identifies configuration
+save durability and incremental decomposition as follow-up work. Applying source
+changes does not deploy mbweb or restart an IRC instance.
+
 Run focused tests, the fast lane, then one visible full suite immediately
 before each source commit. A dev restart does not change nbot. An offline
 replay or synthetic brain proves only the behavior it exercises; nbot work

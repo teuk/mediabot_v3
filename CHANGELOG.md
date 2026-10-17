@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB829 — maintenance of identities, events and authorization freshness
+
+- Preserve the AI speaker identity and display name across case-only and
+  RFC1459-equivalent nick changes, including restart, in-flight replies and
+  personal erasure.
+- Claim one-shot EventBus listeners before callback execution so nested emits
+  cannot replay them; retain ordinary listeners, registration during dispatch
+  and isolated error reports.
+- Read dashboard channel membership afresh on each request; revoked membership
+  or a failed read can no longer reuse a process-wide 30-second channel list.
+- Make the dashboard privacy test independent of timestamp digits while
+  explicitly checking hidden database identity, global counts and role gates.
+- Set network-statistics managed-directory permissions explicitly under a
+  private umask, retain private credentials/outboxes and refuse symbolic paths.
+  Report failed setup command names and exit codes without exposing arguments.
+- Add regression coverage and a dated cross-cutting maintenance review. Keep
+  installed services, private configuration and live deployments separate.
+
 ### MB828 — reproducible offline TLS fixtures in CI
 
 - Generate the network-statistics test certificate from an explicit local

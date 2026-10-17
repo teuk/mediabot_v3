@@ -33,6 +33,28 @@ def run(args,capture=False):
     return r.stdout.strip() if capture else ''
 
 
+def managed_directory(path,mode,owner):
+    path=Path(path)
+    if any(p.is_symlink() for p in (path,*path.parents)):
+        raise ValueError('symbolic managed directory refused')
+    path.mkdir(parents=True,exist_ok=True)
+    # mkdir(mode=...) is filtered by the caller's umask. These managed
+    # directories must be traversable by their service accounts even at 077.
+    os.chmod(path,mode)
+    os.chown(path,*owner)
+
+
+def failure_message(error):
+    if isinstance(error,subprocess.CalledProcessError):
+        args=error.cmd
+        command=Path(str(args[0])).name if isinstance(args,(list,tuple)) and args else 'subprocess'
+        command=re.sub('[^A-Za-z0-9_.-]','?',command)[:80]
+        # Arguments and captured output may include private configuration.
+        return f'[KO] Setup command failed: {command} (exit {error.returncode}); inspect local service/configuration status.'
+    if isinstance(error,ValueError):return '[KO] '+str(error)
+    return '[KO] Setup failed ('+type(error).__name__+'); inspect local service/configuration status.'
+
+
 def atomic(path,content,mode=0o644,owner=None):
     path=Path(path)
     if any(x.is_symlink() for x in (path,*path.parents)): raise ValueError('symbolic target refused: '+str(path))
@@ -198,7 +220,8 @@ def main():
     tracked={}
     def remember(path):
         path=Path(path)
-        if path.is_symlink():raise ValueError('symbolic managed path refused')
+        if any(p.is_symlink() for p in (path,*path.parents)):
+            raise ValueError('symbolic managed path refused')
         if path.exists():
             st=path.stat();tracked[path]=(path.read_bytes(),st.st_mode&0o777,(st.st_uid,st.st_gid))
             dest=backup/str(path).lstrip('/');dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,dest)
@@ -214,12 +237,13 @@ def main():
     was_hub_enabled=subprocess.run(['systemctl','is-enabled','--quiet',hub_unit],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
     was_timer_enabled=subprocess.run(['systemctl','is-enabled','--quiet',timer],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
     try:
-        ETC.mkdir(exist_ok=True,mode=0o755)
+        for directory in (ETC,APP,APP/'static'):
+            managed_directory(directory,0o755,(0,0))
         if a.role=='hub':
             try:pwd.getpwnam('mbnetstats')
             except KeyError:run(['useradd','--system','--home-dir',str(DATA),'--no-create-home','--shell','/usr/sbin/nologin','mbnetstats'])
             hubuser=pwd.getpwnam('mbnetstats');hubowner=(hubuser.pw_uid,hubuser.pw_gid)
-            DATA.mkdir(exist_ok=True,mode=0o750);os.chown(DATA,*hubowner)
+            managed_directory(DATA,0o750,hubowner)
             run(['a2enmod','proxy','proxy_http'],True)
             if cfg is None:
                 keys={k:secrets.token_urlsafe(36) for k in streams}
@@ -234,7 +258,7 @@ def main():
             elif not publisher_path.exists():raise ValueError('existing hub credential cannot be reconstructed; restore the original publisher configuration')
         else:
             atomic(publisher_path,core.encode(cfg),0o600,med)
-        outbox=PUBLISHER_DATA;outbox.mkdir(exist_ok=True,mode=0o700);os.chown(outbox,*med)
+        managed_directory(PUBLISHER_DATA,0o700,med)
         if a.role=='hub' and was_active:run(['systemctl','stop',hub_unit])
         for src in [HERE/'network_stats.py',HERE/'setup.py',*(HERE/'static'/n for n in ('index.html','dashboard.js','dashboard.css'))]:
             atomic(APP/src.relative_to(HERE),src.read_bytes(),0o644)
@@ -285,5 +309,5 @@ if __name__=='__main__':
     try:main()
     except Exception as e:
         # Setup input errors can be explained; never echo private configs/keys.
-        print('[KO] '+str(e) if isinstance(e,ValueError) else '[KO] Setup failed ('+type(e).__name__+'); inspect local service/configuration status.')
+        print(failure_message(e))
         raise SystemExit(1)

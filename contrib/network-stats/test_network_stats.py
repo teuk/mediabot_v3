@@ -243,7 +243,7 @@ class StatsTest(unittest.TestCase):
         self.assertEqual(updated.count('Include /etc/apache2/mediabot-network-stats.conf'),1);self.assertEqual(setup.vhost_include(updated),updated)
         for bad in [s+s,s.replace(':443',':80'),s.replace('teuk.org','other.org')]:
             with self.assertRaises(ValueError):setup.vhost_include(bad)
-    def exercise_setup(self, fail=False, repeat=False):
+    def exercise_setup(self, fail=False, repeat=False, role='hub'):
         etc=self.root/'etc';apache=etc/'apache2';apache.mkdir(parents=True)
         vhost=apache/'site.conf';original='<VirtualHost *:443>\nServerName teuk.org\n</VirtualHost>\n';vhost.write_text(original)
         home=self.root/'home';home.mkdir();backups=self.root/'backups';backups.mkdir()
@@ -261,6 +261,13 @@ class StatsTest(unittest.TestCase):
                 return Response(n.encode({'stream':slug,'points':[]}))
             return Response(b'{"ok":true}')
         identity=types.SimpleNamespace(pw_uid=0,pw_gid=0)
+        arguments=['setup.py','hub','--apache-vhost',str(vhost),'--apply']
+        if role=='publisher':
+            pc=self.publisher_cfg(types.SimpleNamespace(server_port=9409))
+            pc['url']='https://example.com/network-stats-api/ingest/epiknet'
+            pc['state']=str(constants['PUBLISHER_DATA']/'epiknet.sqlite3')
+            source=home/'publisher.json';source.write_bytes(n.encode(pc));source.chmod(0o600)
+            arguments=['setup.py','publisher','--instance','epiknet','--publisher-config',str(source),'--apply']
         from contextlib import ExitStack, redirect_stdout
         with ExitStack() as stack:
             stack.enter_context(redirect_stdout(io.StringIO()))
@@ -271,15 +278,16 @@ class StatsTest(unittest.TestCase):
             stack.enter_context(patch.object(setup.os,'geteuid',return_value=0))
             stack.enter_context(patch.object(setup.os,'chown'))
             stack.enter_context(patch.object(setup.subprocess,'run',return_value=types.SimpleNamespace(returncode=1)))
-            stack.enter_context(patch.object(sys,'argv',['setup.py','hub','--apache-vhost',str(vhost),'--apply']))
+            stack.enter_context(patch.object(sys,'argv',arguments))
             if fail:
                 with self.assertRaises(OSError):setup.main()
             else:
                 setup.main()
                 if repeat:
-                    original_keys=(constants['ETC']/'hub.json').read_bytes()
+                    credentials=constants['ETC']/('hub.json' if role=='hub' else 'epiknet.publisher.json')
+                    original_keys=credentials.read_bytes()
                     setup.main()
-                    self.assertEqual((constants['ETC']/'hub.json').read_bytes(),original_keys)
+                    self.assertEqual(credentials.read_bytes(),original_keys)
         return constants,calls,vhost,original
 
     def test_setup_apply_installs_scoped_files_and_separate_credentials(self):
@@ -303,6 +311,51 @@ class StatsTest(unittest.TestCase):
         self.assertFalse((paths['BOT_HOME']/'network-stats-epiknet.private.json').exists())
         self.assertTrue(paths['DATA'].is_dir())
         self.assertEqual(len(list(paths['BACKUPS'].iterdir())),1)
+
+    def test_setup_hub_permissions_with_private_umask(self):
+        original=os.umask(0o077)
+        try:
+            paths,_,_,_=self.exercise_setup(repeat=True)
+        finally:
+            observed=os.umask(original)
+        self.assertEqual(observed,0o077,'setup does not relax the caller umask')
+        for directory in (paths['APP'],paths['APP']/'static',paths['ETC']):
+            self.assertEqual(directory.stat().st_mode&0o777,0o755)
+        self.assertEqual(paths['DATA'].stat().st_mode&0o777,0o750)
+        self.assertEqual(paths['PUBLISHER_DATA'].stat().st_mode&0o777,0o700)
+        self.assertEqual((paths['ETC']/'hub.json').stat().st_mode&0o777,0o640)
+        self.assertEqual((paths['ETC']/'mbdev.publisher.json').stat().st_mode&0o777,0o600)
+        self.assertEqual((paths['BOT_HOME']/'network-stats-epiknet.private.json').stat().st_mode&0o777,0o600)
+
+    def test_setup_remote_publisher_permissions_with_private_umask(self):
+        original=os.umask(0o077)
+        try:
+            paths,calls,_,_=self.exercise_setup(repeat=True,role='publisher')
+        finally:
+            observed=os.umask(original)
+        self.assertEqual(observed,0o077)
+        for directory in (paths['APP'],paths['APP']/'static',paths['ETC']):
+            self.assertEqual(directory.stat().st_mode&0o777,0o755)
+        self.assertEqual(paths['PUBLISHER_DATA'].stat().st_mode&0o777,0o700)
+        self.assertEqual((paths['ETC']/'epiknet.publisher.json').stat().st_mode&0o777,0o600)
+        self.assertFalse((paths['ETC']/'hub.json').exists())
+        self.assertFalse(any('apache2ctl' in cmd or 'mediabot@nbot.service' in cmd for cmd in calls))
+
+    def test_setup_managed_directory_rejects_symlinks(self):
+        outside=self.root/'outside';outside.mkdir(mode=0o700)
+        alias=self.root/'alias';alias.symlink_to(outside,target_is_directory=True)
+        with patch.object(setup.os,'chown') as chown:
+            with self.assertRaises(ValueError):setup.managed_directory(alias/'static',0o755,(0,0))
+        chown.assert_not_called()
+        self.assertFalse((outside/'static').exists())
+        self.assertEqual(outside.stat().st_mode&0o777,0o700)
+
+    def test_setup_failure_diagnostic_keeps_arguments_and_output_private(self):
+        failure=subprocess.CalledProcessError(7,['runuser','-u',self.token],output=self.token,stderr=self.token)
+        message=setup.failure_message(failure)
+        self.assertIn('runuser',message);self.assertIn('exit 7',message)
+        self.assertNotIn(self.token,message);self.assertNotIn('-u',message)
+        self.assertNotIn(self.token,setup.failure_message(PermissionError(self.token)))
 
     def test_generic_single_bot_profile(self):
         host,streams,local=setup.profile('https://irc.example.org',['network=Our network'],'network')

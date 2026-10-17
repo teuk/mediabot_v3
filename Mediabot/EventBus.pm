@@ -189,6 +189,19 @@ sub _drop_once_entries_from_current_list {
     }
 }
 
+sub _claim_listener {
+    my ($self, $name, $entry) = @_;
+
+    # Claim before calling user code. A nested emit may otherwise execute the
+    # same one-shot, or consume one still present in an outer snapshot.
+    return 0 if $entry->{_once_claimed};
+    if ($entry->{once}) {
+        $entry->{_once_claimed} = 1;
+        $self->off($name, $entry);
+    }
+    return 1;
+}
+
 sub emit {
     my ($self, $event, @args) = @_;
 
@@ -200,6 +213,7 @@ sub emit {
     my $ran = 0;
 
     for my $entry (@listeners) {
+        next unless $self->_claim_listener($name, $entry);
         eval {
             $entry->{cb}->(@args);
             1;
@@ -231,6 +245,7 @@ sub emit_report {
     my $ran = 0;
 
     for my $entry (@listeners) {
+        next unless $self->_claim_listener($name, $entry);
         my $ok = eval {
             $entry->{cb}->(@args);
             1;

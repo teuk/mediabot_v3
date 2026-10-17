@@ -287,7 +287,7 @@ test('both quote HTML and JSON routes forward authenticated scope to both querie
   }
 });
 
-function dashboardModule() {
+function dashboardModule(getChannels = async () => [{ id_channel: 1, name: '#allowed' }]) {
   let counts = 0;
   const adapter = load('../lib/dashboardData.js', {
     './config': { config: { db: { database: 'internal_db', user: 'internal_user', host: 'internal_host' } } },
@@ -295,20 +295,51 @@ function dashboardModule() {
     './securityLog': { logError() {} },
     './db': { ping: async () => ({ db: 'internal_db' }) },
     './mediabotRepository': {
-      getUserChannels: async () => [{ id_channel: 1, name: '#allowed' }],
+      getUserChannels: getChannels,
       getCounts: async () => { counts++; return { users: 123, channels: 456 }; }
     }
   });
   return { adapter, countReads: () => counts };
 }
 
-test('regular dashboard HTML/JSON data omits database identity and global counts', async () => {
-  for (const level of [1, 2, 3]) {
-    const { adapter, countReads } = dashboardModule();
-    const data = await adapter.getDashboardData(request(level));
-    assert.doesNotMatch(JSON.stringify(data), /internal_db|internal_user|internal_host|123|456/);
-    assert.equal(data.myChannels.length, 1);
-    assert.equal(countReads(), 0);
+test('dashboard channel membership reflects revocation on the next request', async () => {
+  let rows = [{ id_channel: 1, name: '#allowed' }];
+  let reads = 0;
+  const { adapter } = dashboardModule(async () => { reads++; return rows; });
+  const req = request(3);
+  assert.deepEqual((await adapter.getDashboardData(req)).myChannels, rows);
+  rows = [];
+  assert.deepEqual((await adapter.getDashboardData(req)).myChannels, []);
+  assert.equal(reads, 2);
+});
+
+test('dashboard channel membership failure never reuses previous rows', async () => {
+  let unavailable = false;
+  const { adapter } = dashboardModule(async () => {
+    if (unavailable) throw new Error('database unavailable');
+    return [{ id_channel: 1, name: '#previously-allowed' }];
+  });
+  const req = request(3);
+  assert.equal((await adapter.getDashboardData(req)).myChannels.length, 1);
+  unavailable = true;
+  assert.deepEqual((await adapter.getDashboardData(req)).myChannels, []);
+});
+
+test('regular dashboard HTML/JSON data omits database identity and global counts', async t => {
+  let timestamp;
+  t.mock.method(Date.prototype, 'toISOString', () => timestamp);
+  for (const milliseconds of ['123', '456']) {
+    timestamp = `2026-10-17T12:34:56.${milliseconds}Z`;
+    for (const level of [1, 2, 3]) {
+      const { adapter, countReads } = dashboardModule();
+      const data = await adapter.getDashboardData(request(level));
+      assert.equal(data.generatedAt, timestamp);
+      assert.deepEqual(data.db, { ok: true, name: null, user: null, host: null, error: null });
+      assert.deepEqual(data.counts, { users: null, channels: null });
+      assert.doesNotMatch(JSON.stringify(data), /internal_db|internal_user|internal_host/);
+      assert.equal(data.myChannels.length, 1);
+      assert.equal(countReads(), 0);
+    }
   }
   const { adapter, countReads } = dashboardModule();
   const data = await adapter.getDashboardData(request(0));

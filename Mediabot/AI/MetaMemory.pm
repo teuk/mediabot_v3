@@ -153,9 +153,10 @@ sub rename_actor {
             for my $turn (@{$room->{turns}}) {$turn->{actor}=$to if $turn->{actor} eq $from}
             if ($room->{names}) {
                 $room->{names}{$to}=clean((split /!/, $new,2)[0],40);
-                delete $room->{names}{$from};
+                delete $room->{names}{$from} if $from ne $to;
             }
-            delete $room->{actors}{$from};$changed=1;
+            delete $room->{actors}{$from} if $from ne $to;
+            $changed=1;
         }
         return ($changed,$changed);
     });
