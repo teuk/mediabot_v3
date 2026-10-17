@@ -471,8 +471,22 @@ rather than an uncited answer. Configure the existing teuk.org service using
 `shorturl.API_URL`, `shorturl.PUBLIC_BASE_URL` and its private credential; keys
 stay in the instance configuration and never enter model requests or logs.
 
+Each source URL is preceded by its site label in dark grey (IRC colour 14),
+with a reset before the separating space. Labels come from the original
+retrieved URL, never from the shorturl, article title or model-supplied text.
+A small local domain catalogue supplies familiar names such as FranceInfo;
+other sites display their hostname without `www.`. Unknown hosts longer than
+48 characters retain their last 45 characters after `...`, preserving the
+domain ending. Matching uses complete domain boundaries, including subdomains;
+a lookalike such as `franceinfo.fr.example.org` cannot borrow the FranceInfo label.
+No additional HTTP lookup or AI request is needed.
+
 Accepted private-service aliases use light blue (IRC colour 12), underline and
 a reset after each link. Separators and answer text retain their normal style.
+For example, a plain-text view reads:
+`Sources: FranceInfo https://teuk.org/shorturl/Abcdef23 | example.org https://teuk.org/shorturl/Ghijkm45`.
+French channels keep `Sources :`. Labels and style controls share the existing
+400-byte sources-message budget; URLs are never truncated to make room.
 Accidental literal line-break/bullet escape artifacts are flattened in provider
 prose before output and memory retention; incoming prompts and evidence are not
 rewritten. Quoted escape notation and ambiguous code/path sequences remain intact.

@@ -51,7 +51,7 @@ my $urls=display_urls($sources,$shortened,'https://teuk.org/shorturl/');
 is($urls->{$long1},'https://teuk.org/shorturl/Abcdef23','first alias is attached to its exact source');
 my $line=Mediabot::AI::MetaRuntime::_source_line($sources,'fr',$urls);
 like($line,qr/\x0312\x1fhttps:\/\/teuk\.org\/shorturl\/Abcdef23\x0f/,'shorturl is light blue and underlined with a reset');
-like($line,qr/\x0f \| \x0312\x1f/,'separator stays outside link style');
+like($line,qr/\x0f \| \x0314two\.example\.org\x0f \x0312\x1f/,'separator stays outside label and link styles');
 unlike($line,qr/first-article|second-article/,'long verified original links do not consume displayed space');
 cmp_ok(length(encode('UTF-8',$line)),'<',160,'source line is compact including colour and underline bytes');
 is(scalar(()=$line=~/\x0312\x1f/g),2,'both displayed aliases have the requested style');
@@ -116,6 +116,8 @@ is($timers[1][0],1.5,'sources line also waits 1.5 seconds');
 $timers[1][1]->();
 is(scalar(@sent),3,'at most two answer lines plus one compact sources line are sent');
 like($sent[2][1],qr/^Sources : /,'third line contains only source presentation');
+like($sent[2][1],qr/\x0314one\.example\.org\x0f \x0312\x1fhttps:\/\/teuk\.org\/shorturl\/Abcdef23\x0f/,
+ 'runtime preserves the original site label before its exact styled shorturl');
 ok(!grep(length(encode('UTF-8',$_->[1]))>400,@sent),'all three payloads including style remain within 400 UTF-8 bytes');
 ok(!grep(!$_->[2]{no_defer},@sent),'none of the three lines bypasses immediate-only flood policy');
 is(history_count($tmp),1,'only fully delivered exchange is retained');

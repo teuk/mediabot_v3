@@ -16,7 +16,7 @@ use Mediabot::AI::MetaPolicy qw(settings fold clean safe_url);
 use Mediabot::AI::MetaMemory;
 use Mediabot::AI::MetaWeb;
 use Mediabot::AI::MetaChat;
-use Mediabot::AI::MetaReply qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready);
+use Mediabot::AI::MetaReply qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label);
 use Mediabot::AI::MetaKnowledge ();
 
 sub new {
@@ -107,12 +107,15 @@ sub _source_line {
     $urls={} unless ref($urls) eq 'HASH';
     for my $source (@$sources) {
         next unless ref($source) eq 'HASH';my $url=safe_url($source->{url});next unless $url;
+        # IRC colour 14 is dark grey. Reset before the space so neither the
+        # alias nor its separator inherits the source-site label's style.
+        my $label="\x0314".source_label($url)."\x0f";
         if (defined($urls->{$url}) && $urls->{$url} ne $url) {
             # IRC colour 12 is light blue; underline and reset are scoped to
             # this verified private-service alias, never to the separator.
             $url="\x0312\x1f".$urls->{$url}."\x0f";
         }
-        my $candidate=$line.($count?' | ':'').$url;
+        my $candidate=$line.($count?' | ':'').$label.' '.$url;
         next if length(encode('UTF-8',$candidate))>400;
         $line=$candidate;last if ++$count>=2;
     }

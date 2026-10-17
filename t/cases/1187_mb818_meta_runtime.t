@@ -111,7 +111,7 @@ is(scalar(@{$client->{calls}}),8,'forget makes no provider call');
 
 ($bot,$client,$runtime,$dir)=fixture();$lang='en';ask($bot,'Alice','#test','latest update?');drafts($client,0,1);final($client,3,'Verified current update.',[1]);
 is(scalar(@sent),1,'web answer precedes its sources');
-$timers[0][1]->();like($sent[1][1],qr/^Sources: https:\/\/www.example.org\/news/,'only verified supplied URL appears in source line');
+$timers[0][1]->();like($sent[1][1],qr/^Sources: \x0314example\.org\x0f https:\/\/www\.example\.org\/news\z/,'label and exact verified supplied URL appear in source line');
 ok(!grep($_->[1]=~/[\x00\r\n\x01]/,@sent),'answers contain no CTCP framing or embedded IRC line breaks');
 
 ($bot,$client,$runtime,$dir)=fixture();$bot->{conf}{'meta_ai.RATE_MAX'}=1;ask($bot,'Alice','#test','calcule 2+2');drafts($client,0,0);final($client,3,'Done');

@@ -7,7 +7,37 @@ use Mediabot::AI::MetaPolicy qw(clean safe_url);
 use Mediabot::URLShortener qw(make_bot_shortener);
 use Mediabot::AI::IRCOutput qw(format_ai_reply);
 use Encode qw(encode);
-our @EXPORT_OK=qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready);
+our @EXPORT_OK=qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label);
+
+sub source_label {
+    my ($url)=@_;
+    $url=safe_url($url);return '' unless defined $url;
+    my ($host)=$url=~m{\Ahttps?://([^/]+)}i;
+    $host=lc $host;$host=~s/\Awww\.//;
+    # Labels describe the original source site, never a model-supplied title
+    # or the shortener. More specific domains precede their parent site.
+    for my $site (
+        ['cert.ssi.gouv.fr','CERT-FR'],
+        ['ssi.gouv.fr','ANSSI'],
+        ['cybermalveillance.gouv.fr','Cybermalveillance.gouv.fr'],
+        ['franceinfo.fr','FranceInfo'],
+        ['francetvinfo.fr','FranceInfo'],
+        ['lemonde.fr','Le Monde'],
+        ['reuters.com','Reuters'],
+        ['bbc.com','BBC'],
+        ['bbc.co.uk','BBC'],
+        ['wikipedia.org','Wikipedia'],
+        ['github.com','GitHub'],
+        ['home-assistant.io','Home Assistant'],
+        ['musee-orsay.fr',"Musée d'Orsay"],
+    ) {
+        my ($domain,$label)=@$site;
+        return $label if $host eq $domain || $host=~/\.\Q$domain\E\z/;
+    }
+    # Unknown sites retain their host, including meaningful subdomains.
+    # For unusually long names keep the domain ending, not a misleading prefix.
+    return length($host)>48?'...'.substr($host,-45):$host;
+}
 
 sub shorturl_ready {
     my ($bot)=@_;

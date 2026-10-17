@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB835 — Readable site labels beside researched source links (2026-10-18)
+
+- Prefix each researched source link with its original site's name in dark
+  grey (IRC colour 14), independently reset from light-blue underlined
+  private-service shorturls and unstyled separators.
+- Resolve familiar names from complete original-host domain boundaries;
+  retain a bounded hostname for other sites. Ignore article titles and
+  model-supplied labels; add no HTTP or AI calls.
+- Keep both English/French sources prefixes, the two-source and 400-byte
+  envelope, validated alias binding, original-URL fallback and paced delivery.
+  Exercise labels, spoofed hosts, formatting boundaries and runtime delivery.
+
 ### MB834 — Atomic configuration saves and stale-writer protection (2026-10-18)
 
 - Prepare configuration changes in a private same-directory temporary file,
