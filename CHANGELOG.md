@@ -10,6 +10,36 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB831 — Network Observatory and Libera (2026-10-17)
+
+- Subdued responsive dashboard, eleven plots, sparklines, synchronized cursors,
+  drag zoom, optional zero-origin axes and accessible tables/UTC CSV export.
+- All twelve raw counters with sample-based deltas, dated extrema, mean,
+  median, P95, deviation and measured coverage/gaps. Net rates use adjacent
+  raw observations even when long-period curves are downsampled. Use one
+  indexed scan instead of the expensive bucket/history join.
+- Scoped installed-hub upgrade preserves streams, credentials and databases;
+  additive remote stream provisioning prepares https://teuk.org/libera from
+  mediabot.teuk.org with a host-bound private publisher configuration.
+- Verify the actual process/cgroup/systemd identity before native Conf writer
+  activation; no guessed unit names or live configuration edits.
+- Retain MB830 local Undernet wiring and mbdev/EpikNet histories. Add regression
+  checks for calculations, charts, provisioning, rollback and activation.
+  Hosting, source publication and live acceptance remain explicit steps.
+
+
+### MB830 — add the local Undernet network-statistics stream
+
+- Extend an existing managed statistics hub with one explicit local stream,
+  without rebuilding its current streams, credentials, histories or outboxes.
+- Bind the Undernet publisher to the absolute snapshot from `mediabot3` and
+  document native activation through `mbundernet.conf` and its actual unit.
+- Validate managed routes, units and existing public endpoints before applying;
+  check all streams after reload and restore scoped files if validation fails.
+  Keep private credentials out of output and prevent accidental rebinding.
+- Exercise actual HTTP/SQLite publication alongside simulated service changes,
+  including failure recovery, repeated application and instance separation.
+
 ### MB829 — maintenance of identities, events and authorization freshness
 
 - Preserve the AI speaker identity and display name across case-only and

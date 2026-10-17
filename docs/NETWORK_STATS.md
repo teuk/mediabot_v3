@@ -32,24 +32,50 @@ requires the 255/266 end of the reply and a valid user total. Late replies are
 bounded; fields from older replies are never used to fill a new observation.
 The existing Prometheus gauges, partyline `.lusers` and polling remain available.
 
-## Dashboard
+## Dashboard (MB831)
 
-- Dark, responsive panels, numeric cards, visible/invisible curves, channels,
-  IRC operators, servers, local clients and unknown connections.
-- 1 hour, 6 hours, 24 hours, 7 days, 30 days or 90 days; automatic refresh every
-  60 seconds; per-series toggles and pointer tooltips with exact observations.
-- A screen-reader-friendly observation table and detailed current counters.
-- True min/max/mean across samples in the selected period; long graphs show
-  at most 601 real last observations per time bucket, never invented averages.
-- Missing values and collection gaps remain gaps. Old data is marked stale,
-  instead of being labelled live or being periodically copied as new data.
-- Time labels use the visitor's browser timezone. Stored epochs are UTC.
-- No external JavaScript, CDN, tracking, Grafana or Prometheus dependency.
-  This is a standalone dashboard inspired by monitoring tools, not Grafana.
+- Subdued responsive dark design, no animation/flashing or external assets;
+  four summary cards with sparklines and period deltas; eleven plots covering
+  all twelve raw counters plus visibility proportions, net hourly change,
+  users/server, users/channel and operators per 1,000 users. Reported peaks
+  and the distinct 266 global count are optional dashed series.
+- Complete table: latest snapshot, period delta, minimum, mean, maximum with
+  date, median, P95, population deviation and number of observations.
+- 1h/6h/24h/7d/30d/90d, refresh every 60s while visible, series toggles,
+  synchronized cursor, pointer/keyboard tooltips, drag zoom and optional
+  zero-origin axes. Escape, double click or reset leaves zoom. Cards/tables
+  keep the full selected period when a curve is zoomed.
+- Accessible observation table and CSV download of **displayed real samples**
+  only, UTC timestamps, all twelve raw columns, empty unknown values. This is
+  not an unbounded raw-database export.
+- True min/max/mean/median/P95/deviation/deltas across **all raw samples** for
+  each present field. Means/deviation are not time weighted; P95 uses the upper
+  nearest rank. Delta = last minus first; percentage is unknown if first=0.
+  First/last/min/max timestamps are also in JSON. A single point has zero
+  delta, not an established trend.
+- Coverage merges each sample's following declared-cadence slot, clipped to
+  now/the requested window, divided by requested duration. It estimates
+  measured slots, **not network uptime**. A newly activated history can have
+  low coverage on a long period. Gaps count interior separations >2.5 cadences;
+  range edges are not called gaps. Observation age is displayed separately.
+- An indexed chronological scan computes the statistics and retains at most
+  601 actual last observations per time bucket, without a bucket/history join.
+  A hidden within-bucket peak remains in raw-period statistics; the graph does
+  not invent it. Ratios use counters in one displayed sample. Net hourly rate
+  uses adjacent **raw** observations within 2.5 cadences before downsampling;
+  it is not a join/quit counter. Ratio and zoom footers summarize shown values.
+- Users/channel is not actual average membership (one user can join many
+  channels). Numeric 251/266 and local/global scopes remain distinct. Peaks
+  advertised by the server are not historical maxima. Missing fields and
+  gaps remain visible, zero remains zero, old observations are marked stale.
+- Browser-local times and explicit timezone footer; storage and CSV in UTC.
+  No CDN, tracking, Grafana or Prometheus dependency.
 
-Open `contrib/network-stats/preview.html` locally for the visual design. It is
-self-contained and clearly labelled **simulated data**, not an IRC history.
-History starts at activation; no historical figures are manufactured.
+Open `contrib/network-stats/preview.html` for a self-contained design preview
+with **simulated data**, no connections to running instances. Use `upgrade.py`
+to update an installed hub without recreating its stream profile; see
+[LIBERA_NETWORK_STATS.md](LIBERA_NETWORK_STATS.md). History starts at activation;
+no past measurements are manufactured.
 
 ## Simple installation: one Mediabot and one web server
 
@@ -127,14 +153,23 @@ expects the Unix bot account `mediabot`; deployments under another account can
 adapt the explicit service/config templates. Repeat `--stream SLUG=LABEL` for
 more streams. Private file paths are generated, never stored in the bot config.
 
-## Teuk.org dev + EpikNet on nbot
+## Teuk.org hub: dev, Undernet, EpikNet and Libera
 
 | Host | Role | Output |
 | --- | --- | --- |
 | `teuk.org` | Dev bot + local publisher + dashboard hub | `https://teuk.org/mbdev` |
+| `teuk.org` | Undernet bot in `mediabot3`, using `mbundernet.conf` | `https://teuk.org/undernet` |
 | `nbot.soyou.rocks` | EpikNet bot + outgoing HTTPS publisher | `https://teuk.org/epiknet` on teuk.org |
+| `mediabot.teuk.org` | Libera bot + outgoing HTTPS publisher | `https://teuk.org/libera` on teuk.org |
 
-The supplied setup helper implements this profile. Source installation and all
+The initial setup helper creates the dev/EpikNet pair. Add the local Undernet
+stream to an existing installation with `add_local.py`, following
+[UNDERNET_NETWORK_STATS.md](UNDERNET_NETWORK_STATS.md). It preserves the existing
+streams and uses the absolute `mediabot3` snapshot, not the dev export. The
+Undernet bot can already collect LUSERS once its own config enables export;
+it does not require a different IRC operator role or a new bot implementation.
+
+Source installation and all
 required tests come first. The source package does **not** activate anything,
 edit private configuration or restart a running bot.
 
@@ -182,8 +217,9 @@ Only after reviewing the plan, repeat with `--apply`. The helper:
 `setup.py` manages `mediabot-network-stats.service` and
 `mediabot-network-publish-<instance>.service/.timer`; it does not stop or change
 `mediabot@dev.service`, `mediabot@nbot.service`, mbweb or another web application.
-The setup is separate from `commit.sh` and is run again when dashboard code is
-updated; the bot updater never deploys the web host's application automatically.
+The setup is separate from `commit.sh`. Later dashboard updates use the
+scoped `upgrade.py`, retaining every existing stream. The bot updater never
+deploys the web host's application automatically.
 
 ### 2. Activate the dev export using the native config writer
 
@@ -292,3 +328,9 @@ also runs these tests and the actual core numeric/export integration. Use the
 full project suite before committing. The visual preview is fixture data; only
 host-side collection, TLS reverse proxy and a live `/LUSERS` comparison establish
 production acceptance.
+
+MB831 regression checks cover statistics/coverage, raw-rate downsampling,
+chart gaps/ratios, remote host binding, scoped upgrade/rollback and native
+config activation. The pure chart tests use Node.js (`node --test
+contrib/network-stats/test_dashboard.js`), required for this dashboard development lane only,
+not for the bot's full Perl/Python suite or the Python runtime. No npm installation is required for these tests.

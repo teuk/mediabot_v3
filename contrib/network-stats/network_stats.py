@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import math
+import statistics
 import os
 from pathlib import Path
 import re
@@ -151,24 +152,82 @@ class History:
 
     def query(self, stream, span, now=None):
         now = int(time.time()) if now is None else now
-        since = now-RANGES[span]
-        bucket = max(1,math.ceil(RANGES[span]/600))
+        since = now - RANGES[span]
+        bucket = max(1, math.ceil(RANGES[span] / 600))
+        values, summary, displayed = {}, {}, {}
+        covered, end, count, gaps, longest = 0, since, 0, 0, 0
+        first_at = last_at = None
+        intervals = set()
+        previous = None
+        previous_bucket, bucket_gap = None, False
         with self.connect() as db:
             db.execute('DELETE FROM samples WHERE ts < ?', (now-RETENTION,))
-            latest=self.unpack(db.execute('SELECT * FROM samples WHERE stream=? ORDER BY ts DESC LIMIT 1',(stream,)).fetchone())
-            # Return real last observations, not invented average headcounts.
-            rows=db.execute('SELECT s.* FROM samples s JOIN (SELECT MAX(ts) ts FROM samples WHERE stream=? AND ts>=? AND ts<=? GROUP BY CAST((ts-?)/? AS INTEGER)) b ON s.ts=b.ts WHERE s.stream=? ORDER BY s.ts',
-                            (stream,since,now,since,bucket,stream)).fetchall()
-            raw=db.execute('SELECT counts FROM samples WHERE stream=? AND ts>=? AND ts<=?',(stream,since,now)).fetchall()
-        summary={}
-        for row in raw:
-            for key,val in strict_json(row['counts']).items():
-                stat=summary.setdefault(key,{'min':val,'max':val,'sum':0,'n':0})
-                stat['min']=min(stat['min'],val);stat['max']=max(stat['max'],val);stat['sum']+=val;stat['n']+=1
-        for val in summary.values():
-            val['mean']=round(val.pop('sum')/val['n'],2)
-        return {'now':now,'from':since,'range':span,'bucket_seconds':bucket,'latest':latest,
-                'points':[self.unpack(row) for row in rows],'samples':len(raw),'summary':summary}
+            latest = self.unpack(db.execute('SELECT * FROM samples WHERE stream=? ORDER BY ts DESC LIMIT 1', (stream,)).fetchone())
+            # One indexed chronological scan: no bucket-to-history join and no
+            # list containing every decoded observation. Only counter arrays
+            # (for exact quantiles) and <=601 real display samples are retained.
+            rows = db.execute('SELECT * FROM samples WHERE stream=? AND ts>=? AND ts<=? ORDER BY ts', (stream, since, now))
+            for row in rows:
+                point = self.unpack(row)
+                ts, cadence = point['ts'], point['interval']
+                count += 1
+                if first_at is None:
+                    first_at = ts
+                last_at = ts
+                intervals.add(cadence)
+                # Coverage estimates measured slots, never network uptime.
+                start, stop = max(since, ts, end), min(now, ts+cadence)
+                covered += max(0, stop-start)
+                end = max(end, stop)
+                point['net_rate'] = None
+                raw_gap = False
+                if previous is not None:
+                    elapsed = ts-previous['ts']
+                    if elapsed > max(cadence, previous['interval']) * 2.5:
+                        gaps += 1
+                        raw_gap = True
+                        longest = max(longest, elapsed)
+                    elif elapsed > 0:
+                        point['net_rate'] = round((point['counts']['users']-previous['counts']['users'])*3600/elapsed, 4)
+                # Rates refer to adjacent RAW measurements, before downsampling.
+                bucket_id = (ts-since)//bucket
+                bucket_gap = (bucket_gap or raw_gap) if bucket_id == previous_bucket else raw_gap
+                point['gap_before'] = bucket_gap
+                displayed[bucket_id] = point
+                previous_bucket = bucket_id
+                for key, value in point['counts'].items():
+                    values.setdefault(key, []).append(value)
+                    stat = summary.setdefault(key, {
+                        'min': value, 'max': value, 'first': value, 'last': value,
+                        'first_at': ts, 'last_at': ts, 'min_at': ts, 'max_at': ts,
+                    })
+                    if value < stat['min']:
+                        stat['min'], stat['min_at'] = value, ts
+                    if value > stat['max']:
+                        stat['max'], stat['max_at'] = value, ts
+                    stat['last'], stat['last_at'] = value, ts
+                previous = point
+        for key, stat in summary.items():
+            ordered = sorted(values[key])
+            size = len(ordered)
+            stat.update(n=size, mean=round(statistics.fmean(ordered), 2),
+                        median=(ordered[(size-1)//2]+ordered[size//2])/2,
+                        p95=ordered[math.ceil(.95*size)-1],
+                        stddev=round(statistics.pstdev(ordered), 2),
+                        delta=stat['last']-stat['first'],
+                        delta_percent=round((stat['last']-stat['first'])/stat['first']*100, 2) if stat['first'] else None)
+        quality = {
+            'covered_seconds': covered,
+            'coverage_percent': round(100*covered/RANGES[span], 2),
+            'gaps': gaps, 'longest_gap_seconds': longest,
+            'first_at': first_at, 'last_at': last_at,
+            'sample_intervals': sorted(intervals),
+        }
+        return {'now': now, 'from': since, 'range': span,
+                'bucket_seconds': bucket, 'latest': latest,
+                'points': list(displayed.values()), 'samples': count,
+                'summary': summary, 'quality': quality}
+
 
 
 class Server(ThreadingHTTPServer):

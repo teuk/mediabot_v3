@@ -155,6 +155,12 @@ def audit():
             except subprocess.CalledProcessError:print('[INFO] Command unavailable at current privilege: '+command[0])
 
 
+def valid_host(host):
+    return (isinstance(host,str) and len(host)<=253 and '.' in host
+            and all(re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?',part)
+                    for part in host.split('.')))
+
+
 def profile(site, specs, local):
     u=urlsplit(site)
     if u.scheme!='https' or not u.hostname or u.username or u.password or u.path not in ('','/') or u.query or u.fragment or u.port not in (None,443):
@@ -205,6 +211,8 @@ def main():
     else:
         if not a.publisher_config:raise ValueError('--publisher-config must name the private transferred configuration')
         cfg=core.load_config(a.publisher_config,'publisher')
+        if 'publisher_host' in cfg and (not valid_host(cfg['publisher_host']) or run(['hostname','-f'],True).lower()!=cfg['publisher_host'].lower()):
+            raise ValueError('private publisher configuration belongs to another host')
         if cfg['url'].rstrip('/').split('/')[-1]!=a.instance:raise ValueError('configuration destination differs from --instance')
         print('[PLAN] Publisher '+a.instance+': local aggregate snapshot -> HTTPS hub; persistent outbox; no bot restart.')
         files={}
@@ -287,7 +295,7 @@ def main():
         print('[OK] Installed and started. Backup: '+str(backup))
         if a.role=='hub':
             for k in streams:
-                if k!=local:print('[NEXT] Private remote configuration: /home/mediabot/network-stats-'+k+'.private.json (transfer over SSH).')
+                if k!=local and (BOT_HOME/('network-stats-'+k+'.private.json')).is_file():print('[NEXT] Private remote configuration: /home/mediabot/network-stats-'+k+'.private.json (transfer over SSH).')
     except Exception:
         subprocess.run(['systemctl','stop',timer],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         if not was_timer_enabled:subprocess.run(['systemctl','disable',timer],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
