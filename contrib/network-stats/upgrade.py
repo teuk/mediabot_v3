@@ -14,8 +14,8 @@ import add_local as guard
 import network_stats as core
 import setup as deploy
 
-# The shipped pre-MB831 implementation/assets, reviewed from the supplied tree.
-PREVIOUS = {'network_stats.py': '6fbedbc0299c769e5fbbd7e76940c5af3c9af041408195e1d7534b5a8c78e356', 'static/index.html': '8d5553a5a5361ff1c19ca958cef0651ba0305517175df9bb831386c54da38385', 'static/dashboard.css': '2dd862abcdcb1bb231e44bbf58e9fc4cdbc96c9fa9f4b9fe7bf27d3cabb6417c', 'static/dashboard.js': 'eaafef46584dc343ce221f8d8853ab45686e95864d830bafd7d7acece2cd9e40'}
+# Reviewed pre-MB831, MB831 and MB832 implementation/assets. Retain both upgrade paths.
+PREVIOUS = {'network_stats.py': ['6fbedbc0299c769e5fbbd7e76940c5af3c9af041408195e1d7534b5a8c78e356', '8f8862a2fdee7f0308e65efb7017d0ed6ebea668e689cdffea6f09f51ae0f0cd'], 'static/index.html': ['8d5553a5a5361ff1c19ca958cef0651ba0305517175df9bb831386c54da38385', 'a1c494dec8da230262fc49b292c420a6e698b23792b515a792661ac062d753ca', '99edd38bdb6e0a150f6189eefc5dee6853e922ec62971cf29cd4842db152ef99'], 'static/dashboard.css': ['2dd862abcdcb1bb231e44bbf58e9fc4cdbc96c9fa9f4b9fe7bf27d3cabb6417c', '9ba97e6b7531dbbcbc35b369dcb2b087d6b29e9d9ea2ea26b54024cdab3bbc3f', 'c2fc277c5aa0f354192860b95e39243d9f90313cd5f7a8d460a7e872e3a92041'], 'static/dashboard.js': ['eaafef46584dc343ce221f8d8853ab45686e95864d830bafd7d7acece2cd9e40', '3aee259d9bff67a38a032802e922f1b96642f12593fa48f5cd33b2d1c81d6e20', '8a8ace3e7e421416bf9f323fc7696776d48690a0c162e6d2e2cd5250c7008719']}
 
 
 def prepare(site, vhost):
@@ -40,7 +40,8 @@ def prepare(site, vhost):
     for rel,previous in PREVIOUS.items():
         source=guard.safe(deploy.HERE/rel);dest=guard.safe(deploy.APP/rel)
         old=dest.read_bytes();new=source.read_bytes()
-        if hashlib.sha256(old).hexdigest() not in (previous,hashlib.sha256(new).hexdigest()):
+        allowed=(previous,) if isinstance(previous,str) else tuple(previous)
+        if hashlib.sha256(old).hexdigest() not in (*allowed,hashlib.sha256(new).hexdigest()):
             raise ValueError('installed hub file differs from reviewed versions: '+rel)
         files[dest]=(old,new,dest.stat())
     compile((deploy.HERE/'network_stats.py').read_text(),'network_stats.py','exec')

@@ -179,6 +179,14 @@ class ProvisionTest(unittest.TestCase):
         self.assertEqual(f.hub.read_bytes(),hub);self.assertEqual(deploy.INCLUDE.read_bytes(),routes)
         for rel in old:self.assertEqual((deploy.APP/rel).read_bytes(),(deploy.HERE/rel).read_bytes())
         f.retained()
+    def test_ui_upgrade_accepts_multiple_reviewed_asset_generations(self):
+        f=self.fixture;old=self.changed_upgrade();hub=f.hub.read_bytes();routes=deploy.INCLUDE.read_bytes()
+        reviewed={rel:['0'*64,digest] for rel,digest in old.items()}
+        with patch.object(upgrade,'PREVIOUS',reviewed),redirect_stdout(io.StringIO()):
+            p=upgrade.prepare('https://teuk.org',f.vhost);upgrade.install(p)
+        self.assertEqual(f.hub.read_bytes(),hub);self.assertEqual(deploy.INCLUDE.read_bytes(),routes)
+        for rel in reviewed:self.assertEqual((deploy.APP/rel).read_bytes(),(deploy.HERE/rel).read_bytes())
+        f.retained()
     def test_failed_ui_upgrade_restores_code_without_changing_data(self):
         f=self.fixture;old=self.changed_upgrade();before={rel:(deploy.APP/rel).read_bytes() for rel in old}
         real=add_local.checked_json;count=[0]
@@ -216,6 +224,35 @@ class ExportActivationTest(unittest.TestCase):
             self.assertEqual(activate_export.managed_unit(self.fake,os.getuid()),'mediabot@libera.service')
         with patch.object(activate_export,'command',return_value='MainPID=67890\nActiveState=active\nUser='+who):
             with self.assertRaises(ValueError):activate_export.managed_unit(self.fake,os.getuid())
+    def audit_host(self, actual):
+        a=types.SimpleNamespace(instance='libera',network='Libera',
+            expected_host='mediabot.teuk.org',bot_dir=self.bot,bot_conf=self.config,
+            unit='mediabot@libera.service',site_url='https://teuk.org')
+        pc={'url':'https://teuk.org/network-stats-api/ingest/libera',
+            'snapshot':str(self.bot/'var/network-stats.json'),
+            'state':str(deploy.PUBLISHER_DATA/'libera.sqlite3'),
+            'publisher_host':'mediabot.teuk.org'}
+        with patch.object(activate_export.pwd,'getpwuid',return_value=types.SimpleNamespace(pw_name='mediabot')), \
+             patch.object(activate_export,'command',return_value=actual) as host_command, \
+             patch('socket.getfqdn',side_effect=AssertionError('reverse DNS must not select the local host identity')), \
+             patch.object(activate_export,'configured_network',return_value='Libera.Chat') as network, \
+             patch.object(activate_export,'process',return_value=self.fake), \
+             patch.object(activate_export,'managed_unit',return_value=a.unit), \
+             patch.object(activate_export.core,'load_config',return_value=pc), \
+             patch.object(activate_export.guard,'active',return_value=True), \
+             patch.object(activate_export.subprocess,'run') as mutation, redirect_stdout(io.StringIO()):
+            try:
+                return activate_export.audit(a)
+            finally:
+                host_command.assert_called_once_with(['hostname','-f'])
+                mutation.assert_not_called()
+                self.assertEqual(self.config.read_bytes(),self.before)
+    def test_local_hostname_matches_even_when_reverse_dns_is_different(self):
+        for actual in ['mediabot.teuk.org','MEDIABOT.TEUK.ORG']:
+            self.assertEqual(self.audit_host(actual)[3],'mediabot@libera.service')
+    def test_wrong_local_hostname_still_refuses_activation_without_mutation(self):
+        with self.assertRaisesRegex(ValueError,'unexpected bot host'):
+            self.audit_host('different.teuk.org')
     def activate(self,fail=False):
         real=subprocess.run;calls=[];starts=[0]
         def run(args,**kwargs):

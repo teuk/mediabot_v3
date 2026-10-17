@@ -150,9 +150,25 @@ class History:
             return None
         return {'ts':row['ts'],'network':row['network'],'interval':row['cadence'],'counts':strict_json(row['counts'])}
 
-    def query(self, stream, span, now=None):
+    def query(self, stream, span, now=None, *, until=None, compare=False):
         now = int(time.time()) if now is None else now
-        since = now - RANGES[span]
+        if span not in RANGES or type(compare) is not bool:
+            raise ValueError('invalid history options')
+        cutoff = now-RETENTION
+        if until is not None:
+            integer(until,cutoff+1,now)
+        endpoint = now if until is None else until
+        with self.connect() as db:
+            db.execute('DELETE FROM samples WHERE ts < ?', (cutoff,))
+            result = self._window(db,stream,span,endpoint,cutoff)
+            earliest = db.execute('SELECT min(ts) FROM samples WHERE stream=?', (stream,)).fetchone()[0]
+            result.update(server_now=now,live=until is None,retention_from=cutoff,first_available=earliest)
+            if compare:
+                result['comparison'] = self._window(db,stream,span,result['from'],cutoff,inclusive=False)
+        return result
+
+    def _window(self, db, stream, span, until, cutoff, inclusive=True):
+        since = until - RANGES[span]
         bucket = max(1, math.ceil(RANGES[span] / 600))
         values, summary, displayed = {}, {}, {}
         covered, end, count, gaps, longest = 0, since, 0, 0, 0
@@ -160,53 +176,52 @@ class History:
         intervals = set()
         previous = None
         previous_bucket, bucket_gap = None, False
-        with self.connect() as db:
-            db.execute('DELETE FROM samples WHERE ts < ?', (now-RETENTION,))
-            latest = self.unpack(db.execute('SELECT * FROM samples WHERE stream=? ORDER BY ts DESC LIMIT 1', (stream,)).fetchone())
-            # One indexed chronological scan: no bucket-to-history join and no
-            # list containing every decoded observation. Only counter arrays
-            # (for exact quantiles) and <=601 real display samples are retained.
-            rows = db.execute('SELECT * FROM samples WHERE stream=? AND ts>=? AND ts<=? ORDER BY ts', (stream, since, now))
-            for row in rows:
-                point = self.unpack(row)
-                ts, cadence = point['ts'], point['interval']
-                count += 1
-                if first_at is None:
-                    first_at = ts
-                last_at = ts
-                intervals.add(cadence)
-                # Coverage estimates measured slots, never network uptime.
-                start, stop = max(since, ts, end), min(now, ts+cadence)
-                covered += max(0, stop-start)
-                end = max(end, stop)
-                point['net_rate'] = None
-                raw_gap = False
-                if previous is not None:
-                    elapsed = ts-previous['ts']
-                    if elapsed > max(cadence, previous['interval']) * 2.5:
-                        gaps += 1
-                        raw_gap = True
-                        longest = max(longest, elapsed)
-                    elif elapsed > 0:
-                        point['net_rate'] = round((point['counts']['users']-previous['counts']['users'])*3600/elapsed, 4)
-                # Rates refer to adjacent RAW measurements, before downsampling.
-                bucket_id = (ts-since)//bucket
-                bucket_gap = (bucket_gap or raw_gap) if bucket_id == previous_bucket else raw_gap
-                point['gap_before'] = bucket_gap
-                displayed[bucket_id] = point
-                previous_bucket = bucket_id
-                for key, value in point['counts'].items():
-                    values.setdefault(key, []).append(value)
-                    stat = summary.setdefault(key, {
-                        'min': value, 'max': value, 'first': value, 'last': value,
-                        'first_at': ts, 'last_at': ts, 'min_at': ts, 'max_at': ts,
-                    })
-                    if value < stat['min']:
-                        stat['min'], stat['min_at'] = value, ts
-                    if value > stat['max']:
-                        stat['max'], stat['max_at'] = value, ts
-                    stat['last'], stat['last_at'] = value, ts
-                previous = point
+        upper = '<=' if inclusive else '<'
+        latest = self.unpack(db.execute('SELECT * FROM samples WHERE stream=? AND ts '+upper+' ? ORDER BY ts DESC LIMIT 1', (stream,until)).fetchone())
+        # One indexed chronological scan: no bucket-to-history join and no
+        # list containing every decoded observation. Only counter arrays
+        # (for exact quantiles) and <=601 real display samples are retained.
+        rows = db.execute('SELECT * FROM samples WHERE stream=? AND ts>=? AND ts '+upper+' ? ORDER BY ts', (stream, max(since,cutoff), until))
+        for row in rows:
+            point = self.unpack(row)
+            ts, cadence = point['ts'], point['interval']
+            count += 1
+            if first_at is None:
+                first_at = ts
+            last_at = ts
+            intervals.add(cadence)
+            # Coverage estimates measured slots, never network uptime.
+            start, stop = max(since, ts, end), min(until, ts+cadence)
+            covered += max(0, stop-start)
+            end = max(end, stop)
+            point['net_rate'] = None
+            raw_gap = False
+            if previous is not None:
+                elapsed = ts-previous['ts']
+                if elapsed > max(cadence, previous['interval']) * 2.5:
+                    gaps += 1
+                    raw_gap = True
+                    longest = max(longest, elapsed)
+                elif elapsed > 0:
+                    point['net_rate'] = round((point['counts']['users']-previous['counts']['users'])*3600/elapsed, 4)
+            # Rates refer to adjacent RAW measurements, before downsampling.
+            bucket_id = (ts-since)//bucket
+            bucket_gap = (bucket_gap or raw_gap) if bucket_id == previous_bucket else raw_gap
+            point['gap_before'] = bucket_gap
+            displayed[bucket_id] = point
+            previous_bucket = bucket_id
+            for key, value in point['counts'].items():
+                values.setdefault(key, []).append(value)
+                stat = summary.setdefault(key, {
+                    'min': value, 'max': value, 'first': value, 'last': value,
+                    'first_at': ts, 'last_at': ts, 'min_at': ts, 'max_at': ts,
+                })
+                if value < stat['min']:
+                    stat['min'], stat['min_at'] = value, ts
+                if value > stat['max']:
+                    stat['max'], stat['max_at'] = value, ts
+                stat['last'], stat['last_at'] = value, ts
+            previous = point
         for key, stat in summary.items():
             ordered = sorted(values[key])
             size = len(ordered)
@@ -222,8 +237,9 @@ class History:
             'gaps': gaps, 'longest_gap_seconds': longest,
             'first_at': first_at, 'last_at': last_at,
             'sample_intervals': sorted(intervals),
+            'retention_clipped': since < cutoff,
         }
-        return {'now': now, 'from': since, 'range': span,
+        return {'now': until, 'from': since, 'until': until, 'range': span,
                 'bucket_seconds': bucket, 'latest': latest,
                 'points': list(displayed.values()), 'samples': count,
                 'summary': summary, 'quality': quality}
@@ -279,9 +295,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200,(STATIC/'index.html').read_bytes(),'text/html; charset=utf-8')
                 if u.path=='/'+slug+'/data':
                     q=parse_qs(u.query,keep_blank_values=True,strict_parsing=True) if u.query else {}
-                    if set(q)-{'range'} or len(q.get('range',[]))>1 or q.get('range',['24h'])[0] not in RANGES:
+                    if set(q)-{'range','end','compare'} or any(len(values)!=1 for values in q.values()) or q.get('range',['24h'])[0] not in RANGES:
                         return self.error(400,'invalid_range')
-                    data=self.server.history.query(slug,q.get('range',['24h'])[0])
+                    if ('end' in q and not re.fullmatch('[0-9]{1,12}',q['end'][0])) or q.get('compare',['0'])[0] not in ('0','1'):
+                        return self.error(400,'invalid_history_options')
+                    endpoint=int(q['end'][0]) if 'end' in q else None
+                    data=self.server.history.query(slug,q.get('range',['24h'])[0],until=endpoint,compare=q.get('compare',['0'])[0]=='1')
                     data.update(label=meta['label'],stream=slug,retention_days=90,streams=[{'id':k,'label':v['label']} for k,v in self.server.cfg['streams'].items()])
                     return self.send(200,encode(data))
             if u.path.startswith('/network-stats-assets/'):

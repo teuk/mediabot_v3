@@ -114,8 +114,10 @@ python3 -B contrib/network-stats/activate_export.py \
   --bot-conf /home/mediabot/mediabot_v3/mediabot.conf
 ```
 
-Default is read-only. It verifies account/host, native config network (`Libera`
-or `Libera.Chat`), exact process/cwd/config, publisher binding and active timer.
+Default is read-only. It uses `hostname -f` for local host identity, matching
+the installer and shell checks; a reverse-DNS alias from `socket.getfqdn()`
+does not replace that identity. It verifies account, native config network
+(`Libera` or `Libera.Chat`), exact process/cwd/config, publisher binding and timer.
 The service is discovered from the process cgroup; its `MainPID` and `User`
 must match that exact bot. If cgroups are unavailable, `--unit
 REAL_VERIFIED_UNIT.service` can identify an already verified system service,

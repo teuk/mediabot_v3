@@ -334,3 +334,98 @@ chart gaps/ratios, remote host binding, scoped upgrade/rollback and native
 config activation. The pure chart tests use Node.js (`node --test
 contrib/network-stats/test_dashboard.js`), required for this dashboard development lane only,
 not for the bot's full Perl/Python suite or the Python runtime. No npm installation is required for these tests.
+
+## Dashboard language
+
+Every stream page opens in **English** unless that browser has explicitly
+selected **Français** in the header. The language choice is shared by all
+dashboard streams on the same origin and persists across reloads. Browser
+language does not change the English default.
+
+The selector updates headings, eleven charts, legends, keyboard instructions,
+hover tooltips, summary tables, collection/error notices and methodology in
+place. Dates and numbers use `en-GB` or `fr-FR`, with the browser’s existing
+local time zone. Network labels and raw IRC counter identifiers keep their
+configured meanings. CSV headers and UTC ISO timestamps stay stable.
+
+A language change neither requests new measurements nor resets the selected
+time range, zoom, hidden series or zero-axis setting. Publication errors remain
+visible while the last good measurements stay on screen.
+
+The only saved browser setting is the non-sensitive
+`mediabot.networkStats.language` preference (`en` or `fr`) in local storage.
+If storage is denied, the dashboard remains usable and language can still be
+changed for that page; it starts in English again on the next load. No cookie,
+login, external translation service or new server configuration is required.
+
+Deploy through `contrib/network-stats/upgrade.py` to update every configured
+stream together, preserving the history database, stream credentials, managed
+routes, bot processes and publisher timers. Reviewed pre-MB831, MB831, MB832 and
+already-current assets are accepted; unrelated local asset edits are refused.
+
+## Historical navigation and period comparison (MB833)
+
+Use **Earlier / Later / Live** below the time-range controls to inspect retained
+history. The date strip always states the selected interval in browser local
+time. Historical status describes that interval, not current network health.
+Returning within one minute of the latest live endpoint selects Live, avoiding
+a view stranded a few seconds behind the moving server clock.
+
+**Compare previous period** overlays the preceding equal elapsed duration with
+subdued dashed curves. All eleven charts retain series visibility, explicit
+zeros, unknowns and collection gaps. The previous-period timestamp appears in
+tooltips; nearby previous samples are used only within 1.25 sample intervals,
+never interpolated across a wide gap.
+
+The raw-counter table adds previous mean, difference between means and percent
+change. A difference requires at least two actual samples of that counter in
+each period. A zero previous mean has no percentage change. Means are sample
+means without time weighting; compare each period’s coverage and sample count
+before interpreting them. Different coverage can bias a comparison. These are
+network-counter observations, not unique audiences or individual join/part counts.
+
+The joining boundary belongs to the selected period; it is excluded from the
+comparison period to prevent double counting. Both periods use fixed elapsed
+durations, not civil calendar days: a daylight-saving transition can therefore
+align different local hours. Earlier/Later standalone views keep the historical
+API’s closed endpoint convention; the comparison baseline explicitly excludes
+the joining endpoint.
+
+Cards show observed lows and peaks, with their timestamps in the title. Raw
+current-period extrema are marked on charts when not zoomed, including an
+extreme that is absent from the downsampled display points. In a zoomed chart
+the summary strip continues to describe displayed points; cards and the raw
+statistics table retain the full selected interval.
+
+**Copy view link** produces a link with a fixed server endpoint, selected range
+and comparison flag. A copied live view becomes historical for its recipient
+while the original page keeps updating. The browser’s language preference
+remains local. Drag zoom and hidden-series settings are not included in the
+shared link. Clipboard failure displays the link as selectable plain text.
+A link can reproduce its period only while the underlying history is retained.
+
+The accessible observations table contains both periods, with original UTC
+instants formatted in browser local time and an explicit period label. CSV
+exports keep their previous raw identifiers and ISO UTC timestamps, and contain
+only selected-period display observations.
+
+### Public history API
+
+`/<stream>/data?range=24h&end=<Unix-seconds>&compare=1` accepts the existing
+range names. `end` is optional; omitting it selects the moving live endpoint.
+It must be an integer strictly newer than the current retention cutoff and no
+later than the actual server clock. `compare` accepts only `0` or `1`; duplicate
+or unknown query parameters are rejected.
+
+Legacy response fields remain available. `now` is the selected endpoint;
+`server_now` is the actual request-time clock. `live`, `retention_from` and
+`first_available` describe the selection and retained history. With comparison
+enabled, `comparison` contains its own interval, summary, points and quality.
+Coverage can be partial when a requested window crosses the retention cutoff;
+`quality.retention_clipped` reports that case. The 90-day baseline can be empty
+because data older than 90 days is not retained.
+
+Both disjoint windows are read in the same database transaction, using bounded
+indexed scans with at most 601 actual display points per period. There is no
+schema migration, new stream credential, remote publisher change or IRC restart.
+Deploy the reviewed source through `upgrade.py` on the existing hub host.

@@ -9,7 +9,6 @@ from pathlib import Path
 import pwd
 import re
 import shutil
-import socket
 import subprocess
 import tempfile
 import time
@@ -63,7 +62,9 @@ def managed_unit(proc,uid,explicit=None):
 
 def audit(a):
     if pwd.getpwuid(os.geteuid()).pw_name!='mediabot':raise ValueError('run as mediabot, without sudo')
-    if socket.getfqdn().lower()!=a.expected_host.lower():raise ValueError('unexpected bot host')
+    # Use the same local host identity as setup.py and the operator's
+    # hostname -f precondition. socket.getfqdn() can select a reverse-DNS alias.
+    if command(['hostname','-f']).lower()!=a.expected_host.lower():raise ValueError('unexpected bot host')
     directory=guard.safe(a.bot_dir).resolve(strict=True);config=guard.safe(a.bot_conf).resolve(strict=True)
     if not directory.is_absolute() or config.parent!=directory:raise ValueError('expected the explicit configuration in the bot directory')
     if not core.SLUG.fullmatch(a.instance):raise ValueError('invalid instance')

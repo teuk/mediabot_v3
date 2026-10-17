@@ -79,7 +79,9 @@ return sub {
     $pl2->_handle_line($stream2, 7, ".x") for 1..11;
     $assert->is($stream2->count779(qr/Rate limit exceeded/), 1,
         'mb596-779: fenetre 1 — refus pose');
-    $pl2->{users}{7}{rate_window} = time() - 6;   # la fenetre expire
+    # Same native clock as Dispatcher; other loaded cases may import their own
+    # time() into the legacy runner's shared package main.
+    $pl2->{users}{7}{rate_window} = CORE::time() - 6;
     $pl2->_handle_line($stream2, 7, ".x");
     $assert->is($pl2->{users}{7}{rate_count}, 1,
         'mb596-779: nouvelle fenetre — compteur reparti');

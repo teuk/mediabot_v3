@@ -10,8 +10,42 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB833 — Historical views and meaningful network-period comparison (2026-10-17)
+
+- Browse retained network history, return to live data and share fixed-endpoint
+  period links. Validate historical endpoints and query options on the server;
+  pruning remains bound to its actual clock and the existing 90-day policy.
+- Compare with the previous equal-length period using disjoint observations,
+  subdued dashed curves, coverage, sample means and changes. Missing baselines,
+  zero denominators and fewer than two counter samples remain unavailable.
+- Highlight observed extrema, retain both periods’ real timestamps and gaps,
+  and expose previous-period observations in the accessible table. Keep the
+  existing UTC CSV schema for the selected period only.
+- Extend both English and French without changing language persistence,
+  stream credentials, history schema, IRC collection or publisher services.
+
+### MB832 — English-first network observatory with French selection (2026-10-17)
+
+- Make every network dashboard English by default with an accessible
+  English/Français selector. Remember only the explicit language preference
+  across stream pages; unavailable browser storage does not block the UI.
+- Translate chart legends, tooltips, summaries, notices, accessibility labels
+  and methodology; format dates and numbers in the selected locale while
+  retaining browser time zone and stable UTC CSV fields.
+- Change language without another data request or resetting zoom, period,
+  hidden series or the zero-axis setting. Keep publication failures visible
+  during a language change and retain all streams, credentials and history.
+- Extend the scoped hub upgrader to accept reviewed MB831 assets alongside
+  the previous installation; retain the MB831 hostname activation correction.
+- Keep the historical Partyline throttle regression on the Dispatcher’s native
+  clock despite imported clocks in the shared test runner. Exercise both clock
+  contexts in isolated interpreters without changing the production throttle.
+
 ### MB831 — Network Observatory and Libera (2026-10-17)
 
+- Align exporter activation host checks with `hostname -f`, as used by the
+  publisher installer; a differing reverse-DNS alias must not reject the right
+  host. Retain exact process/unit/configuration binding and wrong-host refusal.
 - Subdued responsive dashboard, eleven plots, sparklines, synchronized cursors,
   drag zoom, optional zero-origin axes and accessible tables/UTC CSV export.
 - All twelve raw counters with sample-based deltas, dated extrema, mean,
