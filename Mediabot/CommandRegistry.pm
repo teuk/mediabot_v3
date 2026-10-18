@@ -98,6 +98,15 @@ sub register_command {
         die "CommandRegistry: command '$name' already registered for source '$source'\n";
     }
 
+    # MB837: canonical names and aliases share one dispatch namespace.
+    # command_for resolves aliases first, so accepting an existing alias as
+    # a new canonical name would create an unreachable command. replace is
+    # permission to replace this command, never to take another one's alias.
+    my $alias_owner = $self->{aliases}{$source}{$name};
+    if (defined $alias_owner && $alias_owner ne $name) {
+        die "CommandRegistry: command '$name' conflicts with alias owned by '$alias_owner' for source '$source'\n";
+    }
+
     # mb230-B1: replacing a command must not leave stale aliases behind, and
     # replace must not steal aliases/canonical names owned by another command.
     # This matters for plugins because a reload can legitimately replace a

@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB837 — Command ownership and log reopen continuity (2026-10-18)
+
+- Reject a canonical command name already owned by another command's alias
+  in the same source. Even `replace` cannot create an unreachable entry or
+  take that alias; failed registration preserves handlers, aliases and help.
+- Open and configure a replacement log file before switching away from the
+  active descriptor. An unsuccessful reopen still reports its error while
+  subsequent logging can continue to the old file until recovery.
+- Exercise collisions, source isolation, legitimate replacement/removal,
+  failed/recovered log reopening, automatic rotation and console delivery.
+  No database schema, migration, SQL query, private setting, service operation
+  or dashboard deployment is changed by this maintenance package.
+
 ### MB836 — Runtime ownership and stale-result maintenance (2026-10-18)
 
 - Bind private AI tickets to a fresh room incarnation as well as its epoch.

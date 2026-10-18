@@ -167,3 +167,49 @@ acceptance remains on **#i/o on Epiknet through nbot**, the instance already
 configured for collective AI. A successful private follow-up after the update
 checks normal continuity without changing live settings; restart/reload is
 what loads the new in-memory classes.
+
+## MB837 — Command ownership and log reopen continuity
+
+The follow-up pass uses the supplied clean `3.6dev-20261018_081930` snapshot,
+including MB836. Two additional defects were reproduced against that source.
+These reproductions use local API calls and temporary files; they are not
+claims of incidents observed on any live instance.
+
+| Trigger | Before | After |
+| --- | --- | --- |
+| Register `weather` after `forecast` has registered alias `weather` in the same source | Registration succeeds and increases the catalogue count, but dispatch still resolves `weather` to `forecast`. The new canonical handler is unreachable. | Registration raises a collision before changing command entries or alias ownership, including when `replace` is requested. |
+| Reopen an active log after its destination becomes unavailable | The existing descriptor is closed before opening the replacement. Reopen raises an error, and subsequent file writes use a closed descriptor. | Open and configure the candidate first. If opening fails, report the same error and retain the active descriptor; a later successful reopen switches files and closes the old descriptor. |
+
+### Command namespace
+
+Canonical commands and aliases share the dispatch namespace of each source.
+Public and private commands remain independent. `replace` still replaces an
+existing canonical command and releases its removed aliases. It does not
+authorize taking an alias from another command. To reuse an alias as a new
+canonical name, first explicitly release it through its current owner's
+replacement or removal. Failed registration leaves handlers, help metadata
+and aliases usable. The PluginManager's own registration and authorization
+checks remain in place; this closes the lower-level registry API gap.
+
+### Log continuity
+
+The logger keeps its existing error reporting, UTF-8 output and autoflush.
+Only a successful candidate replaces the active handle. During an unsuccessful
+reopen it continues writing to the still-open file, which an external rotator
+may already have renamed; it does not claim that the requested new destination
+is healthy. Once the path is repaired, an explicit reopen switches to it.
+Normal size rotation still writes its boundary record to the new base file.
+Standard output and Partyline console hooks retain one delivery per log call.
+This does not add retry loops or change archive retention policy.
+
+### Database and deployment scope
+
+There are no database schema changes, migrations, new tables or columns,
+changed SQL queries or live database operations. The payload contains only two
+Perl modules, two temporary-fixture regression tests and documentation. Source
+installation preserves private configuration, data files and running services.
+No hub, publisher, dashboard or mbweb deployment is needed. Use the normal
+`commit.sh` workflow after the required checks, then update the intended bot
+instance. Normal live continuity is accepted on **#i/o on Epiknet via nbot**;
+do not provoke filesystem failures or register colliding commands on a live
+bot to reproduce the tests.

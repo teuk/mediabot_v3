@@ -26,11 +26,15 @@ sub new {
 sub _open_logfile {
     my ($self) = @_;
     return unless $self->{logfile};
-    close($self->{logfilehandle}) if $self->{logfilehandle};
+    # MB837: a failed reopen must leave the current descriptor usable.
+    # Open/configure the candidate before replacing the live handle; callers
+    # still receive the existing explicit error if the destination is invalid.
     open my $fh, '>>:utf8', $self->{logfile}
         or die "Cannot open logfile $self->{logfile}: $!";
     $fh->autoflush(1);
+    my $previous = $self->{logfilehandle};
     $self->{logfilehandle} = $fh;
+    close($previous) if $previous;
 }
 
 # Rotate log file when it exceeds maxsize bytes
