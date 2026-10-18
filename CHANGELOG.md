@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB840 — Async command delivery and worker cleanup (2026-10-18)
+
+- Bind asynchronous command replies and auxiliary notices to their original
+  IRC transport and, when provided, joined-channel runtime generation. Reject
+  obsolete output after reconnect, part/rejoin, shutdown or state replacement,
+  including between individual reply intents and in paced news queues.
+- Finish a timed-out command after the existing TERM/KILL grace even when EOF
+  is missing. Do not signal a PID already reaped by the owned process watcher;
+  retained deadline callbacks cannot re-arm or finalize the job twice.
+- Close and release completed worker streams/timers to break callback ownership
+  cycles. Preserve the ordinary process-plus-EOF barrier and existing helpers,
+  news pacing, isolated SQL connector and synchronous fallback contracts.
+- Add real fork/pipe and IO::Async lifecycle regressions without live IRC,
+  provider or production database access. No SQL/schema or private settings
+  change; MB838 and MB839 behavior remain protected by regression validation.
+
 ### MB839 — Calendar lifecycle and Hailo completion maintenance (2026-10-18)
 
 - Revalidate calendar task identity and generation after its next-date callback.

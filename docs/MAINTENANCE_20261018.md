@@ -271,3 +271,77 @@ workflow. A normal Hailo reply and normal scheduled activity suffice for live
 acceptance; do not replace real tasks or provoke provider errors on production.
 The package README records exact qualification results and any local fixture
 limitations. Full host validation remains mandatory before commit.
+
+## MB840 — Asynchronous command delivery and cleanup
+
+This pass follows MB839 (`522c184`, `3.6dev-20261018_153139`). Its reviewed base
+is reconstructed from the supplied MB838 snapshot, the exact MB839 payload and
+the VERSION reported by the successful commit transcript. The installer still
+requires matching source fingerprints and a clean checkout on the host; it
+does not infer or publish Git history from that reconstruction.
+
+The review follows the parent-side `CommandAsync` lifecycle used by statistics,
+career, RSS/DTC and other offloaded reads. Three defects are reproduced through
+controlled local API calls; none is claimed as a live production incident.
+
+| Trigger | Previous behavior | Correction |
+| --- | --- | --- |
+| A worker completes after transport replacement/disconnect, channel part/rejoin or runtime shutdown | Most command intents and failure/truncation notices can be delivered through the current bot connection without checking the request's original context. News has a transport check but loses channel lifecycle identity while queued. | Capture transport and the existing joined-channel generation when available; recheck before notices and each intent. Carry the binding into delayed news items, discarding obsolete items while preserving later valid batches and pacing. |
+| Process exit is observed, but pipe EOF delivery never arrives | The normal completion barrier never releases the channel slot. Timeout/escalation may signal a PID already reaped by the watcher, and still cannot finalize without EOF. | Keep the ordinary process/EOF barrier for successful results. A timeout has a bounded backstop after the existing grace; only an un-reaped owned child is signaled. Late callbacks cannot restart termination or complete twice. |
+| A normal worker completes and leaves the loop | Stream/timer callbacks, finalization and cleanup retain one another, retaining their bot reference after resources should be released. | Close the worker stream, remove its notifiers and clear the owning lexical references during cleanup. Weak-reference regressions verify reclamation after normal completion. |
+
+### Delivery context and authorization
+
+The context check uses in-memory state, not a database read. Public `#channel`
+commands bind to `wit_runtime_state` only when the bot supplies that existing
+state object; a missing/unverifiable captured generation cannot later grant
+output. A replaced state object does not inherit an older object's generation
+number. Private commands have no channel-generation lookup and keep transport
+binding. Offline test callers without either transport remain supported, but
+work captured without a transport cannot attach to a newly created one.
+
+Permission gates, command targets and reply helpers remain unchanged. This is
+not fresh user authorization, nick-ownership verification or permission to
+execute administrative commands. It does not undo SQL work already completed
+in an isolated child. The maintenance prevents obsolete parent-side emission;
+it does not claim to revoke child-side actions retroactively.
+
+News keeps its existing minimum interval, queue size and TTL. Each queued item
+retains its request binding. Dropping an old-generation item cannot drop a later
+valid batch or flush that batch as a burst. Normal non-news synchronous fallback
+still executes directly; the news fallback retains its captured/paced output.
+
+### Timeout and resource ownership
+
+The existing command deadline (45 seconds) and escalation grace (5 seconds)
+remain unchanged. The backstop finalizes after that grace if needed, even with
+missing EOF. Successful requests still wait for both process status and EOF,
+so this does not reinstate the earlier truncated-result race. Timeout accounting
+and current-context notices occur once. Logs say timeout cleanup rather than
+asserting that a process has already been reaped.
+
+If finalization precedes child exit, IO::Async's process watcher retains reaping
+ownership until the actual process status arrives. No second waitpid is added
+to the normal path. A known-reaped PID receives no TERM/KILL; stale timeout
+callbacks are inert after completion or setup failure. Cleanup also releases
+stream/timer references, while retaining ordinary worker logs and counters.
+
+The regression fixture uses real forks, pipes, process watching, timers and
+channel runtime state with a dummy isolated DB connector and captured output.
+It tests missing EOF by withholding the read notifier while still observing the
+real child's exit; it creates no background descendant. Reaped-PID signal
+attempts are intercepted rather than delivered. A separate live-child fixture
+permits real TERM/KILL only to its own still-owned child and waits for the real
+watcher to reap it. No live IRC, provider or production DB is involved.
+
+### Deployment scope
+
+No database schema, migration, SQL query, persistent format, configuration,
+provider model, Hailo policy, X-authentication setting, dashboard or publisher
+changes. Source installation preserves private state and services and includes
+mandatory complete host validation. After commit, restart only the dev instance
+when ready, then update intended production instances through their normal
+workflow. Normal command replies on #i/o through nbot are sufficient for smoke
+acceptance; do not disconnect production or trigger long-running SQL to provoke
+these failure paths. Exact local qualification and limitations are recorded in
+the package README.

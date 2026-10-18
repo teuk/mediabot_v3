@@ -118,12 +118,54 @@ sub _collect_intents_run {
     return (\@intents, $truncated, $ok, $err);
 }
 
+# MB840: bind delayed output to its transport and, when available, the
+# existing joined-channel generation. This is not a new authorization layer.
+sub _delivery_binding {
+    my ($self, $channel) = @_;
+    my $binding = { irc => $self->{irc} };
+    if (defined($channel) && $channel =~ /^#/ && $self->{wit_runtime_state}) {
+        $binding->{runtime} = $self->{wit_runtime_state};
+        $binding->{channel} = $channel;
+        $binding->{generation} = eval {
+            $binding->{runtime}->capture_generation($channel);
+        };
+    }
+    return $binding;
+}
+
+sub _delivery_current {
+    my ($self, $binding) = @_;
+    return 0 if eval { $self->getQuit };
+    my $current = $self->{irc};
+    if (defined($binding->{irc})) {
+        return 0 unless ref($current) && ref($binding->{irc})
+            && refaddr($current) == refaddr($binding->{irc})
+            && eval { $current->is_connected };
+    }
+    else {
+        # Preserve offline fixture callers, but never attach their old work
+        # to a connection that appeared after submission.
+        return 0 if defined $current;
+    }
+    if ($binding->{runtime}) {
+        my $state = $self->{wit_runtime_state};
+        return 0 unless ref($state) && refaddr($state) == refaddr($binding->{runtime});
+        my $expected = $binding->{generation};
+        my $generation = eval { $state->capture_generation($binding->{channel}) };
+        return 0 unless defined($expected) && !ref($expected) && "$expected" =~ /\A[1-9][0-9]*\z/
+            && defined($generation) && !ref($generation) && "$generation" eq "$expected";
+    }
+    return 1;
+}
+
 # Rejeu cote PARENT via les vrais helpers (AntiFlood/NoColors/file mb568).
 sub _replay_intents {
-    my ($self, $intents, $label, $expected_irc) = @_;
-    return _queue_news_intents($self, $intents, $expected_irc)
+    my ($self, $intents, $label, $expected_irc, $binding) = @_;
+    return 0 if $binding && !_delivery_current($self, $binding);
+    return _queue_news_intents($self, $intents, $expected_irc, $binding)
         if defined($label) && $label eq 'actualites';
     for my $it (@{ $intents || [] }) {
+        return 0 if $binding && !_delivery_current($self, $binding);
         my ($kind, $target, $text) = @$it;
         next unless defined $target && length $target;
         if    ($kind eq 'privmsg') { eval { Mediabot::Helpers::botPrivmsg($self, $target, $text) } }
@@ -196,22 +238,28 @@ sub _drain_news_output {
             && eval { $self->{irc}->is_connected }
             && !eval { $self->getQuit };
     my $now = _news_output_now();
-    my $expired = 0;
-    while (@{$q->{items}} && $q->{items}[0]{expires} <= $now) {
-        shift @{$q->{items}}; $expired++;
+    my ($expired, $stale) = (0, 0);
+    while (@{$q->{items}}) {
+        my $first = $q->{items}[0];
+        if ($first->{expires} <= $now) {shift @{$q->{items}}; $expired++; next}
+        if ($first->{binding} && !_delivery_current($self, $first->{binding})) {
+            shift @{$q->{items}}; $stale++; next;
+        }
+        last;
     }
     _news_output_log($self, 'expired') if $expired;
+    _news_output_log($self, 'context_changed') if $stale;
     return 1 unless @{$q->{items}};
     my $wait = defined($q->{last_at}) ? $NEWS_OUTPUT_STEP - ($now - $q->{last_at}) : 0;
     return _arm_news_output($self, $q, $wait) if $wait > 0;
     my $item = shift @{$q->{items}};
-    _replay_intents($self, [$item->{intent}]);
+    _replay_intents($self, [$item->{intent}], undef, undef, $item->{binding});
     $q->{last_at} = _news_output_now();
     return @{$q->{items}} ? _arm_news_output($self, $q, $NEWS_OUTPUT_STEP) : 1;
 }
 
 sub _queue_news_intents {
-    my ($self, $intents, $expected_irc) = @_;
+    my ($self, $intents, $expected_irc, $binding) = @_;
     my $irc = $self->{irc};
     unless ($irc && eval { $irc->is_connected }
         && (!$expected_irc || refaddr($expected_irc) == refaddr($irc))) {
@@ -242,17 +290,17 @@ sub _queue_news_intents {
         return 0; # Reject the whole new batch, preserving the pending order.
     }
     my $expires = _news_output_now() + $NEWS_OUTPUT_TTL;
-    push @{$q->{items}}, map { {intent => $_, expires => $expires} } @batch;
+    push @{$q->{items}}, map { {intent => $_, expires => $expires, binding => $binding} } @batch;
     return $q->{timer} ? 1 : _drain_news_output($self, $q);
 }
 
 sub _run_sync {
-    my ($self, $label, $code) = @_;
+    my ($self, $label, $code, $binding) = @_;
     return $code->() unless $label eq 'actualites';
     my $irc = $self->{irc};
     my ($intents, $truncated, $ok, $err) = _collect_intents_run($code);
     die $err unless $ok;
-    return _replay_intents($self, $intents, $label, $irc);
+    return _replay_intents($self, $intents, $label, $irc, $binding);
 }
 
 # mb595-B1: instantanes de LECTURE pour l'operateur (.status) — memoire
@@ -311,7 +359,8 @@ sub run_ctx_async {
     my $nick    = eval { $ctx->nick }    // '';
     my $channel = eval { $ctx->channel } // '';
     my $lockkey = lc($channel || $nick || 'global');
-    my $news_irc = $label eq 'actualites' ? $self->{irc} : undef;
+    my $delivery = _delivery_binding($self, $channel);
+    my $news_irc = $delivery->{irc};
 
     # Un seul gros job par canal : proteger MariaDB et l'ordre des reponses.
     $self->{_cmd_async_jobs} ||= {};
@@ -332,7 +381,7 @@ sub run_ctx_async {
         $self->{_cmd_async_stats}{fallback_sync}++;
         eval { $self->{logger}->log(3,
             "CommandAsync: no async loop, running '$label' synchronously") };
-        return _run_sync($self, $label, $code);
+        return _run_sync($self, $label, $code, $delivery);
     }
 
     require IO::Async::Stream;
@@ -343,14 +392,14 @@ sub run_ctx_async {
     unless (pipe($pipe, $child_write)) {
         $self->{_cmd_async_stats}{fallback_sync}++;
         eval { $self->{logger}->log(1, "CommandAsync: pipe failed: $!") };
-        return _run_sync($self, $label, $code);
+        return _run_sync($self, $label, $code, $delivery);
     }
     my $pid = fork();
     unless (defined $pid) {
         $self->{_cmd_async_stats}{fallback_sync}++;
         eval { close $pipe }; eval { close $child_write };
         eval { $self->{logger}->log(1, "CommandAsync: fork failed: $!") };
-        return _run_sync($self, $label, $code);
+        return _run_sync($self, $label, $code, $delivery);
     }
 
     if ($pid == 0) {
@@ -434,11 +483,15 @@ sub run_ctx_async {
     };
     my ($stream, $t_term, $t_kill);
     my $cleanup = sub {
+        eval { $stream->close_now } if $stream;
         for my $obj ($stream, $t_term, $t_kill) {
             next unless $obj;
             eval { $obj->stop };
             eval { $loop->remove($obj) };
         }
+        # Break stream/timer -> callback -> finalize -> cleanup ownership
+        # cycles, even if an external caller retains a completed callback.
+        ($stream, $t_term, $t_kill) = (undef, undef, undef);
         delete $self->{_cmd_async_jobs}{$lockkey};
     };
     my $job_started = Time::HiRes::time();
@@ -450,10 +503,16 @@ sub run_ctx_async {
         if ($state->{timed_out}) {
             $self->{_cmd_async_stats}{timeouts}++;
             eval { $self->{logger}->log(1,
-                "CommandAsync: '$label' timed out after ${TIMEOUT_S}s (killed)") };
+                "CommandAsync: '$label' timed out after ${TIMEOUT_S}s (worker cleanup)") };
             eval { Mediabot::Helpers::botNotice($self, $nick,
                 "$label: analysis timed out — the database may be missing indexes"
-                . " (see tools/normalize_channel_log_indexes.pl).") };
+                . " (see tools/normalize_channel_log_indexes.pl).") }
+                if _delivery_current($self, $delivery);
+            return;
+        }
+        unless (_delivery_current($self, $delivery)) {
+            eval { $self->{logger}->log(2,
+                "CommandAsync: '$label' result discarded (delivery context changed)") };
             return;
         }
         my $res = eval { JSON::PP::decode_json($state->{buffer}) };
@@ -465,10 +524,10 @@ sub run_ctx_async {
         }
         if (ref($res) eq 'HASH' && $res->{ok}) {
             $self->{_cmd_async_stats}{completed}++;
-            _replay_intents($self, $res->{intents}, $label, $news_irc);
+            _replay_intents($self, $res->{intents}, $label, $news_irc, $delivery);
             eval { Mediabot::Helpers::botNotice($self, $nick,
                 "$label: output truncated (too many lines for one run).") }
-                if $res->{truncated};
+                if $res->{truncated} && _delivery_current($self, $delivery);
             eval { $self->{logger}->log(3,
                 "CommandAsync: '$label' completed in ${elapsed}s ("
                 . scalar(@{ $res->{intents} || [] }) . " line(s))") };
@@ -478,7 +537,8 @@ sub run_ctx_async {
                 ? ($res->{detail} // $res->{stage} // 'unknown') : 'no result';
             eval { $self->{logger}->log(1,
                 "CommandAsync: '$label' failed: $detail") };
-            eval { Mediabot::Helpers::botNotice($self, $nick, 'Database error.') };
+            eval { Mediabot::Helpers::botNotice($self, $nick, 'Database error.') }
+                if _delivery_current($self, $delivery);
         }
     };
     my $completion_barrier = sub {
@@ -503,11 +563,18 @@ sub run_ctx_async {
     $t_term = IO::Async::Timer::Countdown->new(
         delay => $TIMEOUT_S,
         on_expire => sub {
+            return if $state->{finalized} || $state->{timed_out};
             $state->{timed_out} = 1;
-            kill 'TERM', $pid;
+            kill 'TERM', $pid unless $state->{process_done};
             $t_kill = IO::Async::Timer::Countdown->new(
                 delay => $KILL_AFTER_S,
-                on_expire => sub { kill 'KILL', $pid },
+                on_expire => sub {
+                    return if $state->{finalized};
+                    kill 'KILL', $pid unless $state->{process_done};
+                    # Missing EOF must not keep the per-channel slot forever.
+                    # watch_process still owns reaping if the child exits later.
+                    $finalize->();
+                },
             );
             $loop->add($t_kill); $t_kill->start;
         },
@@ -526,10 +593,11 @@ sub run_ctx_async {
         $self->{_cmd_async_stats}{fallback_sync}++;
         kill 'KILL', $pid;
         waitpid($pid, 0);
+        $state->{finalized} = 1;
         $cleanup->();
         eval { $self->{logger}->log(1,
             "CommandAsync: could not watch worker; running '$label' synchronously") };
-        return _run_sync($self, $label, $code);
+        return _run_sync($self, $label, $code, $delivery);
     }
     return 1;
 }
