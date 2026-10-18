@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB838 — Confirmed Undernet X authentication and periodic recovery (2026-10-18)
+
+- Expose Master-only `xauth [status]` and compatible `xlogin [status]` in both
+  public and private registries. Use configured credentials only; report
+  pending checks honestly and keep account/password values out of diagnostics.
+- Share startup, manual and five-minute verification in one connection-bound
+  controller. Require a complete server self-WHOIS with the configured account
+  before declaring authentication; a completed negative reply triggers LOGIN
+  to the server-qualified service. Timeouts remain unknown, not logged out.
+- Request +x only when positively configured, then confirm it through numeric
+  221. Defer configured Undernet autojoins, including console, until account
+  and requested cloak are confirmed; retain the normal paced channel joins.
+- Bound checks, in-flight requests and LOGIN retries. Reset on disconnect,
+  reconnect and nick changes, respect other network types, and avoid repeated
+  joins on healthy periodic checks. Localized/spoofed X notices grant no state.
+- Add an offline private-configuration checker and real protocol-dispatch,
+  privilege and lifecycle regressions. Preserve Libera's existing flow and the
+  database schema; no private configuration or service is changed on install.
+
 ### MB837 — Command ownership and log reopen continuity (2026-10-18)
 
 - Reject a canonical command name already owned by another command's alias

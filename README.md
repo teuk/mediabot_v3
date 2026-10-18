@@ -31,6 +31,8 @@ Mediabot helps IRC communities **run, remember and understand their channels**. 
 
 Network history and public dashboards: [NETWORK_STATS.md](docs/NETWORK_STATS.md).
 
+Undernet X authentication and recovery: [XAUTH_UNDERNET.md](docs/XAUTH_UNDERNET.md).
+
 ## What Mediabot provides
 
 | Area | Capabilities |

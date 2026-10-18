@@ -1017,44 +1017,30 @@ sub xLogin_ctx {
         return;
     }
 
-    # --- Read configuration ---
-    my $xService = $conf->get('undernet.UNET_CSERVICE_LOGIN');
-    unless (defined($xService) && $xService ne "") {
-        botNotice($self, $nick, "undernet.UNET_CSERVICE_LOGIN is undefined in configuration file");
+    # MB838: the same controller handles startup and periodic recovery. Never
+    # accept account/password arguments from IRC and never claim login success
+    # merely because a LOGIN was queued.
+    my @args=ref($ctx->args) eq 'ARRAY'?@{$ctx->args}:();
+    if (@args && (@args!=1 || lc($args[0]) ne 'status')) {
+        botNotice($self,$nick,'Syntax: xauth [status] (xlogin is also accepted). Credentials come from private configuration.');
         return;
     }
-
-    my $xUsername = $conf->get('undernet.UNET_CSERVICE_USERNAME');
-    unless (defined($xUsername) && $xUsername ne "") {
-        botNotice($self, $nick, "undernet.UNET_CSERVICE_USERNAME is undefined in configuration file");
-        return;
+    my $controller=$self->xauth;
+    if (@args) {
+        my $s=$controller->status;
+        botNotice($self,$nick,'XAUTH state='.$s->{state}
+            .' | +x='.($s->{want_x}?($s->{cloak}?'confirmed':'unconfirmed'):'not requested')
+            .' | check interval='.$s->{interval}.'s'
+            .' | last verified='.(defined($s->{verified_age})?$s->{verified_age}.'s ago':'never'));
+        return 1;
     }
+    my $ok=$controller->request;
+    botNotice($self,$nick,$ok
+        ? 'X authentication check requested. Recovery and configured +x require server confirmation; use xauth status.'
+        : 'X authentication check unavailable. Check the Undernet network type, private service settings and IRC connection.');
+    logBot($self,$message,undef,'xLogin',$ok?'check_requested':'check_unavailable');
+    return $ok;
 
-    my $xPassword = $conf->get('undernet.UNET_CSERVICE_PASSWORD');
-    unless (defined($xPassword) && $xPassword ne "") {
-        botNotice($self, $nick, "undernet.UNET_CSERVICE_PASSWORD is undefined in configuration file");
-        return;
-    }
-
-    # --- Perform login to CSERVICE ---
-    my $sNoticeMsg = "Authenticating to $xService with username $xUsername";
-    botNotice($self, $nick, $sNoticeMsg);
-    noticeConsoleChan($self, $sNoticeMsg);
-
-    # Send login command to service
-    botPrivmsg($self, $xService, "login $xUsername $xPassword");
-
-    # Request +x on the bot nick
-    if ($self->{irc} && $self->{irc}->is_connected) {
-        my $botnick = $self->{irc}->nick_folded;
-        $self->{irc}->write("MODE $botnick +x\x0d\x0a");
-    } else {
-        $self->{logger}->log(1, "xLogin_ctx: cannot set +x, not connected to IRC");
-    }
-
-    # Log action
-    logBot($self, $message, undef, "xLogin", "$xUsername\@$xService");
-    return 1;
 }
 
 # yomomma

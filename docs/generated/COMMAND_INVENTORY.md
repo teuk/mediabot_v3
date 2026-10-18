@@ -8,11 +8,11 @@ Source version line: `3.6dev`
 
 | Measure | Count |
 | --- | ---: |
-| Internal help entries | 249 |
-| Registered public built-ins | 242 |
-| Registered private built-ins | 97 |
-| Direct public registry handlers | 242 |
-| Direct private registry handlers | 97 |
+| Internal help entries | 250 |
+| Registered public built-ins | 243 |
+| Registered private built-ins | 99 |
+| Direct public registry handlers | 243 |
+| Direct private registry handlers | 99 |
 | Compatibility dispatch tables | 0 |
 | Help parser anomalies | 0 |
 | Help-only entries | 0 |
@@ -270,7 +270,8 @@ Source version line: `3.6dev`
 | `whotalk` | public | registry-public, registry-private | `whotalk #channel` | Show channel talk statistics. |  |
 | `whotalks` | public | registry-public, registry-private | `whotalks #channel` | Alias for whotalk. |  |
 | `wordcount` | public | registry-public | `wordcount [nick]` | Count distinct words spoken by a nick on the channel. |  |
-| `xlogin` | public | registry-public | `xlogin <account>` | Authenticate or check X login integration when configured. |  |
+| `xauth` | master | registry-public, registry-private | `xauth [status]` | Verify or show Undernet X authentication and configured +x. Uses private configuration only. |  |
+| `xlogin` | master | registry-public, registry-private | `xlogin [status]` | Check the configured X account and recover authentication; alias for xauth. |  |
 | `yearbook` | public | registry-public | `yearbook [YYYY]` | Revisit a channel year: activity, peaks, top voices, quotes and factoids. Defaults to the last completed year. |  |
 | `yomomma` | public | registry-public | `yomomma` | Return a yomomma joke. |  |
 | `yt` | public | registry-public | `yt <query>` | Search YouTube when configured. |  |

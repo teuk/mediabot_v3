@@ -10,6 +10,7 @@ use Mediabot::User;
 use Mediabot::Channel;
 use Mediabot::Conf;
 use Mediabot::NetworkStats qw(parse_numeric);
+use Mediabot::XAuth;
 use Mediabot::Log;
 use Mediabot::Context;
 use Mediabot::Command;
@@ -631,6 +632,12 @@ sub update_network_metrics_from_numeric {
 }
 
 # MB827: no network I/O on the IRC loop; a separate publisher handles delivery.
+# MB838: shared, connection-bound Undernet/X authentication controller.
+sub xauth {
+    my ($self)=@_;
+    return $self->{xauth_controller} ||= Mediabot::XAuth->new(bot=>$self);
+}
+
 sub _network_stats_exporter {
     my ($self) = @_;
     return $self->{network_stats_exporter} ||= Mediabot::NetworkStats->new(
@@ -2361,6 +2368,7 @@ sub _builtin_public_command_handlers {
         birthday     => sub { my ($ctx) = @_; userBirthday_ctx($ctx) },
         f            => sub { my ($ctx) = @_; fortniteStats_ctx($ctx) },
         xlogin       => sub { my ($ctx) = @_; xLogin_ctx($ctx) },
+        xauth        => sub { my ($ctx) = @_; xLogin_ctx($ctx) },
         tellme       => sub { my ($ctx) = @_; chatGPT_ctx($ctx) },
         chatgpt      => sub { my ($ctx) = @_; chatGPT_ctx($ctx) },
         openai       => sub { my ($ctx) = @_; openai_ctx($ctx) },
@@ -2839,7 +2847,8 @@ whereis|whereis <nick>|public|Locate a nick or channel when known.
 whoami|whoami|public|Show who the bot thinks you are.
 whotalk|whotalk #channel|public|Show channel talk statistics.
 whotalks|whotalks #channel|public|Alias for whotalk.
-xlogin|xlogin <account>|public|Authenticate or check X login integration when configured.
+xlogin|xlogin [status]|master|Check the configured X account and recover authentication; alias for xauth.
+xauth|xauth [status]|master|Verify or show Undernet X authentication and configured +x. Uses private configuration only.
 yomomma|yomomma|public|Return a yomomma joke.
 yt|yt <query>|public|Search YouTube when configured.
 
@@ -3263,7 +3272,7 @@ sub _mbHelpCategoryForCommand {
     return 'moderation' if $hay =~ /\b(?:ban|kick|ignore|voice|op|deop|devoice|invite|topic|mode)\b/;
     return 'channel' if $hay =~ /\b(?:channel|chan|access|chanset|owner)\b/
         || $cmd =~ /^(?:add|del|access|chan|channels|chanlist|channellist|chaninfo|chanset|addchan|part|join|purge|nicklist)$/;
-    return 'auth' if $hay =~ /\b(?:login|logout|password|pass|auth|register|verify|hostmask|whoami|ident|xlogin|user)\b/;
+    return 'auth' if $hay =~ /\b(?:login|logout|password|pass|auth|register|verify|hostmask|whoami|ident|xlogin|xauth|user)\b/;
     return 'stats' if $hay =~ /\b(?:stats|stat|seen|top|log|lines|talk|date|weather|meteo|resolve|whereis)\b/;
     return 'ai_fun' if $hay =~ /\b(?:hailo|openai|chatgpt|claude|gemini|tellme|quote|joke|dice|leet|yomomma|greet|birthday|birthdate|q)\b/;
     return 'admin' if $level =~ /\b(?:admin|master|owner|authorized)\b/
@@ -3718,6 +3727,8 @@ sub mbHandleNickTriggered {
 # MB749: private built-ins use the same registry-native contract.
 sub _builtin_private_command_handlers {
     return (
+        xlogin => sub { my ($ctx) = @_; xLogin_ctx($ctx) },
+        xauth  => sub { my ($ctx) = @_; xLogin_ctx($ctx) },
         randomquote => sub { my ($ctx) = @_; Mediabot::RandomQuote::Commands::mbRandomQuote_ctx($ctx) },
 
         # --- Legacy handlers (not yet migrated to Context) ---

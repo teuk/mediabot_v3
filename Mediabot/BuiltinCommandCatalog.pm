@@ -43,7 +43,7 @@ my @PUBLIC_CATALOGUE = qw(
     radiocacheprune radiodlstatus radiodlcancel radiopush radioskip radioflush
     addresponder delresponder lastcom q quote moduser antifloodset leet rehash
     mp3 exec qlog hailo hailo_ignore hailo_unignore hailo_status hailo_chatter
-    whereis birthday f xlogin tellme chatgpt openai ai claude gemini yomomma
+    whereis birthday f xlogin xauth tellme chatgpt openai ai claude gemini yomomma
     resolve tmdb tmdblangset debug version uptime help commands spike update
 );
 
@@ -51,7 +51,7 @@ my @PRIVATE_CATALOGUE = qw(
     pass ident topic update debug status radiostatus radiomounts echo die nick
     addtimer remtimer timers register msg dump say act song play radioimport
     commands radioqueue radiopush radioskip radioflush adduser useradd deluser
-    users cstat login logout userinfo addhost addchan chanset randomquote purge part join
+    users cstat login logout xlogin xauth userinfo addhost addchan chanset randomquote purge part join
     add del modinfo op deop invite voice devoice kick showcommands chaninfo
     chanlist channels channellist whoami auth verify access addcmd remcmd modcmd
     mvcmd chowncmd showcmd testcmd cmdvars chanstatlines whotalk whotalks countcmd topcmd popcmd
@@ -63,7 +63,7 @@ my @PRIVATE_CATALOGUE = qw(
 # The first four native handlers predated MB741. The new hailo operator
 # command and MB807 previews/variable guide have no legacy public handlers. All existing
 # migratable public built-ins retain their original migration eligibility.
-my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars randomquote);
+my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars randomquote xauth);
 
 sub public_command_names {
     return @PUBLIC_CATALOGUE;

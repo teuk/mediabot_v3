@@ -1949,6 +1949,8 @@ sub on_message_002;
 sub on_message_003;
 sub on_message_004;
 sub on_message_005;
+sub on_message_RPL_WHOISACCOUNT;
+sub on_message_221;
 sub on_message_RPL_CHANNELMODEIS;
 sub on_message_251;
 sub on_message_252;
@@ -2924,6 +2926,8 @@ sub _build_irc {
         on_message_265                   => \&on_message_265,
         on_message_266                   => \&on_message_266,
         on_message_RPL_WHOISUSER         => \&on_message_RPL_WHOISUSER,
+        on_message_RPL_WHOISACCOUNT      => \&on_message_RPL_WHOISACCOUNT,
+        on_message_221           => \&on_message_221,
         on_message_ERROR                 => \&on_message_ERROR,
         on_message_KILL                  => \&on_message_KILL,
         on_message_SERVER                => \&on_message_SERVER,
@@ -3080,7 +3084,7 @@ sub _private_message_is_sensitive {
     my ($command, $arg1) = split /\s+/, lc($text), 3;
     return 0 unless defined $command && $command ne '';
 
-    return 1 if $command =~ /^(?:login|register|pass|newpass|ident|identify|auth|xlogin|setpass|password|ghost|recover|release)$/;
+    return 1 if $command =~ /^(?:login|register|pass|newpass|ident|identify|auth|xlogin|xauth|setpass|password|ghost|recover|release)$/;
     return 1 if $command eq 'set' && defined($arg1) && $arg1 eq 'password';
 
     return 0;
@@ -3120,6 +3124,7 @@ sub on_timer_tick {
     # mb543-B1: keep the network gauges fresh (throttled inside).
     eval { $mediabot->flush_network_stats(); };
     eval { $mediabot->maybe_request_lusers(); };
+    eval { $mediabot->xauth->tick; }; # MB838: bounded five-minute X checks
     # mb599-B1: plugin cron heartbeat — emits plugin_cron_observed once per
     # minute (no-op without listeners). Eval-guarded like every observer.
     eval { $mediabot->observe_cron_event(); };
@@ -3235,18 +3240,9 @@ sub on_message_NOTICE {
         else {
             $mediabot->{logger}->log(0,"-$who- $what");
         }
-        if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1 ) && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD') ne "")) {
-            # Undernet CService login
-            my $sSuccesfullLoginFrText = "AUTHENTIFICATION R.USSIE pour " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME');
-            my $sSuccesfullLoginEnText = "AUTHENTICATION SUCCESSFUL as " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME');
-            if (($who eq "X") && (($what =~ /USSIE/) || ($what eq $sSuccesfullLoginEnText)) && defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1) && ($mediabot->{conf}->get('connection.CONN_USERMODE') =~ /x/)) {
-                $self->write("MODE " . $self->nick_folded . " +x\x0d\x0a");
-                $self->change_nick( $mediabot->{conf}->get('connection.CONN_NICK') );
-                $mediabot->joinChannels();
-                $mediabot->{logger}->log(0, "on_login(): joinChannels() called");
-            }
-        }
-        elsif (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2 ) && defined($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD') ne "")) {
+        # MB838: localized or spoofed X notices never establish authentication.
+        # The server's self-WHOIS account numeric drives that state instead.
+        if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2 ) && defined($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD') ne "")) {
             if (($who eq "NickServ") && (($what =~ /This nickname is registered/) && defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2))) {
                 $mediabot->botPrivmsg("NickServ","identify " . $mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD'));
                 $mediabot->joinChannels();
@@ -3284,22 +3280,13 @@ sub on_login {
     };
     $mediabot->{logger}->log(1, "update completion login hook error: $@") if $@;
     
-    # Undernet: authentication to channel service if credentials are defined
-    if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1 ) && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') ne "") && defined($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD')) && ($mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD') ne "")) {
-        $mediabot->{logger}->log(0,"on_login() Logging to " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN'));
-        $mediabot->botPrivmsg($mediabot->{conf}->get('undernet.UNET_CSERVICE_LOGIN'),"login " . $mediabot->{conf}->get('undernet.UNET_CSERVICE_USERNAME') . " "  . $mediabot->{conf}->get('undernet.UNET_CSERVICE_PASSWORD'));
-    }
-
-    # Set user modes
-    if (defined($mediabot->{conf}->get('connection.CONN_USERMODE'))) {
-        if ( substr($mediabot->{conf}->get('connection.CONN_USERMODE'),0,1) eq '+') {
-            my $sUserMode = $mediabot->{conf}->get('connection.CONN_USERMODE');
-            if (defined($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE')) && ( $mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1 )) {
-                $sUserMode =~ s/x//;
-            }
-            $mediabot->{logger}->log(0,"on_login() Setting user mode $sUserMode");
-            $self->write("MODE " . $mediabot->{conf}->get('connection.CONN_NICK') . " +" . $sUserMode . "\x0d\x0a");
-        }
+    # MB838: reuse the confirmed account controller for connect/manual/tick.
+    $mediabot->xauth->on_login($self);
+    my $defer_x_joins=$mediabot->xauth->defer_joins;
+    my $connect_modes=$mediabot->xauth->connect_modes;
+    if (length($connect_modes)) {
+        $mediabot->{logger}->log(0,"on_login() Setting user mode $connect_modes");
+        $self->send_message('MODE',undef,$self->nick_folded,$connect_modes);
     }
 
     # First join the console channel from the populated channels
@@ -3312,17 +3299,17 @@ sub on_login {
         }
     }
 
-    if (defined $console_channel) {
+    if (defined($console_channel) && !$defer_x_joins) {
         my $name = $console_channel->get_name;
         my $key  = $console_channel->get_key;
         $mediabot->{logger}->log(1, "Joining console channel $name");
         $mediabot->joinChannel($name, $key);
-    } else {
+    } elsif (!defined($console_channel)) {
         $mediabot->{logger}->log(1, "Warning: no console channel found in database (description = 'console'). You may want to run configure script again.");
     }
 
     # Join other channels
-    unless ((($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 1) && ($mediabot->{conf}->get('connection.CONN_USERMODE') =~ /x/)) || (($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2) && defined($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD') ne ""))) {
+    unless ($defer_x_joins || (($mediabot->{conf}->get('connection.CONN_NETWORK_TYPE') == 2) && defined($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD')) && ($mediabot->{conf}->get('libera.LIBERA_NICKSERV_PASSWORD') ne ""))) {
         # NS3: throttled JOIN flood prevention — stagger joins every 1.5s
         # Prevents server-side flood kick on large channel lists after a split.
         my @chans_to_join = sort grep {
@@ -5002,9 +4989,21 @@ sub on_motd {
     }
 }
     
+# MB838: explicit numeric hooks also work through Net::Async::IRC's named
+# Protocol::IRC dispatch. Keep all account proof parsing in the controller.
+sub on_message_RPL_WHOISACCOUNT {
+    my ($self,$message,$hints)=@_;
+    eval { $mediabot->xauth->numeric($self,'330',$message->prefix,[_irc_message_args($message)]); };
+}
+sub on_message_221 {
+    my ($self,$message,$hints)=@_;
+    eval { $mediabot->xauth->numeric($self,'221',$message->prefix,[_irc_message_args($message)]); };
+}
+
 sub on_message_RPL_WHOISUSER {
     my ($self,$message,$hints) = @_;
     log_debug_args('on_message_RPL_WHOISUSER', $message);
+    my $xauth_reply=eval { $mediabot->xauth->numeric($self,'311',$message->prefix,[_irc_message_args($message)]); };
     my $whois_ref = $mediabot->getWhoisVar();
     my %WHOIS_VARS = (ref($whois_ref) eq 'HASH') ? %{$whois_ref} : ();
     my @tArgs = _irc_message_args($message);
@@ -5013,6 +5012,10 @@ sub on_message_RPL_WHOISUSER {
     $mediabot->{logger}->log(2,"$target_name is $ident\@$sHostname $flags $realname");
     # B1/A1: route to Partyline if .whois was issued from a session
     _partyline_whois_write($target_name, "[311] $target_name $ident\@$sHostname * :$realname");
+    # MB838: an owned self-probe must not replay stale user-auth/ban callbacks.
+    # Partyline visibility above remains available; unrelated WHOIS retains its
+    # normal dispatch below. No Mediabot user-session or SQL auth mutation.
+    return if $xauth_reply;
     if (defined($WHOIS_VARS{'nick'}) && ($WHOIS_VARS{'nick'} eq $target_name) && defined($WHOIS_VARS{'sub'}) && ($WHOIS_VARS{'sub'} ne "")) {
         if ($WHOIS_VARS{'sub'} eq "userVerifyNick") {
                 $mediabot->{logger}->log(4,"WHOIS userVerifyNick");
@@ -5284,6 +5287,7 @@ sub on_message_RPL_WHOISUSER {
 
 sub on_message_ERROR {
     my ($self, $message, $hints) = @_;
+    eval { $mediabot->xauth->reset; };
     log_debug_args('on_message_ERROR', $message);
     my @error_args = _irc_message_args($message);
     my $err_msg = @error_args ? join(" ", @error_args) : 'IRC connection closed';
@@ -5312,6 +5316,7 @@ sub on_message_ERROR {
 
 sub on_message_KILL {
     my ($self, $message, $hints) = @_;
+    eval { $mediabot->xauth->reset; };
     log_debug_args('on_message_KILL', $message);
     my @kill_args = _irc_message_args($message);
     my ($killer, $victim, $reason) = @kill_args;
@@ -5501,6 +5506,7 @@ sub on_message_RPL_WHOISIDLE {
 
 sub on_message_RPL_ENDOFWHOIS {
     my ($self, $message, $hints) = @_;
+    eval { $mediabot->xauth->numeric($self,'318',$message->prefix,[_irc_message_args($message)]); };
     my @args = _irc_message_args($message);
     my $nick = $args[1] // '';
     $mediabot->{logger}->log(3, "WHOIS end for $nick");
@@ -5607,6 +5613,7 @@ sub _reset_irc_reconnect_state {
 
 sub reconnect {
     return if $mediabot->{irc_reconnect_in_progress};
+    eval { $mediabot->xauth->reset; };
 
     # mb701-B: defensive invalidation also covers reconnects reached without a
     # protocol ERROR/KILL callback. Repeated invalidation is a no-op.
