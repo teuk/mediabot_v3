@@ -20,6 +20,30 @@ sub new {
 }
 sub actor { sha256_hex(encode('UTF-8', fold($_[1]))) }
 sub _key { sha256_hex(encode('UTF-8', $_[1] // '')) }
+sub _new_incarnation {
+    # Epoch counters restart when an expired room is recreated. A separate
+    # room incarnation prevents a late ticket from matching that new room.
+    sysopen(my $fh,'/dev/urandom',O_RDONLY) or croak 'memory generation unavailable';
+    my $bytes='';
+    while (length($bytes)<16) {
+        my $read=sysread($fh,$bytes,16-length($bytes),length($bytes));
+        next if !defined($read) && $!{EINTR};
+        croak 'memory generation unavailable' unless defined($read) && $read>0;
+    }
+    close($fh) or croak 'memory generation unavailable';
+    return unpack('H*',$bytes);
+}
+sub _ticket_room {
+    my ($state,$ticket)=@_;
+    return unless ref($ticket) eq 'HASH'
+        && defined($ticket->{scope}) && !ref($ticket->{scope}) && $ticket->{scope}=~/\A[a-f0-9]{64}\z/
+        && defined($ticket->{epoch}) && !ref($ticket->{epoch}) && $ticket->{epoch}=~/\A\d+\z/
+        && defined($ticket->{incarnation}) && !ref($ticket->{incarnation}) && $ticket->{incarnation}=~/\A[a-f0-9]{32}\z/;
+    my $room=$state->{rooms}{$ticket->{scope}};
+    return unless $room && defined($room->{incarnation})
+        && $room->{incarnation} eq $ticket->{incarnation} && $room->{epoch}==$ticket->{epoch};
+    return $room;
+}
 sub _locked {
     my ($self,$code)=@_;
     my $path=$self->{path}; my $dir=dirname($path);
@@ -52,6 +76,9 @@ sub _locked {
             && ($room->{epoch}//'') =~ /^\d+$/ && ($room->{next_speaker}//'') =~ /^\d+$/
             && keys(%{$room->{actors}})<=256 && @{$room->{turns}}<=24;
         croak 'memory names invalid' if exists($room->{names}) && ref($room->{names}) ne 'HASH';
+        croak 'memory generation invalid' if exists($room->{incarnation})
+            && (!defined($room->{incarnation}) || ref($room->{incarnation})
+                || $room->{incarnation}!~/\A[a-f0-9]{32}\z/);
         for my $actor (keys %{$room->{actors}}) {
             croak 'memory actor invalid' unless $actor =~ /^[a-f0-9]{64}$/
                 && ($room->{actors}{$actor}//'') =~ /^speaker\d+$/;
@@ -90,6 +117,9 @@ sub begin_turn {
         return ({error=>'daily_limit'},0) if ($state->{usage}{$day}//0)>=$daily;
         croak 'memory room capacity' if !exists($state->{rooms}{$key}) && keys(%{$state->{rooms}})>=128;
         my $room=$state->{rooms}{$key}||={at=>$now,epoch=>1,next_speaker=>0,actors=>{},names=>{},turns=>[]};
+        # Existing version-1 rooms retain their history and acquire this field
+        # on their next successful begin. No reset or separate migration.
+        $room->{incarnation}//=_new_incarnation();
         unless (exists $room->{actors}{$actor}) {
             croak 'memory actor capacity' if keys(%{$room->{actors}})>=256;
             $room->{actors}{$actor}='speaker'.(++$room->{next_speaker});
@@ -108,15 +138,15 @@ sub begin_turn {
         my $name=$room->{names}{$actor}//'';
         push @messages,{role=>'user',content=>$speaker.(length($name)?" ($name)":'').': '.clean($prompt,4000)};
         $room->{at}=$now; $state->{usage}{$day}++;
-        return ({messages=>\@messages,scope=>$key,epoch=>$room->{epoch},actor=>$actor,
+        return ({messages=>\@messages,scope=>$key,epoch=>$room->{epoch},incarnation=>$room->{incarnation},actor=>$actor,
             speaker=>$speaker,name=>$name,prompt=>clean($prompt,4000)},1);
     });
 }
 sub commit_turn {
     my ($self,$ticket,$answer)=@_;
     return $self->_locked(sub {
-        my ($state,$now)=@_; my $room=$state->{rooms}{$ticket->{scope}};
-        return (0,0) unless $room && $room->{epoch}==$ticket->{epoch};
+        my ($state,$now)=@_; my $room=_ticket_room($state,$ticket);
+        return (0,0) unless $room;
         my ($current_actor)=grep {$room->{actors}{$_} eq $ticket->{speaker}} keys %{$room->{actors}};
         push @{$room->{turns}},{actor=>$current_actor//$ticket->{actor},speaker=>$ticket->{speaker},
             name=>$ticket->{name}//'',prompt=>$ticket->{prompt},answer=>clean($answer,1600),at=>$now};
@@ -128,8 +158,8 @@ sub commit_turn {
 sub current {
     my ($self,$ticket)=@_;
     return $self->_locked(sub {
-        my ($state)=@_;my $room=$state->{rooms}{$ticket->{scope}};
-        return ($room && $room->{epoch}==$ticket->{epoch} ? 1:0,0);
+        my ($state)=@_;
+        return (_ticket_room($state,$ticket) ? 1:0,0);
     });
 }
 sub forget_actor {

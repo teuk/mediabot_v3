@@ -30,6 +30,17 @@ sub _read_pid_from_fh {
     return $buffer;
 }
 
+sub _path_matches_handle {
+    my ($path,$fh,$entry)=@_;
+    return 0 unless ref($entry) eq 'ARRAY' && @$entry==2;
+    my @current=lstat($path);
+    my @held=stat($fh);
+    my @target=stat($path);
+    return @current && @held && @target
+        && $current[0]==$entry->[0] && $current[1]==$entry->[1]
+        && $target[0]==$held[0] && $target[1]==$held[1] ? 1:0;
+}
+
 sub acquire {
     my ($self) = @_;
     return 1 if $self->{fh};
@@ -44,6 +55,13 @@ sub acquire {
         $self->{error} = "cannot open PID file '$path': $!";
         return 0;
     };
+    my @entry=lstat($path);
+    my $identity=@entry ? [@entry[0,1]] : undef;
+    unless (_path_matches_handle($path,$fh,$identity)) {
+        $self->{error} = 'PID file path changed while opening';
+        close $fh;
+        return 0;
+    }
 
     unless (flock($fh, LOCK_EX | LOCK_NB)) {
         my $owner = _read_pid_from_fh($fh);
@@ -87,9 +105,15 @@ sub acquire {
         close $fh;
         return 0;
     }
-    chmod 0644, $path;
+    chmod 0644, $fh;
+    unless (_path_matches_handle($path,$fh,$identity)) {
+        $self->{error} = 'PID file path changed while acquiring';
+        close $fh;
+        return 0;
+    }
 
     $self->{fh}    = $fh;
+    $self->{path_entry} = $identity;
     $self->{error} = undef;
     return 1;
 }
@@ -97,6 +121,7 @@ sub acquire {
 sub release {
     my ($self) = @_;
     my $fh = delete $self->{fh};
+    my $entry = delete $self->{path_entry};
     return 1 unless $fh;
 
     my $path  = $self->{path};
@@ -109,10 +134,22 @@ sub release {
         $owned = 1 if $stored =~ /^\d+$/ && $stored == $self->{pid};
     }
 
-    if ($owned && -e $path && !unlink($path)) {
-        $self->{error} = "cannot remove PID file '$path': $!";
-        close $fh;
-        return 0;
+    if ($owned) {
+        my @current=lstat($path);
+        if (@current) {
+            # The descriptor may still contain our PID after an operator or
+            # replacement process has published a different directory entry.
+            unless (_path_matches_handle($path,$fh,$entry)) {
+                $self->{error} = 'PID file path changed; replacement retained';
+                close $fh;
+                return 0;
+            }
+            if (!unlink($path)) {
+                $self->{error} = "cannot remove PID file '$path': $!";
+                close $fh;
+                return 0;
+            }
+        }
     }
 
     close $fh;

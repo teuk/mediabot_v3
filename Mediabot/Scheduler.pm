@@ -120,17 +120,26 @@ sub add {
     $self->{_tasks}{$name} = $task;
 
     if ($mode eq 'periodic') {
+        # The registry and loop own tasks/timers. A retained or queued timer
+        # callback must neither keep them alive nor run after removal/stop.
+        my ($weak_self,$weak_task)=($self,$task);
+        weaken($weak_self);
+        weaken($weak_task);
         my $timer = IO::Async::Timer::Periodic->new(
             interval => $interval,
             (defined $first ? (first_interval => $first) : ()),
             on_tick  => sub {
+                my $scheduler=$weak_self or return;
+                my $owned=$weak_task or return;
+                my $current=$scheduler->{_tasks}{$name} or return;
+                return unless refaddr($current)==refaddr($owned) && $current->{started};
                 my $now = time();
-                $task->{ticks}++;
-                $task->{last_tick} = $now;
-                $task->{next_run}  = $now + $task->{interval};
-                $self->_log(4, "Scheduler: tick '$name' (#$task->{ticks})");
+                $current->{ticks}++;
+                $current->{last_tick} = $now;
+                $current->{next_run}  = $now + $current->{interval};
+                $scheduler->_log(4, "Scheduler: tick '$name' (#$current->{ticks})");
 
-                $self->_run_task_callback($name, $cb);
+                $scheduler->_run_task_callback($name, $current->{cb});
             },
         );
 

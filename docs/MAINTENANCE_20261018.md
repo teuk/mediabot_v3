@@ -96,3 +96,74 @@ workflow. There is no database, dashboard, publisher or mbweb deployment.
 
 Filesystem regressions use temporary dummy configurations. Live acceptance
 does not require writing real credentials or changing a production setting.
+
+## MB836 follow-up — Runtime ownership
+
+This second maintenance pass starts from the supplied
+`3.6dev-20261017_232115` snapshot, including MB834 and MB835. It follows delayed
+results, scheduler ownership and PID-file lifetime, alongside the previously
+reviewed persistence/export paths. The three defects below were reproduced on
+that unchanged source; other paths read are not claimed defect-free.
+
+| Trigger | Reproduced behavior | Correction |
+| --- | --- | --- |
+| A private AI room expires, then the same scope is recreated before an old completion arrives | The new room restarts at epoch 1. The old epoch-1 ticket becomes current again, even for the same actor/speaker, and its expired question/answer can enter the new history. | Match both epoch and a fresh 128-bit room incarnation. Rejected tickets cannot write history. |
+| A periodic task is removed while a caller still holds its timer/callback | The callback retains the task and scheduler; even a retained tick invoked after stop/removal can still execute and update counters. Repeated add/remove cycles retain those object graphs. | Hold weak task/scheduler references and validate current registry identity and started state before accounting or dispatch. |
+| A locked PID path is replaced before the old owner releases its open descriptor | Reading the old descriptor still proves its own PID, so release unlinks the new owner's path. The replacement's lock is then detached from the public PID path. | Compare the acquired directory entry and the path's target with the owned descriptor. Preserve a replacement, close only the old handle and report the conflict. |
+
+### Private memory compatibility
+
+The JSON state remains version 1. Existing rooms acquire `incarnation` on their
+next successful `begin_turn`; their turns, speaker labels, names, epoch and
+daily usage are retained. A ticket includes the room's incarnation; both
+`current` and `commit_turn` check it with the epoch. Personal erasure still
+advances the epoch, and a legitimate nick rename does not change the room
+incarnation. An expired/recreated room receives a different incarnation even
+if its actor, speaker label and epoch coincide with the former room.
+
+Incarnations use 16 bytes from the operating system's `/dev/urandom`, available
+on the supported Debian/Linux hosts. Failure to obtain a complete value fails
+the begin operation without publishing partial memory. This is a room
+lifecycle identifier, not a provider key or an authorization credential.
+Malformed stored incarnations are rejected while preserving the file for
+recovery. Tickets missing a valid incarnation are rejected without writing.
+No operator migration or deletion of the memory file is required.
+
+### Scheduler ownership
+
+The real IO::Async loop still owns active periodic timers; the registry owns
+their task records. Callback closures no longer create an additional strong
+task/timer/scheduler cycle. Explicit start/stop/remove/re-add operations remain
+the lifecycle controls. Retained tick events for stopped, removed or replaced
+tasks neither run callbacks nor inflate task statistics. Running callbacks
+still pass through the existing duration/error helper, and calendar generation
+checks are unchanged. Tests use real periodic timers and a real loop; retained
+events are explicitly invoked to exercise delayed-callback safety.
+
+### PID-file boundaries
+
+Acquisition checks that its directory entry and target still identify the
+opened descriptor before reporting success. Mode changes use that descriptor,
+so an observed replacement does not get chmodded through a stale pathname.
+Release preserves replacement regular files and symbolic entries, including
+an alias newly created to the same target. Stable symbolic PID aliases retain
+their previous behavior: release removes the owned alias, not its target.
+Normal release, an already missing path and repeated release remain supported.
+
+These checks detect observed replacement; they are not a filesystem
+compare-and-unlink primitive against an unrelated writer racing the final
+check/unlink interval. Do not edit/remove live PID files to start a second
+instance. The existing rule remains: stop the exact service before operator
+changes to its runtime files. A conflict produces a bounded diagnostic and
+releases the old descriptor without claiming that the replacement was removed.
+
+### Validation and rollout
+
+The delivery README records regression, targeted, fast and complete-suite
+results, including local limitations. Source installation preserves private
+configuration, state files, databases, index and services. No dashboard or
+publisher upgrade is required. After the normal commit/update workflow, live
+acceptance remains on **#i/o on Epiknet through nbot**, the instance already
+configured for collective AI. A successful private follow-up after the update
+checks normal continuity without changing live settings; restart/reload is
+what loads the new in-memory classes.

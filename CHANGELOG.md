@@ -10,6 +10,23 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB836 — Runtime ownership and stale-result maintenance (2026-10-18)
+
+- Bind private AI tickets to a fresh room incarnation as well as its epoch.
+  A result delayed past memory expiry cannot reattach when that scope is
+  recreated. Upgrade existing version-1 rooms lazily without resetting their
+  history, identities or daily usage; malformed/legacy tickets fail closed.
+- Remove the periodic scheduler's callback ownership cycles. Ignore retained
+  ticks for stopped, removed or replaced tasks; keep timer cadence, timing
+  metrics, calendar scheduling and explicit restart behavior unchanged.
+- Bind PID cleanup to the acquired directory entry and opened file. An old
+  owner cannot remove a replacement PID file or retargeted symbolic alias;
+  observed path replacement during acquire is rejected and chmod uses the
+  owned descriptor. Keep stable symbolic aliases and legacy live-PID refusal.
+- Reproduce expiry/recreation, real timer reclamation and file replacement in
+  regressions. No private configuration, memory reset, service operation,
+  provider change or web deployment is performed by source installation.
+
 ### MB835 — Readable site labels beside researched source links (2026-10-18)
 
 - Prefix each researched source link with its original site's name in dark
