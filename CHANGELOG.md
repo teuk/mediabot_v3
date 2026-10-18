@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB841 — Source and plugin worker launch ownership (2026-10-18)
+
+- Reserve the DansTonChat asynchronous source slot before worker launch and
+  bind completion to that request. Inline or duplicate callbacks cannot
+  resurrect an old handle, repeat delivery or clear a successor's slot.
+- Contain source-worker launch exceptions/refusals with one bounded failure
+  callback; free capacity before calling the consumer so later requests can
+  recover, including a request started by that consumer.
+- Contain plugin HTTP launcher failures and release their pending slots. If
+  a plugin is disabled during launch, cancel the returned handle and retain
+  revocation rather than inserting it into the replacement generation.
+- Exercise launch failures, reentrant completion, duplicate callbacks, plugin
+  replacement and real offline fork/pipe delivery. Preserve HTTP destination
+  validation, cache/circuit behavior, concurrency limits and existing Spark
+  delivery gates. No SQL/schema, private configuration or service changes.
+
 ### MB840 — Async command delivery and worker cleanup (2026-10-18)
 
 - Bind asynchronous command replies and auxiliary notices to their original

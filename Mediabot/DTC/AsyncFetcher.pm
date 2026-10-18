@@ -16,33 +16,46 @@ sub new {
             return Mediabot::DTC::Source::fetch_random();
         },
         worker => undef,
+        request => undef,
     }, $class;
 }
 
-sub inflight { return $_[0]{worker} ? 1 : 0 }
+sub inflight { return $_[0]{request} ? 1 : 0 }
 
 sub fetch {
     my ($self, %args) = @_;
     my $done = $args{on_done};
-    return 0 unless ref($done) eq 'CODE' && !$self->{worker};
+    return 0 unless ref($done) eq 'CODE' && !$self->{request};
     my $worker_class = $self->{worker_class};
     return 0 unless eval { $worker_class->can('start') };
+    # Reserve before entering the launcher. It may complete synchronously or
+    # reenter fetch(); the returned handle belongs only to this request.
+    my $request = $self->{request} = {};
+    my $finished = 0;
+    my $finish = sub {
+        my ($result) = @_;
+        return if $finished++;
+        return unless $self->{request} && $self->{request} == $request;
+        $self->{request} = undef;
+        $self->{worker} = undef;
+        my $value = ref($result) eq 'HASH' && $result->{ok}
+            && ref($result->{value}) eq 'HASH'
+                ? $result->{value} : { ok => 0, error => 'worker_error' };
+        eval { $done->($value); 1 };
+    };
     my $fetch_cb = $self->{fetch_cb};
-    my $worker = $worker_class->start(
+    my $worker = eval { $worker_class->start(
         loop => $self->{loop}, label => 'dtc random', timeout => 15,
         max_output => 64 * 1024,
         child => sub { $fetch_cb->() },
-        on_done => sub {
-            my ($result) = @_;
-            $self->{worker} = undef;
-            my $value = ref($result) eq 'HASH' && $result->{ok}
-                && ref($result->{value}) eq 'HASH'
-                    ? $result->{value} : { ok => 0, error => 'worker_error' };
-            eval { $done->($value); 1 };
-        },
-    );
-    return 0 unless $worker;
-    $self->{worker} = $worker;
+        on_done => $finish,
+    ) };
+    unless ($worker) {
+        $finish->({ ok => 0, error => 'worker_setup' });
+        return 0;
+    }
+    $self->{worker} = $worker
+        if $self->{request} && $self->{request} == $request;
     return 1;
 }
 

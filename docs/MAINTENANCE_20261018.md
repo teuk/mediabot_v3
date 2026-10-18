@@ -345,3 +345,55 @@ workflow. Normal command replies on #i/o through nbot are sufficient for smoke
 acceptance; do not disconnect production or trigger long-running SQL to provoke
 these failure paths. Exact local qualification and limitations are recorded in
 the package README.
+
+
+## MB841 — Source and plugin worker launch ownership
+
+This pass reviews the supplied MB840 snapshot (`23515ce`,
+`3.6dev-20261018_160228`). It changes two worker adapters rather than the shared
+process implementation or the command reply context introduced by MB840.
+The failures below are reproduced locally; no production incident is inferred.
+
+| Trigger | Previous behavior | Correction |
+| --- | --- | --- |
+| DansTonChat completes inline during launch, or an earlier completion is invoked again | A returned completed handle can occupy the source slot indefinitely; an old callback can repeat its consumer and clear a newer request. Reentrant launch can also begin before any slot is reserved. | Reserve an opaque request identity before launch. Claim completion once, release its capacity before calling consumer code, and adopt the returned handle only while that request still owns the slot. |
+| A source launcher throws or refuses without invoking its callback | The exception escapes the adapter or its consumer receives no terminal result. | Convert launch failure into the existing bounded `worker_error` result, once, and leave the next source request usable. A preceding inline completion remains authoritative. |
+| A plugin HTTP launcher throws before returning a handle | Its `Pending` entry remains in the per-plugin capacity map; two such failures can leave subsequent requests permanently reporting `busy`. | Contain the launch exception and pass it through the existing callback-once setup-failure path, releasing that pending entry. Do not expose launcher exception text in the HTTP response. |
+| A plugin is disabled/replaced while an injected launcher is still returning its handle | Cancellation removes the pending marker, but the outer launch can then insert the obsolete worker into the new generation. | Recheck plugin generation after launch; cancel a returned obsolete handle and return `cancelled` without reviving its slot or delivering its revoked callback. |
+
+### Boundaries retained
+
+The DTC change affects the asynchronous source fetcher used by Spark. It does
+not change user-invoked `!dtc` formatting, the Spark enable switch, room checks,
+source selection, cooldown or guarded sender. The adapter still permits one
+in-flight source request, uses a 15-second worker deadline and a 64 KiB output
+limit, and returns false when the launcher refuses. Failure callbacks receive
+`worker_error` rather than raw private exception text. A consumer exception
+cannot retain the slot; no synchronous network fallback or new retry is added.
+
+Plugin HTTP keeps its existing two-request cap, HTTPS-only destination and
+redirect validation, public-address checks, SSL verification, body limit,
+cache and circuit breaker. The launch boundary contains exceptions from both
+an injected factory and the normal AsyncWorker launcher. An inline completion
+followed by a refusal/exception is not delivered twice. Existing generations
+continue to suppress delayed callbacks after plugin disable. Cancelling a
+late returned handle is best effort through its existing `cancel` API; this is
+not a claim that already performed child-side work can be undone.
+
+### Verification and deployment
+
+New regression files exercise each adapter through its public API, including
+injected launch failure, synchronous completion, reentry, old callbacks and
+recovery. Two additional paths use real local forks, pipes and IO::Async
+process watchers with fixed offline source/HTTP responses. No HTTP request,
+IRC connection, provider call or production database is used by these cases.
+Existing plugin HTTP tests continue to cover cache, circuit, timeout, capacity
+and destination/redirect refusal. The source package protects the reviewed
+MB838–MB840 modules and requires the complete host suite before commit.
+
+No database schema, migration, SQL query, persistent format, private setting,
+service, dashboard or publisher is changed. After validation and commit through
+`commit.sh`, update the intended bot instances normally. A routine enabled
+source/plugin operation is sufficient for smoke acceptance; provoking startup
+failures or disabling live plugins is unnecessary. The package README records
+exact local qualification results and any environment limitations.

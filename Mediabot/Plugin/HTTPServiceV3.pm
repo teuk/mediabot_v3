@@ -425,13 +425,26 @@ sub fetch {
         on_done    => $finish,
     );
     $self->{inflight}{$plugin}{$id} = bless({}, 'Mediabot::Plugin::HTTPServiceV3::Pending');
-    my $worker;
-    if (ref($self->{worker_factory}) eq 'CODE') {
-        $worker = $self->{worker_factory}->(%worker_args);
-    }
-    else {
-        require Mediabot::AsyncWorker;
-        $worker = Mediabot::AsyncWorker->start(%worker_args);
+    # Both injected factories and the default launcher can fail before they
+    # return a handle. Keep their pending slot and callback under one terminal
+    # owner, including an inline callback followed by a throw/refusal.
+    my $worker = eval {
+        if (ref($self->{worker_factory}) eq 'CODE') {
+            $self->{worker_factory}->(%worker_args);
+        }
+        else {
+            require Mediabot::AsyncWorker;
+            Mediabot::AsyncWorker->start(%worker_args);
+        }
+    };
+    # Disable may have removed the pending marker while launch was in progress.
+    # The newly returned handle must be cancelled rather than resurrected in a
+    # newer plugin generation. Its callback is already revoked by generation.
+    if (($self->{generation}{$plugin} // 0) != $generation) {
+        $finished = 1;
+        eval { $worker->cancel('plugin disabled') }
+            if ref($worker) && eval { $worker->can('cancel') };
+        return { accepted => 0, error => 'cancelled' };
     }
     unless ($worker) {
         $finish->({ ok => 0, error => 'worker_setup' });
