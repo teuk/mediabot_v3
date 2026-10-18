@@ -62,6 +62,7 @@ mediabot_fun_commands_migration_20260512.sql
 20260911_radio_chanset.sql
 20260916_channel_timezone.sql
 20260921_quotes_anonymous_author.sql
+20261018_metaai_chanset.sql
 ```
 
 The migration set adds channel-ban tracking, user seen/activity tracking, Claude chanset reference data, schema support for newer fun/user commands, and persistent trivia scores and user notes, including:
@@ -176,6 +177,8 @@ SOURCE /home/mediabot/mediabot_v3/install/migrations/20260909_quip_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260911_radio_chanset.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260916_channel_timezone.sql;
 SOURCE /home/mediabot/mediabot_v3/install/migrations/20260921_quotes_anonymous_author.sql;
+-- For an existing MetaAI pilot, use tools/meta_ai_channels.pl --adopt-legacy --apply instead.
+SOURCE /home/mediabot/mediabot_v3/install/migrations/20261018_metaai_chanset.sql;
 ```
 
 Afterwards:
@@ -224,3 +227,15 @@ Bird classification state so history is recomputed under the new civil time.
 referential integrity. It makes `QUOTES.id_user` nullable, converts historical
 zero or orphan identities to `NULL`, and rebuilds `fk_quotes_user` with
 `ON DELETE SET NULL`. Registered author ids and quote text are preserved.
+
+## MetaAI reference data (MB842)
+
+`20261018_metaai_chanset.sql` only registers the `MetaAI` chanset in the existing
+`CHANSET_LIST` table; it changes no schema and enables no channel. Before running
+a general upgrade on an existing MetaAI pilot, preview and apply
+`tools/meta_ai_channels.pl --conf FILE --adopt-legacy [--apply]` as the bot owner.
+That transaction registers the flag and adopts only known channels that were
+previously allowed by `meta_ai.CHANNELS`, `meta_ai.ENABLED` and `+chatGPT`.
+Registering the flag first with SQL intentionally switches to an empty opt-in
+policy; subsequent adoption cannot resurrect a channel disabled by an operator.
+See `docs/META_AI.md` for the transition and rights.

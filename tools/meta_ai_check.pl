@@ -71,7 +71,8 @@ if ($list) {
 }
 $cfg->{models}{$only}=$model if length($model);
 print "[PROBE] Explicit provider=$only; private configuration and activation unchanged.\n" if length($only);
-print "Mode: ",($cfg->{enabled}?'enabled':'disabled')," | pilot channels: ",scalar(keys %{$cfg->{channels}}),"\n";
+print "Mode: ",($cfg->{enabled}?'enabled':'disabled')," | legacy channel entries: ",scalar(keys %{$cfg->{channels}}),"\n";
+print "Channel activation: +MetaAI; legacy CHANNELS/+chatGPT applies only before catalogue registration. Use tools/meta_ai_channels.pl for a read-only database preview.\n";
 print "Limits: $cfg->{rate_max}/min/channel; $cfg->{global_rate_max}/min/instance; $cfg->{daily_limit}/UTC day\n";
 my %overrides=('openai.API_URL'=>'https://api.openai.com/v1/responses',
     'openai.FALLBACK_MODEL'=>'','gemini.THINKING_LEVEL'=>'LOW',

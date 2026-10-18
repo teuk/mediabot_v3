@@ -638,12 +638,16 @@ sub channelSet_ctx {
                 return;
             }
 
-            my $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL_SET (id_channel, id_chanset_list) VALUES (?, ?)");
-            # F1/fix: guard execute return
-            if ($sth && $sth->execute($id_channel, $id_chanset_list)) {
-                $sth->finish;
-            } else {
-                $self->{logger}->log(1, "channelSet_ctx INSERT failed: $DBI::errstr");
+            my $stored = eval {
+                my $sth = $self->{dbh}->prepare("INSERT INTO CHANNEL_SET (id_channel, id_chanset_list) VALUES (?, ?)")
+                    or die 'prepare';
+                $sth->execute($id_channel, $id_chanset_list) or die 'execute';
+                $sth->finish; 1;
+            };
+            unless ($stored) {
+                $self->{logger}->log(1, 'channelSet_ctx INSERT failed');
+                botNotice($self, $nick, "Could not apply +$chanset to $target_channel.");
+                return;
             }
 
             # mb111-IMP1: invalider le cache TTL de getIdChannelSet
@@ -681,12 +685,16 @@ sub channelSet_ctx {
                 return;
             }
 
-            my $sth = $self->{dbh}->prepare("DELETE FROM CHANNEL_SET WHERE id_channel_set=?");
-            # F1/fix: guard execute return (DELETE)
-            if ($sth && $sth->execute($id_channel_set)) {
-                $sth->finish;
-            } else {
-                $self->{logger}->log(1, "channelSet_ctx DELETE failed: $DBI::errstr");
+            my $stored = eval {
+                my $sth = $self->{dbh}->prepare("DELETE FROM CHANNEL_SET WHERE id_channel_set=?")
+                    or die 'prepare';
+                $sth->execute($id_channel_set) or die 'execute';
+                $sth->finish; 1;
+            };
+            unless ($stored) {
+                $self->{logger}->log(1, 'channelSet_ctx DELETE failed');
+                botNotice($self, $nick, "Could not remove +$chanset from $target_channel.");
+                return;
             }
 
             # mb111-IMP1: invalider le cache TTL de getIdChannelSet
@@ -698,6 +706,11 @@ sub channelSet_ctx {
     else {
         channelSetSyntax_ctx($ctx);
         return;
+    }
+
+    if ($args[0] =~ /^[+-]MetaAI$/i) {
+        require Mediabot::AI::MetaActivation;
+        Mediabot::AI::MetaActivation::note_policy_change($self,$target_channel);
     }
 
     # Log (keep legacy-ish payload)

@@ -1,4 +1,5 @@
 use strict;
+use DBI;
 use warnings;
 use utf8;
 use Test::More;
@@ -83,7 +84,9 @@ sub fixture {
  my $c=bless {%$conf,'meta_ai.ENABLED'=>1,'meta_ai.CHANNELS'=>'#test','meta_ai.PROVIDERS'=>'openai anthropic',
   'meta_ai.STATE_FILE'=>"$tmp/memory.json",'openai.API_KEY'=>'YOUR_OPENAI_TEST_KEY','anthropic.API_KEY'=>'YOUR_CLAUDE_TEST_KEY'},'MB819Conf';
  my $client=bless {calls=>[]},'MB819Client';
- my $b=bless {conf=>$c,config_file=>"$tmp/mediabot.conf",wit_runtime_state=>bless({generation=>1},'MB819Gen'),
+ my $gate_db=DBI->connect('dbi:SQLite:dbname=:memory:','','',{RaiseError=>1,PrintError=>0});
+ $gate_db->do('CREATE TABLE CHANSET_LIST(id_chanset_list INTEGER PRIMARY KEY,chanset TEXT)');
+ my $b=bless {dbh=>$gate_db,conf=>$c,config_file=>"$tmp/mediabot.conf",wit_runtime_state=>bless({generation=>1},'MB819Gen'),
   logger=>bless({lines=>[]},'MB819Logger')},'MB819Bot';
  my $runtime=Mediabot::AI::MetaRuntime->new(bot=>$b,client_factory=>sub {$client},
   web_start=>sub {$_[1]->({ok=>1,sources=>$sources});1},schedule_cb=>sub {push @timers,[@_]},

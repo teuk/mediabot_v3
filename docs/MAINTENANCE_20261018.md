@@ -397,3 +397,36 @@ service, dashboard or publisher is changed. After validation and commit through
 source/plugin operation is sufficient for smoke acceptance; provoking startup
 failures or disabling live plugins is unnecessary. The package README records
 exact local qualification results and any environment limitations.
+
+
+## MB842 — MetaAI channel policy
+
+The reviewed base combines the supplied MB840 snapshot with the exact validated
+MB841 payload. The later MB841 commit/version was not supplied; installers must
+check reviewed source bytes and clean Git state without inventing that revision
+or replacing VERSION. The next commit remains owned by `commit.sh`.
+
+`+MetaAI` replaces the per-instance pilot allowlist for addressed questions.
+The private file keeps credentials, providers, models, limits and an optional
+global emergency stop. Existing databases retain their prior explicit pilot
+behavior until an explicit, transactional data-only handover. Fresh policy reads
+and an in-memory policy epoch prevent a removed/re-enabled flag from reviving
+old replies. Chanset writes now report errors before any false success, cache
+invalidation or successful action log. The existing authenticated Administrator+
+or per-channel level 450 permission gate is unchanged.
+
+New SQLite-backed regressions exercise handover, refusal, rollback, no-resurrection,
+native activation without `+chatGPT`/CHANNELS, role and channel boundaries,
+provider admission and delayed output after policy revocation. Existing runtime
+fixtures now model an actual pre-registration catalogue; their legacy tests
+continue to verify compatibility rather than mocking an absent database as
+successful absence. The tests create only disposable fixture tables. Runtime
+and initialization add no schema operation.
+
+See `docs/META_AI.md` for commands and transition semantics. Source installation
+changes neither private settings nor existing database rows. After normal host
+validation and commit, update intended instances normally, then preview and
+apply data-only handover through the Ansible controller. The same audit checks
+six exact configurations under their native Unix owners and the shared teuk.org
+shortener. No unrelated inventory host or automatic provider/channel activation
+is part of that audit.

@@ -3,8 +3,9 @@
 `mediabot: <question>` can ask OpenAI, Claude and Gemini concurrently, then
 produce one concise reply. Each contributor receives the same conversation;
 a synthesis compares their drafts. Agreement is not treated as evidence.
-The feature starts **disabled**, and requires both an explicit pilot-channel
-allowlist and that channel's existing `+chatGPT` setting.
+Addressed questions are opt-in through the channel's **`+MetaAI` chanset**.
+No channel allowlist in the configuration is needed once MetaAI is registered.
+The optional global `ENABLED=0` override remains an emergency stop.
 
 ## Natural questions about Mediabot (MB820)
 
@@ -319,8 +320,8 @@ The source package never rewrites a private configuration.
 
 | Key | Default | Accepted values and effect |
 | --- | --- | --- |
-| `ENABLED` | `0` | `0` or `1`; activate the collective addressed route. |
-| `CHANNELS` | empty | Space/comma-separated channel names, e.g. `#mbtest #i/o`; exact IRC case-folded match. Empty enables no channel. |
+| `ENABLED` | `1` | Optional global switch. `0` stops MetaAI everywhere; otherwise only channels with `+MetaAI` can answer. |
+| `CHANNELS` | empty | Legacy-only handover input, ignored after the database registers MetaAI. Manage channels with `chanset #channel +MetaAI` / `-MetaAI`. |
 | `PROVIDERS` | `openai anthropic gemini` | Names or registry aliases (`claude`, `gpt`, etc.); deduplicated. Unknown names are ignored. |
 | `MIN_PROVIDERS` | `2` | `1..3`; minimum configured contributor keys, not a guarantee all calls succeed. Keep `2` or `3` for collective operation. |
 | `OPENAI_MODEL` | `gpt-6.1-sol` | OpenAI contributor/synthesis model. The new route uses `/v1/responses`, low reasoning for GPT-5/6 and no unsupported sampling fields. |
@@ -427,7 +428,7 @@ API references: [Tavily Search](https://docs.tavily.com/documentation/api-refere
    Optionally run `perl tools/meta_ai_check.pl --conf mediabot.conf --live`:
    this explicitly makes one small **paid** request per configured contributor,
    without IRC output, memory writes or web research.
-4. Activate `ENABLED=1`, confirm the channel's existing `+chatGPT` setting using
+4. Confirm that the global emergency switch is not `ENABLED=0`, then enable the channel with `+MetaAI` using
    the normal chanset command, then restart only the dev service. Syntax-check
    and status/journal acceptance precede public tests.
 5. Test stable facts, follow-ups from another nick, nick changes, recent facts
@@ -585,3 +586,62 @@ Judge relevance, coverage, practical detail, conditions, source quality and
 compactness. Do not judge success only by the presence of links. An ambiguous
 request should get a concise useful clarification, not invented context. A
 source can be old and still be relevant; recency must not be fabricated.
+
+## Per-channel activation and handover (MB842)
+
+Use the existing authenticated chanset command:
+
+```text
+!chanset #i/o +MetaAI
+!chanset #i/o -MetaAI
+```
+
+Administrator, Master and Owner identities retain global access. An
+**authenticated** channel user needs level **450 or higher for that channel**.
+Permission on another channel grants nothing here. The command reports a
+failed database write instead of saying the change succeeded. Natural-language
+questions about flags retain MB820's private, permission-bound read behavior;
+asking about a setting never changes it.
+
+After registration, addressed `botnick: question` routing belongs exclusively
+to MetaAI. `-MetaAI` (or the global emergency stop) suppresses that route rather
+than silently giving the question to the legacy single-provider chatbot.
+Explicit legacy commands such as `!tellme` retain their own `+chatGPT` gate.
+Keys, provider selection/models, web mode, budgets and limits stay in private
+configuration. `ENABLED` defaults to 1 but enables no channel without its
+MetaAI flag. Existing explicit `ENABLED=0` remains authoritative and is not
+rewritten by deployment or initialization.
+
+An existing database without a MetaAI catalogue entry temporarily retains the
+old **explicit ENABLED=1 + CHANNELS + chatGPT** collective gate. Missing/broken
+SQL is not interpreted as an absent catalogue; it grants no request. Register
+and adopt eligible old channels atomically with the supplied tool, as the
+configuration owner:
+
+```bash
+perl tools/meta_ai_channels.pl --conf mediabot.conf --adopt-legacy
+perl tools/meta_ai_channels.pl --conf mediabot.conf --adopt-legacy --apply
+```
+
+The first command is a read-only database preview. The second writes only
+rows in existing `CHANSET_LIST` and `CHANNEL_SET` tables. It preserves only
+listed channels already eligible for the old collective route. Unknown or
+unflagged channels and a disabled old instance are not enabled. A per-database
+nonblocking advisory lock and one transaction serialize initial registration;
+failure rolls the registration and every adopted row back together. Once the
+catalogue exists, subsequent initialization is a no-op: it never restores
+flags an operator removed. Private configuration and history are not rewritten.
+
+The standalone data seed `install/migrations/20261018_metaai_chanset.sql` is
+for registration **without adoption**, and therefore enables no channel.
+Running that seed before adoption intentionally selects an empty native
+policy. Fresh installation seeds the catalogue with no active MetaAI channel.
+There are no table, column, index or other schema changes.
+
+Policy is reread before admission and delivery. Successful MetaAI toggles
+invalidate pending reply ownership, including a rapid off/on sequence, without
+resetting conversation history or opening another concurrent worker slot.
+No provider answer or partial delivery can bypass a removed flag. `/forget`
+continues to allow a participant to erase their own conversation when the
+feature is disabled. Generic help, protected local reads, source validation,
+shorturl labels, colours and pacing are unchanged.

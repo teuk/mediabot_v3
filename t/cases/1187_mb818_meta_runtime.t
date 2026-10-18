@@ -1,4 +1,5 @@
 use strict;
+use DBI;
 use warnings;
 use utf8;
 use Test::More;
@@ -31,7 +32,9 @@ sub fixture {
         'openai.API_KEY'=>'fake-openai','anthropic.API_KEY'=>'fake-claude','gemini.API_KEY'=>'fake-gemini',
         'connection.CONN_SERVER_NETWORK'=>'test-network'},'MB818RuntimeConf';
     my $client=bless {calls=>[]},'MB818RuntimeClient';
-    my $bot=bless {conf=>$conf,config_file=>"$dir/mediabot.conf",
+    my $gate_db=DBI->connect('dbi:SQLite:dbname=:memory:','','',{RaiseError=>1,PrintError=>0});
+    $gate_db->do('CREATE TABLE CHANSET_LIST(id_chanset_list INTEGER PRIMARY KEY,chanset TEXT)');
+    my $bot=bless {dbh=>$gate_db,conf=>$conf,config_file=>"$dir/mediabot.conf",
         wit_runtime_state=>bless({generation=>1},'MB818RuntimeGeneration'),
         logger=>bless({lines=>[]},'MB818RuntimeLogger')},'MB818RuntimeBot';
     my $runtime=Mediabot::AI::MetaRuntime->new(bot=>$bot,clock=>sub {$now},

@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB842 — Per-channel MetaAI activation (2026-10-18)
+
+- Introduce the opt-in `+MetaAI` chanset for addressed questions, independent
+  of the legacy `+chatGPT` flag and configuration channel allowlist. Retain
+  optional `ENABLED=0` as a global emergency stop; the normal default permits
+  only channels explicitly opting in through the existing chanset permissions.
+- Use fresh database policy reads at admission and delivery. A successful
+  MetaAI toggle invalidates pending replies, including disable/re-enable before
+  completion. Disabled native channels do not silently fall back to legacy GPT.
+- Provide a read-only channel preview and explicit data-only registration /
+  atomic adoption of eligible legacy pilot channels. Repeat initialization
+  never re-enables a removed flag. No table, column, index or schema changes.
+- Preserve legacy pilot behavior until the database registers MetaAI. Retain
+  keys, models, budgets, source validation, private memory and paced shorturls.
+- Report failed chanset INSERT/DELETE operations without a false success reply,
+  successful action log or cache invalidation. Existing Administrator+ and
+  authenticated channel-level 450 authorization remains authoritative.
+
 ### MB841 — Source and plugin worker launch ownership (2026-10-18)
 
 - Reserve the DansTonChat asynchronous source slot before worker launch and

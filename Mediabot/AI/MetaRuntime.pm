@@ -18,6 +18,7 @@ use Mediabot::AI::MetaWeb;
 use Mediabot::AI::MetaChat;
 use Mediabot::AI::MetaReply qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label);
 use Mediabot::AI::MetaKnowledge ();
+use Mediabot::AI::MetaActivation qw(channel_policy policy_epoch);
 
 sub new {
     my ($class,%args)=@_;
@@ -31,8 +32,7 @@ sub _signature {
 }
 sub _enabled {
     my ($self,$cfg,$channel)=@_;
-    return 0 unless $cfg->{enabled} && $cfg->{channels}{fold($channel)};
-    return eval {Mediabot::Helpers::chanset_enabled($self->{bot},$channel,'chatGPT',default=>0)} ? 1:0;
+    return channel_policy($self->{bot},$cfg,$channel)->{enabled} ? 1:0;
 }
 sub _identity {
     my ($bot,$message,$nick)=@_;
@@ -77,6 +77,7 @@ sub _alive {
     my ($self,$channel,$generation,$signature,$memory,$ticket)=@_;
     my $bot=$self->{bot};my $cfg=settings($bot->{conf});
     return 0 unless $self->_signature($cfg) eq $signature && $self->_enabled($cfg,$channel);
+    return 0 unless ($ticket->{metaai_policy_epoch}//0)==policy_epoch($bot,$channel);
     my $current=eval {$bot->{wit_runtime_state}->capture_generation($channel)};
     return 0 unless defined($current) && $current==$generation;
     return eval {$memory->current($ticket)} ? 1:0;
@@ -231,6 +232,7 @@ sub _ask {
     my $ticket=eval {$memory->begin_turn($scope,$actor,$prompt,$cfg->{daily_limit},$nick)};
     unless ($ticket) {$self->_notice($nick,$lang,'memory');return 1}
     if ($ticket->{error}) {$self->_notice($nick,$lang,$ticket->{error});return 1}
+    $ticket->{metaai_policy_epoch}=policy_epoch($bot,$channel);
     push @{$self->{rate}{$key}},$now;push @{$self->{rate}{__global__}},$now;
     my $signature=$self->_signature($cfg);$self->{jobs}{$key}=1;
     my %overrides=('openai.API_URL'=>'https://api.openai.com/v1/responses',
@@ -327,8 +329,10 @@ sub _local {
         message=>$message,language=>$lang,settings=>$cfg)};
     unless (ref($result) eq 'HASH' && length($result->{text}//'')) {$self->_notice($nick,$lang,'failed');return 1}
     my $signature=$self->_signature($cfg);
+    my $epoch=policy_epoch($bot,$channel);
     my $alive=sub {
         my $current=settings($bot->{conf});
+        return 0 unless $epoch==policy_epoch($bot,$channel);
         return 0 unless $signature eq $self->_signature($current) && $self->_enabled($current,$channel);
         my $gen=eval {$bot->{wit_runtime_state}->capture_generation($channel)};
         return 0 unless defined($gen) && $gen==$generation;
@@ -351,7 +355,11 @@ sub handle {
     my $cfg=settings($bot->{conf});
     my $runtime=$bot->{_meta_ai_runtime}||=__PACKAGE__->new(bot=>$bot);
     my $raw=join(' ',@words);my $prompt=clean($raw,4001);
-    return 0 unless $prompt eq '/forget' || $runtime->_enabled($cfg,$channel);
+    my $policy=channel_policy($bot,$cfg,$channel);
+    # Once +MetaAI is registered, addressed questions belong to that policy.
+    # A disabled/unavailable gate must not silently fall back to legacy GPT.
+    return $policy->{mode} eq 'legacy' ? 0:1
+        unless $prompt eq '/forget' || $policy->{enabled};
     unless (length($prompt) && length($prompt)<=4000) {
         $runtime->_notice($nick,Mediabot::Helpers::channel_lang($bot,$channel),'failed');return 1;
     }

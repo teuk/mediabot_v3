@@ -101,7 +101,7 @@ sub settings {
         'nist.gov cve.org nvd.nist.gov cisa.gov cert.ssi.gouv.fr cern.ch nasa.gov esa.int insee.fr service-public.gouv.fr legifrance.gouv.fr cyber.gouv.fr cybermalveillance.gouv.fr who.int reuters.com bbc.com franceinfo.fr developers.openai.com platform.claude.com ai.google.dev');
     splice @domains, 32 if @domains > 32;
     return {
-        enabled => $int->('ENABLED',0,0,1), channels => \%channels,
+        enabled => $int->('ENABLED',1,0,1), legacy_enabled => $int->('ENABLED',0,0,1), channels => \%channels,
         providers => \@providers, min_providers => $int->('MIN_PROVIDERS',2,1,3),
         gemini_fallback => $get->('GEMINI_FALLBACK_MODEL',''),
         models => { openai=>$get->('OPENAI_MODEL','gpt-6.1-sol'),
