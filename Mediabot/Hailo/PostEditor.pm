@@ -255,10 +255,19 @@ sub submit {
     my $on_done = delete $args{on_done};
     croak 'on_done must be a code reference' unless ref($on_done) eq 'CODE';
 
+    # MB839: claim completion before caller code. A client can refuse, throw
+    # after an inline callback, or deliver a late duplicate; none can reopen
+    # the accepted decision or invoke the consumer a second time.
+    my $completed = 0;
+    my $finish = sub {
+        return if $completed++;
+        $on_done->($_[0]);
+    };
+
     my $prepared = eval { $self->build_edit_request(%args) };
     if ($@ || !$prepared) {
         my $fallback = _clean_line($args{candidate}, 360);
-        $on_done->({
+        $finish->({
             ok     => defined($fallback) ? 1 : 0,
             line   => $fallback,
             edited => 0,
@@ -272,12 +281,14 @@ sub submit {
             $prepared->{request},
             on_done => sub {
                 my ($client_result) = @_;
-                $on_done->(_decision($prepared, $client_result));
+                return if $completed;
+                $finish->(_decision($prepared, $client_result));
             },
         );
     };
-    if ($@) {
-        $on_done->(_decision($prepared, { ok => 0, error => 'submit_failed' }));
+    if ($@ || !$submitted) {
+        return 1 if $completed;
+        $finish->(_decision($prepared, { ok => 0, error => 'submit_failed' }));
         return 0;
     }
     return $submitted ? 1 : 0;

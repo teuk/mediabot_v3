@@ -375,7 +375,9 @@ sub _start_job {
         1;
     };
 
-    if (!$ok || (!$started && !$callback_seen)) {
+    # MB839: an editor that completed inline owns the result even if submit
+    # subsequently throws. Preserve its edit and existing typing timer.
+    if (!$callback_seen && (!$ok || !$started)) {
         $callback_seen = 1;
         $self->_provider_done($job, {
             ok       => 1,

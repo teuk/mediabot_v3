@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB839 — Calendar lifecycle and Hailo completion maintenance (2026-10-18)
+
+- Revalidate calendar task identity and generation after its next-date callback.
+  A resolver that stops, restarts or replaces a task cannot publish an obsolete
+  timer; a failed older start/re-arm cannot stop or delete its successor.
+- Claim one terminal Hailo post-edit decision before invoking caller code.
+  Refused submissions complete through the existing fallback; late duplicates
+  and exceptions after an inline completion cannot reopen that decision.
+- Preserve a completed Hailo edit and its single typing timer if the injected
+  editor subsequently throws. Retain final emission/state/TTL checks and queue
+  accounting rather than overwriting the result with a second fallback.
+- Add real IO::Async countdown ownership tests and post-editor/runtime callback
+  regressions. No SQL/schema, private configuration, web or live state changes.
+
 ### MB838 — Confirmed Undernet X authentication and periodic recovery (2026-10-18)
 
 - Expose Master-only `xauth [status]` and compatible `xlogin [status]` in both

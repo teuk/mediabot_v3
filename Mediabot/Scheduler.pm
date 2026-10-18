@@ -155,10 +155,18 @@ sub add {
     }
 
     if ($auto) {
+        my $start_generation = $task->{generation} + 1;
         unless ($self->start($name)) {
-            my $timer = $task->{timer};
-            delete $self->{_tasks}{$name};
-            eval { $self->{loop}->remove($timer) if $timer };
+            # MB839: a resolver may remove/re-add or restart this name. Only
+            # roll back the original failed start, never its successor.
+            my $current = $self->{_tasks}{$name};
+            if ($current && refaddr($current) == refaddr($task)
+                && $current->{generation} == $start_generation + 1
+                && !$current->{started}) {
+                my $timer = $task->{timer};
+                delete $self->{_tasks}{$name};
+                eval { $self->{loop}->remove($timer) if $timer };
+            }
             die("Scheduler: failed to autostart '$name'\n");
         }
     }
@@ -185,8 +193,14 @@ sub _arm_calendar {
 
     my $now = time();
     my $next = eval { $task->{next_run_cb}->($now) };
-    if ($@ || !defined($next) || ref($next) || "$next" !~ /^\d+$/ || $next <= $now) {
-        (my $err = $@ || "invalid next epoch") =~ s/\s+/ /g;
+    my $next_error = $@;
+    # MB839: computing the next date is caller code too. A lifecycle change
+    # there invalidates this arm before any timer is created or published.
+    my $current = $self->{_tasks}{$name};
+    return 0 unless $current && refaddr($current) == $task_addr
+        && $current->{generation} == $generation && $current->{started};
+    if ($next_error || !defined($next) || ref($next) || "$next" !~ /^\d+$/ || $next <= $now) {
+        (my $err = $next_error || "invalid next epoch") =~ s/\s+/ /g;
         $self->_log(1, "Scheduler: cannot arm calendar task '$name': $err");
         return 0;
     }
@@ -233,6 +247,9 @@ sub _arm_calendar {
             return unless $current->{started};
 
             unless ($scheduler->_arm_calendar($name)) {
+                $current = $scheduler->{_tasks}{$name} or return;
+                return unless refaddr($current) == $task_addr;
+                return unless $current->{generation} == $generation;
                 $current->{started} = 0;
                 $scheduler->_log(1,
                     "Scheduler: calendar task '$name' stopped because re-arm failed");
@@ -308,6 +325,7 @@ sub start {
     $task->{started}    = 1;
     $task->{start_time} = $now;
     $task->{next_run}   = 0;
+    my $generation = $task->{generation};
 
     my $ok = eval {
         if ($task->{mode} eq 'calendar') {
@@ -325,6 +343,10 @@ sub start {
 
     if (!$ok) {
         (my $err = $@ || 'unknown error') =~ s/\s+/ /g;
+        # Do not undo a stop/restart/replacement performed by a resolver.
+        my $current = $self->{_tasks}{$name};
+        return 0 unless $current && refaddr($current) == refaddr($task)
+            && $current->{generation} == $generation;
         $task->{generation}++;
         $task->{started}  = 0;
         $task->{next_run} = 0;

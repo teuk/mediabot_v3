@@ -213,3 +213,61 @@ No hub, publisher, dashboard or mbweb deployment is needed. Use the normal
 instance. Normal live continuity is accepted on **#i/o on Epiknet via nbot**;
 do not provoke filesystem failures or register colliding commands on a live
 bot to reproduce the tests.
+
+## MB839 — Calendar resolver and Hailo completion ownership
+
+This pass starts from the supplied `3.6dev-20261018_110759` snapshot, after
+MB838. The review follows scheduler callbacks, asynchronous workers, command
+output, RSS/RandomQuote state and Hailo queues. The changes below concern two
+reproduced callback-lifecycle defects; the other paths read are not claimed to
+have received an exhaustive audit.
+
+| Trigger in an isolated regression | Previous behavior | Correction |
+| --- | --- | --- |
+| A calendar next-date resolver stops or restarts its own task | The outer arming operation publishes a stale countdown after the lifecycle changed, potentially overwriting the newer timer and leaving a loop-owned orphan. | Revalidate registration identity, generation and started state immediately after date resolution and before creating a timer. A superseded start returns false. |
+| A resolver replaces its registration and the old start fails, or restarts during re-arm | Old failure cleanup can remove the replacement entry or mark the new lifecycle stopped. | Cleanup and re-arm failure handling apply only to the registration/generation they own. A failed autostart still raises; it does not claim that a replacement was rolled back. |
+| A post-edit client completes inline and then throws, refuses, or calls back again | The post-editor can issue multiple terminal decisions; a plain refusal can leave its consumer without any decision. | Claim completion before consumer code. Keep the first decision, ignore late callbacks, and complete a true refusal once with the existing fallback. An already-completed submission returns success even if the client subsequently reports false or throws. |
+| An injected post-editor completes an edit, then throws while typing delay is pending | The runtime replaces the accepted edit with the raw fallback and schedules a second typing callback. | Treat the first callback as terminal for provider selection; preserve the edit, metadata and one timer. Final channel authorization, generation and expiry are still checked before IRC delivery. |
+
+### Calendar boundaries
+
+The calendar API and periodic cadence remain unchanged. Resolvers still return
+an absolute future epoch. They may trigger public stop/restart/remove/re-add
+operations; such changes supersede the outer attempt. A normal invalid date
+still fails and an original failed autostart still removes its own registration.
+A legitimate replacement can remain active even though the superseded outer
+`add(..., autostart => 1)` raises. Callers should inspect the current task rather
+than assuming that a failed outer attempt removed a successor it did not own.
+
+Regressions use independent real IO::Async loops and countdowns, invoke
+retained expiration callbacks explicitly, and count actual loop-owned timers.
+They cover initial start, post-run re-arm, stop, restart, removal, replacement,
+invalid dates, resolver exceptions, stale callbacks and normal cleanup. There
+is no wall-clock sleep or live scheduler manipulation in these tests.
+
+### Hailo boundaries
+
+Exactly one post-editor completion is attempted per submission, including
+fallback. A consumer exception cannot trigger a second invocation. This is
+not a retry mechanism and does not add another provider call. Pending accepted
+asynchronous work continues to complete through its callback as before.
+
+The runtime also defends its injected editor boundary. An exception before
+any callback still uses the existing fallback; an exception after completion
+cannot overwrite that completion. Typing delay, bounded queue, final emission
+checks, language/semantic guards and metrics remain in force. The regressions
+exercise both direct post-editor clients and delayed runtime delivery without
+sending a message to IRC or calling an AI provider.
+
+### Scope and deployment
+
+No database schema, migration, SQL query or persistent-state format changes.
+No private configuration, brain, account, live service, dashboard or publisher
+is edited by the source installer. MB838 X authentication is retained.
+
+After required host validation, commit with `commit.sh`, restart only the dev
+instance for an optional smoke check, then update production through its normal
+workflow. A normal Hailo reply and normal scheduled activity suffice for live
+acceptance; do not replace real tasks or provoke provider errors on production.
+The package README records exact qualification results and any local fixture
+limitations. Full host validation remains mandatory before commit.
