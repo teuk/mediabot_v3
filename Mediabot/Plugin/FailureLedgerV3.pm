@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 
 use Digest::SHA qw(sha256_hex);
+use Encode qw(encode);
 
 my %RUNTIME_KIND = map { $_ => 1 } qw(
     command
@@ -84,6 +85,9 @@ sub _error_fingerprint {
     $text =~ s/^\s+|\s+$//g;
     $text = 'runtime failure' unless length($text);
     $text = substr($text, 0, 512);
+    # Fingerprinting must not itself fail on international exception text.
+    # Retain prior byte-sized fingerprints; wide characters become UTF-8 bytes.
+    $text = encode('UTF-8', $text) unless utf8::downgrade($text, 1);
     return substr(sha256_hex($self->{fingerprint_salt} . "\x00" . $text),
         0, 16);
 }

@@ -433,3 +433,71 @@ It leaves the index and running services unchanged. After host success, restart
 the development bot and exercise manual `!dtc`, `!dtc <id>` and `!bashfr <id>`
 on an already-enabled test channel. Commit via `commit.sh`, update production
 normally, then check automatic/manual continuity on nbot's `#i/o`.
+
+
+## MB850 — Unicode fingerprints without changing existing RSS identity
+
+Two hashing sites accepted character strings but passed them directly to
+Digest::SHA, which consumes octets. Characters above U+00FF (curly punctuation,
+non-Latin scripts, emojis) could therefore raise a wide-character exception.
+This is distinct from the MB847 HTTP output correction: the bytes must be
+selected before hashing, while original text remains unchanged for presentation.
+
+### RSS IDs and deduplication
+
+`rss_item_key` uses ID, GUID or URL, then title/date as a fallback. A numeric XML
+entity can produce wide characters even when the HTTP document is all ASCII.
+A wide GUID, Atom ID or fallback title could abort parsing and make a valid
+feed look broken to the poller.
+
+The internal digest helper now first tries lossless byte downgrading on a local
+copy. Every input that Digest::SHA could already hash keeps exactly the same
+bytes and SHA-256 key: ASCII, Latin-1, already encoded byte strings and their
+UTF-8-upgraded Perl scalar equivalents. Only previously unhashable wide text is
+encoded as UTF-8. This deliberately preserves legacy identity rather than
+re-encoding every stored key. No Unicode normalization or key migration occurs.
+Original item strings, key field precedence, cleaning/length bounds and field
+separators remain unchanged.
+
+`1246_mb850_rss_unicode_identity.t` fixes byte-for-byte legacy expectations,
+checks wide values across all identity fields and fallback, and parses actual
+RSS/Atom documents containing numeric Unicode entities. The actual poller uses
+an isolated in-memory repository holding a previously announced Latin-1 item;
+only the new Unicode item is inserted, repeated polls deduplicate it and the
+old item remains suppressed. Initial polling still records a quiet baseline.
+No external HTTP request or real database is used by this test.
+
+### API v3 failure diagnostics
+
+`FailureLedgerV3` had the same byte-boundary defect after sanitizing and bounding
+an exception to 512 characters. The plugin manager contains errors from its
+own observer, so a Unicode fingerprint failure silently lost that diagnostic
+record rather than updating counts/history.
+
+The bounded text now undergoes the same lossless downgrade / wide-only UTF-8
+conversion before salting and hashing. Existing byte-sized fingerprints remain
+unchanged for the same runtime salt. Raw exception text is still absent from
+reports; only the short fingerprint, resource, runtime kind, counts and times
+remain. Reference exceptions keep their generic fallback, and success still
+clears the corresponding streak without erasing history. Cardinality/ring
+bounds and instance-local lifetime remain unchanged.
+
+`1247_mb850_unicode_plugin_failures.t` checks exact byte/wide fingerprints,
+warning-free recording, counts, streak reset, bounded detached reports and
+absence of raw text. It then runs Unicode exceptions through real API v3
+command, event, job and HTTP-callback boundaries, verifies all four records and
+normal recovery, and checks unload/reload clears the old instance history.
+Local callback/scheduler fixtures provide IO; no live IRC or provider is used.
+
+Only RSS.pm and Plugin/FailureLedgerV3.pm change in production. The accepted
+MB849 DTC budget, scheduling, permissions, private configuration, persistent
+state, SQL/schema and source transport are unchanged. Source installation backs
+up its payload, requires focused/security/inventory/fast/full checks and restores
+its own writes on required-check failure, preserving concurrent owner changes.
+It stages/commits nothing and restarts no service.
+
+After full host success, restart only the development bot and check ordinary
+continuity. Do not reset feed history, inject broken plugins into production or
+force announcements for acceptance. Commit through `commit.sh`, update production
+normally and check nbot's `#i/o`. No web, dashboard, shortener or statistics
+publisher deployment is required.

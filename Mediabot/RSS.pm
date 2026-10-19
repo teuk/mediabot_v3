@@ -244,13 +244,22 @@ sub _article_url {
     return $url =~ m{\Ahttps?://}i ? $url : '';
 }
 
+sub _item_key_digest {
+    my ($text) = @_;
+    # Digest::SHA requires octets. Preserve every previously valid byte-sized
+    # identity (including Latin-1) so existing announced items stay deduplicated.
+    # Only previously unhashable wide text needs UTF-8 encoding.
+    $text = encode('UTF-8', $text) unless utf8::downgrade($text, 1);
+    return sha256_hex($text);
+}
+
 sub rss_item_key {
     my ($item) = @_;
     return undef unless ref($item) eq 'HASH';
 
     for my $field (qw(id guid url)) {
         my $value = _clean_scalar($item->{$field}, 2048);
-        return sha256_hex(lc($field) . "\0" . $value)
+        return _item_key_digest(lc($field) . "\0" . $value)
             if length $value;
     }
 
@@ -258,7 +267,7 @@ sub rss_item_key {
     my $date  = _clean_scalar($item->{published}, 160);
 
     return undef unless length($title) || length($date);
-    return sha256_hex("fallback\0$title\0$date");
+    return _item_key_digest("fallback\0$title\0$date");
 }
 
 sub _parse_rss_items {

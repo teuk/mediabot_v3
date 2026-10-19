@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB850 — Unicode RSS identity and plugin failure diagnostics (2026-10-19)
+
+- Hash RSS IDs, GUIDs, URLs and fallback title/date identities without wide-
+  character exceptions. Preserve every previously hashable byte-sized key,
+  including Latin-1 and already encoded strings, so announced history is not
+  reset and existing articles are not treated as new after the update.
+- Make bounded API v3 exception fingerprints accept Unicode without losing
+  failure counts/history. Keep existing byte-sized fingerprints, per-instance
+  salt, detached reports, bounded rings and raw-exception redaction.
+- Exercise actual RSS/Atom entity parsing and poller dedup/baseline behavior,
+  plus command, event, job and HTTP-callback failure reporting through the real
+  plugin manager. Preserve accepted DTC display and runtime safeguards.
+  No SQL/schema, migration, private configuration or stored-format change.
+
 ### MB849 — Readable automatic and manual DTC quotes (2026-10-19)
 
 - Remove Spark's separate three-line DTC restriction, which reserved two lines
