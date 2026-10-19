@@ -572,3 +572,83 @@ conversation/Hailo continuity on an already enabled test channel. Do not clear,
 reseed, rename or retrain production brains for acceptance. Commit through
 `commit.sh`, update production normally and check nbot's `#i/o`. No web,
 shortener, dashboard or statistics publisher deployment is required.
+
+
+## MB852 — Shared worker recovery when timer setup fails
+
+The shared `AsyncWorker` foundation serves existing consumers such as source
+fetches and provider/version/trivia workers. This round changes only that
+foundation's exceptional timer paths; no consumer migration or new asynchronous
+framework is introduced.
+
+### Failed timer registration is rolled back
+
+`_new_timer` previously returned its handle only after adding and starting the
+notifier. If add/start threw after partial registration, callers had no handle
+to remove. A failed initial deadline could therefore remain in the loop after
+setup had reported failure and killed its child. The orphan timer retained the
+worker graph; direct retained callbacks could still invoke their consumers.
+
+Construction/add/start are now one protected arm. On exception the callback
+slot is invalidated first, the provisional timer is stopped/removed, then the
+original exception is rethrown. Callback indirection lives in a separate named
+factory so its closure does not retain the whole setup activation under newer
+Perl versions. A retained failed arm is inert even if cleanup itself cannot
+remove a notifier. Successful timers retain their existing behavior and delay.
+
+### Escalation remains effective without a grace timer
+
+Termination previously swallowed failures while arming the KILL timer and the
+finalization backstop. A child ignoring TERM could outlive the worker if its
+KILL arm failed; if both arms failed, there was no remaining completion path.
+
+A failed KILL arm now triggers immediate KILL for the still-owned, unreaped
+child. A failed finalization arm triggers KILL before marking the result forced
+and proceeding to terminal cleanup; otherwise cleanup would remove a working
+KILL arm before it could run. The original `worker_timeout` or `worker_cancelled`
+result remains authoritative. Normal grace delays and TERM/KILL behavior are
+unchanged when arms succeed. An already-reaped child receives no signal.
+
+The existing IO::Async process watcher continues to own reaping. There is no
+blocking wait, detached process, manual post-ownership waitpid or synchronous
+fallback. Consumer completion stays one-shot and frees its capacity even when
+its backstop registration fails. Late callbacks and cancellation remain inert.
+
+### Native regression coverage
+
+`MB852WorkerFixture.pm` supplies a real IO::Async Poll loop with narrowly scoped
+fault injection after native timer add/start. It tracks only children forked by
+these tests, and signal interception never delivers TERM/KILL to a reaped PID.
+A pipe handshake proves the child has installed TERM-ignore before escalation
+is requested; a separate pipe releases it during safe baseline cleanup. Tests
+use no IRC, external endpoint, provider, database or private configuration.
+
+`1250_mb852_worker_timer_setup.t` checks rollback, original errors, stopped and
+detached timers, inert retained callbacks and released context. Real worker
+setup failure still yields exactly one structured timeout_timer error, its real
+watcher reaps the killed child, no worker stream/timer remains, and the same loop
+accepts a successor whose actual fork/pipe packet is preserved. IO::Async's own
+SIGCHLD handle is distinct from worker-owned stream/timer resources.
+
+`1251_mb852_worker_termination_timers.t` drives both timeout and explicit cancel
+through KILL-arm failure, force-arm failure and both failures. TERM-resistant
+children are escalated, reaped and completed once without waiting for a working
+grace arm. Retained callbacks cannot repeat completion or signal old PIDs.
+A real child is also reaped while pipe delivery is withheld, verifying that the
+process/EOF barrier remains until timeout and that failed-arm recovery does not
+signal an already-reaped process number.
+
+Only AsyncWorker.pm changes in production. Normal worker protocol, byte/output
+caps, child exception envelopes, process/EOF barrier and deadlines remain.
+Accepted MB849 DTC display, MB850 fingerprints and MB851 Hailo identities are
+preserved. No SQL/schema, migration, private configuration, stored format,
+source selection, AI policy or web deployment change is required.
+
+Source installation backs up the payload and requires focused/security/
+inventory/fast/full checks. A required-check failure restores its own writes,
+keeping concurrent owner edits/deletions. It stages/commits nothing and restarts
+no service. After full host success, restart only the development bot and check
+normal command/source/MetaAI continuity on an already enabled test channel.
+Do not inject timer failures into production for acceptance. Commit through
+`commit.sh`, update intended production instances normally and check nbot's
+`#i/o`. No shortener, dashboard or statistics publisher deployment is required.

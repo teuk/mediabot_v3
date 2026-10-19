@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB852 — Shared worker timer failure recovery (2026-10-19)
+
+- Roll back partially registered AsyncWorker timers when add/start throws.
+  Revoke the failed callback before stopping/removing its timer so retained
+  notifiers cannot call consumers or keep their request context alive.
+- If the KILL grace timer cannot arm, escalate the owned child immediately.
+  If the finalization backstop cannot arm, escalate before cleanup and finish
+  without another timer. Preserve timeout/cancellation result precedence and
+  leave reaping with the existing process watcher; never signal a reaped child.
+- Exercise native IO::Async timers plus real fork/pipe/watch completion under
+  injected registration/start failures, subsequent worker recovery and withheld
+  pipe EOF. Normal deadlines, grace periods, protocol/output limits and accepted
+  source/runtime safeguards remain. No SQL/schema, private setting, persistent
+  format, command or service deployment change is required.
+
 ### MB851 — Unicode Hailo brain and nick identities (2026-10-19)
 
 - Accept wide Unicode network/channel names when selecting a per-channel Hailo

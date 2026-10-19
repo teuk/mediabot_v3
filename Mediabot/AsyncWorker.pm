@@ -404,6 +404,9 @@ sub _begin_termination {
                 },
             );
         };
+        # A failed grace arm must not leave a TERM-resistant child running.
+        $self->_signal_child('KILL')
+            if !$self->{kill_timer} && !$self->{child_done};
     }
 
     unless ($self->{force_timer}) {
@@ -417,6 +420,12 @@ sub _begin_termination {
                 },
             );
         };
+        unless ($self->{force_timer}) {
+            # Cleanup will remove any working kill timer. Escalate first,
+            # then finish without relying on another timer registration.
+            $self->_signal_child('KILL') unless $self->{child_done};
+            $self->{forced} = 1;
+        }
     }
 
     $self->_maybe_finish;
@@ -438,14 +447,37 @@ sub _signal_child {
     return kill($signal, $self->{pid}) ? 1 : 0;
 }
 
+sub _new_timer_callback {
+    my ($slot) = @_;
+    return sub {
+        my $callback = $$slot;
+        $callback->() if ref($callback) eq 'CODE';
+    };
+}
+
 sub _new_timer {
     my ($self, $delay, $callback) = @_;
-    my $timer = IO::Async::Timer::Countdown->new(
-        delay     => $delay,
-        on_expire => $callback,
-    );
-    $self->{loop}->add($timer);
-    $timer->start;
+    my $timer;
+    my $ok = eval {
+        $timer = IO::Async::Timer::Countdown->new(
+            delay     => $delay,
+            on_expire => _new_timer_callback(\$callback),
+        );
+        $self->{loop}->add($timer);
+        $timer->start;
+        1;
+    };
+    unless ($ok) {
+        my $error = $@ || 'worker timer setup failed';
+        # add/start may throw after registering the notifier. Revoke its
+        # callback before rollback, even if the loop retains the failed arm.
+        $callback = undef;
+        if ($timer) {
+            eval { $timer->stop };
+            eval { $self->{loop}->remove($timer) };
+        }
+        die $error;
+    }
     return $timer;
 }
 
