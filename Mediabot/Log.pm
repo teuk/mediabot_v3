@@ -57,12 +57,20 @@ sub _maybe_rotate {
     for my $i (reverse 1 .. $max - 1) {
         my $src = "$base.$i";
         my $dst = "$base." . ($i + 1);
-        rename($src, $dst) if -f $src;
+        if (-f $src) {
+            rename($src, $dst)
+                or die "Cannot rotate logfile $src to $dst: $!";
+        }
     }
-    rename($base, "$base.1") if -f $base;
+    if (-f $base) {
+        rename($base, "$base.1")
+            or die "Cannot rotate logfile $base to $base.1: $!";
+    }
 
     $self->{_write_count} = 0;
     $self->_open_logfile();
+    delete $self->{_rotation_failed};
+    return 1;
 }
 
 # Reopen log file (called on SIGHUP or .rehash)
@@ -130,7 +138,15 @@ sub log {
     # vers le fichier maintenant nomme ".log.1". Resultat : la 100eme
     # ecriture apres rotation atterrissait dans le fichier rotate au lieu
     # du nouveau .log.
-    $self->_maybe_rotate() if $self->{logfile} && $self->{logfilehandle};
+    if ($self->{logfile} && $self->{logfilehandle}) {
+        my $ok = eval { $self->_maybe_rotate(); 1 };
+        if (!$ok && !$self->{_rotation_failed}) {
+            # Keep the current record and console delivery alive. Diagnose
+            # once per failed streak, without exposing paths or message text.
+            $self->{_rotation_failed} = 1;
+            eval { warn "Mediabot: logfile rotation failed; continuing with active descriptor\n" };
+        }
+    }
     if (my $fh = $self->{logfilehandle}) {
         print $fh $logline;
     }

@@ -722,3 +722,78 @@ check normal scheduled/source/command continuity; do not inject timer failures
 into production for acceptance. Commit through `commit.sh`, update intended
 production instances normally and check nbot's `#i/o`. No shortener, dashboard
 or statistics publisher deployment is required.
+
+
+## MB854 — Log rotation continuity and checked archive moves
+
+This continues MB837's active-descriptor preservation at the automatic rotation
+boundary. It does not alter the explicit `reopen_logfile` contract or configure
+new log destinations.
+
+### Stop after the first failed rename
+
+The rotation loop previously ignored rename failures. If `.log.1` could not
+move to `.log.2`, execution still promoted the base file to `.log.1`, overwriting
+history that had failed to move. A failed base promotion was also silently
+followed by reopening the same path.
+
+Every existing archive/base rename is now checked. The first failed move aborts
+further rotation steps with an explicit operation error. The active descriptor
+remains usable, and a later size-check can retry after filesystem recovery.
+Rotation of multiple files is not an atomic transaction: any older archives
+already moved before a later failure remain at their new positions; there is
+no speculative rename rollback. The fix prevents proceeding past the failed
+move and overwriting the archive that could not be moved.
+
+### Automatic errors do not discard the current message
+
+Automatic rotation runs after stdout output but before file and console-hook
+delivery. A rotation/open exception previously escaped log(), so the current
+message missed its active file and Partyline console callbacks even though
+MB837 kept the previous descriptor open.
+
+`log()` now contains automatic rotation errors, then continues its normal file
+write attempt and console dispatch. The existing descriptor is used until a
+successful rotation replaces it. A fixed warning identifies rotation failure
+without including the path, exception text or current message. It is emitted
+once per failed rotation streak, and successful rotation resets suppression.
+The warning callback itself is contained. There is no diagnostic for filtered
+messages or a logger without a file.
+
+The existing one-stat-per-100-writes throttle remains. This is not a new retry
+loop or guarantee that an unwritable/full filesystem can accept data: writing
+to the active descriptor remains best effort. Explicit initial-open and manual
+reopen errors remain visible to their callers. Normal successful rotation still
+writes the boundary record to the newly opened base file and closes the old
+handle before subsequent records.
+
+### Native filesystem regressions
+
+`1254_mb854_log_rotation_continuity.t` renames the live file and places a real
+directory at its path, inducing open failure even under root without permissions
+or IO mocks. Unicode boundary records still reach the live descriptor and
+console, diagnostics remain bounded/redacted, explicit reopen still fails,
+filtered debug records remain suppressed, and recovery archives prior records
+without duplicating the new boundary. A second failure after successful recovery
+emits a new single diagnostic. Console-only logging remains effective.
+
+`1255_mb854_log_archive_rename.t` uses real directory collisions at `.log.2`
+and `.log.1` to fail older-archive and base-file promotion respectively. Failed
+rotation preserves the current history and blocked archive; automatic logging
+continues with one console delivery/diagnostic. Removing the collision allows
+normal ordered rotation, retaining the old archive and keeping each boundary
+record in the correct file. No real instance log is opened or moved.
+
+Only Log.pm changes in production. Accepted MB130 rotation ordering, MB837
+reopen continuity, MB852/MB853 timer recovery and other runtime safeguards stay
+in place. No SQL/schema, migration, private configuration, stored format, log
+level, retention count, schedule or web deployment change is required.
+
+The source installer backs up its payload and requires focused/security/
+inventory/fast/full host checks. Failed required checks restore its own writes,
+preserving concurrent owner edits/deletions. It stages/commits nothing and
+restarts no service. After full host success, restart only the development
+instance and check ordinary command/source/log/console continuity. Do not force
+filesystem failures or rotate production logs for acceptance. Commit through
+`commit.sh`, update production normally and check nbot's `#i/o`. No dashboard,
+shortener or statistics publisher deployment is required.

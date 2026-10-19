@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB854 — Log rotation failure continuity (2026-10-19)
+
+- Check every archive/base rename and stop the rotation on its first failure.
+  A blocked older archive can no longer be overwritten by promoting the base
+  file after its own move failed.
+- Contain automatic rotation/reopen failures in log(): still attempt the current
+  record through the active descriptor and dispatch console hooks. Emit one
+  fixed diagnostic per failed streak, without paths or message content; reset
+  suppression after a successful rotation. Explicit reopen errors remain explicit.
+- Exercise real filesystem collisions, Unicode records, archive preservation,
+  retry/recovery, console delivery, debug filtering and failure diagnostics under
+  Perl 5.38/5.40. Preserve normal rotation order and size-check throttle.
+  No SQL/schema, private configuration, persistent format or service deployment
+  change is required.
+
 ### MB853 — Periodic scheduler registration and restart recovery (2026-10-19)
 
 - Roll back a failed periodic timer constructor/add as one registration: remove
