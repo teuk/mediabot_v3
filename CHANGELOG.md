@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB843 — Sources when the task needs evidence (2026-10-18)
+
+- Keep self-contained arithmetic word problems, ordinary translations, supplied
+  text transformations and multilingual greetings out of automatic web research.
+  A hypothetical weight calculation is not medical advice; a German greeting
+  should receive a conversational answer rather than a researched definition.
+- Classify ambiguous tasks in the existing contributor responses. Suppress
+  optional research only when at least two usable contributors, and the configured
+  minimum, agree on the same self-contained task with no verification request.
+  Missing, conflicting or factual classifications retain open-domain research.
+- Preserve research for explicit sources/web requests, current facts, technical
+  verification and high-stakes advice. Keep supplied transformation text and
+  private keyword/name recall from becoming public search instructions.
+- Give local synthesis a source-free contract and clarify complete cycles,
+  intermediate values, exact targets and threshold crossings. Preserve collective
+  synthesis, evidence validation, native fallback, budgets and IRC pacing.
+  No extra routing call, configuration change or SQL/schema change is required.
+
 ### MB842 — Per-channel MetaAI activation (2026-10-18)
 
 - Introduce the opt-in `+MetaAI` chanset for addressed questions, independent

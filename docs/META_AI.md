@@ -98,12 +98,44 @@ return `needs_web=false`. Profiles such as CVE/software/documentation tune the
 research; they do not define which subjects the bot can handle.
 
 Acknowledgements, personal keyword/name recall, creative or user-text tasks,
-and simple calculations/conversions do not force public research. Contributors
-can still request verification when external facts are needed. This distinction
-is heuristic: it does not promise perfect intent understanding or an answer to
-every question. Search uses Tavily general search with native OpenAI fallback,
+and self-contained calculations/conversions use the supplied input without
+automatic public research. Explicit source requests and external factual details
+retain verification. This distinction is heuristic: it does not promise perfect
+intent understanding or an answer to every question. Search uses Tavily general search with native OpenAI fallback,
 not a Google browser session. No routing provider call or editorial retry is
 added; existing request budgets and IRC pacing remain in effect.
+
+### Self-contained tasks and source selection (MB843)
+
+In `WEB_MODE=auto`, numeric word problems such as losing 10 kg then regaining
+5 kg per cycle, and ordinary greetings such as `wie geht's`, do not call Search,
+Extract, native web or the shortener. A previous researched topic does not force
+citations into the next local task. Personal name/keyword recall remains local
+even if its value resembles a current topic. A transformation's supplied text
+is data: translating a sentence containing "latest sources" is not a web request;
+retrieving the contents of a linked page still requires research.
+
+Contributors return `task_type` alongside their existing draft, query and
+`needs_web`. For unfamiliar wording, local routing requires all usable drafts to
+agree on the same `conversation`, `calculation`, `translation` or `transformation`
+task, with no verification request, at least two drafts and the configured
+`MIN_PROVIDERS`. Unknown/missing labels, disagreement, a factual draft or too few
+usable drafts retain the factual research default. This is a routing hint, not
+proof that a model's answer is correct. No additional classification API call is
+made. Known self-contained patterns do not need a model vote to avoid research.
+
+Explicit citation/web requests, current prices/schedules/versions, security and
+technical verification, exchange rates and medical/legal/financial advice keep
+the research route. `needs_web=false` alone cannot veto factual research.
+`WEB_MODE=always` remains an explicit override; `off` permits local work but
+refuses a question requiring verification. Ordinary factual questions, including
+timeless reference questions, remain researched by default.
+
+Local synthesis returns no source IDs or source line and does not claim external
+verification. Greetings are answered naturally, and calculation instructions
+distinguish a complete cycle from an intermediate value, exact equality and
+crossing a threshold. Contributor and synthesis calls still take time; avoiding
+unnecessary research does not establish a fixed response-time guarantee.
 
 ```text
 mediabot: je voudrais comprendre pourquoi la mer monte et descend

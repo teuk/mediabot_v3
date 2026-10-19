@@ -4,7 +4,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::AI qw(normalize_provider);
-our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind is_followup is_acknowledgement parse_object);
+our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind research_needed is_followup is_acknowledgement parse_object);
 use JSON::PP ();
 
 sub fold { my $s = lc($_[0] // ''); $s =~ tr/[]\\^/{}|~/; return $s }
@@ -38,12 +38,32 @@ sub is_followup {
 }
 sub is_acknowledgement {
     my $s=lc clean($_[0],2000);
-    my $social=qr/(?:salut|bonjour|bonsoir|hello|hi|hey|coucou|merci(?: beaucoup| pour (?:ta|votre|la) réponse)?|thanks(?: a lot| for (?:your|the) answer)?|thank you|ça va|comment vas.tu|tu vas bien|how are you|how.s it going|tu es là|are you there|ok(?:ay)?|oui|non|yes|no|parfait|super|très bien|tres bien|bien reçu|bien recu|d.accord|got it|great|nice|c.est (?:parfait|clair|bien)|ça (?:marche|roule)|je te remercie|j.ai compris)/;
+    $s =~ s/\A[¿¡]+//;
+    my $social=qr/(?:salut|bonjour|bonsoir|hello|hi|hey|coucou|merci(?: beaucoup| pour (?:ta|votre|la) réponse)?|thanks(?: a lot| for (?:your|the) answer)?|thank you|ça va|comment vas.tu|tu vas bien|how are you|how.s it going|tu es là|are you there|ok(?:ay)?|oui|non|yes|no|parfait|super|très bien|tres bien|bien reçu|bien recu|d.accord|got it|great|nice|c.est (?:parfait|clair|bien)|ça (?:marche|roule)|je te remercie|j.ai compris|hallo|guten (?:tag|morgen|abend)|wie geht(?:[’']?s| es (?:dir|euch|ihnen))|gut(?: und (?:du|dir))?|danke|hola|buenos días|buenas noches|qu[eé] tal|c[oó]mo est[aá]s|ciao|buongiorno|come stai)/;
     return $s =~ /\A$social(?:[\s!?.,:;]+$social)*\s*[!?.,:;)]*\z/ ? 1:0;
 }
-sub _conversation_only {
+sub _instruction {
+    my $s=lc clean($_[0],2000);
+    # A supplied transformation payload is data. Words such as "today" or
+    # "sources" inside the text to translate must not become a web request.
+    if ($s =~ /\A(?:traduis|traduire|translate|corrige|correct|reformule|rewrite|résume|resume|summari[sz]e)\b/) {
+        if ($s =~ /\A(.+?):\s+(.+)\z/s && $2 !~ m{\Ahttps?://\S+\z}) {return $1}
+        $s =~ s/["«“][^"»”]+["»”]//g;
+        $s =~ s/(?:\A|\s)'[^']+'(?=\s|[?!.,;:]|\z)/ /g;
+    }
+    return $s;
+}
+sub _external_request {
+    my $s=_instruction($_[0]);
+    return $s =~ m{https?://|(?:sur (?:le )?(?:web|net|internet)|\b(?:web search|recherche web|google|look up|lookup)\b)|\b(?:cite|citer|citations?)\b|\b(?:avec|with|tes|vos|your|des|les|the)\s+(?:sources|références|references)\b|\b(?:provide|include|donne|fournis|ajoute)\b.*\b(?:sources|références|references)\b|\b(?:vérifie|verifie|verify|check)\b.*\b(?:officiel|official|site|faits?|facts?)\b} ? 1:0;
+}
+sub _external_facts {
+    my $s=_instruction($_[0]);
+    return 1 if _external_request($_[0]);
+    return $s =~ /(?:\bcve[- ]20\d{2}[- ]\d{4,10}\b|\b(?:actuel\w*|current|latest|recent\w*|récent\w*|aujourd.hui|today|news|actualité\w*|actualite\w*|derni[eè]r\w*|horaires?|timetable|tarifs?|prices?|prix|co[uû]te|costs?|versions?|release|candidats?|candidates?|président\w*|president\w*|élection\w*|election\w*|météo|meteo|weather|bourse|bitcoin\w*|cryptomonnaie\w*|exchange rate|taux de change|posologie|dosages?|médicaments?|medicaments?|medication|médical\w*|medical|sympt[oô]mes?|symptoms?|traitements?|treatments?|dangereu\w*|dangerous|santé|sante|health|juridique|legal|imp[oô]ts?|taxes?|invest\w*)\b)/ ? 1:0;
+}
+sub _personal_context {
     my ($s)=@_;
-    return 1 if !length($s) || is_acknowledgement($s);
     # Personal recall is conversation context, not a public search target.
     # 'mon code Python' and 'my name server' are ordinary factual requests.
     return 1 if $s =~ /(?:\b(?:mot (?:repère|repere)|repère|repere|code (?:secret|repère|repere)|keyword|codeword)\b)/
@@ -51,17 +71,29 @@ sub _conversation_only {
     return 1 if $s =~ /(?:\b(?:je (?:m.appelle|suis né)|mon (?:nom|prénom|prenom|surnom) est|my (?:name|nickname) is)\b|\b(?:t.ai dit|je viens de dire|did i (?:say|tell)|i just (?:said|told)|remember my)\b)/;
     return 1 if $s =~ /\A(?:my word (?:is|was)|what is my word|mon mot (?:est|était|etait))\b/;
     return 1 if $s =~ /\A(?:quel est mon (?:nom|prénom|prenom|surnom)|what is my (?:name|nickname)|tu (?:te souviens|me connais)|do you remember)\b/;
+    return 0;
+}
+sub _conversation_only {
+    my ($s)=@_;
+    return 1 if !length($s) || is_acknowledgement($s) || _personal_context($s);
     return 1 if $s =~ /\A(?:écris|ecris|rédige|redige|invente|raconte|traduis|traduire|corrige|reformule|résume|resume|write|compose|invent|translate|rewrite|summari[sz]e)\b/;
     return 1 if $s =~ /\A(?:peux.tu|tu peux|tu pourrais|can you|could you|would you)\s+(?:(?:me|m[’'])\s*)?(?:écrire|ecrire|rédiger|rediger|inventer|raconter|traduire|corriger|reformuler|résumer|resumer|write|compose|invent|translate|rewrite|summari[sz]e)\b/;
     return 1 if $s =~ /\A[\d\s.,+*\/()^%=-]+[?]?\z/;
     return 1 if $s =~ /\A(?:calcule|calculer|calculate|compute|combien font)\s+[\d\s.,+*\/()^%=-]+[?]?\z/;
+    # A numeric word problem can describe weights or money without asking for
+    # health/market advice. It must contain supplied operands, a calculation
+    # question and arithmetic operations; external advice keeps its own route.
+    my @numbers=$s =~ /(?<![\p{L}\p{N}])[+-]?\d+(?:[.,]\d+)?/g;
+    return 1 if @numbers>=2 && !_external_facts($s)
+        && $s =~ /(?:\b(?:combien|calcule|calculer|calculate|compute|how many|how much|cycles?|total)\b)/
+        && $s =~ /(?:\b(?:perds?|perd(?:s|re|u)?|gagne\w*|repren\w*|reprends?|ajout\w*|retir\w*|moins|plus|lose|loses|lost|gain|regain|add|subtract)\b|[+*\/=])/;
     my $unit=qr/(?:km|m|cm|mm|mètres?|m[eè]tres?|kilom[eè]tres?|miles?|kg|g|grammes?|kilogrammes?|lb|lbs|pounds?|litres?|liters?|ml|cl|celsius|fahrenheit)/;
     return 1 if $s =~ /\A(?:convertis|convert|convertir)\s+[+-]?[\d.,]+\s*$unit\s+(?:en|in|to)\s+$unit\s*[?.]?\z/;
     return 0;
 }
 sub research_kind {
     my $s=lc clean($_[0],2000);
-    return 'general' if _conversation_only($s);
+    return 'general' if _personal_context($s) || (_conversation_only($s) && !_external_facts($s));
     return 'cve' if $s =~ /\bcve[- ]20\d{2}[- ]\d{4,10}\b/;
     return 'software' if $s =~ /(?:logiciel|\bsoft\b|software|\bapp(?:lication)?s?\b|\boutil|\btools?\b|programme|alternative)/
         && $s =~ /(?:gratuit|free|open.?source|libre|recommand|recommend|conseill|conseil|meilleur|\bbest\b|alternativ|quel|which|what|choisir|choos)/;
@@ -77,11 +109,32 @@ sub research_kind {
 }
 sub wants_web {
     my $s=lc clean($_[0],2000);
-    return 0 if _conversation_only($s);
+    return 0 if _personal_context($s) || (_conversation_only($s) && !_external_facts($s));
     # Addressed informational requests are researched by default, including
     # fragments and informal wording. Topic profiles tune research, not access
     # to it. Contributors may additionally request verification for local tasks.
     return $s =~ /[\p{L}\p{N}]/ ? 1:0;
+}
+sub research_needed {
+    my (%args)=@_;my $prompt=$args{prompt};
+    return 1 if ($args{mode}//'auto') eq 'always';
+    return 0 if !wants_web($prompt);
+    my $kind=research_kind($prompt);
+    my $drafts=ref($args{drafts}) eq 'ARRAY'?$args{drafts}:[];
+    # A previous technical topic is context, not the type of this new task.
+    # Reuse independent contributors for unfamiliar wording/languages. Their
+    # agreement is a routing hint, never proof of a factual answer. Default
+    # factual research cannot be vetoed by needs_web=false alone or one model.
+    my $minimum=$args{minimum}//2;$minimum=2 if $minimum<2;
+    if (!_external_facts($prompt) && $kind !~ /\A(?:cve|software|documentation)\z/
+        && @$drafts>=$minimum) {
+        my $task=$drafts->[0]{task_type}//'';
+        if ($task =~ /\A(?:conversation|calculation|translation|transformation)\z/
+            && !grep {($_->{task_type}//'') ne $task || $_->{needs_web}} @$drafts) {
+            return 0;
+        }
+    }
+    return 1;
 }
 sub settings {
     my ($conf) = @_;
