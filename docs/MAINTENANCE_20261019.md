@@ -141,3 +141,95 @@ cadence. Live failure injection, enabling plugins or shortening production quote
 intervals is unnecessary. Commit through commit.sh, update instances normally
 and check regular nbot continuity on `#i/o`. No schema/data migration, private
 configuration, dashboard or publisher deployment is required.
+
+
+## MB846 — MetaAI paced delivery and channel recovery
+
+Reviewed base: the host-validated MB845 payload applied to
+`snap_mediabot_v3_teuk_20261019_111925.zip`, with VERSION updated to
+`3.6dev-20261019_113132` as shown in the supplied successful `1da2e18` commit.
+The installer checks all reviewed source bytes and requires clean tracked state
+and an empty index; it does not assume a remote checkout matches this base.
+
+The defects were reproduced offline. Replaying a retained paced callback could
+send an undefined or premature line and call the delivery terminal callback more
+than once. That callback commits history and releases the channel job, so replay
+after another question starts could corrupt its reservation. Separately, a
+scheduler refusal left delivery with no terminal result; a thrown scheduling
+exception could be swallowed by the upstream asynchronous provider boundary,
+leaving the channel busy. Neither reproduction asserts an observed live incident.
+
+| Trigger | Corrected result |
+| --- | --- |
+| The same paced callback is invoked twice | Its arm advances output only once |
+| Old callback runs while sources await their own timer | Sources remain paced |
+| Old callback runs after a new question starts | No duplicate output, history commit or job release |
+| Scheduler refuses or throws before advancing the arm | Delivery aborts and releases its channel |
+| Native timer is added but setup fails | Stop/remove that partial timer and abort once |
+| Scheduler runs the callback inline, then refuses or throws | Preserve the successor arm or completed result |
+| Final rights check fails or throws | Stop remaining lines and do not record an incomplete answer |
+
+The public response still has up to two answer lines followed by the validated
+sources line. Original-site labels remain dark grey, verified private shorturls
+remain blue and underlined, every line retains the 400-byte envelope and public
+transport uses `no_defer`. The configured pacing delay is unchanged. There is no
+immediate fallback burst when scheduling fails. Source selection, research
+routing, provider requests, budgets and +MetaAI permissions are unchanged.
+
+A delivery consumes its arm before entering caller code. Terminal completion
+invalidates the pending arm and breaks the recursive pump reference before
+calling the existing consumer. Retained arm and native expiry callbacks are
+constructed in separate helper scopes, so they do not retain the pump's lexical
+activation after it has finished. A failed older scheduling frame checks arm
+ownership before aborting, so it cannot cancel an inline successor. Failed native
+timer setup is cleaned up locally. Retained callbacks after completion cannot
+retain the runtime through the delivery pump. Existing bounded
+`META_AI delivery_aborted` logging reports the outcome without raw exception text.
+
+`1239_mb846_meta_delivery_arms.t` covers repeated/retained callbacks, scheduler
+refusal/exception, inline completion and successor ownership, revocation, guard
+and output failures, empty/single-line delivery, resource release, real countdown
+execution and partial native timer setup failures. `1240_mb846_meta_delivery_recovery.t`
+uses native +MetaAI policy reads against an isolated SQLite fixture, deterministic
+contributor/evidence responses, verified-alias presentation and the real private
+memory writer. It checks complete history, next-question recovery, source order,
+revocation/re-enable and private local output. No external service or live
+production database is contacted by these tests.
+
+Installation changes one production module, this log, the changelog and two new
+regression cases. It creates a private source backup, runs the focused safety
+lane, then mandatory fast and full host validation. On failure it restores its
+own changes while retaining concurrent edits. It leaves configuration, SQL/schema,
+existing persistent state, the real Git index and running services untouched.
+
+After successful host validation, restart only the development bot and use an
+ordinary addressed question on an already enabled channel. Check answer/source
+ordering and that a subsequent question is accepted normally. Do not inject
+failures or replay callbacks on a live bot. Commit through `commit.sh`, update
+production normally and check continuity on nbot's `#i/o`. No migration,
+registration, private setting, dashboard or publisher deployment is required.
+
+
+### MB846 R2 — Perl 5.40 callback lifetime correction
+
+The R1 preview on teuk.org failed assertions 8, 13 and 18 of the new delivery-arm
+case before installing any source. R1 had passed these assertions under local
+Perl 5.38.2. Re-running the exact R1 test under an independently built Perl 5.40.3
+reproduces precisely those three failures. The original assertions are retained.
+
+An anonymous callback created inside the pump can keep the outer pump activation
+alive after the recursive `$pump` variable is cleared. The activation retains the
+runtime. R2 constructs arm callbacks and native expiry callbacks in separate
+package helper scopes. They capture only the state references or timer ownership
+needed for their task; clearing the pump on terminal completion now actually
+releases its runtime. Pending delivery still owns its runtime until completion.
+
+The expanded 78-assertion arm test passes under both Perl 5.38.2 and 5.40.3,
+including retained native expiries after completion, setup refusal and timer
+start failure. Tests explicitly confirm the requested native failure path was
+reached and its actual expiry callback was retained. This also corrects the R1
+test's unsupported timer getter, which could otherwise masquerade as a requested
+setup failure. All three host-reported weak-reference assertions keep their
+original conditions. The 51 integrated policy/history/private-output assertions
+remain unchanged. Source installation still targets the clean MB845 base: the
+failed R1 preview installed nothing and needs no rollback or service restart.

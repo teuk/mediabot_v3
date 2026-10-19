@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB846 — MetaAI paced delivery recovery (2026-10-19)
+
+- Give each paced MetaAI line one consumable scheduling arm and finish each
+  delivery once. Duplicate or retained callbacks cannot send sources early,
+  repeat memory commits or clear a following question's channel reservation.
+- Construct retained arm/expiry callbacks outside the delivery pump's lexical
+  activation. Release completed/aborted runtimes on Perl 5.38 and 5.40 while
+  retaining ownership of pending deliveries; preserve all R1 weak-reference checks.
+- Abort incomplete delivery when a scheduler refuses, throws or native timer
+  setup fails. Release channel capacity without bursting remaining lines or
+  saving a partial response as a complete exchange; clean up partial timers.
+- Preserve a successor arm when an old scheduling frame completed inline before
+  reporting failure. Recheck delivery rights and contain failed late guards.
+- Exercise actual IO::Async countdowns, native +MetaAI policy, researched
+  synthesis with deterministic local providers, real private memory and private
+  local replies. Keep evidence validation, source labels, aliases, byte budgets,
+  pacing, no-defer transport and MB843–MB845 safeguards unchanged.
+  No SQL/schema, private configuration or web deployment is required.
+
 ### MB845 — RandomQuote attempts and plugin event generations (2026-10-19)
 
 - Give each automatic quote attempt one completion owner. Release capacity

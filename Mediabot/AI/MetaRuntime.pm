@@ -82,25 +82,77 @@ sub _alive {
     return 0 unless defined($current) && $current==$generation;
     return eval {$memory->current($ticket)} ? 1:0;
 }
+# Build retained callbacks outside the pump's lexical scope. A nested closure
+# can retain that outer activation (and its runtime) after $pump is cleared.
+sub _emit_arm {
+    my ($pump,$pending,$finished,$token)=@_;
+    return sub {
+        return if $$finished || $$pending!=$token;
+        $$pending=0;
+        $$pump->() if $$pump;
+    };
+}
+sub _emit_expiry {
+    my ($loop,$timer,$next)=@_;
+    return sub {
+        my $owned=$$timer;
+        $$timer=undef;
+        eval {$loop->remove($owned)} if $owned;
+        $next->();
+    };
+}
 sub _emit {
     my ($self,$channel,$chunks,$cfg,$alive,$complete,$sender)=@_;
-    my $index=0;my @sent;my $pump;
+    my ($index,$finished,$sequence,$pending)=(0,0,0,0);
+    my (@sent,$pump);
+    my $finish=sub {
+        return if $finished++;
+        $pending=0;
+        $pump=undef;
+        $complete->($_[0]);
+    };
     $pump=sub {
-        unless ($alive->()) {$complete->(undef);$pump=undef;return}
+        return if $finished;
+        unless (eval {$alive->()}) {$finish->(undef);return}
         my $ok=eval {$sender ? $sender->($chunks->[$index])
             : Mediabot::Helpers::botPrivmsg($self->{bot},$channel,$chunks->[$index],{no_defer=>1})};
-        unless ($ok) {$complete->(undef);$pump=undef;return}
+        unless ($ok) {$finish->(undef);return}
         push @sent,$chunks->[$index++];
-        if ($index>=@$chunks) {$complete->(join(' ',@sent));$pump=undef;return}
-        if ($self->{schedule_cb}) {$self->{schedule_cb}->($cfg->{pacing_us}/1_000_000,$pump);return}
-        require IO::Async::Timer::Countdown;
-        my $loop=Mediabot::AI::Transport::usable_loop($self->{bot});
-        unless ($loop) {$complete->(undef);$pump=undef;return}
-        my $timer; $timer=IO::Async::Timer::Countdown->new(delay=>$cfg->{pacing_us}/1_000_000,
-            on_expire=>sub {$loop->remove($timer);$timer=undef;$pump->() if $pump});
-        $loop->add($timer);$timer->start;
+        if ($index>=@$chunks) {$finish->(join(' ',@sent));return}
+
+        # Each arm may advance this delivery once. A retained callback from an
+        # earlier arm cannot send a later line or complete a successor job.
+        my $token=++$sequence;
+        $pending=$token;
+        my $next=_emit_arm(\$pump,\$pending,\$finished,$token);
+        my ($loop,$timer);
+        my $scheduled=eval {
+            if ($self->{schedule_cb}) {
+                $self->{schedule_cb}->($cfg->{pacing_us}/1_000_000,$next);
+            }
+            else {
+                require IO::Async::Timer::Countdown;
+                $loop=Mediabot::AI::Transport::usable_loop($self->{bot});
+                die "MetaAI pacing loop unavailable\n" unless $loop;
+                $timer=IO::Async::Timer::Countdown->new(delay=>$cfg->{pacing_us}/1_000_000,
+                    on_expire=>_emit_expiry($loop,\$timer,$next));
+                $loop->add($timer);
+                $timer->start;
+                1;
+            }
+        };
+        unless ($scheduled) {
+            if ($timer) {
+                eval {$timer->stop};
+                eval {$loop->remove($timer)} if $loop;
+                $timer=undef;
+            }
+            # A scheduler may already have run this arm inline before failing.
+            # Its successor, if any, owns the pending arm now.
+            $finish->(undef) if !$finished && $pending==$token;
+        }
     };
-    unless (@$chunks) {$complete->(undef);return}
+    unless (@$chunks) {$finish->(undef);return}
     $pump->();
 }
 sub _source_line {
