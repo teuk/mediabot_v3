@@ -125,32 +125,40 @@ sub add {
         my ($weak_self,$weak_task)=($self,$task);
         weaken($weak_self);
         weaken($weak_task);
-        my $timer = IO::Async::Timer::Periodic->new(
-            interval => $interval,
-            (defined $first ? (first_interval => $first) : ()),
-            on_tick  => sub {
-                my $scheduler=$weak_self or return;
-                my $owned=$weak_task or return;
-                my $current=$scheduler->{_tasks}{$name} or return;
-                return unless refaddr($current)==refaddr($owned) && $current->{started};
-                my $now = time();
-                $current->{ticks}++;
-                $current->{last_tick} = $now;
-                $current->{next_run}  = $now + $current->{interval};
-                $scheduler->_log(4, "Scheduler: tick '$name' (#$current->{ticks})");
-
-                $scheduler->_run_task_callback($name, $current->{cb});
-            },
-        );
-
-        $task->{timer} = $timer;
+        my $timer;
         my $ok = eval {
+            $timer = IO::Async::Timer::Periodic->new(
+                interval => $interval,
+                (defined $first ? (first_interval => $first) : ()),
+                on_tick  => sub {
+                    my $scheduler=$weak_self or return;
+                    my $owned=$weak_task or return;
+                    my $current=$scheduler->{_tasks}{$name} or return;
+                    return unless refaddr($current)==refaddr($owned) && $current->{started};
+                    my $now = time();
+                    $current->{ticks}++;
+                    $current->{last_tick} = $now;
+                    $current->{next_run}  = $now + $current->{interval};
+                    $scheduler->_log(4, "Scheduler: tick '$name' (#$current->{ticks})");
+
+                    $scheduler->_run_task_callback($name, $current->{cb});
+                },
+            );
+
+            $task->{timer} = $timer;
             $self->{loop}->add($timer);
             1;
         };
         unless ($ok) {
-            delete $self->{_tasks}{$name};
-            die($@ || "Scheduler: failed to add timer '$name' to loop\n");
+            my $error = $@ || "Scheduler: failed to add timer '$name' to loop\n";
+            # Constructor/add may fail after publishing partial ownership.
+            # Revoke only this registration, preserving a same-name successor.
+            my $current = $self->{_tasks}{$name};
+            delete $self->{_tasks}{$name}
+                if $current && refaddr($current) == refaddr($task);
+            eval { $timer->stop if $timer };
+            eval { $self->{loop}->remove($timer) if $timer };
+            die $error;
         }
     }
 
@@ -350,6 +358,10 @@ sub start {
         $task->{generation}++;
         $task->{started}  = 0;
         $task->{next_run} = 0;
+        # A native start can arm before it throws. Stop that partial arm so
+        # the registered periodic task can be started again after recovery.
+        eval { $task->{timer}->stop }
+            if $task->{mode} eq 'periodic' && $task->{timer};
         $self->_log(1, "Scheduler: failed to start '$name': $err");
         return 0;
     }

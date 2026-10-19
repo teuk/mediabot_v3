@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB853 — Periodic scheduler registration and restart recovery (2026-10-19)
+
+- Roll back a failed periodic timer constructor/add as one registration: remove
+  only its original task, stop/remove its provisional notifier and retain the
+  original error. A same-name replacement registered during loop reentry stays
+  intact and runnable.
+- Stop a partially armed periodic timer after start throws, while retaining its
+  stopped registration for an explicit retry. Keep successful task execution,
+  metadata, first interval, calendar ownership and lifecycle guards unchanged.
+- Exercise real IO::Async periodic timers, transient failures, same-name reentry
+  and actual first ticks after recovery under Perl 5.38/5.40. Quiet the intentional
+  one-use symbol warning in the MB852 test fixture. No SQL/schema, private
+  configuration, persistent format, new schedule or web deployment change.
+
 ### MB852 — Shared worker timer failure recovery (2026-10-19)
 
 - Roll back partially registered AsyncWorker timers when add/start throws.

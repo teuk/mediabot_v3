@@ -652,3 +652,73 @@ normal command/source/MetaAI continuity on an already enabled test channel.
 Do not inject timer failures into production for acceptance. Commit through
 `commit.sh`, update intended production instances normally and check nbot's
 `#i/o`. No shortener, dashboard or statistics publisher deployment is required.
+
+
+## MB853 — Periodic scheduler failure recovery
+
+This continues lifecycle maintenance in the central scheduler's periodic path.
+It does not add or enable tasks, change normal intervals or rewrite the calendar
+scheduler repaired in MB839.
+
+### Registration owns construction and loop attachment together
+
+The scheduler publishes a task entry before constructing its periodic timer.
+Previously a constructor exception left that task name registered with no timer,
+blocking registration retries. An add exception removed the entry but did not
+remove a notifier already attached to the loop. Unconditional deletion also
+could erase a same-name replacement registered during loop-boundary reentry.
+
+Construction, task/timer attachment and loop add now share one protected
+registration. A failed original registration is removed only if it is still
+the current object. Its provisional timer is stopped and removed, and its
+original exception is rethrown. An independently registered same-name successor
+keeps its own metadata, timer and callback. Existing weak callback ownership
+still prevents a retained old timer from retaining or executing the old task.
+
+### A failed start can be retried
+
+A native periodic start can arm before throwing. Previously `start()` reset
+its task flags but left the timer running. The task appeared stopped, its tick
+was suppressed, and every new start failed because the timer was already
+running. Explicit stop also returned early on the stopped task flag.
+
+On a failure still belonging to the current task/generation, the scheduler
+invalidates its lifecycle, resets started/next-run metadata and stops its partial
+periodic arm before reporting failure. Manual registrations remain available
+for a successful retry; failed autostart registrations retain their existing
+rollback semantics. Calendar cleanup and newer task generations remain under
+their existing ownership rules. Native stop/remove calls remain best effort
+when cleaning an exceptional registration; successful operations are unchanged.
+
+### Native regressions and fixture warning
+
+`1252_mb853_scheduler_registration_recovery.t` uses actual IO::Async periodic
+timers and injects constructor/add errors after native operations. It checks
+exact error propagation, released task names, detached timers, weak-reference
+release and callbacks that cannot execute a failed or replacement registration.
+A reentrant loop add removes/re-adds the name before the old add throws; the
+new running schedule survives, runs its own callback and remains removable.
+
+`1253_mb853_scheduler_periodic_start.t` injects a transient error after real
+start, checks stopped metadata/timers, then retries the same manual registration
+or a fresh autostart registration. Actual zero-first-interval ticks run through
+the real loop, update statistics once and retain ordinary stop/removal behavior.
+Tests do not contact IRC, providers, network services or a real database.
+
+The MB852 fixture's method override now scopes both `redefine` and `once`
+warning categories explicitly. This removes the compile-only one-use symbol
+notice observed on teuk.org; it changes no assertion or worker behavior.
+
+Only Scheduler.pm changes in production. Accepted MB836/MB839 task ownership,
+MB849 display, MB850/MB851 Unicode identities and MB852 worker recovery are
+preserved. There is no SQL/schema, migration, private configuration, stored
+format, enabled task, scheduling frequency or web deployment change.
+
+Source installation backs up the payload and requires focused/security/
+inventory/fast/full host checks. Required-check failure restores its own writes,
+keeping concurrent owner edits/deletions. It stages/commits nothing and restarts
+no service. After full host success, restart only the development instance and
+check normal scheduled/source/command continuity; do not inject timer failures
+into production for acceptance. Commit through `commit.sh`, update intended
+production instances normally and check nbot's `#i/o`. No shortener, dashboard
+or statistics publisher deployment is required.

@@ -57,7 +57,7 @@ sub new_loop {
 sub with_faults {
     my ($code) = @_;
     my $start = IO::Async::Timer::Countdown->can('start');
-    no warnings 'redefine';
+    no warnings qw(redefine once);
     local *IO::Async::Timer::Countdown::start = sub {
         my ($timer) = @_;
         $start->(@_);
