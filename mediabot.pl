@@ -4934,6 +4934,11 @@ sub on_message_005 {
     shift @args; # Remove nickname (first arg)
     my $features = join(" ", @args);
     $mediabot->{logger}->log(4, "005 $features");
+    eval {
+        $mediabot->{wit_runtime_state}->update_isupport(@args)
+            if $mediabot->{wit_runtime_state};
+    };
+    $mediabot->{logger}->log(1, 'Conversation runtime ISUPPORT parse failed') if $@;
     eval { $mediabot->{fullop}->update_isupport(@args) if $mediabot->{fullop}; };
     if ($@) {
         (my $err = $@) =~ s/\s+/ /g;

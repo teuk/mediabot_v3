@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use utf8;
 use Encode qw(encode);
+use Scalar::Util qw(refaddr);
 
 use IO::Async::Timer::Countdown;
 use Mediabot::AsyncWorker;
@@ -194,45 +195,57 @@ sub _start_feed_worker {
     my $id = 0 + $feed->{id_rss_feed};
     return 0 if $self->{inflight}{$id};
 
-    $self->{inflight}{$id} = 1;
+    my $ticket = {};
+    $self->{inflight}{$id} = $ticket;
     $self->{inflight_channels}{$id} = lc($feed->{channel} // "");
+    my $completed = 0;
+    my $complete = sub {
+        my ($result) = @_;
+        return if $completed++;
+        my $current = $self->{inflight}{$id};
+        return unless ref($current) && refaddr($current) == refaddr($ticket);
+        # Release this attempt before invoking code that can start its successor.
+        delete $self->{inflight}{$id};
+        delete $self->{inflight_channels}{$id};
+        delete $self->{workers}{$id};
+        my $handled = eval {
+            local $self->{dispatching} = 1;
+            $self->_worker_done($feed, $result);
+            1;
+        };
+        $self->_log(1, "rss_poll_dispatch: completion failed feed=$id") unless $handled;
+        my $drained = eval { $self->_drain_ready_channels; 1 };
+        $self->_log(1, "rss_poll_dispatch: output drain failed feed=$id") unless $drained;
+    };
     my $worker_class = $self->{worker_class};
     unless (defined($worker_class) && !ref($worker_class)
         && eval { $worker_class->can('start') }) {
-        delete $self->{inflight}{$id};
-        delete $self->{inflight_channels}{$id};
-        $self->_log(1, "rss_poll_dispatch: worker class is unavailable");
+        $complete->({ok => 0, error => 'worker_launch', detail => 'RSS worker class is unavailable'});
         return 0;
     }
 
     my $worker;
-    $worker = $worker_class->start(
+    my $launched = eval { $worker = $worker_class->start(
         loop       => $self->{loop},
         label      => "rss poll $id",
         timeout    => $self->{worker_timeout},
         max_output => 256 * 1024,
         child      => sub { $self->_child_poll($feed) },
-        on_done    => sub {
-            my ($result) = @_;
-            delete $self->{inflight}{$id};
-            delete $self->{inflight_channels}{$id};
-            delete $self->{workers}{$id};
-            {
-                local $self->{dispatching} = 1;
-                $self->_worker_done($feed, $result);
-            }
-            $self->_drain_ready_channels;
-        },
-    );
+        on_done    => $complete,
+    ); 1 };
 
-    unless ($worker) {
-        delete $self->{inflight}{$id};
-        delete $self->{inflight_channels}{$id};
+    unless ($launched && $worker) {
+        # A native setup failure may already have completed inline. The same
+        # terminal callback contains exceptions/refusals without double handling.
+        $complete->({ok => 0, error => 'worker_launch',
+            detail => $launched ? 'RSS worker launch refused' : 'RSS worker launch failed'});
         return 0;
     }
 
-    $self->{workers}{$id} = $worker;
-    $self->_log(3, "rss_poll_dispatch: worker started feed=$id label=$feed->{label}");
+    unless ($completed) {
+        $self->{workers}{$id} = $worker;
+        $self->_log(3, "rss_poll_dispatch: worker started feed=$id label=$feed->{label}");
+    }
     return 1;
 }
 

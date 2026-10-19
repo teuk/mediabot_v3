@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB844 — RSS launch recovery and negotiated channel identities (2026-10-19)
+
+- Give each RSS poll attempt one completion owner. Release capacity and channel
+  barriers after launch exceptions, refusals and synchronous completion; contain
+  consumer failures so a later poll can recover. An old callback cannot consume
+  another result, clear a successor slot or overwrite its returned handle.
+- Feed server-advertised CASEMAPPING into conversation lifecycle state. Respect
+  ASCII, RFC1459 and strict RFC1459 identities so equivalent PART/KICK spellings
+  revoke delayed output without merging distinct ASCII channels.
+- Invalidate old reply tickets when identity rules change, preserve actual joined
+  membership and reset negotiated rules on disconnect. Exercise the real 005
+  hook and offline fork/pipe replies alongside existing RSS pacing, quota,
+  rotation, acknowledgement and late-delivery regressions.
+- No SQL/schema, migration, private setting, provider/source policy, dashboard
+  or service change is required. Source installation leaves running bots alone.
+
 ### MB843 — Sources when the task needs evidence (2026-10-18)
 
 - Keep self-contained arithmetic word problems, ordinary translations, supplied
