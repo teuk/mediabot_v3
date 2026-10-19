@@ -255,10 +255,12 @@ sub request_manual {
     $state->{pending} = $request_id;
     $state->{touched} = $self->_now;
 
-    my $accepted = $fetcher->fetch(
+    my $finished = 0;
+    my $accepted = eval { $fetcher->fetch(
         (defined($requested_id) ? (id => $requested_id) : ()),
         on_done => sub {
             my ($result) = @_;
+            return if $finished++;
             my $current = $self->{channel_states}{$key};
             return unless $current && defined($current->{pending}) && $current->{pending} == $request_id;
             delete $current->{pending};
@@ -301,12 +303,17 @@ sub request_manual {
             $self->_remember_id($current, $picked->{item}{id});
             $self->_log(3, "[VDM] channel=$channel action=sent mode=manual request_id=$request_id story_id=$picked->{item}{id}");
         },
-    );
+    ) };
 
     unless ($accepted) {
-        delete $state->{pending} if defined($state->{pending}) && $state->{pending} == $request_id;
-        $self->_safe_notice($nick, 'VDM is temporarily unavailable.');
-        $self->_log(2, "[VDM] channel=$channel action=no_fetch reason=worker_busy mode=manual request_id=$request_id");
+        # Failure without a callback is terminal too. An inline completion may
+        # already have delivered and started a successor; do not report a
+        # contradictory refusal or disturb that successor's reservation.
+        unless ($finished++) {
+            delete $state->{pending} if defined($state->{pending}) && $state->{pending} == $request_id;
+            $self->_safe_notice($nick, 'VDM is temporarily unavailable.');
+            $self->_log(2, "[VDM] channel=$channel action=no_fetch reason=worker_busy mode=manual request_id=$request_id");
+        }
         return 1;
     }
 
@@ -365,9 +372,11 @@ sub request_spark {
     $state->{pending} = $request_id;
     $state->{touched} = $self->_now;
 
-    my $accepted = $fetcher->fetch(
+    my $finished = 0;
+    my $accepted = eval { $fetcher->fetch(
         on_done => sub {
             my ($result) = @_;
+            return if $finished++;
             my $current = $self->{channel_states}{$key};
             return unless $current && defined($current->{pending}) && $current->{pending} == $request_id;
             delete $current->{pending};
@@ -418,11 +427,13 @@ sub request_spark {
             $self->_remember_id($current, $picked->{item}{id});
             $self->_log(3, "[VDM] channel=$channel action=sent mode=spark request_id=$request_id story_id=$picked->{item}{id}");
         },
-    );
+    ) };
 
     unless ($accepted) {
-        delete $state->{pending} if defined($state->{pending}) && $state->{pending} == $request_id;
-        $self->_log(2, "[VDM] channel=$channel action=no_fetch reason=worker_busy mode=spark request_id=$request_id");
+        unless ($finished++) {
+            delete $state->{pending} if defined($state->{pending}) && $state->{pending} == $request_id;
+            $self->_log(2, "[VDM] channel=$channel action=no_fetch reason=worker_busy mode=spark request_id=$request_id");
+        }
         return 0;
     }
 

@@ -305,3 +305,86 @@ continuity and the existing local metrics/radio endpoint if enabled; do not
 change a live song or inject bad samples. Commit through `commit.sh`, update the
 intended production instances normally, and check continuity on nbot's `#i/o`.
 No dashboard, web, shortener or network-stats publisher deployment is required.
+
+
+## MB848 — VDM completion resources and launch recovery
+
+The VDM source boundary supports concurrent numbered-article jobs and coalesces
+callers asking for the same article or feed. The manual `!vdm` and automatic
+Spark paths then recheck delivery conditions before output. This pass preserves
+that architecture and repairs two reproduced lifecycle failures.
+
+### Reproduced failures
+
+`AsyncFetcher::_finish` removed the active job from its map but left waiters and
+the worker handle inside the completed job. A retained worker callback still
+captured that job: former caller contexts remained reachable, and the job's
+worker reference could complete a worker/callback/job cycle. When completion
+ran inline and its caller immediately requested the same source again, the old
+launch frame could also reattach its returned handle to its already-completed
+job simply because the source key existed again.
+
+Both `Runtime::request_manual` and `request_spark` reserved their channel before
+calling the fetcher without an exception boundary. A fetch exception escaped
+and left that reservation occupied. Subsequent requests then reported busy
+instead of reaching the source. A fetcher completing inline and then reporting
+failure could also produce a misleading manual failure notice after a successful
+story. No production API or IRC connection is needed to reproduce these cases.
+
+### Corrected ownership and compatibility
+
+The source completion removes its waiter list and worker handle before calling
+consumers. It delivers a local snapshot of the waiters, isolating each consumer
+exception as before. Only the exact job still registered under that source key
+may accept a returned handle. Duplicate terminal callbacks remain inert and a
+new same-source request retains its own cancellable worker.
+
+Both runtime entry points now contain fetch exceptions and consume one terminal
+outcome per request. Refusal/exception without completion invalidates the old
+callback and releases that request's reservation. Manual commands keep their
+handled return value and bounded private unavailability notice; Spark keeps its
+refused return value and stays quiet. No exception detail is logged or sent.
+If a callback already completed inline, subsequent launch failure does not
+repeat terminal processing, send a contradictory notice or disturb a reentrant
+successor. A later callback from a failed launch cannot revive output.
+
+| Contract | Retained behavior |
+| --- | --- |
+| Source identity | Feed and each numbered article remain separate; identical requests coalesce |
+| Capacity | Four independent workers; configured global waiter bound; coalescing at full worker capacity |
+| Cancellation | Current worker handles remain available; completed handles are not restored |
+| Final delivery | VDM/Spark flags, connection, membership and activity checks run at completion |
+| Repeat history | Only accepted delivery records a story; failed/revoked work records nothing |
+| Return values | Manual request handled; Spark refuses on failed launch; source launch return contract unchanged |
+| Privacy | Bounded existing notices/log codes; no raw constructor exception text |
+
+### Regression validation and rollout
+
+`1243_mb848_vdm_fetch_completion.t` covers retained contexts and completed-worker
+cycles with weak references; inline launch/reentry with a same-source successor;
+correct cancellation; duplicate callbacks; coalesced consumer exceptions; launch
+refusal/exception; waiter/worker bounds; and a real worker passing an exact article
+ID through its fork/pipe transport. It explicitly tests that an inline returned
+handle cannot recreate a completed-job cycle while a successor exists.
+
+`1244_mb848_vdm_launch_recovery.t` covers manual and Spark launch failure,
+immediate recovery, silent late callbacks, one terminal notice, inline
+completion/reentry followed by refusal or exception, and revoked successor work.
+An integrated real Runtime/AsyncFetcher/AsyncWorker test coalesces two channels'
+feed requests, revokes one before completion and delivers only to the other.
+The new tests use local child values and isolated loops; no source HTTP, live
+IRC, provider API, private configuration or database operation is performed.
+
+Only the two VDM modules, changelog, this maintenance log and two regression
+cases change. Existing MB844–MB847 safeguards remain covered. Source installation
+requires focused, security, inventory, fast and full host checks. It backs up
+source, restores its own writes on failure, preserves concurrent owner edits and
+leaves the real index, private configuration and running services unchanged.
+No SQL/schema, migration or persistent-format change is required.
+
+After successful host checks, restart only the development bot and check ordinary
+continuity. If VDM is already enabled on a test channel, exercise the normal
+manual command and ensure it completes once and permits a following request;
+do not enable automatic announcements solely for acceptance. Commit through
+`commit.sh`, update production normally and check nbot's `#i/o`. No dashboard,
+shortener, web or network-stats publisher deployment is required.

@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB848 — VDM request completion and launch recovery (2026-10-19)
+
+- Detach completed VDM worker handles and waiters before notifying consumers.
+  Retained callbacks no longer retain former request contexts or form a cycle
+  through completed workers. Only the exact still-active source job may adopt
+  the handle returned by a launcher, including inline completion/reentry.
+- Contain VDM fetch-launch exceptions in both manual and Spark paths. Release
+  failed channel reservations, invalidate late callbacks and permit the next
+  request. An inline terminal result followed by launch refusal/exception cannot
+  add a contradictory manual failure notice or affect a successor request.
+- Preserve same-source coalescing, separate numbered articles/feed, four-worker
+  and waiter bounds, cancellation, anti-repeat and final VDM/Spark/connection/
+  membership/activity checks. Exercise actual fork/pipe transport and coalesced
+  Spark delivery with per-channel revocation. No SQL/schema, private setting,
+  persistent format, external API call or web deployment is involved.
+
 ### MB847 — Finite metrics and faithful radio UTF-8 (2026-10-19)
 
 - Preserve the UTF-8 bytes already produced by the radio JSON encoder when

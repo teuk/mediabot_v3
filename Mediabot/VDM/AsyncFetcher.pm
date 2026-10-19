@@ -76,7 +76,11 @@ sub _finish {
     my ($self, $key, $job, $result) = @_;
     return 0 unless $self->{jobs}{$key} && $self->{jobs}{$key} == $job;
     delete $self->{jobs}{$key};
-    my $waiters = $job->{waiters};
+    # Detach completed request resources before consumer callbacks can start
+    # another request. A retained worker callback must not keep former waiters
+    # or a worker -> callback -> job -> worker cycle alive.
+    my $waiters = delete $job->{waiters};
+    delete $job->{worker};
 
     my $normalized = _normalize_worker_result($result);
     for my $cb (@$waiters) {
@@ -125,7 +129,8 @@ sub fetch {
         $self->_finish($key, $job, { ok => 0, error => 'worker_setup' });
         return 0;
     }
-    $job->{worker} = $worker if exists $self->{jobs}{$key};
+    $job->{worker} = $worker
+        if $self->{jobs}{$key} && $self->{jobs}{$key} == $job;
     return 1;
 }
 
