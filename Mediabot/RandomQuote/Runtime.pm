@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use utf8;
 use Encode qw(encode);
+use Scalar::Util qw(refaddr);
 use Mediabot::AsyncWorker;
 use Mediabot::Helpers ();
 use Mediabot::Plugin::QuoteServiceV3;
@@ -113,19 +114,27 @@ sub _child {
 }
 sub _start {
     my ($self,$channel,$generation,$ticket)=@_;my $key=lc $channel;
-    $self->{inflight}{$key}=1;
+    return 0 if $self->{inflight}{$key};
+    my $attempt={};$self->{inflight}{$key}=$attempt;
+    my $completed=0;
+    my $complete=sub {
+        my ($result)=@_;return if $completed++;
+        my $current=$self->{inflight}{$key};
+        return unless ref($current) && refaddr($current)==refaddr($attempt);
+        # A consumer may start its successor; release only this attempt first.
+        delete $self->{inflight}{$key};delete $self->{workers}{$key};
+        my $ok=eval {$self->_done($channel,$generation,$ticket,$result);1};
+        $self->_log("quote result processing failed on $channel") unless $ok;
+    };
     my $worker=eval {$self->{worker_class}->start(
         loop=>$self->{loop},label=>"RandomQuote $channel",timeout=>30,max_output=>16384,
-        child=>sub{$self->_child($channel,$ticket)},
-        on_done=>sub {
-            my ($result)=@_;delete $self->{inflight}{$key};delete $self->{workers}{$key};
-            my $ok=eval {$self->_done($channel,$generation,$ticket,$result);1};
-            $self->_log($@) unless $ok;
-        })};
+        child=>sub{$self->_child($channel,$ticket)},on_done=>$complete)};
     unless ($worker) {
-        delete $self->{inflight}{$key};$self->_log($@ || 'worker did not start');return 0;
+        # Native setup errors may have completed inline already.
+        $complete->({ok=>0,error=>'worker_setup'});return 0;
     }
-    $self->{workers}{$key}=$worker;return 1;
+    $self->{workers}{$key}=$worker unless $completed;
+    return 1;
 }
 sub _done {
     my ($self,$channel,$generation,$ticket,$result)=@_;

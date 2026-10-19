@@ -73,3 +73,71 @@ polling are sufficient. Do not provoke failures or change live channel membershi
 to test this patch. Commit with `commit.sh`, then update production normally and
 check normal continuity on nbot's `#i/o`. No database schema/data initialization,
 private configuration, web deployment or publisher restart is required.
+
+
+## MB845 — Automatic quote ownership and plugin event batches
+
+Reviewed base: `snap_mediabot_v3_teuk_20261019_111925.zip`, VERSION
+`3.6dev-20261019_091519`, including the host-validated MB844 source.
+Both defects below are reproduced offline against the intact snapshot. The
+initial regression runs fail 15/72 quote assertions and 22/43 event assertions;
+this does not assert either failure was observed in production.
+
+| Trigger | Previous behavior | Corrected behavior |
+| --- | --- | --- |
+| RandomQuote completes inline before start returns | A completed handle can be retained again | Store the handle only while the attempt is pending |
+| An old quote callback fires after a successor starts | It can clear the successor's reservation and worker handle | Only the current attempt can finish, once |
+| Quote completion starts another attempt, then the old launcher throws/refuses | Old failure cleanup can remove the successor reservation | Release the old attempt before the consumer and preserve its successor |
+| A plugin clears its event queue and enqueues fresh work from its event/error handler | The old active batch can process fresh work immediately | Stop the old generation and schedule a fresh bounded batch |
+| A defer operation completes inline, arms a successor, then throws | Its error can clear the successor's scheduled flag | Scheduling failure cleans up only the arm it owns |
+
+### Automatic quotes
+
+RandomQuote reserves a unique attempt per case-normalized channel. One terminal
+callback checks that ownership and removes its reservation and handle before
+calling the existing result processor. A native setup error, injected refusal or
+constructor exception follows the same completion path. Constructor exception
+text is not logged. Consumer exceptions cannot retain the attempt or escape the
+callback. A direct overlapping launch is refused; the normal tick still permits
+at most two pending workers.
+
+The persistent schedule/revision protocol and all SQL queries are unchanged.
+The initial full-interval wait, no immediate retry/catch-up after failure, final
+RandomQuote/JOIN/revision checks, channel selection, anonymous quotes, Unicode
+wire bound and no-defer output remain authoritative. Only accepted transport
+output updates the last sent id. Automatic selection still leaves quote recall
+counters unchanged. No new configuration or data initialization is necessary.
+
+### Deferred plugin events
+
+EventQueueV3 claims a scheduled callback before dispatch. A retained callback
+from a failed scheduling operation cannot drain queued work. The active drain
+also records its generation and stops when clear() changes it, including when
+called from dispatch or on_error. Fresh work retains its own deferred batch.
+The real plugin manager already clears this queue on disable/unregister; its
+normal disable/re-enable path now respects that active-batch boundary too.
+
+A scheduling exception is still reported to its caller. If an inline callback
+already scheduled a successor, the old exception leaves the successor's flag
+alone. Pending/batch bounds, drop-newest overflow, processed/drop counters,
+handler error isolation, policy/capability checks and owned scheduler jobs are
+unchanged. No new retry or plugin activation is introduced.
+
+### Verification and rollout
+
+Two new regression files include real local IO::Async scheduling, a native
+AsyncWorker setup failure, real fork/pipe selection through an isolated SQLite
+fixture and the actual plugin manager's event handler disable/re-enable path.
+They make no IRC connection or provider request and access no production DB.
+Existing RandomQuote, API v3 lifecycle/policy/quarantine, quote services,
+asynchronous command, RSS and negotiated-channel tests remain in the targeted
+lane. The package README records the observed local qualification and any
+container limits. Full host validation remains mandatory before commit.
+
+Install source on teuk.org as mediabot, using the reviewed clean master/index
+and private source backup. After host checks, restart only the development bot
+for ordinary acceptance; observe an already enabled quote channel at its normal
+cadence. Live failure injection, enabling plugins or shortening production quote
+intervals is unnecessary. Commit through commit.sh, update instances normally
+and check regular nbot continuity on `#i/o`. No schema/data migration, private
+configuration, dashboard or publisher deployment is required.

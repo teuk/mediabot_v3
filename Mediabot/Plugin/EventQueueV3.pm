@@ -67,15 +67,18 @@ sub _schedule {
     $self->{scheduled} = 1;
     my $ok = eval {
         $self->{defer}->(sub {
-            return unless $token == $self->{generation};
+            return unless $token == $self->{generation} && $self->{scheduled};
             $self->{scheduled} = 0;
             $self->_drain;
         });
         1;
     };
     unless ($ok) {
-        $self->{scheduled} = 0;
-        die($@ || "EventQueueV3: defer failed\n");
+        my $error = $@ || "EventQueueV3: defer failed\n";
+        # A defer callback can finish inline and arm its successor before
+        # throwing. Its old failure does not own the new scheduled flag.
+        $self->{scheduled} = 0 if $token == $self->{generation};
+        die $error;
     }
     return 1;
 }
@@ -85,8 +88,12 @@ sub _drain {
     return 1 if $self->{draining};
 
     $self->{draining} = 1;
+    my $generation = $self->{generation};
     my $count = 0;
-    while ($count < $self->{batch_size} && @{ $self->{queue} }) {
+    # clear() revokes an active batch as well as its pending callback.
+    # Newly enqueued work belongs to a fresh deferred batch.
+    while ($generation == $self->{generation}
+        && $count < $self->{batch_size} && @{ $self->{queue} }) {
         my $event = shift @{ $self->{queue} };
         my $ok = eval { $self->{dispatch}->($event); 1 };
         if (!$ok && $self->{on_error}) {

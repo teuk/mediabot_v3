@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB845 — RandomQuote attempts and plugin event generations (2026-10-19)
+
+- Give each automatic quote attempt one completion owner. Release capacity
+  before processing a result; synchronous, duplicate and late callbacks cannot
+  restore a completed handle or clear a replacement attempt. Contain launch
+  exceptions/refusals and consumer failures without exposing constructor details.
+- Preserve RandomQuote's two-worker ceiling, complete-interval schedule,
+  isolated SQL selection, final chanset/JOIN/revision checks, anonymous authors,
+  successful-send bookkeeping and no-catch-up delivery policy.
+- End an active API v3 event batch when its queue is cleared. Newly accepted
+  events wait for a fresh deferred batch, including disable/re-enable from an
+  event handler or failure callback. A failed old scheduling attempt cannot
+  clear its successor's scheduled flag or dispatch through a retained callback.
+- Exercise the actual plugin manager lifecycle, real IO::Async delivery and
+  local fork/pipe quote selection. Retain event bounds, overflow accounting,
+  failure isolation, permissions and MB844 channel/worker safeguards.
+  No SQL/schema, migration, private configuration or service change is required.
+
 ### MB844 — RSS launch recovery and negotiated channel identities (2026-10-19)
 
 - Give each RSS poll attempt one completion owner. Release capacity and channel
