@@ -5,6 +5,7 @@ use warnings;
 
 use Carp qw(croak);
 use Digest::SHA qw(sha256_hex);
+use Encode qw(encode);
 use File::Copy qw(copy);
 use File::Path qw(make_path);
 use File::Spec;
@@ -103,7 +104,10 @@ sub brain_id_for {
     my ($self, $channel) = @_;
     croak 'registry object is required' unless ref($self);
     my $key = _channel_key($channel);
-    return sha256_hex(join "\x00", $self->{network}, $key);
+    my $identity = join "\x00", $self->{network}, $key;
+    # Keep every previously hashable identity on its existing brain path.
+    $identity = encode('UTF-8', $identity) unless utf8::downgrade($identity, 1);
+    return sha256_hex($identity);
 }
 
 sub brain_path_for {

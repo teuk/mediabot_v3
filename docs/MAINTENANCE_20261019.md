@@ -501,3 +501,74 @@ continuity. Do not reset feed history, inject broken plugins into production or
 force announcements for acceptance. Commit through `commit.sh`, update production
 normally and check nbot's `#i/o`. No web, dashboard, shortener or statistics
 publisher deployment is required.
+
+
+## MB851 — Hailo Unicode identities with existing brain continuity
+
+Two Hailo identity paths passed character strings directly to Digest::SHA,
+which consumes octets. A network/channel name or nick containing characters
+above U+00FF could throw a wide-character exception. Brain selection would fail
+for such a channel; nick placeholder construction could abort normalization or
+rehydration even though the turn text and visible nick were otherwise valid.
+This continues MB850's byte-boundary maintenance in Hailo's separate identities.
+
+### Per-channel brain selection
+
+`BrainRegistry::brain_id_for` now constructs its digest input in a local copy,
+tries lossless byte downgrading, then encodes UTF-8 only if wide characters remain.
+Every identity that could already be hashed retains its old bytes and exact
+opaque `.brn` filename. This includes ASCII, Latin-1, pre-encoded byte strings
+and upgraded byte-sized Perl scalars. There is no rehashing of existing brain
+files, Unicode normalization, directory migration or history reset.
+
+Existing network lowercasing and channel folding remain unchanged. The open
+brain cache ceiling, LRU save-before-eviction, legacy seeding policy, private
+permissions and factory interface also remain unchanged. The fix does not
+change how any brain backend stores or learns text.
+
+`1248_mb851_hailo_unicode_brains.t` verifies exact old IDs and paths with both
+Perl scalar flags. Wide network/channel cases exercise the actual registry and
+its factory boundary. A local file-backed fixture starts with pre-existing
+learned bytes at the legacy filename, opens it, evicts it for a Unicode channel,
+saves and reopens it in a fresh registry. The bytes and original path survive;
+new and old channel objects remain separate, the cache ceiling holds, files stay
+0600 and no seed/reset occurs. The fixture supplies brain storage; it does not
+exercise the Hailo training algorithm or a real production brain database.
+
+### Neutral nicknames and output restoration
+
+`Normalizer::hailo_placeholder_for_nick` uses the same lossless downgrade /
+wide-only UTF-8 conversion before hashing. The existing 32 neutral buckets,
+opaque token format and learned mappings remain. Existing folding differences
+between byte and character scalars are deliberately preserved; this correction
+does not redefine IRC identity or negotiated CASEMAPPING.
+
+`1249_mb851_hailo_unicode_nicks.t` freezes tokens observed on the intact MB850
+base for ASCII, Latin-1 and pre-encoded nicks with both scalar flags. It then
+runs wide identities through the real input normalizer and output rehydrator:
+learnable text contains the neutral token, the exact visible nick stays in
+transient turn metadata and is restored for output. Incoming command detection,
+outgoing command refusal, invalid targets and NUL rejection remain effective.
+No live IRC connection, external provider or production database is used.
+
+The source-only security audit now recognizes the explicit octet preparation
+inside `brain_id_for` as well as the original direct digest shape. It still
+requires network/channel scope, symlink refusal and private umask. The brain
+regression runs the real audit on a minimal public-code fixture and proves that
+removing the network, channel, hash input, symlink or umask boundary is refused.
+No audit invariant is disabled and no warn-only option is used.
+
+Only Hailo/BrainRegistry.pm and Hailo/Normalizer.pm change in production runtime;
+`tools/security_audit.pl` follows the equivalent scoped digest in source. No
+SQL/schema, migration, private configuration, training policy, stored-format,
+transport or scheduling change is required. Existing brains remain in place.
+The source installer backs up its payload and requires focused/security/
+inventory/fast/full checks. Failed required checks restore its own writes while
+preserving concurrent owner changes. It stages/commits nothing and restarts no
+service.
+
+After full host success, restart the development bot and check ordinary
+conversation/Hailo continuity on an already enabled test channel. Do not clear,
+reseed, rename or retrain production brains for acceptance. Commit through
+`commit.sh`, update production normally and check nbot's `#i/o`. No web,
+shortener, dashboard or statistics publisher deployment is required.

@@ -447,7 +447,15 @@ say_info("\n[10] Hailo isolation and deterministic fallback");
     my $post = slurp('Mediabot/Hailo/PostEditor.pm') // '';
     my $runtime = slurp('Mediabot/Hailo/PostEditRuntime.pm') // '';
 
-    if ($registry =~ /sha256_hex\(join\s+"\\x00",\s*\$self->\{network\},\s*\$key\)/
+    my ($brain_id) = $registry =~ /(sub\s+brain_id_for\s*\{.*?)(?=\nsub\s|\z)/s;
+    $brain_id //= '';
+    my $scoped_digest =
+        $brain_id =~ /return\s+sha256_hex\(join\s+"\\x00",\s*\$self->\{network\},\s*\$key\)/
+        || $brain_id =~ /my\s+\$identity\s*=\s*join\s+"\\x00",\s*\$self->\{network\},\s*\$key\s*;
+            \s*(?:\#[^\n]*\n\s*)*
+            \$identity\s*=\s*encode\('UTF-8',\s*\$identity\)\s+unless\s+utf8::downgrade\(\$identity,\s*1\)\s*;
+            \s*return\s+sha256_hex\(\$identity\)\s*;/x;
+    if ($scoped_digest
             && $registry =~ /Hailo brain path must not be a symbolic link/
             && $registry =~ /umask\s+0077/) {
         pass("Hailo brain identity is network/channel-scoped and private symlinks are refused");

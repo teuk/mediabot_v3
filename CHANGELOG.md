@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB851 — Unicode Hailo brain and nick identities (2026-10-19)
+
+- Accept wide Unicode network/channel names when selecting a per-channel Hailo
+  brain. Preserve every previously hashable identity and its exact existing
+  filename, including Latin-1 and already encoded byte strings.
+- Hash wide nick/channel identities into the existing bounded neutral nickname
+  buckets without aborting normalization or rehydration. Keep all previously
+  learned byte-sized mappings and existing fold rules.
+- Exercise legacy path continuity through save/eviction/reopening, private file
+  permissions, neutral learning text, exact nick restoration and command guards.
+  Adapt the source security check to the explicit byte preparation and verify
+  that missing network/channel/digest/privacy boundaries still fail the audit.
+  No brain rewrite/reset, SQL/schema, migration, private setting or service
+  deployment change is required. Retain MB849 display and MB850 safeguards.
+
 ### MB850 — Unicode RSS identity and plugin failure diagnostics (2026-10-19)
 
 - Hash RSS IDs, GUIDs, URLs and fallback title/date identities without wide-

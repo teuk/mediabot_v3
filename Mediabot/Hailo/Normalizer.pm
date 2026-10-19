@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 
 use Digest::SHA qw(sha256_hex);
+use Encode qw(encode);
 use Exporter 'import';
 
 our $VERSION = '1.0';
@@ -79,7 +80,10 @@ sub hailo_placeholder_for_nick {
     my $channel = _channel_key($args{channel});
     return undef unless defined($channel) && _plain($args{nick}) && length("$args{nick}");
 
-    my $digest = sha256_hex(join "\x00", $channel, _irc_fold($args{nick}));
+    my $identity = join "\x00", $channel, _irc_fold($args{nick});
+    # Preserve learned buckets for byte-sized identities, including Latin-1.
+    $identity = encode('UTF-8', $identity) unless utf8::downgrade($identity, 1);
+    my $digest = sha256_hex($identity);
     my $bucket = hex(substr($digest, 0, 8)) % $BUCKETS;
     return sprintf('%s%02d%s', $NICK_PREFIX, $bucket, $NICK_SUFFIX);
 }
