@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB847 — Finite metrics and faithful radio UTF-8 (2026-10-19)
+
+- Preserve the UTF-8 bytes already produced by the radio JSON encoder when
+  building HTTP responses. International titles, artist names and nested
+  metadata arrive unchanged; text/Prometheus bodies still encode characters
+  once and Content-Length remains the exact transmitted byte length.
+- Reject nonnumeric, reference and non-finite metric samples, including
+  scientific values that overflow during numeric conversion. Refuse scalar
+  set/add/inc on histograms, and reject overflowing sums before changing
+  counters or histogram buckets/counts. Retain the previous valid measurement.
+- Keep finite scientific durations, negative gauges/generic observations,
+  legacy undefined scalar-to-zero behavior, positive sorted histogram bounds,
+  default latency buckets and the explicit terminal +Inf bucket.
+- Exercise actual loopback HTTP requests, both JSON encoder backends and Perl
+  5.38/5.40. Preserve endpoints, the five-second metrics cache, instrumentation
+  names, header limits, configuration and accepted MB844–MB846 behavior.
+  No SQL/schema, private setting or web/publisher deployment is required.
+
 ### MB846 — MetaAI paced delivery recovery (2026-10-19)
 
 - Give each paced MetaAI line one consumable scheduling arm and finish each

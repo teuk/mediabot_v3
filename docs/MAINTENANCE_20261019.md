@@ -233,3 +233,75 @@ setup failure. All three host-reported weak-reference assertions keep their
 original conditions. The 51 integrated policy/history/private-output assertions
 remain unchanged. Source installation still targets the clean MB845 base: the
 failed R1 preview installed nothing and needs no rollback or service restart.
+
+
+## MB847 — Metrics numeric safety and radio HTTP encoding
+
+Reviewed base: `snap_mediabot_v3_teuk_20261019_141514.zip`, VERSION
+`3.6dev-20261019_121430`, supplied after successful MB846 commit `190d709`.
+The installer requires the exact reviewed source bytes, clean tracked state,
+master branch, matching origin and an empty Git index.
+
+Two defects are reproduced offline against that intact snapshot. Radio status
+JSON is already serialized to UTF-8 bytes; the common HTTP builder encoded those
+bytes again, corrupting international titles such as `Björk — Jóga`. Separately,
+the numeric validator accepted scientific input such as `1e999`, which becomes
+infinite when converted. Scalar setters accepted raw strings/references, and
+scalar operations could replace or numerically coerce histogram state. A later
+observation could then throw through the caller. These are code reproductions,
+not a claim that a particular live instance encountered them.
+
+| Trigger | Corrected behavior |
+| --- | --- |
+| Radio provider returns accented, non-Latin or emoji metadata | JSON bytes are transmitted once, preserving the original values |
+| Plain text contains an unflagged Latin-1 character | The character body is still encoded to UTF-8 normally |
+| Scientific input overflows to infinity | Refuse it before adding a metric sample or bucket bound |
+| set/add/inc targets a histogram | Refuse scalar mutation and preserve the histogram |
+| Two finite values would overflow the stored sum | Refuse the whole update before changing buckets or count |
+| Bad instrumentation precedes an HTTP scrape | Keep the previous valid measurements and serve the scrape normally |
+
+`_http_response_bytes` retains its character-body default and accepts an explicit
+encoded-byte flag for the internal JSON route. It does not guess from Perl's
+UTF-8 flag: valid character strings containing only Latin-1 may be unflagged.
+The direct `render_radio_status_json` API continues to return encoded JSON bytes.
+Its keys, status codes and media type are unchanged. Content-Length always uses
+the bytes actually transmitted. Existing radio error behavior is outside this
+change.
+
+Metric grammar retains finite decimal and exponent notation. POSIX `isfinite`
+checks the converted value and each resulting sum. Invalid values are silent
+no-ops returning false; the last valid value remains available. Unsupported
+scalar operations cannot corrupt histogram hashes. Sum validation precedes
+bucket/count mutation, so overflow cannot publish a partial observation. Custom
+finite positive bucket normalization and the default boundaries stay unchanged.
+The explicit `le="+Inf"` bucket remains required and continues to count all
+accepted observations; it is distinct from an infinite stored sample value.
+
+Compatibility is deliberate: disabled/unknown metrics remain inert, undefined
+set/add values still normalize to zero, finite negative gauge deltas and generic
+histogram observations remain supported, counter resets via set remain possible,
+and small scientific Time::HiRes durations still work. The existing five-second
+render cache, metric names, routes, listener binding, request-header limit and
+provider call pattern are unchanged. No cardinality or public API expansion is
+introduced beyond the internal HTTP builder's explicit encoded-body argument.
+
+`1241_mb847_metrics_numeric_contract.t` covers invalid/coercible values, mutation
+types, atomic scalar/histogram overflow, recovery, bucket limits and legacy
+numeric behavior. `1242_mb847_metrics_http_utf8.t` covers Latin-1, non-Latin,
+emoji and nested metadata, direct JSON API compatibility, unflagged plain text,
+Prometheus labels and exact byte lengths. Real IO::Async/loopback requests prove
+that radio JSON and a later metrics scrape remain usable after rejected
+instrumentation. Test listeners bind OS-assigned ephemeral loopback ports.
+No production service or external provider is contacted.
+
+Only Metrics.pm, the changelog, this log and two regression cases change.
+Installation backs up source and requires focused, security, inventory, fast
+and full host validation. Failure restores its own source writes while retaining
+concurrent edits/deletions. Private configuration, persistent history, SQL/schema,
+running services and the real Git index remain untouched by source installation.
+
+After host checks pass, restart only the development bot. Check ordinary bot
+continuity and the existing local metrics/radio endpoint if enabled; do not
+change a live song or inject bad samples. Commit through `commit.sh`, update the
+intended production instances normally, and check continuity on nbot's `#i/o`.
+No dashboard, web, shortener or network-stats publisher deployment is required.

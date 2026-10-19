@@ -6,6 +6,7 @@ use warnings;
 use IO::Socket::INET;
 use IO::Async::Listener;
 use JSON::MaybeXS qw(encode_json);
+use POSIX qw(isfinite);
 use Encode qw(encode_utf8);   # mb129-B3: Content-Length doit etre en bytes
 
 use constant MAX_HTTP_HEADER_BYTES => 16 * 1024;
@@ -277,7 +278,8 @@ sub declare {
 sub _valid_metric_number {
     my ($value) = @_;
     return 0 unless defined $value && !ref($value);
-    return "$value" =~ /\A[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?)|(?:\.[0-9]+))(?:[eE][+-]?[0-9]+)?\z/;
+    return 0 unless "$value" =~ /\A[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?)|(?:\.[0-9]+))(?:[eE][+-]?[0-9]+)?\z/;
+    return isfinite(0 + $value) ? 1 : 0;
 }
 
 # mb551-B1: record one observation into a histogram. No-op when disabled,
@@ -299,12 +301,16 @@ sub observe {
         count  => 0,
     };
 
+    # Reject an overflowing sum before changing any bucket or sample count.
+    my $sum = $h->{sum} + $value;
+    return unless isfinite($sum);
+
     my $idx = scalar @$buckets;   # default: +Inf slot
     for my $i (0 .. $#$buckets) {
         if ($value <= $buckets->[$i]) { $idx = $i; last; }
     }
     $h->{counts}[$idx]++;
-    $h->{sum}   += $value;
+    $h->{sum}    = $sum;
     $h->{count} += 1;
     return 1;
 }
@@ -320,11 +326,14 @@ sub add {
     return unless $self->enabled;
 
     $value = 0 unless defined $value;
+    return unless _valid_metric_number($value);
     my $entry = $self->{metrics}{$name} or return;
+    return if ($entry->{type} || '') eq 'histogram';
     my $key   = $self->_labels_key($labels);
+    my $sum = ($entry->{values}{$key} // 0) + $value;
+    return unless isfinite($sum);
 
-    $entry->{values}{$key} //= 0;
-    $entry->{values}{$key} += $value;
+    $entry->{values}{$key} = $sum;
     return 1;
 }
 
@@ -333,10 +342,12 @@ sub set {
     return unless $self->enabled;
 
     $value = 0 unless defined $value;
+    return unless _valid_metric_number($value);
     my $entry = $self->{metrics}{$name} or return;
+    return if ($entry->{type} || '') eq 'histogram';
     my $key   = $self->_labels_key($labels);
 
-    $entry->{values}{$key} = $value;
+    $entry->{values}{$key} = 0 + $value;
     return 1;
 }
 
@@ -450,14 +461,15 @@ sub _http_request_state {
 }
 
 sub _http_response_bytes {
-    my ($self, $status, $body, $ctype) = @_;
+    my ($self, $status, $body, $ctype, $body_is_bytes) = @_;
 
     $status ||= '500 Internal Server Error';
     $body   = '' unless defined $body;
     $ctype  ||= 'text/plain; charset=utf-8';
 
     # mb129-B3: Content-Length must describe bytes, not Perl characters.
-    my $body_bytes = encode_utf8($body);
+    # encode_json already returns UTF-8 bytes; only character bodies need encoding.
+    my $body_bytes = $body_is_bytes ? $body : encode_utf8($body);
 
     return join(
         "\r\n",
@@ -488,6 +500,7 @@ sub _route_http_request {
             '200 OK',
             $self->render_radio_status_json(),
             'application/json; charset=utf-8',
+            1, # The JSON encoder has already produced UTF-8 bytes.
         );
     }
 
