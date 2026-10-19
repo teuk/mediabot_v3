@@ -388,3 +388,48 @@ manual command and ensure it completes once and permits a following request;
 do not enable automatic announcements solely for acceptance. Commit through
 `commit.sh`, update production normally and check nbot's `#i/o`. No dashboard,
 shortener, web or network-stats publisher deployment is required.
+
+
+## MB849 — A useful DTC excerpt for automatic and manual requests
+
+A live automatic `!dtc` showed only the first dialogue line, `...`, then the
+full-quote link. Spark explicitly passed `max_lines => 3` to DTC's formatter,
+whose truncation logic reserves two of those three lines for ellipsis and URL.
+The manual formatter already allowed ten lines, so the separate Spark budget
+was the cause. No source-fetch truncation or shortener failure was involved.
+
+Spark now calls the same formatter with its shared default budget and accepts
+up to that formatter's limit. It adds its visible command as before. Manual
+`!dtc`, `!dtc <id>`, text search and the `!bashfr` alias retain the same response
+budget through their real asynchronous worker path.
+
+| Nonempty source lines | Quote displayed after the automatic command, or as the manual reply |
+| --- | --- |
+| 1–10 | All dialogue lines; no unnecessary ellipsis or link |
+| More than 10 | First eight dialogue lines, `...`, canonical full-quote URL |
+
+A manual search retains its separate result heading before the quote. Existing
+colors, per-line byte guard, normal PRIVMSG/NoColors/AntiFlood path and bounded
+deferred queue remain. This is a display-budget change, not a new scheduling
+system: output still follows the instance's existing AntiFlood configuration.
+Spark's audience/activity/permission checks, independent two-minute send limit,
+forty-minute source-event cooldown, anti-repeat and delivery accounting remain.
+VDM and other Spark event budgets do not change.
+
+`1245_mb849_dtc_shared_display.t` checks 1/3/9/10/11/20-line boundaries and exact
+truncation order. It drives actual manual dispatch and CommandAsync fork/pipe/
+parent replay for both aliases with random, ID and search requests. Source IO
+and final transport are local fixtures; the test proves the real worker starts
+and does not recut the response. It also checks partial transport refusal and
+retry throttling. Existing MB806 regression expectations now use a genuinely
+long quote with the shared limit; focused checks retain AntiFlood and MB840/
+MB841/MB848 lifecycle coverage.
+
+Only Spark::Sender.pm changes in production. No private configuration, SQL/schema,
+manual command routing, source fetcher, stored format or external API changes.
+Source installation backs up the six changed/new files, runs focused/security/
+inventory/fast/full checks and restores its own writes on required-check failure.
+It leaves the index and running services unchanged. After host success, restart
+the development bot and exercise manual `!dtc`, `!dtc <id>` and `!bashfr <id>`
+on an already-enabled test channel. Commit via `commit.sh`, update production
+normally, then check automatic/manual continuity on nbot's `#i/o`.

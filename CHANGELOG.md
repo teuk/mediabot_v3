@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB849 — Readable automatic and manual DTC quotes (2026-10-19)
+
+- Remove Spark's separate three-line DTC restriction, which reserved two lines
+  for an ellipsis and link and left only one dialogue line. Reuse the manual
+  formatter's ten-line budget: quotes up to ten lines appear in full; longer
+  quotes show eight dialogue lines, `...`, then their canonical source URL.
+- Keep the visible automatic command, random/numbered/search manual requests,
+  `!bashfr` alias, IRC formatting/byte limits, ordinary AntiFlood transport,
+  source permissions, shared pacing, forty-minute cooldown and anti-repeat.
+- Exercise automatic boundaries and actual manual dispatch/fork/pipe/replay
+  for both aliases and all three request forms. No configuration, SQL/schema,
+  provider, persistent format or service deployment change is required.
+
 ### MB848 — VDM request completion and launch recovery (2026-10-19)
 
 - Detach completed VDM worker handles and waiters before notifying consumers.

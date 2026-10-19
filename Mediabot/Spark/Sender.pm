@@ -261,11 +261,12 @@ sub attempt_send {
                     && length($content->{text}) <= 12_000
                     && $content->{text} !~ /[\x00-\x09\x0b-\x1f\x7f]/;
             $lines = format_quote_lines(
-                $content->{id}, $content->{text}, max_lines => 3,
+                $content->{id}, $content->{text},
             );
         }
         return _result('no_send', 'invalid_content', generation => $generation, kind => $kind)
-            unless ref($lines) eq 'ARRAY' && @$lines && @$lines <= 3;
+            unless ref($lines) eq 'ARRAY' && @$lines
+                && @$lines <= ($kind eq 'dtc' ? Mediabot::DTC::Format::MAX_LINES() : 3);
         @messages = ("$prefix$kind", @$lines);
     }
     else {

@@ -134,8 +134,11 @@ prefix; another configured prefix is used on that instance) before posting
 the source result. VDM needs `+Spark +VDM`; DTC needs `+Spark +DansTonChat`.
 The separate `+SparkAction` switch does not govern these long-silence events.
 DTC performs its network fetch in a worker, drops the result if human activity
-or a channel permission changes, and posts at most three quote lines after
-the command. The two source-backed events have a 40-minute delivered cooldown
+or a channel permission changes, and uses the same ten-line formatted quote
+budget as manual `!dtc`, after the visible command. Quotes of up to ten source
+lines are shown in full; longer quotes show eight dialogue lines, `...`, then
+the canonical source link. The normal IRC/AntiFlood output path is preserved.
+The two source-backed events have a 40-minute delivered cooldown
 instead of the one-hour default for other Spark events. They receive two
 schedule slots apiece when eligible, while audience thresholds, adaptive
 silence, shared channel pacing, the master send arm and the sender's rate

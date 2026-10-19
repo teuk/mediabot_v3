@@ -69,7 +69,7 @@ return sub {
     };
     my $quote = {
         action => 'ready', kind => 'dtc',
-        content => { id => 42, text => join("\n", map { "<a> quote $_" } 1 .. 9) },
+        content => { id => 42, text => join("\n", map { "<a> quote $_" } 1 .. 12) },
     };
     my %request = (
         channel => '#room', kind => 'dtc', generation => 7,
@@ -83,8 +83,8 @@ return sub {
         'mb806: guarded DTC sends successfully');
     $assert->is($sent[0][1], '!dtc',
         'mb806: visible command precedes the quote');
-    $assert->is(scalar(@sent), 4,
-        'mb806: automatic DTC is capped at command plus three quote lines');
+    $assert->is(scalar(@sent), 11,
+        'mb806: automatic DTC uses the shared ten-line quote limit after the command');
     $assert->like($sent[-1][1], qr{https://danstonchat\.com/quote/42\.html},
         'mb806: truncated quote retains its source URL');
     $assert->is($sender->attempt_send(%request)->{reason}, 'rate_limited',
@@ -93,12 +93,12 @@ return sub {
     $state->{enabled} = 0;
     $assert->is($sender->attempt_send(%request)->{reason}, 'disabled',
         'mb806: late channel revocation suppresses command and quote');
-    $assert->is(scalar(@sent), 4, 'mb806: revocation emits no partial command');
+    $assert->is(scalar(@sent), 11, 'mb806: revocation emits no partial command');
     $state->{enabled} = 1;
     $prefix = '#';
     $assert->is($sender->attempt_send(%request)->{action}, 'sent',
         'mb806: configured prefix still permits delivery');
-    $assert->is($sent[4][1], '#dtc',
+    $assert->is($sent[11][1], '#dtc',
         'mb806: visible command uses the instance prefix');
 
     my $fetcher = Mediabot::DTC::AsyncFetcher->new(
