@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB864 — Case-sensitive URL admission and Instagram caching (2026-10-20)
+
+- Preserve resource case in URL anti-repeat identity: two YouTube IDs, paths
+  or query values that differ by case no longer suppress each other's first
+  display. Scheme/host-only case variations still share the same channel gate.
+- Apply the same identity to Instagram metadata and pending requests. Distinct
+  post IDs no longer replay another post's cached title or coalesce into its
+  worker. Keep current caller/channel decoration, expiry and duplicate coalescing.
+- Retain original HTTP URLs, escaping, userinfo and IPv6 scope spelling, existing
+  channel case folding, TTLs, permission order and private-host admission guards.
+  Cover actual title/metadata readers and native Instagram fork/pipe completion.
+  No SQL/schema, private configuration, persistent format or service deployment
+  change; retain MB849–MB863 safeguards.
+
 ### MB863 — Exact YouTube video selection (2026-10-20)
 
 - Select the complete video ID from the outer supported URL. A fragment or

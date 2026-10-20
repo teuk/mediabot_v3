@@ -682,7 +682,7 @@ sub _handle_instagram {
 
     $self->{logger}->log(4, "_handle_instagram() start url=$url");
 
-    my $cache_key = lc($url // '');
+    my $cache_key = _url_cache_identity($url);
 
     # Preserve the existing badge/result cache (TTL 10 min).
     my $ig_cached = $self->{_instagram_cache}{$cache_key};
@@ -1991,6 +1991,30 @@ sub _handle_generic_title {
 }
 
 # ---------------------------------------------------------------------------
+# URL cache identity: fold only scheme and host. Resource paths, query values,
+# fragments and credentials may be case-sensitive. Keep their original spelling
+# without decoding escapes or rewriting the URL sent to the HTTP handler.
+# ---------------------------------------------------------------------------
+sub _url_cache_identity {
+    my ($url) = @_;
+    $url //= '';
+    my ($scheme, $authority, $suffix) = $url =~ m{\A(https?://)([^/?#]*)(.*)\z}is;
+    return $url unless defined $scheme;
+
+    my $userinfo = '';
+    $userinfo = $1 if $authority =~ s{\A(.*@)}{}s;
+    my ($host, $port) = $authority =~ m{\A(\[[^\]]*\]|[^:]*)(.*)\z}s;
+    if ($host =~ /\A\[/) {
+        # An IPv6 scope identifier is local to the interface; preserve its case.
+        my ($address, $scope) = split /%/, $host, 2;
+        $host = lc($address) . (defined($scope) ? "%$scope" : '');
+    } else {
+        $host = lc($host);
+    }
+    return lc($scheme) . $userinfo . $host . $port . $suffix;
+}
+
+# ---------------------------------------------------------------------------
 # _url_display_cache_gate($self, $url, $channel)
 #
 # Anti-repeat cache for displayed URLs.  The caller invokes this only after the
@@ -2000,7 +2024,7 @@ sub _handle_generic_title {
 sub _url_display_cache_gate {
     my ($self, $url, $channel) = @_;
 
-    my $cache_key = lc($url // '') . "\x00" . lc($channel // '');
+    my $cache_key = _url_cache_identity($url) . "\x00" . lc($channel // '');
     my $cache     = $self->{_url_display_cache} //= {};
     my $now       = time();
     my $url_ttl   = 300;  # 5 minutes

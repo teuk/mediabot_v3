@@ -3,14 +3,16 @@
 # mb408 — Deux finitions du pipeline UrlTitle :
 #   (a) la troncature des titres > 300 caractères coupe à la FRONTIÈRE DE MOT
 #       et ajoute une ellipse (avant : coupe brute en plein mot, sans signal) ;
-#   (b) la clé du cache anti-répétition replie aussi le CANAL en lc
-#       (cohérence avec la clé canonique lc de mb407).
+#   (b) la clé du cache anti-répétition replie aussi le CANAL en lc.
+#       MB864 conserve ce contrat sans replier les chemins/identifiants d'URL.
 # =============================================================================
 
 use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use Mediabot::External::URL ();
+{ package CacheLog626; sub log {1} }
 
 sub _slurp_626 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; local $/; <$fh> }
 
@@ -39,14 +41,15 @@ return sub {
     $assert->like($fn->($nospace), qr/x\x{2026}\z/, 'sans espace: coupe dure + ellipse');
     $assert->ok(!defined $fn->('Just a moment...'), 'titres bot-wall toujours filtrés');
 
-    # --- 2. Clé du cache : URL + canal normalisés en lc --------------------
+    # --- 2. Répétition : schéma/hôte et canal sans distinction de casse ---
     my ($cache_body) = $src =~ /(sub _url_display_cache_gate \{.*?\n\}\n)/s;
     $assert->ok(defined $cache_body && $cache_body ne '',
         '_url_display_cache_gate extrait');
 
-    $assert->like(
-        $cache_body,
-        qr/lc\(\$url \/\/ ''\)\s*\.\s*"\\x00"\s*\.\s*lc\(\$channel \/\/ ''\)/,
-        'clé du cache anti-répétition: URL et canal en lc'
+    my $bot = {logger => bless({}, 'CacheLog626')};
+    $assert->ok(
+        Mediabot::External::URL::_url_display_cache_gate($bot, 'https://example.test/Keep', '#Test')
+        && !Mediabot::External::URL::_url_display_cache_gate($bot, 'HTTPS://EXAMPLE.TEST/Keep', '#test'),
+        'anti-répétition: casse du schéma/hôte et du canal toujours neutralisée'
     );
 };

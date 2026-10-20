@@ -512,3 +512,65 @@ private configuration, persistent format, MetaAI research policy, native updater
 or web deployment change is required. MB849–MB862 maintenance remains covered.
 After complete host validation, restart the development bot for normal URL/IRC
 acceptance, then commit through commit.sh before normal production updates.
+
+## MB864 — Resource case in URL admission and Instagram caches
+
+### Reproduced defects
+
+URL anti-repeat identity lowercased the complete URL. Two case-distinct YouTube
+IDs or generic paths/query values therefore collided: publishing one resource
+silently suppressed the other resource's first display in the same channel for
+the ordinary five-minute repeat window. This happened after the MB863 selector
+had correctly retained the video ID's case.
+
+Instagram also lowercased whole URLs for metadata cache and pending ownership.
+Even across independently admitted channels, a second case-distinct post could
+receive the first post's title; concurrent posts could share one pending worker
+and lose the second result. These are controlled offline reproductions, not
+reports of an external service incident.
+
+### Corrected behavior
+
+The repeat gate and Instagram cache/pending path use a shared internal URL
+identity. Scheme and host case are folded; resource paths, parameter names and
+values, fragments, escapes, userinfo and IPv6 scope spelling are retained.
+Ports and HTTP versus HTTPS remain separate. No URL decoding, query sorting,
+fragment removal or resource equivalence beyond this case handling is added.
+The original URL still reaches the existing HTTP reader unchanged.
+
+Only scheme/host case variations cannot bypass ordinary repeat suppression.
+The gate keeps its existing per-channel lowercasing, 300-second TTL, purge
+schedule and per-bot state. Chanset checks still precede admission; disabled
+features and the existing private-literal guard do not burn a cache entry.
+This is cache identity bookkeeping, not a new URL validator or network policy.
+
+Instagram's 600-second result cache and pending requests distinguish the two
+posts, while matching pending URLs still coalesce. Cache replay decorates the
+result with the current caller and destination. Normal expiry fetches again.
+Other service-specific cache implementations are outside this change.
+
+### Validation and rollout
+
+The admission case exercises actual gate calls for path/query/fragment and
+Unicode case, video/post IDs, escaped spelling, userinfo and IPv6 scopes. It
+also covers scheme/host/channel spelling, ports, per-bot/per-channel isolation,
+expiry, stale purge and warning-free empty internal input bookkeeping.
+
+The delivery case runs the real URL dispatcher, generic HTML title reader,
+YouTube metadata reader and Instagram fetch/parser/cache path. It records
+original HTTP URLs, verifies matching case-distinct titles and UTF-8, checks
+repeat suppression, disabled-to-enabled admission, private-literal refusal,
+metadata reuse/expiry and current caller/channel decoration. Real Instagram
+AsyncWorker fork/pipe requests prove separate pending ownership and completion
+for two distinct posts, with normal duplicate coalescing. Only external HTTP
+IO and final IRC output are substituted; no real API, IRC or SQL is contacted.
+
+The existing MB408 cache contract test now exercises real scheme/host/channel
+repeat behavior instead of requiring the obsolete whole-URL lc expression.
+Its assertion count is unchanged; the MB408 title truncation checks remain.
+Only Mediabot/External/URL.pm changes in production runtime. Permissions, TTLs,
+HTTP policy, MetaAI research, persistent formats, the native updater and
+SQL/schema remain unchanged. MB849–MB863 maintenance remains covered.
+After complete host checks, restart the development bot for ordinary URL/IRC
+acceptance, then commit through commit.sh before normal production updates.
+No private configuration, schema migration or web deployment is required.
