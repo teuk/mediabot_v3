@@ -454,3 +454,61 @@ provider/research policy and SQL/schema remain unchanged. No configuration,
 schema or web deployment is required. MB849–MB861 maintenance remains covered.
 After complete host validation, restart the development bot for normal DTC/IRC
 acceptance, then commit through commit.sh before normal production updates.
+
+## MB863 — Exact YouTube identity across metadata readers
+
+### Reproduced defects
+
+The URL router and two metadata readers independently extracted video IDs.
+Their watch expressions searched greedily beyond the outer query: a v= inside
+another parameter's nested URL, or inside a fragment, could replace the actual
+watch selector. The bot then requested/displayed a different video's metadata,
+or read that other video's warm cache entry. The same expressions accepted
+paths merely beginning with watch. Path forms such as youtu.be also accepted
+the first eleven characters of an overlong ID and announced an unrelated prefix
+video. These are controlled offline reproductions, not reported API incidents.
+
+### Corrected behavior
+
+The public metadata reader, radio metadata reader and URL router now use the
+same existing selector function. Watch URLs require the exact supported watch
+path and one complete v parameter in the outer query, before the fragment.
+Nested parameter contents and fragments cannot supply another selector.
+Duplicate selectors, including equal duplicates, are refused as ambiguous.
+
+Shorts, live, embed and short-link paths require a complete eleven-character
+identity, with an optional trailing slash and ordinary query/fragment suffixes.
+Overlong IDs, extra path segments, unsupported hosts, nested outer URLs and
+ASCII control/space-bearing URLs select no video. ID case remains significant.
+Metadata readers use the router's existing supported host families; no new host
+or URL form is introduced. Existing direct helpers expect the URL itself, not
+surrounding IRC text; the ordinary dispatcher still extracts it from a message.
+
+A refused identity reaches neither the video metadata cache nor the Data API
+or its oEmbed fallback through these readers. Generic URL-title routing remains
+subject to its own existing rules. Valid equivalent URL forms retain shared
+video caching, current caller/channel decoration, duration and view formatting,
+verified HTTP policy, API limits and the existing empty-items oEmbed fallback.
+No permission, API key, endpoint, TTL or source publication policy changes.
+
+### Validation and rollout
+
+The URL case covers every existing supported host family, watch query ordering,
+Shorts/live/embed/short-link forms, fragments and nested values, exact ID case,
+trailing slashes, duplicate selectors, overlong/short IDs, wrong paths, host
+impostors, controls, malformed and non-scalar input.
+
+The integration case runs the actual public/radio readers and URL dispatcher.
+It checks the selected ID in the API request and visible title, a competing
+warm cache, equivalent URL reuse across callers/channels, refused identities
+before HTTP/cache output, +Youtube admission and ordinary anti-repeat. An empty
+API items result reaches oEmbed with the same canonical watch identity and
+retains an international title. A real AsyncWorker fork/pipe carries the actual
+reader result. Only HTTP IO and final output are replaced; no external API,
+IRC or SQL connection is used. Existing routing/format tests remain unchanged.
+
+Only Mediabot/External/YouTube.pm changes in production runtime. No SQL/schema,
+private configuration, persistent format, MetaAI research policy, native updater
+or web deployment change is required. MB849–MB862 maintenance remains covered.
+After complete host validation, restart the development bot for normal URL/IRC
+acceptance, then commit through commit.sh before normal production updates.

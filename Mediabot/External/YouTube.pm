@@ -47,25 +47,8 @@ sub getYoutubeDetails {
     my ($self, $sText) = @_;
 
     my $conf = $self->{conf};
-    my $sYoutubeId;
-
     $self->{logger}->log(3, "getYoutubeDetails() $sText");
-
-    if ($sText =~ m{https?://(?:www\.|m\.|music\.)?youtube\.[^/]+/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
-    elsif ($sText =~ m{https?://(?:www\.|m\.)?youtube\.[^/]+/shorts/([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
-    elsif ($sText =~ m{https?://(?:www\.|m\.)?youtube\.[^/]+/live/([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
-    elsif ($sText =~ m{https?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
-    elsif ($sText =~ m{https?://youtu\.be/([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
+    my $sYoutubeId = _is_youtube_url($sText);
 
     unless (defined $sYoutubeId && $sYoutubeId ne '') {
         $self->{logger}->log(3, "getYoutubeDetails() sYoutubeId could not be determined");
@@ -244,22 +227,7 @@ sub displayYoutubeDetails {
     $self->{logger}->log(3, "displayYoutubeDetails() $sText");
 
     # --- Extraction du video ID ---
-    my $sYoutubeId;
-    if    ($sText =~ m{https?://(?:www\.|m\.|music\.)?youtube\.[^/]+/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
-    elsif ($sText =~ m{https?://(?:www\.|m\.)?youtube\.[^/]+/shorts/([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
-    elsif ($sText =~ m{https?://(?:www\.|m\.)?youtube\.[^/]+/live/([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
-    elsif ($sText =~ m{https?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
-    elsif ($sText =~ m{https?://youtu\.be/([A-Za-z0-9_-]{11})}i) {
-        $sYoutubeId = $1;
-    }
+    my $sYoutubeId = _is_youtube_url($sText);
 
     unless (defined($sYoutubeId) && $sYoutubeId ne '') {
         $self->{logger}->log(3, "displayYoutubeDetails() sYoutubeId could not be determined");
@@ -680,29 +648,31 @@ sub _yt_label {
 # ---------------------------------------------------------------------------
 
 sub _is_youtube_url {
-    # mb406-B1: motifs ancrés en début d'URL (\A) — une URL YouTube imbriquée
-    # dans la query d'un autre site ne doit pas router vers le handler YouTube.
+    # mb406-B1: match the outer URL's supported host, never an embedded URL.
+    # MB863: routing, public metadata and radio metadata share one identity.
     my ($url) = @_;
-    return undef unless defined $url;
+    return undef unless defined($url) && !ref($url);
+    return undef if $url =~ /[\x00-\x20\x7f]/;
 
-    # Standard watch URL on all subdomains
-    if ($url =~ m{\Ahttps?://(?:www\.|m\.|music\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp|be)/watch[^\s]*[?&]v=([A-Za-z0-9_-]{11})}i) {
+    # Only the complete v parameter in the outer watch query selects a video.
+    # A second selector is ambiguous; query values and fragments are not paths
+    # to another video. Do not silently truncate overlong identifiers.
+    if ($url =~ m{\Ahttps?://(?:www\.|m\.|music\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp|be)/watch\?([^#]*)(?:\#[^\s]*)?\z}i) {
+        my @selectors = grep { /\Av=/i } split /&/, $1, -1;
+        return undef unless @selectors == 1;
+        return $1 if $selectors[0] =~ /\Av=([A-Za-z0-9_-]{11})\z/i;
+        return undef;
+    }
+    if ($url =~ m{\Ahttps?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/shorts/([A-Za-z0-9_-]{11})/?(?:\?[^#]*)?(?:\#[^\s]*)?\z}i) {
         return $1;
     }
-    # Shorts
-    if ($url =~ m{\Ahttps?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/shorts/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{\Ahttps?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/live/([A-Za-z0-9_-]{11})/?(?:\?[^#]*)?(?:\#[^\s]*)?\z}i) {
         return $1;
     }
-    # Live
-    if ($url =~ m{\Ahttps?://(?:www\.|m\.)?youtube\.(?:com|fr|de|co\.uk|co\.jp)/live/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{\Ahttps?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})/?(?:\?[^#]*)?(?:\#[^\s]*)?\z}i) {
         return $1;
     }
-    # Embed
-    if ($url =~ m{\Ahttps?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{11})}i) {
-        return $1;
-    }
-    # youtu.be short link
-    if ($url =~ m{\Ahttps?://youtu\.be/([A-Za-z0-9_-]{11})}i) {
+    if ($url =~ m{\Ahttps?://youtu\.be/([A-Za-z0-9_-]{11})/?(?:\?[^#]*)?(?:\#[^\s]*)?\z}i) {
         return $1;
     }
     return undef;

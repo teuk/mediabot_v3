@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB863 — Exact YouTube video selection (2026-10-20)
+
+- Select the complete video ID from the outer supported URL. A fragment or
+  nested query URL can no longer replace the watch query's actual selector;
+  overlong IDs and paths merely beginning with watch are no longer truncated
+  or treated as another video's metadata request.
+- Share the selector across URL routing, public video details and radio
+  metadata. Refuse duplicate watch selectors and unsupported identities before
+  reading the video cache or requesting metadata. Keep supported watch, Shorts,
+  live, embed and short-link forms, query/fragment suffixes and ID case.
+- Exercise actual public/radio metadata, cache separation and reuse, oEmbed
+  fallback, channel admission, anti-repeat and native worker completion.
+  No SQL/schema, private configuration, provider policy or service deployment
+  change; retain MB849–MB862 safeguards.
 ### MB862 — Full DTC links after byte truncation (2026-10-20)
 
 - Add the canonical full-quote link when an individual DTC dialogue exceeds
