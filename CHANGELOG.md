@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB858 — News delivery timer ownership and recovery (2026-10-20)
+
+- Consume each paced news timer once. Retained old callbacks cannot replace a
+  successor timer, orphan countdowns or hold completed/aborted queue state alive.
+- Revoke and detach a cleared queue before timer cleanup. A new queue created
+  during cleanup survives, including outer connection-change enqueue; add/start failures stop and remove partial timers,
+  discard abandoned output and leave later news requests usable.
+- Serialize reentrant enqueue during a delivery so the new batch keeps FIFO
+  order and the shared interval rather than bypassing pacing. Preserve normal
+  delivery helpers, bounds, expiry and final connection/channel checks.
+- Exercise stale callbacks with fake and real IO::Async timers, failed setup,
+  cleanup replacement and nested enqueue. No SQL/schema, private configuration,
+  persistent format or service deployment change; retain MB849–MB857 safeguards.
+
 ### MB857 — Event listener revocation during dispatch (2026-10-20)
 
 - Honor exact listener removal and event/global clearing before each pending

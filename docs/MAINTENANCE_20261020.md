@@ -157,3 +157,65 @@ maintenance remain intact. Full host validation is required before development
 acceptance and commit through commit.sh. Check normal command/plugin continuity
 after the development restart; there is no need to force a live plugin reload
 mid-command or disturb production to reproduce this edge case.
+
+## MB858 — News delivery timers and reentrant enqueue
+
+### Reproduced defects
+
+The parent news replay queue used an expiry callback that captured the queue
+strongly and unconditionally deleted its current timer. Invoking an old expiry
+again after its successor was armed removed that successor's ownership marker
+and scheduled another timer. The real loop could retain two countdowns for one
+queue; the queue could also stay alive through a retained completed callback.
+
+Clearing a queue stopped/removed its timer before detaching the queue. An enqueue
+from a cleanup hook consequently joined the old queue and was discarded when
+cleanup finished. Separately, a helper that enqueued another news batch during
+an immediate delivery could recursively drain the queue before the outer send
+recorded its completion time, allowing a second line in the same interval.
+These are controlled callback/loop reproductions; no production incident is
+asserted.
+
+### Corrected behavior
+
+Each timer owns a distinct arm token. An expiry must claim that exact arm before
+it can remove a timer or drain output. Repeated, cleared or superseded callbacks
+become no-ops. The callback weakly references the bot and queue, so retaining a
+completed or failed timer does not retain either queue state or transport state.
+The active bot still owns a pending queue normally.
+
+Cleanup invalidates the arm, empties and detaches its exact queue before calling
+timer stop/remove. A replacement queue created by cleanup stays independent. If connection-change
+cleanup enqueues fresh news, the outer enqueue joins that matching replacement
+instead of overwriting it and orphaning its timer.
+Constructor/add/start exceptions retain the bounded existing diagnostic and
+clear only the failed owner's output. The partially registered timer is stopped
+and removed, and a later request can recover normally.
+
+A drain is serialized while a line passes through the usual delivery helpers.
+Nested enqueue appends its whole batch within the existing capacity bound and
+leaves delivery to that drain. The outer frame records the completed send time
+and arms one successor if necessary. If delivery replaces the queue, the old
+frame cannot arm another timer on its behalf.
+
+The normal 1.5-second shared interval, idle-queue remainder, late-loop behavior,
+FIFO destinations, queue capacity, TTL and connection/channel-generation checks
+remain unchanged. Other asynchronous commands retain their existing replay path.
+No immediate burst or blocking sleep is introduced as a fallback.
+
+### Validation and rollout
+
+The two new cases cover retained/duplicate callbacks before and after completion,
+a new bulletin, connection replacement, queue lifetime, real IO::Async countdowns,
+partial add/start failures, private-error redaction, recovery, cleanup reentry and
+nested enqueue with each delivered interval checked. Existing news delivery,
+context revocation and asynchronous worker tests remain part of qualification.
+The new tests use local capture helpers and controlled clocks; they neither send
+IRC messages nor call a news API.
+
+Only Mediabot/CommandAsync.pm changes in production runtime. No SQL/schema,
+private configuration, stored format, provider policy, web deployment or service
+change is required. MB849 display and MB850–MB857 maintenance remain intact.
+After full host validation, restart the development bot and check an ordinary
+news request on an enabled test channel, then commit through commit.sh before
+normal production updates. No forced timer fault is needed on a running bot.

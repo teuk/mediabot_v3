@@ -192,13 +192,16 @@ sub _news_output_log {
 
 sub _clear_news_output {
     my ($self, $q, $reason) = @_;
-    if (my $timer = delete $q->{timer}) {
-        eval { $timer->stop };
-        eval { $q->{loop}->remove($timer) };
-    }
+    # Revoke ownership before cleanup hooks can enqueue a replacement.
+    delete $q->{arm};
+    my $timer = delete $q->{timer};
     $q->{items} = [];
     delete $self->{_news_output_q}
         if $self->{_news_output_q} && refaddr($self->{_news_output_q}) == refaddr($q);
+    if ($timer) {
+        eval { $timer->stop };
+        eval { $q->{loop}->remove($timer) };
+    }
     _news_output_log($self, $reason);
     return 0;
 }
@@ -208,31 +211,51 @@ sub _arm_news_output {
     return 1 if $q->{timer};
     my $weak_self = $self;
     weaken($weak_self);
+    my $weak_q = $q;
+    weaken($weak_q);
+    my $arm = $q->{arm} = {};
     my $timer;
     my $ok = eval {
         require IO::Async::Timer::Countdown;
         $timer = IO::Async::Timer::Countdown->new(
             delay => $delay,
             on_expire => sub {
-                my ($expired_timer) = @_;
-                eval { $q->{loop}->remove($expired_timer) };
-                delete $q->{timer};
+                my $queue = $weak_q or return;
+                return unless $queue->{arm} && refaddr($queue->{arm}) == refaddr($arm);
+                delete $queue->{arm};
+                my $expired_timer = delete $queue->{timer};
+                if ($expired_timer) {
+                    eval { $expired_timer->stop };
+                    eval { $queue->{loop}->remove($expired_timer) };
+                }
                 my $bot = $weak_self or return;
                 return unless $bot->{_news_output_q}
-                    && refaddr($bot->{_news_output_q}) == refaddr($q);
-                _drain_news_output($bot, $q);
+                    && refaddr($bot->{_news_output_q}) == refaddr($queue);
+                _drain_news_output($bot, $queue);
             },
         );
         $q->{timer} = $timer;
         $q->{loop}->add($timer);
-        $timer->start;
+        $timer->start if $q->{arm} && refaddr($q->{arm}) == refaddr($arm);
         1;
     };
-    return $ok ? 1 : _clear_news_output($self, $q, 'timer_unavailable');
+    return 1 if $ok;
+    return _clear_news_output($self, $q, 'timer_unavailable')
+        if $q->{arm} && refaddr($q->{arm}) == refaddr($arm);
+    # An inline expiry or cleanup may already have handed ownership on.
+    if ($timer) {
+        eval { $timer->stop };
+        eval { $q->{loop}->remove($timer) };
+    }
+    return 1;
 }
 
 sub _drain_news_output {
     my ($self, $q) = @_;
+    return 1 unless $self->{_news_output_q}
+        && refaddr($self->{_news_output_q}) == refaddr($q);
+    return 1 if $q->{draining};
+    local $q->{draining} = 1;
     return _clear_news_output($self, $q, 'connection_changed')
         unless $self->{irc} && refaddr($self->{irc}) == refaddr($q->{irc})
             && eval { $self->{irc}->is_connected }
@@ -254,6 +277,8 @@ sub _drain_news_output {
     return _arm_news_output($self, $q, $wait) if $wait > 0;
     my $item = shift @{$q->{items}};
     _replay_intents($self, [$item->{intent}], undef, undef, $item->{binding});
+    return 1 unless $self->{_news_output_q}
+        && refaddr($self->{_news_output_q}) == refaddr($q);
     $q->{last_at} = _news_output_now();
     return @{$q->{items}} ? _arm_news_output($self, $q, $NEWS_OUTPUT_STEP) : 1;
 }
@@ -282,7 +307,9 @@ sub _queue_news_intents {
     my $q = $self->{_news_output_q};
     if ($q && (refaddr($q->{irc}) != refaddr($irc) || refaddr($q->{loop}) != refaddr($loop))) {
         _clear_news_output($self, $q, 'connection_changed');
-        $q = undef;
+        $q = $self->{_news_output_q};
+        return 0 if $q && (refaddr($q->{irc}) != refaddr($irc)
+            || refaddr($q->{loop}) != refaddr($loop));
     }
     $q ||= $self->{_news_output_q} = {items => [], irc => $irc, loop => $loop};
     if (@{$q->{items}} + @batch > $NEWS_OUTPUT_MAX) {
@@ -291,7 +318,7 @@ sub _queue_news_intents {
     }
     my $expires = _news_output_now() + $NEWS_OUTPUT_TTL;
     push @{$q->{items}}, map { {intent => $_, expires => $expires, binding => $binding} } @batch;
-    return $q->{timer} ? 1 : _drain_news_output($self, $q);
+    return $q->{timer} || $q->{draining} ? 1 : _drain_news_output($self, $q);
 }
 
 sub _run_sync {
