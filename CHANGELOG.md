@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB855 — Coherent Icecast status snapshots (2026-10-20)
+
+- Fetch Icecast once per primary-mount status or summary. Derive server,
+  listener, selected-mount and detailed-mount views from the same response
+  instead of mixing three or four observations during a station transition.
+- Keep each later call fresh without introducing a cache. Preserve existing
+  result shapes/raw fields, Unicode metadata, sorting, mount fallback and
+  explicit HTTP/JSON/no-mount failures with recovery on the next valid response.
+- Exercise changing responses and an actual local HTTP endpoint, including
+  aggregate consistency, all standalone views and error/recovery. Retain HTTP
+  policy, timeouts, commands, playback and MB849–MB854 safeguards. No SQL/schema,
+  private configuration, persistent format or service deployment change.
+
 ### MB854 — Log rotation failure continuity (2026-10-19)
 
 - Check every archive/base rename and stop the rotation on its first failure.

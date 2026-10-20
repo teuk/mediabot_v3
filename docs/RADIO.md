@@ -1,5 +1,10 @@
 # Radio requests
 
+Icecast primary-mount status and summary views use one `status-json.xsl`
+response per call (MB855). Server, title, listener counts and detailed mounts
+therefore describe the same observation. A later call fetches again; no extra
+cache or station/control transaction is introduced.
+
 On a channel with **`+Radio`**, every participant can use:
 
 ```text

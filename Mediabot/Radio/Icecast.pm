@@ -41,8 +41,11 @@ sub get_status {
     my $stats = $self->_fetch_icestats();
     return $stats unless $stats->{ok};
 
-    my $icestats = $stats->{icestats};
+    return _status_from_icestats($stats->{icestats});
+}
 
+sub _status_from_icestats {
+    my ($icestats) = @_;
     return {
         ok        => 1,
         host      => $icestats->{host},
@@ -62,6 +65,11 @@ sub get_listeners {
     my $mounts = $self->get_mounts();
     return $mounts unless $mounts->{ok};
 
+    return _listeners_from_mounts($mounts);
+}
+
+sub _listeners_from_mounts {
+    my ($mounts) = @_;
     my %per_mount;
     my $total = 0;
 
@@ -116,19 +124,21 @@ sub get_now_playing {
 sub get_primary_mount_status {
     my ($self, %args) = @_;
 
+    my $stats = $self->_fetch_icestats();
+    return $stats unless $stats->{ok};
+    my $mounts = $self->_mounts_from_icestats($stats->{icestats});
+    return $self->_primary_from_snapshot($stats->{icestats}, $mounts, %args);
+}
+
+# Derived views must share one response. Fetching each view separately can
+# combine a former title/server with new mounts or listener counts.
+sub _primary_from_snapshot {
+    my ($self, $icestats, $mounts, %args) = @_;
     my $primary_mount = $args{primary_mount} || '/radio.mp3';
     my $public_base   = $args{public_base}   || $self->{base_url};
-
     $public_base =~ s{/\z}{};
-
-    my $status = $self->get_status();
-    return $status unless $status->{ok};
-
-    my $listeners = $self->get_listeners();
-    return $listeners unless $listeners->{ok};
-
-    my $mounts = $self->get_mounts();
-    return $mounts unless $mounts->{ok};
+    my $status = _status_from_icestats($icestats);
+    my $listeners = _listeners_from_mounts($mounts);
 
     my ($selected) = grep {
         defined $_->{mount} && $_->{mount} eq $primary_mount
@@ -168,19 +178,11 @@ sub get_primary_mount_status {
 sub get_summary {
     my ($self, %args) = @_;
 
-    my $primary_mount = $args{primary_mount} || '/radio.mp3';
-    my $public_base   = $args{public_base}   || $self->{base_url};
-
-    $public_base =~ s{/\z}{};
-
-    my $primary = $self->get_primary_mount_status(
-        primary_mount => $primary_mount,
-        public_base   => $public_base,
-    );
+    my $stats = $self->_fetch_icestats();
+    return $stats unless $stats->{ok};
+    my $mounts = $self->_mounts_from_icestats($stats->{icestats});
+    my $primary = $self->_primary_from_snapshot($stats->{icestats}, $mounts, %args);
     return $primary unless $primary->{ok};
-
-    my $mounts = $self->get_mounts();
-    return $mounts unless $mounts->{ok};
 
     return {
         ok              => 1,
@@ -205,8 +207,12 @@ sub get_mounts {
     my $stats = $self->_fetch_icestats();
     return $stats unless $stats->{ok};
 
-    my $icestats = $stats->{icestats};
-    my $sources  = $icestats->{source};
+    return $self->_mounts_from_icestats($stats->{icestats});
+}
+
+sub _mounts_from_icestats {
+    my ($self, $icestats) = @_;
+    my $sources = $icestats->{source};
 
     my @mounts;
 
