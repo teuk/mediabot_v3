@@ -51,3 +51,60 @@ bot and check ordinary IRC continuity. If radio is configured there, inspect an
 ordinary radio status/song response; otherwise qualify the deployed radio
 instance during its normal update. No forced stream transition, outage,
 filesystem failure, Icecast/Liquidsoap restart or web deployment is needed.
+
+## MB856 — Inch syntax and finite conversion results
+
+### Reproduced defects
+
+The conversion handler removed every token equal to `in`, treating the inch
+symbol as an optional English separator. Requests such as `!convert 12 in cm`
+or `!convert 1 m in` therefore lost an actual unit and returned syntax help.
+
+The numeric module also accepted overflowing scientific input as a successful
+`Inf` result. Converting through a base-unit intermediate could overflow or
+underflow even when the final result was representable: `1e300 TB` to `TB`
+became infinity, and a subnormal milligram identity became zero. Temperature
+formulas could likewise overflow before division despite a finite result.
+
+### Corrected behavior
+
+Only a fourth-argument form can contain a separator, and it is removed only
+from the position between the source and destination units:
+
+```text
+!convert 12 in cm
+!convert 12 in to cm
+!convert 1 m in
+!convert 1 m to in
+!convert 1 m in in
+```
+
+The module accepts the existing signed decimal/scientific syntax using ASCII
+numeric characters. References, trailing line breaks and Unicode digits that
+Perl's numeric conversion cannot parse are refused without arithmetic warnings.
+Converted input and final results must be finite. Overflow becomes a bounded
+error rather than a public success. Unit scaling forms the fixed unit ratio
+first, and temperature formulas multiply the ratio rather than multiplying
+before division. Representable large/small conversions therefore remain usable.
+
+This is still ordinary floating-point conversion, not arbitrary precision or
+physical validation of temperatures. Existing underflow/rounding limits and
+display precision remain. Aliases, unit families, negative values, optional
+separators, different-family errors and unknown-unit errors are retained.
+
+### Validation and rollout
+
+The new arithmetic case covers large finite conversions, a subnormal identity,
+input/output overflow, malformed/non-scalar/Unicode numeric input, ordinary
+conversions in all six families and descriptive refusals. The handler case uses
+the actual conversion function and Context with captured bot delivery; it covers
+inch source/destination positions, separators, mixed case and aliases, channel
+and private replies, finite large results, private error delivery, input limits
+and exactly one success audit event only after a successful conversion.
+
+Only Convert.pm and the conversion argument handling in DBCommands.pm change
+in production. No SQL/schema, private setting, persistent format, provider,
+rate-limit, command permission or web deployment change is involved. After
+full host validation, restart the development bot and check ordinary `!convert`
+requests on an enabled test channel. Commit through commit.sh before normal
+production updates; no real stream, outage or external API probe is needed.

@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB856 — Inch arguments and finite unit conversions (2026-10-20)
+
+- Preserve `in` as the inch unit in either unit position. Remove an optional
+  `to`/`in` separator only between source and destination, keeping ordinary
+  inch requests and existing context-based public/private delivery usable.
+- Refuse overflowing inputs/results instead of reporting a successful `Inf`
+  conversion. Form unit ratios before scaling and multiply temperature factors
+  as ratios so representable large/small results avoid unnecessary intermediate
+  overflow/underflow. Retain aliases, unit families and established formatting.
+- Exercise module arithmetic, malformed input, all families and the actual
+  command handler/Context routes. Failed conversions remain caller-only notices
+  without successful-conversion logs. No SQL/schema, private configuration,
+  stored format or service deployment change; retain MB849–MB855 safeguards.
+
 ### MB855 — Coherent Icecast status snapshots (2026-10-20)
 
 - Fetch Icecast once per primary-mount status or summary. Derive server,

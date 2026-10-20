@@ -3163,8 +3163,10 @@ sub mbConvert_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    # allow an optional "to"/"in" separator: "100 km to mi" / "100 km in mi"
-    @args = grep { defined && $_ ne '' && lc($_) ne 'to' && lc($_) ne 'in' } @args;
+    # Only the token between the two units may be an optional separator.
+    # "in" is also the inch unit: preserve it in either unit position.
+    @args = grep { defined && $_ ne '' } @args;
+    splice(@args, 2, 1) if @args >= 4 && lc($args[2]) =~ /\A(?:to|in)\z/;
 
     unless (@args >= 3) {
         $ctx->reply_private("Syntax: convert <value> <from> <to>  (e.g. convert 100 km mi, convert 100 c f)");

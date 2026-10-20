@@ -20,6 +20,7 @@ package Mediabot::Convert;
 
 use strict;
 use warnings;
+use POSIX ();
 
 use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
             # Sans cela ils sont des OCTETS, et interpoler une variable
@@ -140,14 +141,17 @@ sub _fmt {
 }
 
 # temperature conversion via Celsius as pivot
-sub _temp_to_c { my ($v,$u)=@_; return $u eq 'c' ? $v : $u eq 'f' ? (($v-32)*5/9) : ($v-273.15); }
-sub _temp_from_c { my ($v,$u)=@_; return $u eq 'c' ? $v : $u eq 'f' ? ($v*9/5+32) : ($v+273.15); }
+sub _temp_to_c { my ($v,$u)=@_; return $u eq 'c' ? $v : $u eq 'f' ? (($v-32)*(5/9)) : ($v-273.15); }
+sub _temp_from_c { my ($v,$u)=@_; return $u eq 'c' ? $v : $u eq 'f' ? ($v*(9/5)+32) : ($v+273.15); }
 
 # convert($value, $from, $to) -> ($ok, $string_or_error)
 sub convert {
     my ($value, $from_raw, $to_raw) = @_;
 
-    return (0, "value must be a number") unless defined $value && $value =~ /^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/;
+    return (0, "value must be a number") unless defined($value) && !ref($value)
+        && $value =~ /\A[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?\z/;
+    $value = 0 + $value;
+    return (0, "value is outside the supported numeric range") unless POSIX::isfinite($value);
     my $from = _canon($from_raw);
     my $to   = _canon($to_raw);
     return (0, "unknown unit '" . (defined $from_raw ? $from_raw : '') . "'") unless defined $from;
@@ -160,6 +164,8 @@ sub convert {
         }
         my $c   = _temp_to_c($value + 0, $from);
         my $out = _temp_from_c($c, $to);
+        return (0, "conversion result is outside the supported numeric range")
+            unless POSIX::isfinite($out);
         return (1, _fmt($value) . " $LABEL{$from} = " . _fmt($out) . " $LABEL{$to}");
     }
 
@@ -168,8 +174,11 @@ sub convert {
     return (0, "unsupported unit") unless defined $ff && defined $tf;
     return (0, "cannot convert $LABEL{$from} to $LABEL{$to} (different families)") unless $ff eq $tf;
 
-    my $base = ($value + 0) * $FAMILY{$ff}{f}{$from};
-    my $out  = $base / $FAMILY{$tf}{f}{$to};
+    # Form the bounded unit ratio first. A large/small but representable
+    # result must not overflow/underflow through an unnecessary base value.
+    my $out = $value * ($FAMILY{$ff}{f}{$from} / $FAMILY{$tf}{f}{$to});
+    return (0, "conversion result is outside the supported numeric range")
+        unless POSIX::isfinite($out);
     return (1, _fmt($value) . " $LABEL{$from} = " . _fmt($out) . " $LABEL{$to}");
 }
 
