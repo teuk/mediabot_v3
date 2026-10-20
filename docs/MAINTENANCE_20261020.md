@@ -108,3 +108,52 @@ rate-limit, command permission or web deployment change is involved. After
 full host validation, restart the development bot and check ordinary `!convert`
 requests on an enabled test channel. Commit through commit.sh before normal
 production updates; no real stream, outage or external API probe is needed.
+
+## MB857 — Event subscriptions revoked during dispatch
+
+### Reproduced defect
+
+Both EventBus dispatch methods snapshot the current listener list. An earlier
+callback could remove a later listener with `off()`, or clear its subscriptions,
+yet that later callback still ran from the retained snapshot. A nested event
+could return to an outer event that continued invoking the revoked entries.
+
+The integration regression loads the real ScriptDryRun plugin through
+PluginManager, then replaces it from an earlier public-command event listener.
+Normal replacement unregisters the old observer correctly, but the in-progress
+event still called that observer afterward. Its observation counter increased
+despite the unsubscribe. This is a controlled reproduction, not a claim that a
+production reload or external script execution was observed.
+
+### Corrected behavior
+
+`off()` marks only an exact removed entry as revoked; event and global `clear()`
+mark all entries they remove. The shared dispatch claim checks that marker before
+calling a callback. No registry scan is added for each callback. Removing an old
+handle cannot affect another registration with the same callback or metadata.
+
+A callback already executing finishes normally. The fix prevents future calls
+to revoked entries, including calls from existing snapshots; it does not cancel
+work that a callback has already launched. Newly added listeners remain deferred
+from the current snapshot, but are available to a subsequent or nested event.
+One-shots are still claimed before execution, and old snapshot cleanup cannot
+delete newly registered replacements. These rules apply to `emit()` and
+`emit_report()`; revoked callbacks contribute neither execution counts nor errors.
+Live callback exceptions remain isolated and reported normally.
+
+### Validation and rollout
+
+The core regression covers exact/copy/wrong-event handles, regular and one-shot
+removal, nested emissions, event/global clearing, replacement registration,
+clear counts and scope, later delivery and live exception isolation. The plugin
+regression uses actual PluginManager load/replace and ScriptDryRun subscribe,
+observe and unregister methods; a minimal local bot captures lifecycle state
+without connecting to IRC or running any script.
+
+Only `Mediabot/EventBus.pm` changes in production runtime. No SQL/schema,
+private configuration, stored data, command permission, provider policy, network
+request or service change is required. MB849 DTC display and MB850–MB856
+maintenance remain intact. Full host validation is required before development
+acceptance and commit through commit.sh. Check normal command/plugin continuity
+after the development restart; there is no need to force a live plugin reload
+mid-command or disturb production to reproduce this edge case.

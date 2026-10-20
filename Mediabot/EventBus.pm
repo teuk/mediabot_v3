@@ -141,6 +141,9 @@ sub off {
     my @keep;
     for my $current (@{ $self->{listeners}{$name} || [] }) {
         if (_same_listener_entry($current, $entry)) {
+            # A running emit may still hold this exact entry in its snapshot.
+            # Revoke it there too, without affecting a replacement entry.
+            $current->{_removed} = 1;
             $removed++;
             next;
         }
@@ -192,9 +195,11 @@ sub _drop_once_entries_from_current_list {
 sub _claim_listener {
     my ($self, $name, $entry) = @_;
 
+    # off()/clear() also revoke entries held by an active dispatch snapshot.
+    # A callback already running finishes normally; pending callbacks do not run.
     # Claim before calling user code. A nested emit may otherwise execute the
     # same one-shot, or consume one still present in an outer snapshot.
-    return 0 if $entry->{_once_claimed};
+    return 0 if $entry->{_removed} || $entry->{_once_claimed};
     if ($entry->{once}) {
         $entry->{_once_claimed} = 1;
         $self->off($name, $entry);
@@ -302,6 +307,7 @@ sub clear {
         my $name = _event_name($event);
         return 0 unless defined $name;
         my $count = $self->listener_count($name);
+        $_->{_removed} = 1 for @{ $self->{listeners}{$name} || [] };
         delete $self->{listeners}{$name};
         return $count;
     }
@@ -309,6 +315,7 @@ sub clear {
     my $count = 0;
     for my $name (keys %{ $self->{listeners} }) {
         $count += scalar @{ $self->{listeners}{$name} };
+        $_->{_removed} = 1 for @{ $self->{listeners}{$name} };
     }
 
     $self->{listeners} = {};

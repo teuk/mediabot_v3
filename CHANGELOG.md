@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB857 — Event listener revocation during dispatch (2026-10-20)
+
+- Honor exact listener removal and event/global clearing before each pending
+  callback, including callbacks retained by an outer or nested dispatch snapshot.
+  A replaced ScriptDryRun observer no longer receives the in-progress command
+  after PluginManager has unregistered it.
+- Preserve snapshot timing for new subscriptions, same-name replacements,
+  one-shot claiming, priorities, clear scope and callback failure isolation.
+  Execution counts and reports exclude callbacks revoked before invocation.
+- Exercise both dispatch methods, nested events and real PluginManager/plugin
+  replacement. No SQL/schema, private configuration, persistent format or
+  service deployment change; retain MB849–MB856 safeguards.
+
 ### MB856 — Inch arguments and finite unit conversions (2026-10-20)
 
 - Preserve `in` as the inch unit in either unit position. Remove an optional
