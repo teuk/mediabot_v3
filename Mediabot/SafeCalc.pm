@@ -145,7 +145,10 @@ sub _tokenize {
             next;
         }
 
-        if ($expression =~ /\G((?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+\-]?\d+)?)/gc) {
+        # Numeric conversion accepts ASCII digits, whereas regex \d also
+        # accepts Unicode digits. Keep every literal position in the same
+        # alphabet so conversion cannot silently use zero or a numeric prefix.
+        if ($expression =~ /\G((?:(?:[0-9]+(?:\.[0-9]*)?)|(?:\.[0-9]+))(?:[eE][+\-]?[0-9]+)?)/gc) {
             my $raw = $1;
             push @tokens, [ number => _parse_decimal_literal($raw), $raw ];
             next;

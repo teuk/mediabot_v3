@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB859 — Calculator literal conversion consistency (2026-10-20)
+
+- Restrict decimal/scientific literal digits to the ASCII alphabet accepted by
+  Perl numeric conversion. Unicode decimal digits no longer become zero or a
+  numeric prefix while producing an apparently successful arithmetic result.
+- Refuse the whole unsupported expression through the existing private syntax
+  error route, preserving prior calculation history and avoiding success audit
+  entries. Ordinary ASCII literals, hexadecimal input, precedence, supported
+  functions, whitespace and historical formatting retain their behavior.
+- Exercise five Unicode digit families in integer, fraction and exponent
+  positions, plus actual public/private Context delivery and history handling.
+  No SQL/schema, private configuration, persistent format, permission or service
+  deployment change; retain MB849–MB858 safeguards.
+
 ### MB858 — News delivery timer ownership and recovery (2026-10-20)
 
 - Consume each paced news timer once. Retained old callbacks cannot replace a

@@ -219,3 +219,58 @@ change is required. MB849 display and MB850–MB857 maintenance remain intact.
 After full host validation, restart the development bot and check an ordinary
 news request on an enabled test channel, then commit through commit.sh before
 normal production updates. No forced timer fault is needed on a running bot.
+
+## MB859 — Calculator numeric literal consistency
+
+### Reproduced defect
+
+SafeCalc's decimal/scientific tokenizer used Perl's Unicode-aware digit class.
+That class accepted decimal characters which Perl's numeric conversion does not
+interpret. The conversion warning was contained by the existing literal parser,
+but the parser still accepted the converted numeric prefix (or zero).
+
+For example, U+0661 followed by `+1` evaluated to 1 rather than refusing the
+unsupported literal. `2e` followed by U+0662 evaluated to 2. Fractional and mixed
+ASCII/Unicode digits were affected too. The actual calc Context handler returned
+these values as successful results, recorded them in calculation history and
+emitted successful calculation audit events. This is a controlled local
+reproduction, not a claim about an observed user calculation on production.
+
+### Corrected behavior
+
+Every digit position in a decimal/scientific literal now uses the ASCII digits
+accepted by numeric conversion. A Unicode digit anywhere in a literal causes
+the entire expression to fail tokenization with the existing fixed
+`Invalid characters in expression.` error. There is no partial calculation or
+attempt to silently normalize unsupported characters.
+
+The existing command handler already routes that syntax refusal privately.
+It does not update calculation history or emit a success audit event. No change
+to DBCommands or Context is needed. Ordinary ASCII numbers, decimal points,
+signed exponents, hexadecimal literals, operators, precedence and supported
+functions retain their behavior. Accepted whitespace, UTF-8 flagged ASCII
+strings, the original typed expression and six-significant-digit formatting
+remain usable. Length, arithmetic magnitude, exponent and parser-step bounds
+and the prohibition on string eval remain intact.
+
+### Validation and rollout
+
+The pure regression exercises Arabic-Indic, extended Arabic-Indic, Devanagari,
+fullwidth and mathematical digits in integer, mixed-integer, fractional,
+leading-fraction and signed/unsigned exponent positions. Refusals emit no Perl
+warning. Valid decimal/scientific and hexadecimal expressions, negative powers,
+functions, Unicode whitespace and normal formatting remain covered.
+
+The delivery case uses the real calc handler and Context with captured replies.
+It seeds valid history, submits unsupported digits through public and private
+contexts, and checks the caller-only syntax refusal, unchanged prior history,
+absence of a success audit event and warning-free completion. Supported
+calculations still use their normal destination, history and one success audit.
+No new test connects to IRC, a database or an external API.
+
+Only Mediabot/SafeCalc.pm changes in production runtime. No SQL/schema, private
+configuration, stored format, permission, provider/research policy, web deployment
+or native updater change is required. MB849–MB858 safeguards remain intact.
+After full host validation, restart the development bot and check an ordinary
+`!calc 2+2` request on an enabled test channel, then commit through commit.sh
+before normal production updates.
