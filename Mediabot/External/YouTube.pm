@@ -86,7 +86,7 @@ sub getYoutubeDetails {
     $self->{logger}->log(5, "getYoutubeDetails() json_details : $json_details");
 
     my $sYoutubeInfo = eval { decode_json($json_details) };
-    if ($@ || !ref($sYoutubeInfo)) {
+    if ($@ || ref($sYoutubeInfo) ne 'HASH') {
         $self->{logger}->log(3, "getYoutubeDetails() JSON decode error: $@");
         return undef;
     }

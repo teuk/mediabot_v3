@@ -10,6 +10,15 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB866 — YouTube metadata JSON root guard (2026-10-20)
+
+- Require a JSON object before accessing getYoutubeDetails metadata fields.
+  Arrays and boolean roots now return unavailable metadata instead of raising
+  a hash-reference exception. Preserve valid duration/title formatting.
+- Add offline regressions for non-object roots, malformed JSON and a normal
+  metadata response. No SQL/schema or private configuration change.
+
+
 ### MB865 — Independent Spotify pending resources (2026-10-20)
 
 - Preserve resource ID case in Spotify pending ownership. Two case-distinct

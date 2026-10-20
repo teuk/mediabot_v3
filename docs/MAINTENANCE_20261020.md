@@ -627,3 +627,15 @@ remain unchanged. MB849–MB864 safeguards remain covered. After full host check
 restart the development bot for ordinary Spotify/IRC acceptance, then commit
 through commit.sh before normal production updates. No web deployment or
 private configuration change is required.
+
+## MB866 — YouTube metadata JSON root guard
+
+An offline probe on teuk.org reproduced a hash-reference exception when
+getYoutubeDetails received successful HTTP JSON []. The decoder accepted a
+reference without checking that it was a HASH before reading items.
+
+The reader now requires a JSON object. Non-object roots and malformed JSON
+return unavailable metadata. The regression substitutes external HTTP and
+covers arrays, booleans, scalars, null, invalid JSON and a normal object with
+duration/title metadata. No schema, private configuration or service change
+is required. Complete host validation is required before commit.
