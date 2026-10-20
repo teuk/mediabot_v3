@@ -341,3 +341,60 @@ web deployment or native updater change is required. MB849–MB859 maintenance
 remains intact. After full host validation, restart the development bot and
 check normal IRC/scheduler continuity, then commit through commit.sh before
 normal production updates. No fault injection is needed on a running bot.
+
+## MB861 — Per-invocation plugin HTTP cache policy
+
+### Reproduced defect
+
+The shared v3 HTTP service included plugin, URL, Accept and body limit in its
+cache key, but omitted the requested cache TTL. A successful response retained
+for 60 seconds was therefore also returned to an invocation requesting zero
+TTL, without starting a new worker. A shorter policy could inherit a response
+older than its requested lifetime. Zero TTL prevented writes but not reads.
+
+The integration reproduction loads the real short-content-v3 package through
+PluginManager. Two channel policies use the same endpoint, one with TTL 60 and
+one with TTL 0. The zero-TTL channel received the first channel's cached body.
+Changing an already-warmed channel's policy to zero had the same effect. These
+are controlled local reproductions, not observed production endpoint failures.
+
+### Corrected behavior
+
+The normalized TTL joins the existing plugin/URL/Accept/body-limit cache identity.
+Positive policies retain independent entries and expiry times; an equivalent
+explicit/default TTL still shares the same entry. The read path explicitly
+requires a positive TTL, matching the existing positive-TTL-only write path.
+Zero TTL performs no cache read or write and leaves other live entries intact.
+
+The total process cache capacity remains 128 entries across all policies.
+Per-plugin isolation, Accept/body-limit separation, expiry comparisons, cache-hit
+metrics and success-only storage are unchanged. A zero-TTL request still passes
+through the normal two-worker concurrency limit, origin circuit, HTTPS/DNS/body
+validation and final generation/channel checks. It cannot force work through an
+open circuit or deliver after plugin disable. No new option or activation rule
+is introduced; the existing caller setting now applies consistently.
+
+### Validation and rollout
+
+The service regression warms a cache, switches among zero/short/long/default
+TTLs, checks exact expiry boundaries and independent bodies, then exercises
+plugin/Accept/body-limit isolation, bounded eviction, cache metrics, server
+failure/circuit recovery, capacity refusal and cancellation. A real fork/pipe
+worker reads controlled local response data before and after a body change,
+showing that zero TTL obtains the new response despite a warm positive cache.
+
+The integration regression uses the actual PluginManager, invocation policies,
+HTTP service and short-content package. It verifies separate channel TTLs,
+live policy editing, observe output suppression, off admission and disable/unload.
+Only the existing offline bot/context fixture is reused; HTTP fetch is not
+mocked at the plugin boundary. No new test contacts an external endpoint or IRC,
+uses SQL or changes private configuration. Plugin storage uses a temporary local
+data directory.
+
+Only Mediabot/Plugin/HTTPServiceV3.pm changes in production runtime. The cache is
+process-local; no persistent format, SQL/schema, permission, provider/research
+policy, private configuration, native updater or web deployment change is
+required. MB849–MB860 maintenance remains intact. After full host validation,
+restart the development bot and check normal plugin/IRC continuity, then commit
+through commit.sh before normal production updates. No live endpoint failure
+or plugin activation change is needed for acceptance.

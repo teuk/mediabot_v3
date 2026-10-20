@@ -332,9 +332,11 @@ sub fetch {
         unless length($accept) <= 160 && $accept !~ /[\r\n\0]/;
 
     my $now = $self->{clock}->();
-    my $cache_key = join("\0", $plugin, $url, $accept, $max_bytes);
+    # Cache policy is caller-scoped too: a channel requesting no cache or a
+    # shorter lifetime must not inherit another invocation's retained response.
+    my $cache_key = join("\0", $plugin, $url, $accept, $max_bytes, $ttl);
     my $cached = $self->{cache}{$cache_key};
-    if ($cached && $cached->{expires} > $now) {
+    if ($ttl > 0 && $cached && $cached->{expires} > $now) {
         $self->_metric('mediabot_plugin_v3_http_cache_hit_total', { plugin => $plugin });
         $self->_metric('mediabot_plugin_v3_http_request_total', {
             plugin => $plugin, outcome => 'cache',

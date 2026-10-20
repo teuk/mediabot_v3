@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB861 — Caller-specific plugin HTTP cache policy (2026-10-20)
+
+- Include normalized cache TTL in plugin HTTP cache identity. A zero-TTL request
+  no longer reads a response retained for a different invocation or channel;
+  shorter/longer TTL policies keep independently dated entries.
+- Treat zero TTL as no cache read or write, preserving other live cache policies.
+  Equivalent explicit/default TTLs still share an entry. Keep URL/Accept/body-limit
+  and plugin isolation, the cache capacity bound, circuit and concurrency controls.
+- Exercise policy changes on the real short-content runtime, actual worker
+  completion, expiry, eviction, metrics, observe/off and disable behavior.
+  No SQL/schema, private configuration, persistent format or service deployment
+  change; retain MB849–MB860 safeguards.
+
 ### MB860 — Calendar timer failure and lifecycle recovery (2026-10-20)
 
 - Contain countdown constructor failures during calendar rearm. A completed
