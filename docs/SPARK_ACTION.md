@@ -136,8 +136,12 @@ The separate `+SparkAction` switch does not govern these long-silence events.
 DTC performs its network fetch in a worker, drops the result if human activity
 or a channel permission changes, and uses the same ten-line formatted quote
 budget as manual `!dtc`, after the visible command. Quotes of up to ten source
-lines are shown in full; longer quotes show eight dialogue lines, `...`, then
-the canonical source link. The normal IRC/AntiFlood output path is preserved.
+lines are shown in full when their formatted lines fit the 430-byte IRC budget;
+longer quotes show eight dialogue lines, `...`, then the canonical source link.
+An individually clipped line also adds the full-quote link, within the same
+ten-message cap. If that batch is already full, the last two messages become
+`...` and the link. UTF-8 characters remain whole; an unknown ID invents no URL.
+The normal IRC/AntiFlood output path is preserved.
 The two source-backed events have a 40-minute delivered cooldown
 instead of the one-hour default for other Spark events. They receive two
 schedule slots apiece when eligible, while audience thresholds, adaptive

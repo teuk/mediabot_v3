@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB862 — Full DTC links after byte truncation (2026-10-20)
+
+- Add the canonical full-quote link when an individual DTC dialogue exceeds
+  the IRC byte budget, even when the quote contains ten or fewer source lines.
+  Manual `dtc`/`bashfr` and automatic Spark announcements share the correction.
+- Keep the ten-message quote cap, 430-byte formatted line limit, colors and
+  complete short quotes. If a full batch needs a link, retain eight dialogues,
+  the omission marker and the link. Unknown quote IDs never invent a URL.
+- Clip UTF-8 in one encoded prefix, preserving whole characters without
+  repeatedly encoding a shrinking long reply. Cover real command worker
+  delivery, transport refusal, cooldown and channel revocation.
+  No SQL/schema, private configuration, persistent format or service deployment
+  change; retain MB849–MB861 safeguards.
+
 ### MB861 — Caller-specific plugin HTTP cache policy (2026-10-20)
 
 - Include normalized cache TTL in plugin HTTP cache identity. A zero-TTL request

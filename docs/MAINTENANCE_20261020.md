@@ -398,3 +398,59 @@ required. MB849–MB860 maintenance remains intact. After full host validation,
 restart the development bot and check normal plugin/IRC continuity, then commit
 through commit.sh before normal production updates. No live endpoint failure
 or plugin activation change is needed for acceptance.
+
+## MB862 — DTC source access after wire truncation
+
+### Reproduced defect
+
+The shared formatter considered source line count when deciding whether to
+include the full-quote link. It separately clipped each colored IRC line to
+430 UTF-8 bytes. A quote with one long dialogue therefore lost text but offered
+no link to read the complete story. The same happened with up to ten source
+lines, through manual dtc/bashfr random, ID and search requests and automatic
+Spark announcements. This is a controlled local reproduction, not a new report
+of a live source or transport failure.
+
+### Corrected behavior
+
+The formatter records byte clipping as well as source line omission. When a
+known-ID quote loses text to the byte cap, its canonical link is appended if
+there is room. If the batch is already at the configured maximum, its existing
+last two positions become the omission marker and link. The normal ten-message
+quote cap therefore still allows eight dialogue messages before those two
+positions; a shorter clipped quote uses only the messages it needs. The visible
+automatic command and manual search heading stay separate as before.
+
+Quotes already requiring a line-count link keep exactly one link, in the same
+position. Complete short quotes retain their original presentation and acquire
+no unnecessary URL. A missing/invalid ID remains visibly unknown without an
+invented destination. Existing bounded max_lines overrides remain respected.
+
+The wire fitter encodes each long line once, takes the allowed byte prefix
+including space for the ellipsis/reset, and decodes the prefix while discarding
+an incomplete final character. This replaces repeated whole-line encoding for
+each removed character. Formatted lines remain at most 430 UTF-8 bytes, with
+whole international characters, the original prefix and a final color reset.
+
+### Validation and rollout
+
+The formatter regression covers exact first-line byte boundaries, later-line
+clipping, one- through four-byte characters, first/last clipped dialogue,
+three/five/ten-message limits and overflow, link identity/uniqueness, unknown
+IDs, empty input and byte-for-byte unchanged complete quotes. New cases retain
+the existing MB849 ten-line presentation tests rather than changing them.
+
+The delivery regression runs the actual Spark sender and all six manual
+alias/mode combinations through real CommandAsync fork/pipe completion. It
+compares the quote bytes between automatic and manual paths for short and full
+batches. Channel loss after the first manual dialogue blocks the final URL;
+automatic transport refusal still stops delivery and consumes the normal
+cooldown. Only external source IO and final IRC transport are replaced. There
+is no external HTTP, IRC, SQL or private configuration access in the new cases.
+
+Only Mediabot/DTC/Format.pm changes in production runtime. Permissions, pacing,
+AntiFlood, fetch ownership and source limits, the native updater, private state,
+provider/research policy and SQL/schema remain unchanged. No configuration,
+schema or web deployment is required. MB849–MB861 maintenance remains covered.
+After complete host validation, restart the development bot for normal DTC/IRC
+acceptance, then commit through commit.sh before normal production updates.
