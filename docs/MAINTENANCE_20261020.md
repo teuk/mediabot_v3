@@ -574,3 +574,56 @@ SQL/schema remain unchanged. MB849–MB863 maintenance remains covered.
 After complete host checks, restart the development bot for ordinary URL/IRC
 acceptance, then commit through commit.sh before normal production updates.
 No private configuration, schema migration or web deployment is required.
+
+## MB865 — Spotify pending identity retains resource case
+
+### Reproduced defect
+
+The shared MB864 URL gate could correctly admit two case-distinct Spotify
+links, but the Spotify handler still lowercased the complete clean URL for its
+pending key. Concurrent resources whose IDs differed only by case therefore
+shared a pending request: only one worker launched, and the second caller's
+metadata/reply was lost. Controlled deferred completion and real local
+AsyncWorker reproductions both demonstrate the problem on intact MB864.
+This is not a reported Spotify service incident.
+
+### Corrected behavior
+
+Pending identity now folds only the supported open.spotify.com scheme/host
+prefix. Resource IDs and the rest of the existing clean path retain their
+case. Tracking-query removal stays in its existing location and continues to
+allow equivalent tracking-link requests to coalesce. HTTP receives the same
+clean URL and original resource ID as before; locale paths, scheme separation,
+resource types, URL extraction and routing policy are unchanged.
+
+Distinct resources own separate workers and completion state. Completing or
+failing one request does not consume the other pending slot. Matching pending
+URLs still coalesce, including scheme/host case variations and stripped tracking
+queries. Each admitted worker retains its original caller and channel; no new
+fan-out or result cache is added. Setup failure remains contained and retryable.
+
+### Validation and rollout
+
+The pending case executes the real handler for track, album, playlist, episode,
+show and artist resources. Deferred workers expose simultaneous ownership,
+normal duplicate coalescing, out-of-order completion, exactly-once delivery,
+per-request destinations, failure with a sibling pending, and retries after
+refused/thrown setup. No HTTP is executed by this controlled adapter.
+
+The integration case runs the actual URL dispatcher, Spotify fetch/parser and
+AsyncWorker fork/pipe path with substituted external HTTP. Two case-distinct
+tracks both publish matching titles, artist, year and duration. Captured HTTP
+requests preserve each exact resource in oEmbed and lightweight embed URLs.
+The test retains normal same-channel anti-repeat, pending duplicate coalescing,
+later fetches on another channel, current caller/destination, badge/reset
+formatting and disabled-to-enabled admission. No Chromium, real API, IRC or
+SQL connection is used. Existing tests are unchanged.
+
+Only Mediabot/External/Spotify.pm changes in production runtime. No new module
+dependency or schema change is introduced. Network endpoints, HTTP timeouts,
+metadata fallbacks, URL validation, permissions, pending failure policy,
+MetaAI research, persistent formats, the native updater and private configuration
+remain unchanged. MB849–MB864 safeguards remain covered. After full host checks,
+restart the development bot for ordinary Spotify/IRC acceptance, then commit
+through commit.sh before normal production updates. No web deployment or
+private configuration change is required.

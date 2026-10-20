@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB865 — Independent Spotify pending resources (2026-10-20)
+
+- Preserve resource ID case in Spotify pending ownership. Two case-distinct
+  links no longer coalesce into one worker and silently lose the second reply,
+  including after the shared MB864 URL admission gate accepts both links.
+- Fold only the supported URL's scheme/host for pending identity. Keep existing
+  tracking-query removal, path/locale spelling, normal duplicate coalescing,
+  independent completion/failure cleanup and current caller/channel delivery.
+- Cover all six supported resource types, out-of-order completion, retry/setup
+  failure and actual URL routing, lightweight metadata parsing and worker pipes.
+  No SQL/schema, private configuration, persistent format or service deployment
+  change; retain MB849–MB864 safeguards.
+
 ### MB864 — Case-sensitive URL admission and Instagram caching (2026-10-20)
 
 - Preserve resource case in URL anti-repeat identity: two YouTube IDs, paths

@@ -348,7 +348,10 @@ sub _handle_spotify {
         return undef;
     }
 
-    my $pending_key = lc($clean_url);
+    # Resource IDs are case-sensitive. Normalize only the supported URL's
+    # scheme/host, retaining the existing tracking-query removal and path.
+    my $pending_key = $clean_url;
+    $pending_key =~ s{\A(https?://open\.spotify\.com)(?=/|\z)}{lc($1)}ei;
 
     my $finish = sub {
         my ($info, $worker_status) = @_;
