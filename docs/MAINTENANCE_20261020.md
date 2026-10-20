@@ -274,3 +274,70 @@ or native updater change is required. MB849–MB858 safeguards remain intact.
 After full host validation, restart the development bot and check an ordinary
 `!calc 2+2` request on an enabled test channel, then commit through commit.sh
 before normal production updates.
+
+## MB860 — Calendar timer construction and lifecycle recovery
+
+### Reproduced defects
+
+Calendar rearm created its IO::Async countdown outside the arm's error boundary.
+The initial start wrapper contained construction failures, but construction of
+the next occurrence from an expiry callback could throw out of that callback.
+The task remained marked started with no owned timer or next occurrence. A
+normal start then reported success without scheduling anything.
+
+The existing weak timer reference was installed only after loop add succeeded.
+An add failure before that point left a timer/callback reference cycle, even
+after removal from the native loop. Reentry from construction, add or start
+could also replace or restart a task while the old arm was being installed.
+The old frame could report success, orphan an extra timer or clear/stop the
+new lifecycle's timer when handling its own failure.
+
+Expiry similarly removed its notifier before clearing ownership. A restart
+from that cleanup boundary could establish a new timer which the old expiry
+then erased, while still executing the superseded occurrence and counting it
+as a tick. These are controlled native-boundary reproductions, not claims of
+observed production outages or concurrent operator restarts.
+
+### Corrected behavior
+
+Construction, publication, add and start now share the calendar arm's checked
+error path. A provisional notifier has a local strong owner and a weak callback
+reference before entering native loop operations. The task identity, generation,
+started state and exact timer ownership are checked across these boundaries.
+If installation fails or is superseded, only that provisional notifier is
+stopped/removed. Its ownership is detached before cleanup so cleanup reentry
+cannot erase another timer. An ordinary failure leaves the existing registration
+stopped with no next occurrence, available for explicit start/retry. A completed
+occurrence remains counted even when its following rearm fails.
+
+Expiry claims its exact current timer, clears ownership before native removal,
+then rechecks the lifecycle before invoking the task and updating tick metadata.
+A newer lifecycle survives the old expiry and owns its own future occurrence.
+A callback already executing is not interrupted; existing post-callback identity
+and generation checks still prevent the old callback from rearming a successor.
+
+Calendar date resolution, integer delays, minimum one-second wait, interval
+metadata and callback failure logging are unchanged. Periodic task setup/start
+is not modified. There is no automatic immediate retry loop or catch-up burst.
+
+### Validation and rollout
+
+The recovery case injects constructor/add/start failures using real IO::Async
+objects. It checks stopped metadata, failed notifier release, retained callback
+inactivity and scheduler lifetime, explicit retry and removal. An actual native
+expiry fails its next constructor, keeps an unrelated countdown responsive,
+then executes a real later occurrence after retry with correct tick statistics.
+
+The ownership case restarts the same object from constructor/add/start, with
+both normal return and an old-frame exception. It also replaces the registration
+under the same name and restarts from native expiry removal. New timer identity,
+metadata, notifier counts, callback execution and final removal remain checked.
+Existing calendar resolver, periodic ownership and timer failure regressions
+are included in qualification. No new test connects to IRC, SQL or an API.
+
+Only Mediabot/Scheduler.pm changes in production runtime. No SQL/schema, private
+configuration, stored format, command permission, provider/research policy,
+web deployment or native updater change is required. MB849–MB859 maintenance
+remains intact. After full host validation, restart the development bot and
+check normal IRC/scheduler continuity, then commit through commit.sh before
+normal production updates. No fault injection is needed on a running bot.

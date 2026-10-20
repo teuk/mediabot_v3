@@ -184,6 +184,16 @@ sub add {
     return $self;
 }
 
+sub _calendar_owner {
+    my ($self, $name, $address, $generation, $timer) = @_;
+    my $task = $self->{_tasks}{$name} or return;
+    return unless refaddr($task) == $address
+        && $task->{generation} == $generation && $task->{started};
+    return if $timer && (!$task->{timer}
+        || refaddr($task->{timer}) != refaddr($timer));
+    return $task;
+}
+
 # Arm one calendar occurrence. The task registry and loop are the strong owners;
 # callback lexicals are weak to avoid timer/callback/scheduler reference cycles.
 sub _arm_calendar {
@@ -220,67 +230,71 @@ sub _arm_calendar {
     my $weak_self = $self;
     weaken($weak_self);
 
-    my $timer;
-    $timer = IO::Async::Timer::Countdown->new(
-        delay     => $delay,
-        on_expire => sub {
-            my $scheduler = $weak_self or return;
-            my $fired     = $timer     or return;
-            my $current   = $scheduler->{_tasks}{$name} or return;
-
-            # mb356-B1: ignore stale callbacks from a previous lifecycle or a
-            # removed/re-added task with the same name.
-            return unless refaddr($current) == $task_addr;
-            return unless $current->{generation} == $generation;
-            return unless $current->{timer}
-                && refaddr($current->{timer}) == refaddr($fired);
-
-            eval { $scheduler->{loop}->remove($fired) };
-            $current->{timer}    = undef;
-            $current->{next_run} = 0;
-
-            return unless $current->{started};
-
-            my $tick_now = time();
-            $current->{ticks}++;
-            $current->{last_tick} = $tick_now;
-            $scheduler->_log(4,
-                "Scheduler: calendar tick '$name' (#$current->{ticks})");
-
-            $scheduler->_run_task_callback($name, $current->{cb});
-
-            $current = $scheduler->{_tasks}{$name} or return;
-            return unless refaddr($current) == $task_addr;
-            return unless $current->{generation} == $generation;
-            return unless $current->{started};
-
-            unless ($scheduler->_arm_calendar($name)) {
-                $current = $scheduler->{_tasks}{$name} or return;
-                return unless refaddr($current) == $task_addr;
-                return unless $current->{generation} == $generation;
-                $current->{started} = 0;
-                $scheduler->_log(1,
-                    "Scheduler: calendar task '$name' stopped because re-arm failed");
-            }
-        },
-    );
-
+    my ($timer, $owned);
     my $ok = eval {
-        $task->{timer}    = $timer;
-        $task->{next_run} = $next;
-        $self->{loop}->add($timer);
+        $owned = IO::Async::Timer::Countdown->new(
+            delay     => $delay,
+            on_expire => sub {
+                my $scheduler = $weak_self or return;
+                my $fired     = $timer     or return;
+                my $current = $scheduler->_calendar_owner(
+                    $name, $task_addr, $generation, $fired) or return;
+
+                # Revoke the occurrence before native cleanup can reenter.
+                $current->{timer}    = undef;
+                $current->{next_run} = 0;
+                eval { $scheduler->{loop}->remove($fired) };
+                $current = $scheduler->_calendar_owner(
+                    $name, $task_addr, $generation) or return;
+
+                my $tick_now = time();
+                $current->{ticks}++;
+                $current->{last_tick} = $tick_now;
+                $scheduler->_log(4,
+                    "Scheduler: calendar tick '$name' (#$current->{ticks})");
+
+                $scheduler->_run_task_callback($name, $current->{cb});
+
+                $current = $scheduler->_calendar_owner(
+                    $name, $task_addr, $generation) or return;
+
+                unless ($scheduler->_arm_calendar($name)) {
+                    $current = $scheduler->_calendar_owner(
+                        $name, $task_addr, $generation) or return;
+                    $current->{started} = 0;
+                    $scheduler->_log(1,
+                        "Scheduler: calendar task '$name' stopped because re-arm failed");
+                }
+            },
+        );
+
+        # Keep the provisional notifier alive locally; its callback owns only
+        # a weak reference, including when loop add fails before publication.
+        $timer = $owned;
         weaken($timer);
-        $task->{timer}->start;
+        die "calendar arm superseded\n"
+            unless $self->_calendar_owner($name, $task_addr, $generation);
+        $task->{timer}    = $owned;
+        $task->{next_run} = $next;
+        $self->{loop}->add($owned);
+        die "calendar arm superseded\n"
+            unless $self->_calendar_owner($name, $task_addr, $generation, $owned);
+        $owned->start;
+        die "calendar arm superseded\n"
+            unless $self->_calendar_owner($name, $task_addr, $generation, $owned);
         1;
     };
 
     unless ($ok) {
         my $err = $@ || 'unknown error';
-        my $owned = $task->{timer};
+        # A reentrant restart may already own a different timer. Clean only
+        # this provisional occurrence, detaching it before cleanup hooks run.
+        if ($owned && $task->{timer} && refaddr($task->{timer}) == refaddr($owned)) {
+            $task->{timer}    = undef;
+            $task->{next_run} = 0;
+        }
         eval { $owned->stop if $owned && $owned->can('stop') };
         eval { $self->{loop}->remove($owned) if $owned };
-        $task->{timer}    = undef;
-        $task->{next_run} = 0;
         $err =~ s/\s+/ /g;
         $self->_log(1, "Scheduler: failed to arm '$name': $err");
         return 0;

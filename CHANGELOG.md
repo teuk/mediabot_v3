@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB860 — Calendar timer failure and lifecycle recovery (2026-10-20)
+
+- Contain countdown constructor failures during calendar rearm. A completed
+  occurrence no longer leaves an uncaught timer callback exception and a task
+  marked started with no next timer; the registration can be explicitly retried.
+- Keep provisional timers weakly referenced by their callbacks from construction
+  through add/start failure. Clean only the exact failed occurrence, preserving
+  same-object restarts and distinct same-name replacements at native boundaries.
+- Revoke expired timer ownership before native removal and recheck the task
+  lifecycle before invoking its callback or changing tick statistics. Cleanup
+  cannot erase a restarted task's timer or run its superseded occurrence.
+- Exercise native failures, actual expiry/retry, replacements and retained
+  callback lifetime. Preserve schedule resolution, periodic tasks and existing
+  callback error isolation. No SQL/schema, private configuration, persistent
+  format or service deployment change; retain MB849–MB859 safeguards.
+
 ### MB859 — Calculator literal conversion consistency (2026-10-20)
 
 - Restrict decimal/scientific literal digits to the ASCII alphabet accepted by
