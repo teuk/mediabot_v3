@@ -61,10 +61,10 @@ sub _extract_sub_body_tmdb_mojibake {
 return sub {
     my ($assert) = @_;
 
-    require Mediabot::External::Claude;
+    require Mediabot::External::TMDB;
 
     my $src = _slurp_tmdb_mojibake(
-        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'TMDB.pm')
     );
 
     my $helper_body = _extract_sub_body_tmdb_mojibake($src, '_repair_utf8_mojibake');
@@ -83,29 +83,29 @@ return sub {
     $assert->like(
         $src,
         qr/^use Encode qw\(encode decode\);$/m,
-        'External/Claude.pm imports Encode helpers for mojibake conversion'
+        'External/TMDB.pm imports Encode helpers for mojibake conversion'
     );
 
     $assert->is(
-        Mediabot::External::Claude::_repair_utf8_mojibake('piÃ¨ge de cristal'),
+        Mediabot::External::TMDB::_repair_utf8_mojibake('piÃ¨ge de cristal'),
         'piège de cristal',
         'mojibake piÃ¨ge is repaired to piège'
     );
 
     $assert->is(
-        Mediabot::External::Claude::_repair_utf8_mojibake('AmÃ©lie'),
+        Mediabot::External::TMDB::_repair_utf8_mojibake('AmÃ©lie'),
         'Amélie',
         'mojibake AmÃ©lie is repaired to Amélie'
     );
 
     $assert->is(
-        Mediabot::External::Claude::_repair_utf8_mojibake('Lâ€™Ã©tÃ© meurtrier'),
+        Mediabot::External::TMDB::_repair_utf8_mojibake('Lâ€™Ã©tÃ© meurtrier'),
         'L’été meurtrier',
         'CP1252-style mojibake apostrophe and accents are repaired'
     );
 
     $assert->is(
-        Mediabot::External::Claude::_repair_utf8_mojibake('piège de cristal'),
+        Mediabot::External::TMDB::_repair_utf8_mojibake('piège de cristal'),
         'piège de cristal',
         'valid UTF-8-looking French query is left unchanged'
     );

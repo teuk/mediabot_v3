@@ -41,7 +41,8 @@ sub run_tmdb {
         local *Mediabot::Helpers::botNotice = sub {push @{$_[0]{notices}}, [$_[1], $_[2]]; 1};
         local $SIG{__WARN__} = sub {push @warnings, @_};
         my %handlers = Mediabot::_builtin_public_command_handlers();
-        $ok = eval {$result = $handlers{tmdb}->($ctx); 1};
+        my $handler = $args{handler} // $handlers{tmdb};
+        $ok = eval {$result = $handler->($ctx); 1};
         $error = $@;
     }
     return {ok => $ok, error => $error, result => $result, bot => $bot,

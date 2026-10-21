@@ -20,7 +20,7 @@ sub _slurp_639 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_639(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
+    my $src = _slurp_639(File::Spec->catfile('.', 'Mediabot', 'External', 'TMDB.pm'));
 
     # --- 1. Le helper de titre, exécuté ------------------------------------
     my ($body) = $src =~ /(sub _tmdb_first_nonempty \{.*?\n\}\n)/s;

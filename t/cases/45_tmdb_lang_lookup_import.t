@@ -29,6 +29,7 @@ return sub {
     my ($assert) = @_;
 
     my $external = _slurp_tmdb_lang_lookup(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $tmdb = _slurp_tmdb_lang_lookup(File::Spec->catfile('.', 'Mediabot', 'External', 'TMDB.pm'));
     my $channel  = _slurp_tmdb_lang_lookup(File::Spec->catfile('.', 'Mediabot', 'ChannelCommands.pm'));
 
     $assert->ok(
@@ -37,7 +38,7 @@ return sub {
     );
 
     $assert->ok(
-        $external =~ /my \$lang\s+=\s+getTMDBLangChannel\(\$self, \$channel\) \|\| 'en'/,
+        $tmdb =~ /my \$lang\s+=\s+Mediabot::External::getTMDBLangChannel\(\$self, \$channel\) \|\| 'en'/,
         'mbTMDBSearch_ctx calls getTMDBLangChannel'
     );
 

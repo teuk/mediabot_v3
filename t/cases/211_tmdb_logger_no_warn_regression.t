@@ -106,7 +106,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_211(
-        File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'TMDB.pm')
     );
 
     my $tmdb_ctx = _extract_sub_211($src, 'mbTMDBSearch_ctx');

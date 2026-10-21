@@ -198,35 +198,39 @@ say_info("\n[2] TLS verification secure by default");
         fail("country.is HTTPS lookup does not explicitly verify TLS");
     }
 
-    # Dans Claude.pm, chaque _make_http qui sert un endpoint authentifié doit
-    # avoir verify_SSL => 1. On vérifie qu'aucun _make_http n'y est appelé
-    # SANS verify_SSL => 1.
-    my $claude = slurp('Mediabot/External/Claude.pm') // '';
-    my @calls;
-
-    while ($claude =~ /_make_http\s*\((.*?)\)/gs) {
-        push @calls, $1;
+    # MB878: follow both implementation owners after TMDB extraction. Each
+    # owner must contain its expected authenticated calls; no missing module
+    # or missing call may be hidden by the other owner's successful checks.
+    my (@calls, @missing);
+    for my $file (qw(Mediabot/External/Claude.pm Mediabot/External/TMDB.pm)) {
+        my $source = slurp($file) // '';
+        my @owned;
+        while ($source =~ /_make_http\s*\((.*?)\)/gs) {
+            push @owned, $1;
+        }
+        push @missing, $file unless @owned;
+        push @calls, @owned;
     }
 
     my $bad = grep {
         $_ !~ /verify_SSL\s*=>\s*1/
     } @calls;
 
-    if (@calls && $bad == 0) {
+    if (!@missing && $bad == 0) {
         pass(
             "all "
             . scalar(@calls)
             . " authenticated HTTP calls set verify_SSL => 1"
         );
     }
-    elsif (!@calls) {
+    elsif (@missing) {
         fail(
-            "could not find _make_http calls in Claude.pm (shape changed?)"
+            "could not find authenticated _make_http calls in " . join(', ', @missing)
         );
     }
     else {
         fail(
-            "$bad authenticated HTTP call(s) missing verify_SSL => 1 in Claude.pm"
+            "$bad authenticated HTTP call(s) missing verify_SSL => 1 in Claude/TMDB owners"
         );
     }
 }

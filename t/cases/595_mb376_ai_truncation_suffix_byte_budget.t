@@ -144,9 +144,10 @@ return sub {
     # les trois sorties IRC utilisent désormais le renderer commun, qui réserve
     # puis borne son suffixe dans le même budget.
     my $src = _slurp_595(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
+    my $budget_src = _slurp_595(File::Spec->catfile('.', 'Mediabot', 'IRC', 'TextBudget.pm'));
     my $irc_output = _slurp_595(File::Spec->catfile('.', 'Mediabot', 'AI', 'IRCOutput.pm'));
-    $assert->like($src, qr/sub _irc_wire_bytes/, 'helper de coût wire défini');
-    $assert->like($src, qr/sub _irc_prefix_for_budget/, 'helper de préfixe byte-safe défini');
+    $assert->like($budget_src, qr/sub _irc_wire_bytes/, 'helper de coût wire défini');
+    $assert->like($budget_src, qr/sub _irc_prefix_for_budget/, 'helper de préfixe byte-safe défini');
     $assert->like($src, qr/sub _fit_truncation_suffix/, 'helper de suffixe byte-safe défini');
     $assert->like($irc_output, qr/sub format_ai_reply/,
         'renderer commun possède le contrat de réponse IRC');

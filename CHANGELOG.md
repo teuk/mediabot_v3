@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB878 — Extract TMDB and share IRC text budgets (2026-10-21)
+
+- Move TMDB query repair, catalogue search and rendering out of Claude.pm
+  into a dedicated module. Share the existing wire-byte and prefix helpers
+  through IRC::TextBudget, preserving all original function bodies.
+- Import TMDB directly in the External facade and retain the existing facade
+  exports, Claude optional imports and fully qualified legacy calls through
+  aliases to the same implementations. Preserve the MB877 response contracts.
+- Retarget source checks and the authenticated TLS audit to their owners;
+  require coverage of both Claude and TMDB. Add isolated-load, compatibility
+  and audit-mutation regressions. No SQL schema, migration, private
+  configuration or service change.
+
 ### MB877 — TMDB optional metadata and UTF-8 reply limits (2026-10-21)
 
 - Guard optional synopsis/date leaves and require a finite numeric scalar

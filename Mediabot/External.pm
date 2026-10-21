@@ -48,7 +48,7 @@ Mediabot::External::Spotify->import(qw(
     _handle_spotify
 ));
 
-# mb95-R1: sous-module Claude/ChatGPT/TMDB
+# AI command compatibility and conversation/summary entry points.
 require Mediabot::External::Claude;
 Mediabot::External::Claude->import(qw(
     _chatgpt_conf_int
@@ -57,13 +57,13 @@ Mediabot::External::Claude->import(qw(
     chatGPT_ctx
     chatGPT
     _chatgpt_wrap
-    _repair_utf8_mojibake
-    mbTMDBSearch_ctx
-    get_tmdb_info
     claude_ctx
     claudeAI
     _claude_send_and_parse
 ));
+
+require Mediabot::External::TMDB;
+Mediabot::External::TMDB->import(qw(_repair_utf8_mojibake mbTMDBSearch_ctx get_tmdb_info));
 
 # Google Gemini uses the same provider-neutral client and IRC pacing boundary.
 require Mediabot::External::Gemini;

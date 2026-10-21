@@ -65,7 +65,8 @@ return sub {
     );
 
     my $chatgpt_body = _extract_sub_body_external_ctx_args($src, 'chatGPT_ctx');
-    my $tmdb_body    = _extract_sub_body_external_ctx_args($src, 'mbTMDBSearch_ctx');
+    my $tmdb_src = _slurp_external_ctx_args(File::Spec->catfile('.', 'Mediabot', 'External', 'TMDB.pm'));
+    my $tmdb_body    = _extract_sub_body_external_ctx_args($tmdb_src, 'mbTMDBSearch_ctx');
 
     $assert->ok(
         defined $chatgpt_body,

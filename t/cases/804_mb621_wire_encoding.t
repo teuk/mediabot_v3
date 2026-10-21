@@ -56,7 +56,7 @@ return sub {
     my @speaking = qw(UserCommands Helpers Partyline ChannelCommands DBCommands
                       Quotes Convert LoginCommands AdminCommands CommandAsync
                       External/URL External/YouTube External/Claude
-                      External/Weather External/Fortnite
+                      External/Weather External/Fortnite External/TMDB
                       External/News External/Horoscope);
     my @missing;
     for my $mod (@speaking) {

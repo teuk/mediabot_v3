@@ -36,24 +36,28 @@ return sub {
             202_generic_urltitle_cleanup_regression.t
         )],
         'Claude.pm' => [qw(
-            147_tmdb_utf8_query_and_lang_safety.t
-            148_tmdb_result_iteration_robust.t
-            149_tmdb_repair_mojibake_query.t
-            158_tmdb_results_must_be_array.t
             159_external_ctx_args_defensive.t
             167_chatgpt_json_structure_guard.t
             179_chatgpt_openai_runtime_config.t
             182_openai_fallback_model.t
             186_openai_system_prompt_config.t
             208_chatgpt_http_guard_debug5_regression.t
-            210_tmdb_final_message_truncate_regression.t
-            211_tmdb_logger_no_warn_regression.t
             220_external_claude_api.t
             222_external_claude_chanset_gate.t
             224_external_claude_history.t
             226_external_claude_ratelimit.t
             227_external_claude_callback.t
             235_external_claude_persona.t
+        )],
+        'TMDB.pm' => [qw(
+            147_tmdb_utf8_query_and_lang_safety.t
+            148_tmdb_result_iteration_robust.t
+            149_tmdb_repair_mojibake_query.t
+            158_tmdb_results_must_be_array.t
+            210_tmdb_final_message_truncate_regression.t
+            211_tmdb_logger_no_warn_regression.t
+            639_mb424_tmdb_title_fallback.t
+            159_external_ctx_args_defensive.t
         )],
         'YouTube.pm' => [qw(
             150_youtube_search_uses_imported_uri_escape_utf8.t
@@ -107,12 +111,12 @@ return sub {
     my $t149 = _slurp_mb303('t/cases/149_tmdb_repair_mojibake_query.t');
     $assert->like(
         $t149,
-        qr/require Mediabot::External::Claude;/,
+        qr/require Mediabot::External::TMDB;/,
         'TMDB mojibake test loads the implementation owner'
     );
     $assert->like(
         $t149,
-        qr/Mediabot::External::Claude::_repair_utf8_mojibake/,
+        qr/Mediabot::External::TMDB::_repair_utf8_mojibake/,
         'TMDB mojibake test calls the implementation owner'
     );
 
