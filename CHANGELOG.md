@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB874 — Horoscope sign validation and efficient Unicode fitting (2026-10-21)
+
+- Reject a declared horoscope sign that is an object, array or JSON boolean,
+  instead of skipping the identity check and publishing that forecast. Keep
+  existing optional/null sign compatibility, sign aliases, mirror recovery
+  and deterministic local fallback; avoid stringifying malformed containers.
+- Fit overlong forecasts by accumulating a prefix of whole Unicode graphemes
+  within the existing UTF-8 budget. Avoid repeatedly joining and encoding a
+  shrinking whole forecast; preserve word/punctuation trimming and ellipsis.
+- Add offline response/formatting regressions and native worker delivery for
+  horoscope/horo, including mirror and local fallback. Keep HTTP/TLS settings,
+  translation policy, two-line output and byte limits. No SQL schema,
+  migration, private configuration or service change.
+
 ### MB873 — Exact DansTonChat search links in result order (2026-10-21)
 
 - Extract DTC search IDs from actual anchor targets, admitting complete

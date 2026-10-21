@@ -193,11 +193,12 @@ sub _fetch_one {
     # fait rire un canal entier aux depens du bot. En cas de doute, on ne
     # montre RIEN et l'horoscope local prend le relais.
     my $got = $node->{sign};
-    if (defined $got && !ref $got) {
+    if (defined $got) {
         my $got_slug = normalize_sign($got);
         unless (defined $got_slug && $got_slug eq $slug) {
+            my $reported = ref($got) ? '<non-scalar>' : $got;
             eval { $self->{logger}->log(2,
-                "horoscope: provider answered '$got' for '$slug' - ignored") };
+                "horoscope: provider answered '$reported' for '$slug' - ignored") };
             return undef;
         }
     }
@@ -228,11 +229,16 @@ sub cap_text {
     return undef unless defined $text;
     return $text if length(Encode::encode('UTF-8', $text)) <= $bytes;
     return '' if $bytes < 4;
-    my @clusters = $text =~ /\X/g;
-    my $short = $text;
-    while (@clusters && length(Encode::encode('UTF-8', $short)) > $bytes - 3) {
-        pop @clusters;
-        $short = join '', @clusters;
+    # Fit a prefix of whole graphemes without repeatedly encoding/joining the
+    # shrinking source. Only the bounded prefix needs per-cluster encoding.
+    my $short = '';
+    my $used = 0;
+    while ($text =~ /(\X)/g) {
+        my $cluster = $1;
+        my $size = length(Encode::encode('UTF-8', $cluster));
+        last if $used + $size > $bytes - 3;
+        $short .= $cluster;
+        $used += $size;
     }
     $short =~ s/\s+\S*\z// if $short =~ /\s/;
     $short =~ s/[\s,;:]+\z//;
