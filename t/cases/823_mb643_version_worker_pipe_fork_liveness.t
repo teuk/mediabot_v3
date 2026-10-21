@@ -18,7 +18,7 @@ sub _slurp_823 {
 return sub {
     my ($assert) = @_;
 
-    my $hsrc = _slurp_823('Mediabot/Helpers.pm');
+    my $hsrc = _slurp_823('Mediabot/Version/Remote.pm');
     my $awsrc = _slurp_823('Mediabot/AsyncWorker.pm');
     my ($async) = $hsrc =~ /(sub getVersion_async \{.*?\n\}\n# getDetailedVersion)/s;
 

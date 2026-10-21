@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB898 — Give remote version checks their own module (2026-10-22)
+
+- Move remote VERSION source selection, HTTP fetching and the AsyncWorker
+  adapter into Version::Remote. Keep seven Helpers entry points, its default
+  exports and 93 other function bodies unchanged. Local identity/path ownership,
+  command replies and update decisions retain their existing owners.
+- Preserve the mutable historical URL list, late Helpers hooks, source overrides,
+  HTTP/TLS policy, deadlines, version parsing, failure reasons, quiet child logger
+  and callback-once behavior. Share the existing Version::Format and AsyncWorker
+  implementations; loading the new module performs no network or database I/O.
+- Follow implementation ownership in ten existing cases and add six behavior
+  assertions to case 834, including three fresh-interpreter load orders. Keep the
+  numbered case catalogue unchanged. No schema, private config or service change.
+
+
 ### MB897 — Give command throttling an IRC module (2026-10-21)
 
 - Move the existing antiflood integer reader, command cooldown, channel command

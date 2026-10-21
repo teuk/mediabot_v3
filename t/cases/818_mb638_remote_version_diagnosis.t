@@ -160,7 +160,7 @@ return sub {
     }
 
     # [1] getVersion consomme LE MEME fetch (pas de seconde implementation)
-    my $hsrc = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Helpers.pm'
+    my $hsrc = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Version/Remote.pm'
         or die $!; local $/; <$fh> };
     my ($gv) = $hsrc =~ /(sub getVersion \{.*?\n\}\n)/s;
     $assert->like($gv, qr/fetch_remote_version\(\$self\)/,

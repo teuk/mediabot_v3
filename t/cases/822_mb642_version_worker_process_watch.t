@@ -44,7 +44,7 @@ sub _extract_822 {
 return sub {
     my ($assert) = @_;
 
-    my $hsrc = _slurp_822('Mediabot/Helpers.pm');
+    my $hsrc = _slurp_822('Mediabot/Version/Remote.pm');
     my $awsrc = _slurp_822('Mediabot/AsyncWorker.pm');
     my $usrc = _slurp_822('Mediabot/Update.pm');
     my $async = _extract_822($hsrc, 'getVersion_async');

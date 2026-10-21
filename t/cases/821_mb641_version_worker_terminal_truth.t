@@ -19,7 +19,7 @@ sub _slurp_821 {
 
 return sub {
     my ($assert) = @_;
-    my $src = _slurp_821('Mediabot/Helpers.pm');
+    my $src = _slurp_821('Mediabot/Version/Remote.pm');
 
     my ($async) = $src =~ /(sub getVersion_async \{.*?\n\}\n# getDetailedVersion)/s;
     my ($reason) = $src =~ /(sub _version_asyncworker_reason \{.*?\n\}\n\nsub getVersion_async)/s;

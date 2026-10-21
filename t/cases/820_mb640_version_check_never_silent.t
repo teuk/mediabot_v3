@@ -40,7 +40,7 @@ return sub {
     my ($assert) = @_;
 
     require Mediabot::Helpers;
-    my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Helpers.pm'
+    my $src = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Version/Remote.pm'
         or die $!; local $/; <$fh> };
 
     # [1] un seul client HTTP pour tout le bot

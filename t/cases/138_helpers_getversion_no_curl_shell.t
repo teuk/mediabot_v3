@@ -59,7 +59,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_helpers_getversion(
-        File::Spec->catfile('.', 'Mediabot', 'Helpers.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Version', 'Remote.pm')
     );
 
     my $body = _extract_sub_body_helpers_getversion($src, 'getVersion');
@@ -72,7 +72,7 @@ return sub {
     $assert->like(
         $src,
         qr/^use HTTP::Tiny;$/m,
-        'Helpers.pm imports HTTP::Tiny'
+        'Version::Remote imports HTTP::Tiny'
     );
 
     # mb638: la requete a demenage dans fetch_remote_version — une seule
@@ -100,7 +100,7 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/my \(\$fetched, \$fetch_error\) = fetch_remote_version\(\$self\);/,
+        qr/my \(\$fetched, \$fetch_error\) = _compat_fetch_remote_version\(\$self\);/,
         'getVersion reads remote version from HTTP response content'
     );
 

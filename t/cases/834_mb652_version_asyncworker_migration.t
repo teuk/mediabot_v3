@@ -7,6 +7,8 @@
 use strict;
 use warnings;
 use utf8;
+use IPC::Open3 qw(open3);
+use Symbol qw(gensym);
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 
 sub _slurp_834 {
@@ -60,10 +62,20 @@ sub _extract_834 {
     sub getLoop { $_[0]{loop} }
 }
 
+{
+    package MB898::VersionBot;
+    sub getDetailedVersion { Mediabot::Helpers::getDetailedVersion(@_) }
+}
+
+{
+    package MB898::VersionHTTP;
+    sub get { push @{$_[0]{asked}}, $_[1]; return {success=>1, content=>'accepted-by-hook'} }
+}
+
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_834('Mediabot/Helpers.pm');
+    my $src = _slurp_834('Mediabot/Version/Remote.pm');
     my $async = _extract_834($src, 'getVersion_async');
     my $reason = _extract_834($src, '_version_asyncworker_reason');
 
@@ -71,7 +83,7 @@ return sub {
     $assert->ok(defined $reason, 'mb652-834: AsyncWorker reason adapter located');
 
     $assert->like($src, qr/use\s+Mediabot::AsyncWorker;/,
-        'mb652-834: Helpers loads shared AsyncWorker');
+        'mb652-834: Version::Remote loads shared AsyncWorker');
     $assert->like($async // '', qr/Mediabot::AsyncWorker->start\(/,
         'mb652-834: version async path delegates to shared worker');
 
@@ -297,4 +309,122 @@ return sub {
             'mb652-834: launcher exception becomes explicit setup reason');
     }
 
+    # Exercise the canonical owner as well as the historical Helpers entry
+    # points above. A fresh interpreter catches load-order and startup I/O.
+    require Mediabot::Version::Remote;
+    for my $order (
+        [qw(Version::Remote)],
+        [qw(Version::Remote Helpers)],
+        [qw(Helpers Version::Remote)],
+    ) {
+        my $code = q{
+            use strict; use warnings;
+            require HTTP::Tiny;
+            no warnings qw(redefine once);
+            local *HTTP::Tiny::get = sub { die 'unexpected startup HTTP' };
+        };
+        $code .= join('', map { "require Mediabot::$_;\n" } @$order);
+        $code .= q{
+            my $cold = !exists $INC{'Mediabot/Helpers.pm'};
+            die 'unexpected cold dependency' if $cold && (
+                exists $INC{'Mediabot/External.pm'} || exists $INC{'DBI.pm'});
+            die 'unexpected default import' if defined &main::getVersion;
+            Mediabot::Version::Remote->import(qw(_remote_version_urls
+                _remote_version_timeout _remote_version_worker_timeout
+                fetch_remote_version getVersion _version_asyncworker_reason getVersion_async));
+            { package MB898ColdConf; sub get { undef } }
+            my $bot = {conf=>bless({}, 'MB898ColdConf')};
+            my @urls = _remote_version_urls($bot);
+            die 'default routes/budget' unless @urls == 2
+                && $urls[0] eq 'https://raw.githubusercontent.com/teuk/mediabot_v3/master/VERSION'
+                && _remote_version_timeout($bot) == 8
+                && _remote_version_worker_timeout($bot) == 17;
+            die 'cold call loaded facade' if $cold && exists $INC{'Mediabot/Helpers.pm'};
+            require Mediabot::Helpers;
+            {
+                no warnings 'once';
+                local @Mediabot::Helpers::VERSION_URLS = ('http://one/V', 'http://two/V', 'http://three/V');
+                my @custom = _remote_version_urls($bot);
+                die 'legacy mutable routes' unless @custom == 3
+                    && $custom[2] eq 'http://three/V' && _remote_version_worker_timeout($bot) == 25;
+                local @Mediabot::Helpers::VERSION_URLS = ();
+                die 'empty legacy routes' unless scalar(_remote_version_urls($bot)) == 0
+                    && _remote_version_worker_timeout($bot) == 9;
+            }
+            print 'loaded';
+        };
+        my $err = gensym;
+        my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
+        my $stdout = do { local $/; <$out> } // '';
+        my $stderr = do { local $/; <$err> } // '';
+        waitpid($pid, 0);
+        my $exit = $?;
+        (my $diagnostic = $stderr) =~ s/\s+/ /g;
+        $assert->ok($exit == 0 && $stdout eq 'loaded' && $stderr eq '',
+            'remote version contracts and historical URL list survive load order: ' . join('/', @$order)
+                . ($exit || length($stderr) ? " (exit=$exit; $diagnostic)" : ''));
+    }
+    {
+        no warnings 'redefine';
+        require Mediabot::External;
+        my (@asked, @parsed, %options);
+        local *Mediabot::Helpers::_remote_version_urls = sub { 'https://late.example/V' };
+        local *Mediabot::Helpers::_remote_version_timeout = sub { 13 };
+        local *Mediabot::Helpers::_version_parts = sub { push @parsed, $_[0]; return {major=>3,minor=>7} };
+        local *HTTP::Tiny::can_ssl = sub { 1 };
+        local *Mediabot::External::_make_http = sub {
+            %options = @_;
+            return bless {asked=>\@asked}, 'MB898::VersionHTTP';
+        };
+        my ($remote, $reason) = Mediabot::Version::Remote::fetch_remote_version({});
+        $assert->ok($remote eq 'accepted-by-hook' && !defined($reason)
+                && join('|', @asked) eq 'https://late.example/V'
+                && join('|', @parsed) eq 'accepted-by-hook'
+                && $options{timeout} == 13 && $options{max_size} == 65536
+                && $options{agent} eq 'mediabot-version-check/1.0 '
+                && !exists($options{verify_SSL}),
+            'canonical fetch keeps late URL/timeout/parser hooks and the common HTTP factory');
+    }
+    {
+        no warnings 'redefine';
+        my @seen;
+        local *Mediabot::Helpers::getLocalVersion = sub { push @seen, 'local'; '3.6' };
+        local *Mediabot::Helpers::fetch_remote_version = sub { push @seen, 'fetch'; ('3.7', undef) };
+        local *Mediabot::Helpers::_compare_mediabot_versions = sub { push @seen, join('/', @_); 0 };
+        my $logger = MB652::Logger->new;
+        my $bot = bless {logger=>$logger, _version_fetch_error=>'old'}, 'MB898::VersionBot';
+        my @versions = Mediabot::Version::Remote::getVersion($bot);
+        $assert->ok(join('|', @versions) eq '3.6|3.7'
+                && join('|', @seen) eq 'local|fetch|3.6/3.7'
+                && $bot->{main_prog_version} eq '3.6' && !defined($bot->{_version_fetch_error})
+                && grep({$_->[1] eq 'Mediabot is up to date.'} @{$logger->{messages}}),
+            'canonical synchronous check keeps local identity, fetch/comparison hooks and bot state');
+    }
+    {
+        no warnings 'redefine';
+        my (%launch, @calls);
+        local *Mediabot::Helpers::_cached_local_version = sub { '3.6dev-42' };
+        local *Mediabot::Helpers::_remote_version_worker_timeout = sub { 12.5 };
+        local *Mediabot::Helpers::_version_asyncworker_reason = sub { 'legacy terminal reason' };
+        local *Mediabot::Helpers::getVersion = sub {
+            $_[0]{logger}->log(1, 'silent child');
+            $_[0]{_version_fetch_error} = undef;
+            return ('3.6', '3.7');
+        };
+        local *Mediabot::AsyncWorker::start = sub {
+            my ($class, %args) = @_;
+            %launch = %args;
+            return bless {}, 'MB652::FakeWorker';
+        };
+        my $bot = bless {loop=>MB652::Loop->new, logger=>MB652::Logger->new}, 'MB652::Bot';
+        my $started = Mediabot::Version::Remote::getVersion_async($bot, sub {push @calls, [@_]});
+        my $child = $launch{child}->();
+        $launch{on_done}->({ok=>0, error=>'worker_timeout'});
+        $launch{on_done}->({ok=>1, value=>['9.9','9.9']});
+        $assert->ok($started == 1 && $launch{timeout} == 12.5
+                && join('|', map {defined($_) ? $_ : ''} @$child) eq '3.6|3.7|'
+                && @calls == 1 && join('|', @{$calls[0]}) eq '3.6dev-42|Undefined|legacy terminal reason'
+                && @{$bot->{logger}{messages}} == 0,
+            'canonical async check keeps legacy child/timeout/reason hooks, silent logging and callback once');
+    }
 };

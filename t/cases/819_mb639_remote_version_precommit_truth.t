@@ -23,7 +23,7 @@ sub _slurp_819 {
 return sub {
     my ($assert) = @_;
 
-    my $hsrc = _slurp_819('Mediabot/Helpers.pm');
+    my $hsrc = _slurp_819('Mediabot/Version/Remote.pm');
     my $usrc = _slurp_819('Mediabot/Update.pm');
     my $conf = _slurp_819('mediabot.sample.conf');
 
@@ -39,7 +39,7 @@ return sub {
         qr/sub _remote_version_worker_timeout \{.*?\$per_url \* \(\@urls \|\| 1\).*?\+ 1/s,
         'mb639-819: le budget worker couvre chaque source');
     $assert->like($hsrc,
-        qr/\$timeout = _remote_version_worker_timeout\(\$self\)/,
+        qr/\$timeout = _compat_remote_version_worker_timeout\(\$self\)/,
         'mb639-819: getVersion_async utilise ce budget par defaut');
     $assert->like($hsrc, qr/\$timeout = 65\s+if \$timeout > 65/,
         'mb639-819: le budget async reste borne');

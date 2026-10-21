@@ -77,10 +77,11 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_mb317(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
+    my $remote = _slurp_mb317(File::Spec->catfile('.', 'Mediabot', 'Version', 'Remote.pm'));
     my $main = _slurp_mb317(File::Spec->catfile('.', 'mediabot.pl'));
-    my $async = _extract_sub_mb317($src, 'getVersion_async');
+    my $async = _extract_sub_mb317($remote, 'getVersion_async');
     my $command = _extract_sub_mb317($src, 'versionCheck');
-    my $sync = _extract_sub_mb317($src, 'getVersion');
+    my $sync = _extract_sub_mb317($remote, 'getVersion');
 
     $assert->ok(defined $sync, 'existing synchronous getVersion helper remains available');
     $assert->ok(defined $async, 'getVersion_async helper found');

@@ -124,7 +124,8 @@ return sub {
     # mb638: la requete vit dans fetch_remote_version — la GARANTIE (appel
     # reseau sous eval, jamais de die qui remonte dans la boucle IRC) est
     # verifiee la ou elle s'applique desormais.
-    my $fetch_body = _extract_sub_207($src, 'fetch_remote_version');
+    my $remote = _slurp_207(File::Spec->catfile('.', 'Mediabot', 'Version', 'Remote.pm'));
+    my $fetch_body = _extract_sub_207($remote, 'fetch_remote_version');
     $assert->like(
         $fetch_body // '',
         qr/my\s+\$res\s*=\s*eval\s+\{\s*\n\s*require Mediabot::External;/,
