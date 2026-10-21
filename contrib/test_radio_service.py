@@ -753,16 +753,20 @@ class MetadataContract(unittest.TestCase):
                 server.bind(('127.0.0.1', 0)); server.listen(1); server.settimeout(5)
                 events = []
                 def receive():
-                    with server.accept()[0] as peer:
-                        peer.settimeout(5)
-                        data = bytearray()
-                        while not data.endswith(b'\n'):
-                            chunk = peer.recv(4096)
-                            if not chunk or len(data) > 16384:
-                                break
-                            data.extend(chunk)
-                        events.append(bytes(data))
-                        peer.sendall(b'42\r\nEND\r\n')
+                    # Push acknowledgement is followed by two placement reads.
+                    # Serve the full exchange instead of making the real client
+                    # wait for two unrelated queue-observation timeouts.
+                    for _ in range(3):
+                        with server.accept()[0] as peer:
+                            peer.settimeout(5)
+                            data = bytearray()
+                            while not data.endswith(b'\n'):
+                                chunk = peer.recv(4096)
+                                if not chunk or len(data) > 16384:
+                                    break
+                                data.extend(chunk)
+                            events.append(bytes(data))
+                            peer.sendall(b'42\r\nEND\r\n')
                 thread = threading.Thread(target=receive, daemon=True)
                 thread.start()
                 path = Path(area)/'old.mp3'
@@ -780,7 +784,12 @@ class MetadataContract(unittest.TestCase):
                     thread.join(6)
                     self.assertFalse(thread.is_alive())
                     self.assertEqual(service.status(instance, body['id'])['state'], 'queued')
-                    self.assertEqual(events, [('request_queue.push annotate:artist="Stevie Wonder",title="Superstition":'+str(path)+'\n').encode()])
+                    self.assertEqual(events, [
+                        ('request_queue.push annotate:artist="Stevie Wonder",title="Superstition":'+str(path)+'\n').encode(),
+                        b'request_queue.queue\n', b'request_queue.queue\n',
+                    ])
+                    self.assertEqual((service.status(instance, body['id'])['placement'],
+                                      service.status(instance, body['id'])['position']), ('waiting', 1))
                     self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), fingerprint)
                 finally:
                     service.db.close()

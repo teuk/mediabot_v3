@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB884 — Prune low-value tests and remove fixture idle waits (2026-10-21)
+
+- Retire 38 reviewed prose/layout, copied-algorithm and superseded source-shape
+  cases. Consolidate six actual log/history sanitation assertions into the
+  existing sender test; add no new case file. Keep all remaining cases in the
+  default full run and preserve critical behavioral/security regressions.
+- Speed up real HTTP fixture shutdown and complete the radio loopback protocol
+  instead of waiting for unrelated observation timeouts. Keep real TCP/HTTP,
+  SQLite, request deadlines and all Python test methods.
+- Update fast-lane/preflight references to retired cases, retain required
+  sentinels and deletion confirmation, and document coverage decisions and
+  future test-growth policy. No application module or SQL schema change.
+
 ### MB883 — Preserve order across short and unpaced IRC replies (2026-10-21)
 
 - Keep later single-chunk and zero-delay PRIVMSG batches behind older queued

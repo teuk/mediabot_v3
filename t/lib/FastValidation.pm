@@ -57,8 +57,6 @@ my %SENTINELS = (
 my %SLOW_EXCLUSIONS = (
     '612_mb394_trivia_rate_limit_retry.t'
         => 'measured slow: retry/backoff timing',
-    '239_usercommands_wave4_subs.t'
-        => 'measured slow user-command contract',
     '236_usercommands_karmahist.t'
         => 'measured slow karma history contract',
     '707_mb497_seen_enriched.t'
@@ -71,10 +69,6 @@ my %SLOW_EXCLUSIONS = (
         => 'measured slow antiflood timing contract',
     '55_usercommands_lookup_db_safety.t'
         => 'measured slow lookup safety contract',
-    '244_usercommands_poll_ops.t'
-        => 'measured slow poll operations contract',
-    '258_helpers_db_balance.t'
-        => 'measured slow helper DB balance contract',
     '556_mb335_test_runner_contract_isolation.t'
         => 'measured slow but mandatory runner sentinel',
     '219_usercommands_trivia_guard.t'

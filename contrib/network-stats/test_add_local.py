@@ -71,7 +71,7 @@ class LocalStreamTest(unittest.TestCase):
                 db.execute('CREATE TABLE marker (value TEXT)')
                 db.execute('INSERT INTO marker VALUES (?)', (stream,))
         self.server = core.Server(('127.0.0.1', 0), copy.deepcopy(self.cfg))
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
         self.thread.start()
         def close_server():
             self.server.shutdown()

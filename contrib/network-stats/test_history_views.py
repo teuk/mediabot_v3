@@ -103,7 +103,7 @@ class HistoryViewsTest(unittest.TestCase):
     def server(self):
         cfg={'database':str(self.root/'api.sqlite3'),'streams':{'libera':{'label':'Libera','token_sha256':hashlib.sha256(b'public-view-test').hexdigest()}}}
         server=n.Server(('127.0.0.1',0),cfg)
-        threading.Thread(target=server.serve_forever,daemon=True).start()
+        threading.Thread(target=server.serve_forever,kwargs={'poll_interval':0.01},daemon=True).start()
         self.addCleanup(server.server_close);self.addCleanup(server.shutdown)
         return server
 

@@ -26,7 +26,7 @@ return sub {
 
 
     my @slow = fast_lane_slow_exclusions();
-    $assert->is(scalar(@slow), 15,
+    $assert->is(scalar(@slow), 12,
         'mb661-843: profiler-backed slow manifest is explicit and small');
     my %slow = map { $_ => 1 } @slow;
     $assert->ok($slow{'612_mb394_trivia_rate_limit_retry.t'},

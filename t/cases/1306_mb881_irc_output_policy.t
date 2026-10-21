@@ -54,6 +54,10 @@ MB881OutputFixture::with_policy(sub {
         $bot = MB881OutputFixture::new_bot();
         $send->($bot, '#test', "one\r\ntwo\0tail");
         unlike(join('', map {$_->{text}} @{$bot->{irc}{wire}}), qr/[\r\n\0]/, "$kind keeps single-line wire sanitation");
+        unlike(join('', map {$_->[1]} @{$bot->{logger}{rows}}), qr/[\r\n\0]/,
+            "$kind sanitizes every log before emitting diagnostics");
+        unlike(join('', map {join('', map {defined($_) && !ref($_) ? $_ : ''} @$_)} @{$bot->{events}}), qr/[\r\n\0]/,
+            "$kind sanitizes history and console event text before recording it");
         $bot = MB881OutputFixture::new_bot();
         $send->($bot, undef, 'text'); $send->($bot, '#test', undef); $send->($bot, '#test', '');
         is(scalar @{$bot->{irc}{wire}}, 0, "$kind retains missing-target and empty-text guards");
