@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::IRC::Output ();
+use Mediabot::IRC::Timer ();
 use Scalar::Util qw(refaddr);
 
 our @EXPORT_OK = qw(queue_privmsg_chunks queue_notices);
@@ -18,7 +19,6 @@ sub queue_privmsg_chunks {
 
 sub queue_notices {
     require Mediabot::Helpers;
-    require IO::Async::Timer::Countdown;
     return queueBotNotices(@_);
 }
 
@@ -64,8 +64,6 @@ sub _queue_irc_chunks {
         return $queued_count;
     }
 
-    require IO::Async::Timer::Countdown;
-
     my $key = defined($target) && $target ne ''
         ? lc($target)
         : '__unknown__';
@@ -90,33 +88,30 @@ sub _queue_irc_chunks {
 
     my ($pump, $schedule);
 
-    my $cleanup = sub {
-        my ($timer) = @_;
-        return unless $timer;
-
-        eval { $timer->stop if $timer->can('stop') };
-        eval { $loop->remove($timer) };
-    };
-
     $schedule = sub {
         my ($delay) = @_;
 
-        my $timer;
-        $timer = IO::Async::Timer::Countdown->new(
-            delay     => $delay,
-            on_expire => sub {
-                $cleanup->($timer);
-                $state->{timer} = undef;
-                $pump->();
-                # mb326-B1: rompre le cycle closure<->timer (le slot hash est vidé
-                # mais le lexical capturé maintenait l'objet en vie).
-                undef $timer;
-            },
-        );
-
-        $state->{timer} = $timer;
-        $loop->add($timer);
-        $timer->start;
+        my $started = eval {
+            $state->{timer} = Mediabot::IRC::Timer::countdown(
+                loop => $loop,
+                delay => $delay,
+                on_expire => sub {
+                    $state->{timer} = undef;
+                    $pump->();
+                },
+            );
+            1;
+        };
+        unless ($started) {
+            my $error = $@;
+            # Preserve unsent chunks for the next batch, without leaving an
+            # active queue that can never be pumped. Never burst a failed arm.
+            $state->{timer} = undef;
+            $state->{active} = 0;
+            $pump = undef;
+            $schedule = undef;
+            die $error;
+        }
     };
 
     $pump = sub {
@@ -208,33 +203,30 @@ sub queueBotNotices {
         my $line = $lines[$i];
         my $timer;
 
-        $timer = IO::Async::Timer::Countdown->new(
-            delay => $base_delay + ($i * $delay_step),
-            on_expire => sub {
-                botNotice($self, $nick, $line);
-                eval { $loop->remove($timer) };
-                my $expired_id = refaddr($timer);
-                @$timers = grep {
-                    defined($_) && ref($_) && refaddr($_) != $expired_id
-                } @$timers;
-                undef $timer;
-            },
-        );
-
-        push @$timers, $timer;
         my $started = eval {
-            $loop->add($timer);
-            $timer->start;
+            $timer = Mediabot::IRC::Timer::countdown(
+                loop => $loop,
+                delay => $base_delay + ($i * $delay_step),
+                on_expire => sub {
+                    my $sent = eval { botNotice($self, $nick, $line); 1 };
+                    my $error = $@;
+                    my $expired_id = refaddr($timer);
+                    @$timers = grep {
+                        defined($_) && ref($_) && refaddr($_) != $expired_id
+                    } @$timers;
+                    undef $timer;
+                    # Keep the slot during reentrant sends, but release it even
+                    # if the transport throws. Preserve the original exception.
+                    die $error unless $sent;
+                },
+            );
+            push @$timers, $timer;
             1;
         };
 
         unless ($started) {
-            my $failed_id = refaddr($timer);
-            @$timers = grep {
-                defined($_) && ref($_) && refaddr($_) != $failed_id
-            } @$timers;
-            botNotice($self, $nick, $line);
             undef $timer;
+            botNotice($self, $nick, $line);
         }
     }
 

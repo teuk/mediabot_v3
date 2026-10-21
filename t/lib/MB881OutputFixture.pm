@@ -57,6 +57,7 @@ sub stop {$_[0]{stopped} = 1; 1}
 package MB881::Loop;
 sub new {bless {pending => [], delays => []}, shift}
 sub add {push @{$_[0]{pending}}, $_[1]; push @{$_[0]{delays}}, $_[1]{delay}; 1}
+sub remove {$_[1]{removed} = 1; 1}
 sub tick {my $t = shift @{$_[0]{pending}}; $t->{on_expire}->() if $t}
 sub drain {my ($s) = @_; my $n = 0; while (@{$s->{pending}}) {die 'fixture did not finish' if ++$n > 100; $s->tick}}
 1;

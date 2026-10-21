@@ -67,7 +67,7 @@ return sub {
 
     $assert->like(
         $queue // '',
-        qr/IO::Async::Timer::Countdown->new/,
+        qr/Mediabot::IRC::Timer::countdown/,
         'pacing uses an IO::Async countdown timer'
     );
 
@@ -99,6 +99,7 @@ return sub {
     # loop and fake countdown timers.
     my $probe = <<'PROBE';
 use Mediabot::IRC::Output ();
+use Mediabot::IRC::Timer ();
 use strict;
 use warnings;
 

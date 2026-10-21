@@ -207,8 +207,8 @@ return sub {
         'Context recognizes every standard IRC channel prefix'
     );
 
-    require $helpers_file;
-    require $context_file;
+    require Mediabot::Helpers;
+    require Mediabot::Context;
 
     my $start_bot = {
         metrics              => { started => 100 },

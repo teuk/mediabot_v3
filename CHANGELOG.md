@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB882 — Harden the shared IRC timer lifecycle (2026-10-21)
+
+- Add IRC::Timer::countdown for single-use notifier ownership: release expired
+  or partially installed timers, break callback reference cycles, prevent stale
+  expiry replay, and preserve original setup and callback exceptions.
+- Adopt it in paced PRIVMSG, queued NOTICE and AntiFlood output. Recover arm
+  flags after setup failure, retain unsent paced chunks for a later batch,
+  release failed NOTICE slots, and rearm remaining AntiFlood work after a send
+  exception without replaying an uncertain attempted send.
+- Preserve normal delays, queue keys, caps, message order, filters, wire bytes,
+  return conventions and dynamic Helpers/worker hooks. Add deterministic
+  failure/recovery and actual IO::Async lifecycle regressions; keep all existing
+  test cases. No SQL schema, migration, configuration or service change.
+
 ### MB881 — Complete the shared IRC output boundary (2026-10-21)
 
 - Add IRC::Output as the reusable PRIVMSG/ACTION/NOTICE facade. Keep public
