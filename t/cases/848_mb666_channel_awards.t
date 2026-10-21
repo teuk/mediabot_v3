@@ -200,7 +200,7 @@ return sub {
 
     my $uc = slurp848('Mediabot/SocialHistory.pm');
     my $mb = slurp848('Mediabot/Mediabot.pm');
-    my $hp = slurp848('Mediabot/Helpers.pm');
+    my $hp = slurp848('Mediabot/IRC/CommandThrottle.pm');
 
     my $awards_src = extract_sub848($uc, 'mbAwards_ctx');
     $assert->ok(defined($awards_src) && length($awards_src),

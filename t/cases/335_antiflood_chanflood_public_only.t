@@ -28,7 +28,7 @@ sub _sub_335 {
 return sub {
     my ($assert) = @_;
 
-    my $helpers = _slurp_335(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
+    my $helpers = _slurp_335(File::Spec->catfile('.', 'Mediabot', 'IRC', 'CommandThrottle.pm'));
     my $mediabot = _slurp_335(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
 
     my $chan = _sub_335($helpers, 'checkChanFlood');

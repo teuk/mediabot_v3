@@ -28,7 +28,7 @@ sub _sub_334 {
 return sub {
     my ($assert) = @_;
 
-    my $helpers = _slurp_334(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
+    my $helpers = _slurp_334(File::Spec->catfile('.', 'Mediabot', 'IRC', 'CommandThrottle.pm'));
     my $sample  = _slurp_334(File::Spec->catfile('.', 'mediabot.sample.conf'));
 
     my $conf = _sub_334($helpers, '_af_conf_int');

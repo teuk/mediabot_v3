@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB897 — Give command throttling an IRC module (2026-10-21)
+
+- Move the existing antiflood integer reader, command cooldown, channel command
+  limit and nickname command limit into IRC::CommandThrottle. Keep all four
+  Helpers entry points and the same parent-side bot state; resolve config and
+  notification hooks at call time. Calculations can run without Helpers;
+  actual notifications retain their existing runtime dependency.
+- Preserve thresholds, news aliases, configuration precedence, historical
+  channel/nickname keys, window boundaries, silence/mute expiry, metrics and
+  notices. Keep all 96 other Helpers function bodies and default exports
+  unchanged, including output AntiFlood and its CHANNEL_FLOOD query.
+- Follow the owner in seven existing cases and add six runtime assertions to
+  the existing nickname-throttle case, including fresh-interpreter clocks,
+  shared state and hooks. Add no numbered case, schema, SQL, configuration,
+  VERSION, runner, audit-tool or service change.
+
 ### MB896 — Give version grammar and ordering a dedicated owner (2026-10-21)
 
 - Move five pure version functions from Helpers into Version::Format. Preserve

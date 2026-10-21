@@ -192,7 +192,7 @@ return sub {
 
     my $uc = slurp849('Mediabot/SocialHistory.pm');
     my $mb = slurp849('Mediabot/Mediabot.pm');
-    my $hp = slurp849('Mediabot/Helpers.pm');
+    my $hp = slurp849('Mediabot/IRC/CommandThrottle.pm');
     my $yb_src = extract_sub849($uc, 'mbYearbook_ctx') // '';
     my $collect_src = extract_sub849($uc, '_yearbook_collect') // '';
 

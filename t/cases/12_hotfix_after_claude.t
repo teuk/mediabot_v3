@@ -33,7 +33,7 @@ return sub {
     my ($assert) = @_;
 
     my $quotes_pm    = _slurp(File::Spec->catfile('.', 'Mediabot', 'Quotes.pm'));
-    my $helpers_pm   = _slurp(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
+    my $throttle_pm  = _slurp(File::Spec->catfile('.', 'Mediabot', 'IRC', 'CommandThrottle.pm'));
     my $auth_pm      = _slurp(File::Spec->catfile('.', 'Mediabot', 'Auth.pm'));
     my $log_pm       = _slurp(File::Spec->catfile('.', 'Mediabot', 'Log.pm'));
     my $partyline_pm = _slurp(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
@@ -69,13 +69,13 @@ return sub {
         'Quotes.pm: quote random no longer uses ORDER BY RAND()');
 
     # -------------------------------------------------------------------------
-    # Helpers.pm: nick flood should be case-insensitive and self-cleaning.
+    # CommandThrottle.pm: nick flood should be case-insensitive and self-cleaning.
     # -------------------------------------------------------------------------
-    $assert->ok($helpers_pm =~ /my \$nick_key = lc\(\$nick\);/,
-        'Helpers.pm: checkNickFlood normalizes nick lowercase');
+    $assert->ok($throttle_pm =~ /my \$nick_key = lc\(\$nick\);/,
+        'CommandThrottle.pm: checkNickFlood normalizes nick lowercase');
 
-    $assert->ok($helpers_pm =~ /_nick_flood_last_cleanup/,
-        'Helpers.pm: checkNickFlood has stale-state cleanup marker');
+    $assert->ok($throttle_pm =~ /_nick_flood_last_cleanup/,
+        'CommandThrottle.pm: checkNickFlood has stale-state cleanup marker');
 
     # -------------------------------------------------------------------------
     # Auth.pm: metric must be updated after session mutations through helper.

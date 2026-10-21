@@ -96,7 +96,7 @@ return sub {
     # trompe-l'oeil (le processus fils meurt avec ses compteurs). Celui de
     # 'actualites' vit donc cote parent, et couvre TOUS ses alias — sinon on
     # le contourne en tapant 'news' juste apres 'actualites'.
-    my $hsrc = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Helpers.pm'
+    my $hsrc = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/IRC/CommandThrottle.pm'
         or die $!; local $/; <$fh> };
     my ($defaults) = $hsrc =~ /my %defaults = \((.*?)\);/s;
     my $covered = 0;
