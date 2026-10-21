@@ -67,9 +67,10 @@ sub _default_requester {
     # the next already-validated peer only when HTTP::Tiny reports a transport
     # failure (599), so a dead IPv6 route cannot mask a healthy IPv4 path.
     local @ENV{qw(http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy)};
+    # Each grep needs its own LIST; otherwise the first also filters the IPv6 list.
     my @ordered = (
-        grep { index($_, ':') < 0 } @$peers,
-        grep { index($_, ':') >= 0 } @$peers,
+        (grep { index($_, ':') < 0 } @$peers),
+        (grep { index($_, ':') >= 0 } @$peers),
     );
     splice @ordered, 4 if @ordered > 4; # stay well inside CommandAsync timeout
 

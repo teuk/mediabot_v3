@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB867 — YouTube response validation and IPv6 transport recovery (2026-10-21)
+
+- Require an object at the public YouTube metadata JSON root, extending the
+  existing MB866 radio-reader guard to public link previews.
+- Reject malformed search entries and video IDs before metadata lookup; keep
+  distinct videos in search order and enforce the configured 1–5 result bound
+  on the actual response and its cached batch. Contain malformed metadata
+  containers and prevent reference-valued titles from leaking into replies.
+- Restore IPv6-only requests and IPv4-to-IPv6 transport fallback in RSS and
+  plugin HTTP. Parenthesize independent address filters so the IPv4 filter
+  cannot consume the IPv6 list. Preserve validated peer pinning, TLS checks,
+  IPv4 preference, transport-only retry and the RSS four-attempt budget.
+- Add offline runtime regressions. No SQL/schema, private configuration,
+  persistent state format or service deployment change.
+
 ### MB866 — YouTube metadata JSON root guard (2026-10-20)
 
 - Require a JSON object before accessing getYoutubeDetails metadata fields.

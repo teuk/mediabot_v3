@@ -215,9 +215,10 @@ sub _default_requester {
     return { success => 0, status => 599, headers => {}, content => '' }
         unless ref($peers) eq 'ARRAY' && @$peers;
     local @ENV{qw(http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy)};
+    # Each grep needs its own LIST; otherwise the first also filters the IPv6 list.
     my @ordered = (
-        grep { index($_, ':') < 0 } @$peers,
-        grep { index($_, ':') >= 0 } @$peers,
+        (grep { index($_, ':') < 0 } @$peers),
+        (grep { index($_, ':') >= 0 } @$peers),
     );
     my $last;
     for my $peer (@ordered) {

@@ -274,7 +274,7 @@ sub displayYoutubeDetails {
     $self->{logger}->log(5, "displayYoutubeDetails() json_details : $json_details");
 
     my $sYoutubeInfo = eval { decode_json($json_details) };
-    if ($@ || !ref($sYoutubeInfo)) {
+    if ($@ || ref($sYoutubeInfo) ne 'HASH') {
         $self->{logger}->log(3, "displayYoutubeDetails() JSON decode error: $@");
         return undef;
     }
@@ -1599,7 +1599,20 @@ sub ytSearch_ctx {
         return;
     }
 
-    my @items = @{ $data->{items} };
+    # MB867: bound the actual batch, not only the requested API result count.
+    # Ignore malformed/duplicate identities before metadata lookup or output.
+    my (@items, %seen_ids);
+    for my $item (@{ $data->{items} }) {
+        next unless ref($item) eq 'HASH'
+            && ref($item->{id}) eq 'HASH'
+            && ref($item->{snippet}) eq 'HASH';
+        my $id = $item->{id}{videoId};
+        next unless defined($id) && !ref($id)
+            && $id =~ /\A[A-Za-z0-9_-]{11}\z/;
+        next if $seen_ids{$id}++;
+        push @items, $item;
+        last if @items >= $yt_max;
+    }
     unless (@items) {
         Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) No results for: $query");
         return;
@@ -1612,6 +1625,7 @@ sub ytSearch_ctx {
     # F51: fetch duration + view count via videos endpoint
     my %vid_meta;
     my @vid_ids = grep { defined $_ } map { ref($_->{id}) eq 'HASH' ? $_->{id}{videoId} : undef } @items;
+    my %wanted_ids = map { $_ => 1 } @vid_ids;
     if (@vid_ids) {
         my $ids_param = join(',', map { URI::Escape::uri_escape_utf8($_) } @vid_ids);
         my $meta_url  = "https://www.googleapis.com/youtube/v3/videos"
@@ -1621,7 +1635,13 @@ sub ytSearch_ctx {
             my $mdata = eval { decode_json($mres->{content} // '') };
             if (ref($mdata) eq 'HASH' && ref($mdata->{items}) eq 'ARRAY') {
                 for my $v (@{ $mdata->{items} }) {
+                    next unless ref($v) eq 'HASH';
                     my $vid = $v->{id} // next;
+                    next if ref($vid) || !$wanted_ids{$vid};
+                    $v->{contentDetails} = {}
+                        unless ref($v->{contentDetails}) eq 'HASH';
+                    $v->{statistics} = {}
+                        unless ref($v->{statistics}) eq 'HASH';
                     # mb422-B1: réutiliser le parseur partagé _yt_parse_duration
                     # (mb398) — l'ancien parsing inline ignorait le composant
                     # JOURS (P1DT2H3M4S perdait 24h) et lisait le M sur toute la
@@ -1651,6 +1671,8 @@ sub ytSearch_ctx {
         my $vid_id  = $item->{id}{videoId}    // next;
         my $title   = $item->{snippet}{title} // '?';
         my $channel_title = $item->{snippet}{channelTitle} // '?';
+        $title = '?' if ref($title);
+        $channel_title = '?' if ref($channel_title);
         # Normalise ALL-CAPS titles
         if (($title =~ tr/A-Z//) > 20) { $title = ucfirst(lc($title)); }
         my $meta     = $vid_meta{$vid_id} // {};
