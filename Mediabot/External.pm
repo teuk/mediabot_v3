@@ -109,7 +109,11 @@ Mediabot::External::Weather->import(qw(displayWeather_ctx));
 require Mediabot::External::Fortnite;
 Mediabot::External::Fortnite->import(qw(getFortniteId fortniteStats_ctx));
 
-# mb99-R1: sous-module URL/Instagram/Facebook/X/AppleMusic
+# MB886: import the Apple Music handler from its implementation owner.
+require Mediabot::External::AppleMusic;
+Mediabot::External::AppleMusic->import(qw(_handle_applemusic));
+
+# mb99-R1: sous-module URL/Instagram/Facebook/X
 require Mediabot::External::URL;
 Mediabot::External::URL->import(qw(
     _extract_url
@@ -117,7 +121,6 @@ Mediabot::External::URL->import(qw(
     _decode_http_content_utf8
     _fetch_url_chromium_dumpdom
     _handle_instagram
-    _handle_applemusic
     _facebook_url
     _facebook_title_from_html
     _facebook_fallback_title_from_url
@@ -229,9 +232,8 @@ sub _chanset_ok {
 # Parses Instagram page for a title. Instagram's
 # ---------------------------------------------------------------------------
 
-# mb99-R1: _handle_instagram, _handle_facebook, _handle_x_twitter,
-# _handle_applemusic, displayUrlTitle et helpers URL
-# déplacés dans Mediabot::External::URL
+# URL owns Instagram, Facebook, X/Twitter, displayUrlTitle and shared URL helpers.
+# AppleMusic owns _handle_applemusic (MB886).
 
 
 # YouTube search implementations remain in Mediabot::External::YouTube.

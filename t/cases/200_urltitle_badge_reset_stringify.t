@@ -64,6 +64,10 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
     );
 
+    my $applemusic_src = _slurp_200(
+        File::Spec->catfile('.', 'Mediabot', 'External', 'AppleMusic.pm')
+    );
+
     my %handlers = (
         _handle_instagram => {
             badge => q{String::IRC->new("Instagram")->white('pink')},
@@ -72,7 +76,7 @@ return sub {
             reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+"\s*\.\s*\$title;/,
         },
         _handle_applemusic => {
-            badge => q{String::IRC->new("\x{2318}Music")->white('grey')},
+            badge => q{String::IRC->new("AppleMusic")->white('grey')},
             # mb492: rich line composed into $display, same badge+\x0f invariant
             reset => qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+\$display";/,
         },
@@ -89,7 +93,9 @@ return sub {
     );
 
     for my $sub (sort keys %handlers) {
-        my $body = _extract_sub_body_200($src, $sub);
+        my $body = _extract_sub_body_200(
+            $sub eq '_handle_applemusic' ? $applemusic_src : $src, $sub
+        );
 
         $assert->ok(defined $body, "$sub body found");
 

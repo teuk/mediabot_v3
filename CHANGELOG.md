@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB886 — Give Apple Music its own module and full badge (2026-10-21)
+
+- Display `[AppleMusic]` in place of `[⌘Music]`, preserving white on grey,
+  black-backed brackets, IRC reset bytes and the prior character representation.
+- Move the seven Apple Music functions from URL.pm to External::AppleMusic.
+  Import the handler directly in External; retain historical URL entry points
+  and dynamic shared HTML/browser hooks without circular imports.
+- Keep lookup, HTML/Chromium fallback, asynchronous workers, cache keys/TTL,
+  pending requests, rich details and truncation unchanged. Extend the existing
+  Apple Music case by nine checks and retarget badge ownership checks; no new
+  case file, SQL schema, migration or configuration change.
+
 ### MB885 — Bound shared IRC wrapping work (2026-10-21)
 
 - Share the next-chunk decision between full wrapping and prefix-only callers.

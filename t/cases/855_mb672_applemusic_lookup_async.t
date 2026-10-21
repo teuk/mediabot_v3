@@ -10,8 +10,12 @@ BEGIN {
 }
 
 use File::Spec;
+use IPC::Open3;
+use Symbol qw(gensym);
+use Scalar::Util qw(refaddr);
 use Mediabot::External ();
 use Mediabot::External::URL ();
+use Mediabot::External::AppleMusic ();
 
 {
     package L855;
@@ -69,20 +73,54 @@ return sub {
     no warnings 'redefine';
     no warnings 'once';
 
+    # MB886: canonical owner, legacy aliases and independent load order.
+    my @moved = qw(_am_duration_from_iso _am_duration_from_ms _applemusic_url_info
+        _applemusic_extract_details _applemusic_lookup_track _applemusic_fetch_sync
+        _handle_applemusic);
+    $assert->ok(!grep({
+        refaddr(Mediabot::External::URL->can($_))
+            != refaddr(Mediabot::External::AppleMusic->can($_))
+    } @moved), 'mb886: every historical URL entry points to the single AppleMusic owner');
+    $assert->is(refaddr(Mediabot::External->can('_handle_applemusic')),
+        refaddr(Mediabot::External::AppleMusic->can('_handle_applemusic')),
+        'mb886: External facade imports the canonical handler');
+    for my $order (
+        [qw(External::AppleMusic)],
+        [qw(External::URL External::AppleMusic External)],
+        [qw(External External::AppleMusic External::URL)],
+    ) {
+        my $code = join('', map {"require Mediabot::$_;\n"} @$order);
+        if (@$order == 1) {
+            $code .= q{die 'URL loaded eagerly' if $INC{'Mediabot/External/URL.pm'};};
+            $code .= q{die 'AI loaded eagerly' if $INC{'Mediabot/External/Claude.pm'};};
+        }
+        $code .= q{die 'missing pure helper' unless
+            Mediabot::External::AppleMusic::_am_duration_from_ms(242867) eq '4m 02s';
+            print 'loaded';};
+        my $err = gensym;
+        my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
+        my $stdout = do {local $/; <$out>} // '';
+        my $stderr = do {local $/; <$err>} // '';
+        waitpid($pid, 0);
+        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+            'mb886: independent import order loads quietly: ' . join('/', @$order));
+    }
+    my $expected_badge = "\x0300,01[\x0f\x0300,14AppleMusic\x0f\x0300,01]\x0f\x0f ";
+
     $assert->is(
-        Mediabot::External::URL::_am_duration_from_ms(242867),
+        Mediabot::External::AppleMusic::_am_duration_from_ms(242867),
         '4m 02s',
         'mb672-855: Apple milliseconds use floor, matching displayed duration'
     );
     $assert->is(
-        Mediabot::External::URL::_am_duration_from_ms(222200),
+        Mediabot::External::AppleMusic::_am_duration_from_ms(222200),
         '3m 42s',
         'mb672-855: second observed Apple duration is stable'
     );
 
     {
         my $self = bless { logger => L855->new }, 'Bot855';
-        my $am = Mediabot::External::URL::_applemusic_extract_details(
+        my $am = Mediabot::External::AppleMusic::_applemusic_extract_details(
             $self,
             q{<meta property="og:description" content="Låt · 1977 · 1 Song"/>}
         );
@@ -114,7 +152,7 @@ return sub {
         }, 'Bot855';
 
         my $url = 'https://music.apple.com/se/album/starrider/309576627?i=309576635';
-        my $ret = Mediabot::External::URL::_handle_applemusic(
+        my $ret = Mediabot::External::AppleMusic::_handle_applemusic(
             $self, undef, 'nick', '#c', $url
         );
 
@@ -139,10 +177,13 @@ return sub {
         $assert->is(scalar(@sent), 1,
             'mb672-855: worker completion emits exactly one IRC line');
 
+        $assert->ok(index($sent[0], "(nick) $expected_badge") == 0 && utf8::is_utf8($sent[0]),
+            'mb886: actual badge preserves colors, reset bytes and Unicode line representation');
+
         my $clean = _strip_855($sent[0]);
         $assert->is(
             $clean,
-            "(nick) [\x{2318}Music] Starrider - by Foreigner - album Foreigner (Deluxe Version) - 1977 - 4m 02s",
+            "(nick) [AppleMusic] Starrider - by Foreigner - album Foreigner (Deluxe Version) - 1977 - 4m 02s",
             'mb672-855: structured Apple lookup renders exact rich track line'
         );
         $assert->unlike($clean, qr/\bLåt\b/i,
@@ -150,9 +191,9 @@ return sub {
 
         my ($after_reset) = ($sent[0] // '') =~ /\x0f\s+(.*)\z/s;
         $assert->ok(defined($after_reset),
-            'mb672-855: Apple Music command-symbol badge is followed by IRC RESET');
+            'mb672-855: Apple Music badge is followed by IRC RESET');
 
-        my $ret2 = Mediabot::External::URL::_handle_applemusic(
+        my $ret2 = Mediabot::External::AppleMusic::_handle_applemusic(
             $self, undef, 'nick2', '#c',
             'https://music.apple.com/se/album/starrider/309576627?i=309576635&l=en-GB'
         );
@@ -162,11 +203,31 @@ return sub {
             'mb672-855: equivalent tracking/locale variant starts no second worker');
         $assert->is(scalar(@sent), 2,
             'mb672-855: canonical cache still emits IRC response');
+        $assert->is($sent[1], '(nick2) ' . substr($sent[0], length('(nick) ')),
+            'mb886: canonical cache preserves the complete colored badge and display');
+    }
+
+    {
+        my (@calls, @sent);
+        my $browser_calls = 0;
+        local *Mediabot::External::_make_http = sub { H855->new(\@calls) };
+        local *Mediabot::External::URL::_fetch_url_chromium_dumpdom = sub {
+            $browser_calls++;
+            return q{<meta property="og:title" content="Browser &amp; title"/>};
+        };
+        local *Mediabot::Helpers::botPrivmsg = sub { push @sent, $_[2]; return 1; };
+        my $self = bless { logger => L855->new }, 'Bot855';
+        my $ret = Mediabot::External::_handle_applemusic(
+            $self, undef, 'nick', '#test', 'https://music.apple.com/us/playlist/example/pl.fixture');
+        $assert->ok($ret == 1 && $browser_calls == 1 && @calls == 1,
+            'mb886: facade fallback still resolves the dynamic URL browser hook');
+        $assert->is($sent[0], "(nick) ${expected_badge}Browser & title",
+            'mb886: browser fallback shares the exact badge and existing HTML decoder');
     }
 
     {
         my $src = _slurp_855(
-            File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
+            File::Spec->catfile('.', 'Mediabot', 'External', 'AppleMusic.pm')
         );
         my ($handler) = $src =~ /(sub _handle_applemusic \{.*?\n\})\n\n/s;
         $handler //= '';
@@ -177,13 +238,13 @@ return sub {
             'mb672-855: Apple Music parent handler performs no network/browser work');
         $assert->like(
             $handler,
-            qr/String::IRC->new\("\\x\{2318\}Music"\)->white\('grey'\)/,
-            'mb672-855: Apple Music command-symbol badge keeps historical colors'
+            qr/String::IRC->new\("AppleMusic"\)->white\('grey'\)/,
+            'mb672-855: Apple Music badge keeps historical colors'
         );
         $assert->like(
             $handler,
             qr/my\s+\$msg\s*=\s*"\$badge\\x0f\s+\$display";/,
-            'mb672-855: Apple Music shortened badge keeps reset/display contract'
+            'mb672-855: Apple Music badge keeps reset/display contract'
         );
     }
 };
