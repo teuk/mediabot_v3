@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB889 — Isolate the Chromium subprocess wrapper (2026-10-21)
+
+- Move DOM fetching, bounded child reaping and wait-status decoding from URL
+  into External::Chromium. Import the owner in the External facade and retain
+  all historical URL aliases, exports and provider call sites.
+- Preserve the process algorithms, argv, defaults, profiles, pipe handling,
+  timeouts, diagnostics and decoding. Resolve the two fixed paths through
+  private functions so native tests use isolated executables and profiles.
+  Keep all 25 remaining URL function bodies unchanged.
+- Retarget existing ownership checks and extend the existing Chromium case
+  with cold loads and native subprocess success/failure coverage. Exercise the
+  canonical reaping helpers instead of a test-local copy. Add no numbered case,
+  configuration, SQL schema, migration or service change.
+
 ### MB888 — Separate external data sources from UserCommands (2026-10-21)
 
 - Move Wiktionary entry selection and synchronous lookup into

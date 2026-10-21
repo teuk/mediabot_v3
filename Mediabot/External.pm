@@ -113,13 +113,16 @@ Mediabot::External::Fortnite->import(qw(getFortniteId fortniteStats_ctx));
 require Mediabot::External::AppleMusic;
 Mediabot::External::AppleMusic->import(qw(_handle_applemusic));
 
+# MB889: the browser subprocess wrapper has an independent owner.
+require Mediabot::External::Chromium;
+Mediabot::External::Chromium->import(qw(_fetch_url_chromium_dumpdom));
+
 # mb99-R1: sous-module URL/Instagram/Facebook/X
 require Mediabot::External::URL;
 Mediabot::External::URL->import(qw(
     _extract_url
     _decode_html
     _decode_http_content_utf8
-    _fetch_url_chromium_dumpdom
     _handle_instagram
     _facebook_url
     _facebook_title_from_html
@@ -202,7 +205,7 @@ sub _make_http {
 
 # mb99-R1: _decode_http_content_utf8 déplacée dans Mediabot::External::URL
 
-# mb99-R1: _fetch_url_chromium_dumpdom déplacée dans Mediabot::External::URL
+# MB889: _fetch_url_chromium_dumpdom belongs to Mediabot::External::Chromium
 
 
 

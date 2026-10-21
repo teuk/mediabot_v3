@@ -50,7 +50,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_mb308(
-        File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Chromium.pm')
     );
 
     my $wait_sub   = _extract_sub_mb308($src, '_wait_chromium_child');
@@ -96,14 +96,13 @@ return sub {
         'signal-terminated Chromium is rejected explicitly'
     );
 
-    # Exercise the exact helper code in an isolated child Perl process.
+    # Exercise the canonical helper implementations in an isolated child process.
     my $probe = join "\n",
         'use strict;',
         'use warnings;',
         'use POSIX qw(WNOHANG);',
         'use Time::HiRes qw(time usleep);',
-        $wait_sub,
-        $decode_sub,
+        'use Mediabot::External::Chromium qw(_wait_chromium_child _decode_chromium_wait_status);',
         q{
 my ($ok_exit, $ok_signal) = _decode_chromium_wait_status(7 << 8);
 my ($sig_exit, $sig_signal) = _decode_chromium_wait_status(15);
@@ -136,7 +135,7 @@ print join('|',
 },
     ;
 
-    open my $fh, '-|', $^X, '-e', $probe
+    open my $fh, '-|', $^X, '-I.', '-It/lib', '-e', $probe
         or die "could not start MB308 probe: $!";
 
     local $/;

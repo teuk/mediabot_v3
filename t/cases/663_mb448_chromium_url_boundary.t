@@ -33,7 +33,7 @@ return sub {
     $assert->is($accepted->('ftp://host/x'),               0, 'schéma non http(s) refusé');
 
     # --- 2. Câblage réel ----------------------------------------------------
-    my $src = _slurp_663(File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm'));
+    my $src = _slurp_663(File::Spec->catfile('.', 'Mediabot', 'External', 'Chromium.pm'));
     my ($body) = $src =~ /(sub _fetch_url_chromium_dumpdom \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
 

@@ -55,7 +55,7 @@ return sub {
     # [1] les modules qui parlent declarent use utf8
     my @speaking = qw(UserCommands Helpers Partyline ChannelCommands DBCommands
                       Quotes Convert LoginCommands AdminCommands CommandAsync
-                      External/URL External/YouTube External/Claude
+                      External/URL External/Chromium External/YouTube External/Claude
                       External/Weather External/Fortnite External/TMDB
                       External/News External/Horoscope);
     my @missing;
