@@ -136,23 +136,51 @@ sub parse_random_quotes {
     return \@quotes;
 }
 
+sub _search_quote_id {
+    my ($href) = @_;
+    return undef unless defined($href) && !ref($href);
+    $href =~ s/^\s+|\s+$//g;
+    my $target = $href;
+
+    # Decode one target from a supported DDG redirect link, not an arbitrary
+    # nested URL or an unrelated site's similarly named query parameter.
+    if ($href =~ m{\A(?:(?:https?:)?//(?:(?:www|lite|html)\.)?duckduckgo\.com)?/(?:l/)?\?([^#]*)(?:\#.*)?\z}i) {
+        my $query = $1;
+        my @targets;
+        for my $part (split /&/, $query) {
+            my ($key, $value) = split /=/, $part, 2;
+            next unless defined($key) && lc(uri_unescape($key)) eq 'uddg';
+            push @targets, uri_unescape($value // '');
+        }
+        return undef unless @targets == 1;
+        $target = $targets[0];
+    }
+    $target = 'https:' . $target
+        if $target =~ m{\A//(?:www\.)?danstonchat\.com/}i;
+    my $id = _quote_url_id($target);
+    return defined(dtc_quote_url($id)) ? $id : undef;
+}
+
 sub parse_search_ids {
     my ($html) = @_;
     return [] unless defined($html) && !ref($html) && length($html) <= MAX_HTML_BYTES;
     my (@ids, %seen);
-
-    while ($html =~ m{(?:https?://(?:www\.)?danstonchat\.com)?/quote/([0-9]+)\.html}ig) {
-        push @ids, $1 unless $seen{$1}++;
-        last if @ids >= MAX_SEARCH_RESULTS;
-    }
-
-    while (@ids < MAX_SEARCH_RESULTS && $html =~ /[?&]uddg=([^"'&<>]+)/ig) {
-        my $decoded = uri_unescape($1);
-        if ($decoded =~ m{/quote/([0-9]+)\.html}i) {
-            push @ids, $1 unless $seen{$1}++;
+    my $tree = HTML::TreeBuilder->new;
+    $tree->ignore_unknown(0);
+    my $ok = eval {
+        $tree->parse_content($html);
+        # A single document-order pass keeps wrapped and direct hits ranked
+        # together, and ignores scripts, comments and non-link text.
+        for my $link ($tree->look_down(_tag => 'a')) {
+            my $id = _search_quote_id($link->attr('href'));
+            next unless defined($id) && !$seen{$id}++;
+            push @ids, $id;
+            last if @ids >= MAX_SEARCH_RESULTS;
         }
-    }
-    return \@ids;
+        1;
+    };
+    $tree->delete;
+    return $ok ? \@ids : [];
 }
 
 sub _html_parser {

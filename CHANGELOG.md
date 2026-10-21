@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB873 — Exact DansTonChat search links in result order (2026-10-21)
+
+- Extract DTC search IDs from actual anchor targets, admitting complete
+  supported quote URLs and one decoded target of supported DuckDuckGo links.
+  Ignore foreign/nested URL matches, malformed or ambiguous targets, non-link
+  text and IDs outside the existing canonical fetch contract.
+- Preserve document order across direct and wrapped results, deduplicate
+  before applying the existing result bounds, and continue the existing
+  search fallback plan when a page has no usable quote target.
+- Add offline parser, source fallback and native worker delivery regressions
+  through both public aliases. Keep detail identity checks, HTML size limits,
+  HTTP budgets, formatting and runtime ownership. No SQL schema, migration,
+  private configuration or service change.
+
 ### MB872 — Weather location spelling and bounded cache growth (2026-10-21)
 
 - Preserve spaces inside weather location names instead of replacing them
