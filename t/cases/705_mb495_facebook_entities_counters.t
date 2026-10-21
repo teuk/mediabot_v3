@@ -110,7 +110,8 @@ return sub {
         my $url_src = _slurp_705(File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm'));
         my $instagram_src = _slurp_705(File::Spec->catfile('.', 'Mediabot', 'External', 'Instagram.pm'));
         my ($ig) = $instagram_src =~ /(sub _instagram_fetch_sync \{.*?\n\})\n\n/s; $ig //= '';
-        my ($fb) = $url_src =~ /(sub _handle_facebook \{.*?\n\})\n\n/s;  $fb //= '';
+        my $facebook_src = _slurp_705(File::Spec->catfile('.', 'Mediabot', 'External', 'Facebook.pm'));
+        my ($fb) = $facebook_src =~ /(sub _handle_facebook \{.*?\n\})\n\n/s;  $fb //= '';
         $assert->like($ig, qr/default_headers => \{ 'accept-language' => 'en-US/,
             'Instagram: Accept-Language en-US sur le GET crawler');
         $assert->like($fb, qr/default_headers => \{ 'accept-language' => 'en-US/,

@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB892 — Separate Facebook metadata from URL routing (2026-10-21)
+
+- Move the four Facebook functions into External::Facebook. Import their owner
+  in External and retain the four historical URL aliases, the 17 URL optional
+  exports and the 33 facade default exports.
+- Preserve URL normalization, title/description parsing, character limits,
+  badge/reset, cache policy, HTTP options and the distinct Reel/browser fallback
+  paths. Resolve historical helper symbols at call time so runtime overrides
+  remain effective. Keep all 14 remaining URL function bodies unchanged;
+  URL drops from 1,099 to 827 lines.
+- Retarget five existing ownership checks and extend the existing Facebook
+  fallback case by five cold-load and runtime-hook assertions. Add no numbered
+  case, SQL schema, migration, configuration or service change.
+
 ### MB891 — Give Instagram metadata its own module (2026-10-21)
 
 - Move the seven Instagram helpers and handler from URL into External::Instagram.

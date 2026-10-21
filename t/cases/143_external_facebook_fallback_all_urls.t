@@ -59,7 +59,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_facebook_fallback_all_urls(
-        File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Facebook.pm')
     );
 
     my $fallback_body = _extract_sub_body_facebook_fallback_all_urls($src, '_facebook_fallback_title_from_url');
@@ -136,7 +136,7 @@ return sub {
 
     $assert->like(
         $handler_body // '',
-        qr/my \$fallback_title = _facebook_fallback_title_from_url\(\$fb_url\);/,
+        qr/my \$fallback_title = Mediabot::External::URL::_facebook_fallback_title_from_url\(\$fb_url\);/,
         '_handle_facebook calls the URL fallback helper'
     );
 

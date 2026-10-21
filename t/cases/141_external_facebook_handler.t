@@ -63,10 +63,14 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
     );
 
+    my $facebook_src = _slurp_external_facebook_handler(
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Facebook.pm')
+    );
+
     my $display_body  = _extract_sub_body_external_facebook_handler($src, 'displayUrlTitle');
-    my $facebook_body = _extract_sub_body_external_facebook_handler($src, '_handle_facebook');
-    my $url_body      = _extract_sub_body_external_facebook_handler($src, '_facebook_url');
-    my $title_body    = _extract_sub_body_external_facebook_handler($src, '_facebook_title_from_html');
+    my $facebook_body = _extract_sub_body_external_facebook_handler($facebook_src, '_handle_facebook');
+    my $url_body      = _extract_sub_body_external_facebook_handler($facebook_src, '_facebook_url');
+    my $title_body    = _extract_sub_body_external_facebook_handler($facebook_src, '_facebook_title_from_html');
 
     $assert->ok(defined $display_body,  'displayUrlTitle body found');
     $assert->ok(defined $facebook_body, '_handle_facebook body found');

@@ -121,16 +121,21 @@ Mediabot::External::Chromium->import(qw(_fetch_url_chromium_dumpdom));
 require Mediabot::External::Instagram;
 Mediabot::External::Instagram->import(qw(_handle_instagram));
 
-# mb99-R1: sous-module URL/Facebook/X
+# MB892: Facebook metadata and delivery have an independent owner.
+require Mediabot::External::Facebook;
+Mediabot::External::Facebook->import(qw(
+    _facebook_url
+    _facebook_title_from_html
+    _facebook_fallback_title_from_url
+    _handle_facebook
+));
+
+# mb99-R1: sous-module URL/X
 require Mediabot::External::URL;
 Mediabot::External::URL->import(qw(
     _extract_url
     _decode_html
     _decode_http_content_utf8
-    _facebook_url
-    _facebook_title_from_html
-    _facebook_fallback_title_from_url
-    _handle_facebook
     _x_url
     _x_title_from_html
     _x_fallback_title_from_url
