@@ -1447,9 +1447,20 @@ sub fortniteStats_ctx {
         return;
     }
 
+    # mb875: a declared API status is a three-digit scalar, never a JSON
+    # container/boolean or a number inferred from the prefix of arbitrary text.
+    if (exists $data->{status}
+        && (!defined $data->{status} || ref($data->{status})
+            || $data->{status} !~ /\A[0-9]{3}\z/)) {
+        $self->{logger}->log(3, 'fortniteStats_ctx(): invalid API status');
+        Mediabot::Helpers::botPrivmsg($self, $reply_to, 'Fortnite stats: unexpected API response.');
+        return;
+    }
+
     # API may return {status:..., error:...}
     if (exists $data->{status} && $data->{status} != 200) {
-        my $err = $data->{error} // "API error";
+        my $err = defined $data->{error} && !ref($data->{error})
+            ? $data->{error} : "API error";
         $self->{logger}->log(3, "fortniteStats_ctx(): API status=$data->{status} error=$err");
         Mediabot::Helpers::botPrivmsg($self, $reply_to, "Fortnite stats: $err");
         return;
@@ -1488,17 +1499,23 @@ sub fortniteStats_ctx {
         }
     }
 
-    my $name        = $account->{name}       // $target_name;
-    my $matches     = $overall->{matches}    // 0;
-    my $wins        = $overall->{wins}       // 0;
-    my $win_rate    = defined $overall->{winRate} ? $overall->{winRate} : 0;
-    my $kills       = $overall->{kills}      // 0;
-    my $kd          = defined $overall->{kd} ? $overall->{kd} : 0;
-    my $top3        = $overall->{top3}       // 0;
-    my $top5        = $overall->{top5}       // 0;
-    my $top10       = $overall->{top10}      // 0;
-    my $bp_level    = $battlepass->{level}   // 0;
-    my $bp_progress = defined $battlepass->{progress} ? $battlepass->{progress} : 0;
+    # Nested objects are guarded above; their display leaves must also be
+    # scalars. Keep all existing scalar values and missing-field defaults.
+    my $scalar_or = sub {
+        my ($value, $fallback) = @_;
+        return defined $value && !ref($value) ? $value : $fallback;
+    };
+    my $name        = $scalar_or->($account->{name}, $target_name);
+    my $matches     = $scalar_or->($overall->{matches}, 0);
+    my $wins        = $scalar_or->($overall->{wins}, 0);
+    my $win_rate    = $scalar_or->($overall->{winRate}, 0);
+    my $kills       = $scalar_or->($overall->{kills}, 0);
+    my $kd          = $scalar_or->($overall->{kd}, 0);
+    my $top3        = $scalar_or->($overall->{top3}, 0);
+    my $top5        = $scalar_or->($overall->{top5}, 0);
+    my $top10       = $scalar_or->($overall->{top10}, 0);
+    my $bp_level    = $scalar_or->($battlepass->{level}, 0);
+    my $bp_progress = $scalar_or->($battlepass->{progress}, 0);
 
     # mb421-R1: l'API renvoie winRate/kd en flottants non bornés
     # (ex. kd=1.2345678901). Les afficher bruts est illisible sur IRC. On

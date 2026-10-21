@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB875 — Fortnite response status and scalar display fields (2026-10-21)
+
+- Validate a declared API status before numeric comparison. Reject malformed
+  values without warnings or numeric-prefix success; preserve integer/string
+  success, supported absent status and ordinary API failures. Use the existing
+  generic API error for reference-valued error fields.
+- Require scalar account/statistic display leaves. Use the existing nickname
+  or zero defaults for containers and JSON booleans while keeping other stats,
+  valid scalar values, missing/null behavior and existing float rounding.
+- Exercise the real built-in command and account lookups with offline HTTP
+  and an isolated SQLite fixture. Preserve access checks, mode preference,
+  reply destination, request count, HTTP timeout and TLS. No SQL schema,
+  migration, private configuration or service change.
+
 ### MB874 — Horoscope sign validation and efficient Unicode fitting (2026-10-21)
 
 - Reject a declared horoscope sign that is an object, array or JSON boolean,
