@@ -9,6 +9,8 @@ use warnings;
 use Cwd qw(abs_path getcwd);
 use File::Spec;
 use File::Temp qw(tempdir);
+use IPC::Open3;
+use Symbol qw(gensym);
 
 BEGIN {
     no warnings 'redefine';
@@ -61,6 +63,7 @@ return sub {
     my $version_file = File::Spec->catfile($root, 'VERSION');
 
     my $helpers = _slurp_mb389($helpers_file);
+    my $format = _slurp_mb389(File::Spec->catfile($root, 'Mediabot', 'Version', 'Format.pm'));
     my $main    = _slurp_mb389($main_file);
     my $expected = _slurp_mb389($version_file);
     $expected =~ s/\s+\z//;
@@ -78,12 +81,84 @@ return sub {
     );
 
     $assert->like(
-        $helpers,
+        $format,
         qr/sub _compare_mediabot_versions\s*\{/,
         'semantic version comparator is present'
     );
 
     require $helpers_file;
+
+    require Mediabot::Version::Format;
+
+    for my $order (
+        [qw(Version::Format)],
+        [qw(Version::Format Helpers)],
+        [qw(Helpers Version::Format)],
+    ) {
+        my $code = join('', map { "require Mediabot::$_;\n" } @$order);
+        $code .= q{
+            my $cold = !exists $INC{'Mediabot/Helpers.pm'};
+            Mediabot::Version::Format->import(qw(_usable_local_version _version_parts
+                _compare_digit_strings _compare_mediabot_versions getDetailedVersion));
+            die 'normalizer failed' unless _usable_local_version(' 3.5 ') eq '3.5';
+            my $parts = _version_parts('3.6dev-00020261021_201821');
+            die 'parser failed' unless $parts->{major} == 3 && $parts->{minor} == 6
+                && $parts->{type} eq 'devel' && $parts->{dev} eq '20261021201821';
+            die 'digit comparison failed' unless _compare_digit_strings('999', '1000') < 0;
+            die 'release ordering failed' unless _compare_mediabot_versions(
+                '3.5', '3.5dev-20991231_235959') > 0;
+            my @d = getDetailedVersion(undef, '3.5');
+            die 'detail tuple failed' unless @d == 4 && $d[0] == 3
+                && $d[1] == 5 && $d[2] eq 'stable' && !defined $d[3];
+            die 'unexpected dependency load' if $cold && (
+                exists $INC{'Mediabot/Helpers.pm'} || exists $INC{'HTTP/Tiny.pm'}
+                || exists $INC{'DBI.pm'});
+            require Mediabot::Helpers;
+            die 'historical comparator failed' unless
+                Mediabot::Helpers::_compare_mediabot_versions('3.5', '3.6dev-1') < 0;
+            print 'loaded';
+        };
+        my $err = gensym;
+        my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
+        my $stdout = do { local $/; <$out> } // '';
+        my $stderr = do { local $/; <$err> } // '';
+        waitpid($pid, 0);
+        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+            'pure version functions work in load order: ' . join('/', @$order));
+    }
+    {
+        no warnings 'redefine';
+        local *Mediabot::Helpers::_usable_local_version = sub { '8.1' };
+        my $parts = Mediabot::Version::Format::_version_parts('legacy input');
+        $assert->ok($parts && $parts->{major} == 8 && $parts->{minor} == 1
+                && $parts->{type} eq 'stable',
+            'canonical parser keeps the call-time legacy normalizer');
+    }
+    {
+        no warnings 'redefine';
+        my @seen;
+        local *Mediabot::Helpers::_version_parts = sub {
+            push @seen, $_[0];
+            return {major=>8, minor=>1, stage=>0, type=>'devel',
+                dev=>$_[0] eq 'newer' ? '200' : '100'};
+        };
+        my @detail = Mediabot::Version::Format::getDetailedVersion(undef, 'detail');
+        my $cmp = Mediabot::Version::Format::_compare_mediabot_versions('older', 'newer');
+        $assert->ok(join('|', @detail) eq '8|1|devel|100' && $cmp < 0
+                && join('|', @seen) eq 'detail|older|newer',
+            'canonical details and comparison keep the legacy parser and argument order');
+    }
+    {
+        no warnings 'redefine';
+        my @seen;
+        local *Mediabot::Helpers::_compare_digit_strings = sub {
+            @seen = @_; return -17;
+        };
+        my $cmp = Mediabot::Version::Format::_compare_mediabot_versions(
+            '3.6dev-001_2', '3.6dev-001_3');
+        $assert->ok($cmp == -17 && join('|', @seen) eq '12|13',
+            'canonical comparison keeps the legacy digit comparator and its exact return');
+    }
 
     {
         package MB389::Logger;

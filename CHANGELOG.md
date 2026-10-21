@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB896 — Give version grammar and ordering a dedicated owner (2026-10-21)
+
+- Move five pure version functions from Helpers into Version::Format. Preserve
+  all five historical entry points and resolve the legacy normalizer, parser
+  and digit comparator at call time. The module can run without loading
+  Helpers, HTTP or DBI; it has no file/network/database operations.
+- Keep Mediabot's existing stable/development grammar, ordering, tuples,
+  scalar/list returns and UTF-8 behavior. Leave local VERSION path resolution,
+  caching, remote checks, worker policy and IRC replies in place. All 95 other
+  Helpers function bodies and its default exports are unchanged.
+- Extend the existing startup/version case by six assertions for cold loading
+  and hooks, and move its ownership check to the new owner. Add no numbered
+  case, schema, SQL, configuration, VERSION, runner, audit-tool or service change.
+
 ### MB895 — Separate channel-log reads from general helpers (2026-10-21)
 
 - Move archive-name validation, scope-based source selection and streaming

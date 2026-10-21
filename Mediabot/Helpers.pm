@@ -1178,15 +1178,8 @@ my $MEDIABOT_ROOT_DIR   = dirname(dirname($HELPERS_SOURCE_FILE));
 my $LOCAL_VERSION_FILE  = File::Spec->catfile($MEDIABOT_ROOT_DIR, 'VERSION');
 
 sub _usable_local_version {
-    my ($value) = @_;
-
-    return undef unless defined($value) && !ref($value);
-
-    $value = "$value";
-    $value =~ s/^\s+|\s+$//g;
-
-    return undef if $value eq '' || lc($value) eq 'undefined';
-    return $value;
+    require Mediabot::Version::Format;
+    return Mediabot::Version::Format::_usable_local_version(@_);
 }
 
 sub _cached_local_version {
@@ -1234,62 +1227,20 @@ sub getLocalVersion {
 }
 
 sub _version_parts {
-    my ($value) = @_;
-    $value = _usable_local_version($value);
-    return undef unless defined $value;
-
-    if ($value =~ /\A(\d+)\.(\d+)\z/) {
-        return {
-            major => 0 + $1,
-            minor => 0 + $2,
-            stage => 1,       # stable is newer than devel at the same base
-            type  => 'stable',
-            dev   => undef,
-        };
-    }
-
-    if ($value =~ /\A(\d+)\.(\d+)dev[-_]?(\d[\d_]*)\z/) {
-        my ($major, $minor, $dev) = ($1, $2, $3);
-        $dev =~ s/_//g;
-        $dev =~ s/\A0+(?=\d)//;
-
-        return {
-            major => 0 + $major,
-            minor => 0 + $minor,
-            stage => 0,
-            type  => 'devel',
-            dev   => $dev,
-        };
-    }
-
-    return undef;
+    require Mediabot::Version::Format;
+    return Mediabot::Version::Format::_version_parts(@_);
 }
 
 sub _compare_digit_strings {
-    my ($left, $right) = @_;
-    $left  = '0' unless defined($left)  && $left  ne '';
-    $right = '0' unless defined($right) && $right ne '';
-
-    return length($left) <=> length($right)
-        if length($left) != length($right);
-    return $left cmp $right;
+    require Mediabot::Version::Format;
+    return Mediabot::Version::Format::_compare_digit_strings(@_);
 }
 
 # Return -1 when left is older, 0 when equal, 1 when left is newer, and undef
 # when either version does not follow Mediabot's stable/devel format.
 sub _compare_mediabot_versions {
-    my ($left, $right) = @_;
-
-    my $l = _version_parts($left);
-    my $r = _version_parts($right);
-    return undef unless $l && $r;
-
-    return $l->{major} <=> $r->{major} if $l->{major} != $r->{major};
-    return $l->{minor} <=> $r->{minor} if $l->{minor} != $r->{minor};
-    return $l->{stage} <=> $r->{stage} if $l->{stage} != $r->{stage};
-
-    return 0 if $l->{stage} == 1;
-    return _compare_digit_strings($l->{dev}, $r->{dev});
+    require Mediabot::Version::Format;
+    return Mediabot::Version::Format::_compare_mediabot_versions(@_);
 }
 
 # Send a private message to a target
@@ -2242,17 +2193,8 @@ sub getVersion_async {
 # getDetailedVersion – parses a version string and returns its components
 
 sub getDetailedVersion {
-    my ($self, $version_string) = @_;
-
-    my $parts = _version_parts($version_string);
-    return (undef, undef, undef, undef) unless $parts;
-
-    return (
-        $parts->{major},
-        $parts->{minor},
-        $parts->{type},
-        $parts->{dev},
-    );
+    require Mediabot::Version::Format;
+    return Mediabot::Version::Format::getDetailedVersion(@_);
 }
 
 # Get the debug level from the configuration
