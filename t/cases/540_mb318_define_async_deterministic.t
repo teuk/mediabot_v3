@@ -78,12 +78,58 @@ sub _extract_sub_mb318 {
 return sub {
     my ($assert) = @_;
 
+    # MB888: independent source imports and the historical async hook contract.
+    require IPC::Open3;
+    require Symbol;
+    require Mediabot::UserCommands;
+    for my $order (
+        [qw(External::Wiktionary)],
+        [qw(External::Wiktionary UserCommands)],
+        [qw(UserCommands External::Wiktionary)],
+    ) {
+        my $code = join('', map {"require Mediabot::$_;\n"} @$order);
+        if (@$order == 1) {
+            $code .= q{die 'commands loaded eagerly' if $INC{'Mediabot/UserCommands.pm'};};
+            $code .= q{die 'HTTP facade loaded eagerly' if $INC{'Mediabot/External.pm'};};
+        }
+        else {
+            $code .= q{require Scalar::Util;
+                for my $name (qw(_define_pick_entry _define_lookup_sync)) {
+                    die 'legacy owner mismatch' unless
+                        Scalar::Util::refaddr(Mediabot::UserCommands->can($name)) ==
+                        Scalar::Util::refaddr(Mediabot::External::Wiktionary->can($name));
+                }};
+        }
+        $code .= q{print 'loaded';};
+        my $err = Symbol::gensym();
+        my $pid = IPC::Open3::open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
+        my $stdout = do {local $/; <$out>} // '';
+        my $stderr = do {local $/; <$err>} // '';
+        waitpid($pid, 0);
+        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+            'mb888: Wiktionary imports quietly with canonical legacy aliases: ' . join('/', @$order));
+    }
+    {
+        no warnings 'redefine';
+        my (@done, $calls);
+        local *Mediabot::UserCommands::_define_lookup_sync = sub {
+            $calls++;
+            return 'legacy source hook';
+        };
+        my $ret = Mediabot::UserCommands::_define_lookup_async({}, 'probe', 'fr', sub {push @done, $_[0]});
+        $assert->ok($ret == 1 && $calls == 1 && @done == 1 && $done[0] eq 'legacy source hook',
+            'mb888: real define async adapter still honors a runtime legacy source override');
+    }
+
     my $src = _slurp_mb318(
         File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm')
     );
+    my $source = _slurp_mb318(
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Wiktionary.pm')
+    );
 
-    my $pick    = _extract_sub_mb318($src, '_define_pick_entry');
-    my $sync    = _extract_sub_mb318($src, '_define_lookup_sync');
+    my $pick    = _extract_sub_mb318($source, '_define_pick_entry');
+    my $sync    = _extract_sub_mb318($source, '_define_lookup_sync');
     my $async   = _extract_sub_mb318($src, '_define_lookup_async');
     my $command = _extract_sub_mb318($src, 'mbDefine_ctx');
 

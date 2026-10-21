@@ -82,12 +82,56 @@ sub _extract_sub_mb319 {
 return sub {
     my ($assert) = @_;
 
+    # MB888: independent source imports and the historical async hook contract.
+    require IPC::Open3;
+    require Symbol;
+    require Mediabot::UserCommands;
+    for my $order (
+        [qw(External::OpenTriviaDB)],
+        [qw(External::OpenTriviaDB UserCommands)],
+        [qw(UserCommands External::OpenTriviaDB)],
+    ) {
+        my $code = join('', map {"require Mediabot::$_;\n"} @$order);
+        if (@$order == 1) {
+            $code .= q{die 'commands loaded eagerly' if $INC{'Mediabot/UserCommands.pm'};};
+            $code .= q{die 'HTTP facade loaded eagerly' if $INC{'Mediabot/External.pm'};};
+        }
+        else {
+            $code .= q{require Scalar::Util;
+                for my $name (qw(_trivia_parse_api_content _trivia_fetch_sync)) {
+                    die 'legacy owner mismatch' unless
+                        Scalar::Util::refaddr(Mediabot::UserCommands->can($name)) ==
+                        Scalar::Util::refaddr(Mediabot::External::OpenTriviaDB->can($name));
+                }};
+        }
+        $code .= q{print 'loaded';};
+        my $err = Symbol::gensym();
+        my $pid = IPC::Open3::open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
+        my $stdout = do {local $/; <$out>} // '';
+        my $stderr = do {local $/; <$err>} // '';
+        waitpid($pid, 0);
+        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+            'mb888: OpenTriviaDB imports quietly with canonical legacy aliases: ' . join('/', @$order));
+    }
+    {
+        no warnings 'redefine';
+        my (@done, $calls);
+        my $value = {ok=>1, question=>{question=>'legacy source hook'}};
+        local *Mediabot::UserCommands::_trivia_fetch_sync = sub {$calls++; return $value};
+        my $ret = Mediabot::UserCommands::_trivia_fetch_async({}, 10, 'hard', sub {push @done, $_[0]});
+        $assert->ok($ret == 1 && $calls == 1 && @done == 1 && $done[0] == $value,
+            'mb888: real trivia async adapter still honors a runtime legacy source override');
+    }
+
     my $src = _slurp_mb319(
         File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm')
     );
+    my $source = _slurp_mb319(
+        File::Spec->catfile('.', 'Mediabot', 'External', 'OpenTriviaDB.pm')
+    );
 
-    my $parse   = _extract_sub_mb319($src, '_trivia_parse_api_content');
-    my $sync    = _extract_sub_mb319($src, '_trivia_fetch_sync');
+    my $parse   = _extract_sub_mb319($source, '_trivia_parse_api_content');
+    my $sync    = _extract_sub_mb319($source, '_trivia_fetch_sync');
     my $async   = _extract_sub_mb319($src, '_trivia_fetch_async');
     my $command = _extract_sub_mb319($src, 'mbTrivia_ctx');
     my $stop    = _extract_sub_mb319($src, 'mbTriviaStop_ctx');

@@ -85,8 +85,11 @@ return sub {
     my $src = _slurp_mb395(
         File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm')
     );
+    my $source = _slurp_mb395(
+        File::Spec->catfile('.', 'Mediabot', 'External', 'OpenTriviaDB.pm')
+    );
 
-    my $sync    = _extract_sub_mb395($src, '_trivia_fetch_sync');
+    my $sync    = _extract_sub_mb395($source, '_trivia_fetch_sync');
     my $async   = _extract_sub_mb395($src, '_trivia_fetch_async');
     my $command = _extract_sub_mb395($src, 'mbTrivia_ctx');
 

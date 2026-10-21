@@ -55,7 +55,8 @@ return sub {
     (my $dcode = $def) =~ s/^\s*#.*$//mg;
     $assert->like($dcode, qr/\[\^\\w\\s\\x80-\\xFF-\]/, 'validation byte-safe');
 
-    my ($sync) = $src =~ /(sub _define_lookup_sync \{.*?\n\}\n)/s; $sync //= '';
+    my $source = _slurp_651(File::Spec->catfile('.', 'Mediabot', 'External', 'Wiktionary.pm'));
+    my ($sync) = $source =~ /(sub _define_lookup_sync \{.*?\n\}\n)/s; $sync //= '';
     (my $scode = $sync) =~ s/^\s*#.*$//mg;
     $assert->like($scode, qr/utf8::is_utf8\(\$word\) \? Encode::encode\('UTF-8', \$word\) : \$word/,
         'word normalisé en octets avant encodage');

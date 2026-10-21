@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB888 — Separate external data sources from UserCommands (2026-10-21)
+
+- Move Wiktionary entry selection and synchronous lookup into
+  External::Wiktionary, and Open Trivia DB parsing and synchronous fetch/retry
+  into External::OpenTriviaDB. Import the same four historical helper names in
+  UserCommands; retain its default command exports.
+- Preserve the four function bodies exactly. Keep asynchronous adapters,
+  runtime hook lookup, game state, IRC replies, SQL, deadlines and distinct
+  provider policies unchanged. UserCommands drops from 8,462 to 7,876 lines.
+- Retarget six existing ownership checks and extend two existing cases by eight
+  import/legacy-hook assertions. Add no numbered case. No SQL schema, migration,
+  configuration or service change.
+
 ### MB887 — Validate Apple Music metadata before display (2026-10-21)
 
 - Reject reference-valued or blank lookup titles so the existing page fallback
