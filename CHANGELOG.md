@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB883 — Preserve order across short and unpaced IRC replies (2026-10-21)
+
+- Keep later single-chunk and zero-delay PRIVMSG batches behind older queued
+  output for the same target. Previously those immediate branches could
+  overtake an active reply. Preserve independent targets and idle immediacy.
+- Let short or zero-delay requests also resume pending work after a failed
+  arm, retaining the older chunks and waiting batches ahead of new output.
+  Reuse the active timer owner instead of arming a competing countdown.
+- Add deterministic ordering/recovery and real IO::Async delivery regressions.
+  Preserve queue keys, batch delays, send policies, encoding, return counts,
+  worker hooks and existing tests. No SQL schema, migration or configuration change.
+
 ### MB882 — Harden the shared IRC timer lifecycle (2026-10-21)
 
 - Add IRC::Timer::countdown for single-use notifier ownership: release expired

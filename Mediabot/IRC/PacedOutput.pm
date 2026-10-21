@@ -12,6 +12,8 @@ our @EXPORT_OK = qw(queue_privmsg_chunks queue_notices);
 
 # Keep runtime loading lazy. Every send re-enters Helpers so workers, normal
 # output policy and existing instrumentation still see the same facade.
+# PRIVMSG batches serialize behind existing work even when a later batch has
+# one chunk or no requested delay; idle immediate-send behavior is unchanged.
 sub queue_privmsg_chunks {
     require Mediabot::Helpers;
     return _queue_irc_chunks(@_);
@@ -54,22 +56,29 @@ sub _queue_irc_chunks {
 
     $loop ||= eval { $self->{loop} };
 
-    my $can_schedule = $loop
-        && eval { $loop->can('add') }
-        && $sleep_us > 0
-        && @payload > 1;
+    my $can_add = $loop && eval { $loop->can('add') };
+    my $can_start = $can_add && $sleep_us > 0 && @payload > 1;
+
+    # Look up existing work without creating queue state on immediate paths.
+    # A later single-line/zero-delay reply still belongs behind earlier work.
+    my $queues = ref($self) ? eval { $self->{_external_ai_output_queues} } : undef;
+    my ($key, $state);
+    if ($can_start || ($queues && %$queues)) {
+        $key = defined($target) && $target ne '' ? lc($target) : '__unknown__';
+        $state = $queues ? $queues->{$key} : undef;
+    }
+    my $has_pending = $state
+        && ($state->{current} || @{ $state->{batches} // [] });
+    my $can_schedule = ($state && $state->{active})
+        || ($can_add && ($has_pending || $can_start));
 
     unless ($can_schedule) {
         Mediabot::IRC::Output::privmsg($self, $target, $_) for @payload;
         return $queued_count;
     }
 
-    my $key = defined($target) && $target ne ''
-        ? lc($target)
-        : '__unknown__';
-
-    my $queues = $self->{_external_ai_output_queues} //= {};
-    my $state  = $queues->{$key} //= {
+    $queues //= $self->{_external_ai_output_queues} //= {};
+    $state //= $queues->{$key} //= {
         active  => 0,
         batches => [],
         timer   => undef,
