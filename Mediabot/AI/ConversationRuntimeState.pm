@@ -2,6 +2,7 @@ package Mediabot::AI::ConversationRuntimeState;
 
 use strict;
 use warnings;
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 
 use Carp qw(croak);
 
@@ -27,10 +28,7 @@ sub _channel_key {
         unless defined($channel)
             && !ref($channel)
             && "$channel" =~ /^#[^\s,:\x00-\x1f\x7f]{1,79}\z/;
-    my $key = lc "$channel";
-    $key =~ tr/[]\\^/{}|~/ if $self->{casemapping} eq 'rfc1459';
-    $key =~ tr/[]\\/{}|/ if $self->{casemapping} eq 'strict-rfc1459';
-    return $key;
+    return fold_irc("$channel", $self->{casemapping} // 'ascii');
 }
 
 sub _next_generation {

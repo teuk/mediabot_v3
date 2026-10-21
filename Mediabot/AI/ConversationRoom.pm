@@ -2,6 +2,7 @@ package Mediabot::AI::ConversationRoom;
 
 use strict;
 use warnings;
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 use Carp qw(croak);
 use Digest::SHA qw(sha256_hex);
 use Encode qw(encode);
@@ -28,9 +29,7 @@ sub new {
 sub _fold {
     my ($raw) = @_;
     return '' unless defined($raw) && !ref($raw);
-    my $value = lc "$raw";
-    $value =~ tr/[]\\^/{}|~/;
-    return $value;
+    return fold_irc("$raw");
 }
 
 sub forget_channel {

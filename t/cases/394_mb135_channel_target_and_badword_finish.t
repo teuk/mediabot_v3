@@ -17,7 +17,10 @@ my $case = sub {
 
     $assert->($src =~ /sub\s+_is_irc_channel_target\b/,
         '_is_irc_channel_target helper exists');
-    $assert->($src =~ /return defined\(\$target\) && \$target =~ \/\^\[#&!\+\]\//,
+    my $target_file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Target.pm');
+    open my $tfh, '<', $target_file or die $!;
+    my $target_src = do {local $/; <$tfh>};
+    $assert->($target_src =~ /return defined\(\$target\) && \$target =~ \/\^\[#&!\+\]\//,
         '_is_irc_channel_target recognizes # & ! + prefixes');
 
     my $privmsg_block = ($src =~ /sub botPrivmsg \{(.*?)sub botAction \{/s) ? $1 : '';

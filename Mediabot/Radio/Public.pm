@@ -1,6 +1,7 @@
 package Mediabot::Radio::Public;
 use strict;
 use warnings;
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 use utf8;
 use Digest::SHA qw(sha256_hex);
 use Encode qw(encode_utf8 decode FB_CROAK);
@@ -11,7 +12,7 @@ use Time::HiRes ();
 use Mediabot::AsyncWorker;
 use Mediabot::Helpers ();
 
-sub fold { my $s=lc($_[0]//''); $s =~ tr/[]\\^/{}|~/; return $s }
+sub fold { return fold_irc($_[0]); }
 sub setting {
     my ($bot,$key,$default)=@_;
     my $v=eval { $bot->{conf}->get('radio.'.$key) };

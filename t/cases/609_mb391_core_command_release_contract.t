@@ -130,7 +130,8 @@ return sub {
     my $party   = _slurp_mb391($party_file) . "\n" . _slurp_mb391($party_cmds);
 
     my $version = _extract_sub_mb391($helpers, 'versionCheck');
-    my $queue   = _extract_sub_mb391($helpers, 'queueBotNotices');
+    my $pacing = _slurp_mb391(File::Spec->catfile('.', 'Mediabot', 'IRC', 'PacedOutput.pm'));
+    my $queue = _extract_sub_mb391($pacing, 'queueBotNotices');
     my $uptime  = _extract_sub_mb391($main, 'mbUptime_ctx');
     my $status  = _extract_sub_mb391($admin, 'mbStatus_ctx');
     my $showcmd = _extract_sub_mb391($channel, 'userShowcommandsChannel_ctx');
@@ -202,7 +203,7 @@ return sub {
 
     $assert->like(
         $context,
-        qr/return\s+\$chan\s*!~\s*\/\^\[#&!\+\]\//,
+        qr/return\s+!is_channel\(\$chan\)/,
         'Context recognizes every standard IRC channel prefix'
     );
 

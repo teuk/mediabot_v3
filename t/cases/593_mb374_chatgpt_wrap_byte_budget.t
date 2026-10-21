@@ -120,7 +120,7 @@ return sub {
     # Les sorties IRC passent désormais par le renderer commun; le wrapper
     # historique reste disponible pour le callback Partyline en texte brut.
     my $irc_output = _slurp_593(
-        File::Spec->catfile('.', 'Mediabot', 'AI', 'IRCOutput.pm')
+        File::Spec->catfile('.', 'Mediabot', 'IRC', 'Presentation.pm')
     );
     $assert->like($src, qr/format_ai_reply\(/,
         'OpenAI et Claude utilisent le renderer IRC commun');

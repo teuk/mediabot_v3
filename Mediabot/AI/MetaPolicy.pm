@@ -1,13 +1,14 @@
 package Mediabot::AI::MetaPolicy;
 use strict;
 use warnings;
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 use utf8;
 use Exporter 'import';
 use Mediabot::AI qw(normalize_provider);
 our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind research_needed is_followup is_acknowledgement parse_object);
 use JSON::PP ();
 
-sub fold { my $s = lc($_[0] // ''); $s =~ tr/[]\\^/{}|~/; return $s }
+sub fold { return fold_irc($_[0]); }
 sub clean {
     my ($s, $max) = @_;
     return '' unless defined($s) && !ref($s);

@@ -2,6 +2,7 @@ package Mediabot::Hailo::Normalizer;
 
 use strict;
 use warnings;
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 use utf8;
 
 use Digest::SHA qw(sha256_hex);
@@ -29,9 +30,7 @@ sub _plain {
 sub _irc_fold {
     my ($value) = @_;
     return '' unless _plain($value);
-    my $folded = lc "$value";
-    $folded =~ tr/[]\\^/{}|~/;
-    return $folded;
+    return fold_irc("$value");
 }
 
 sub _clean_line {

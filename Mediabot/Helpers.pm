@@ -451,8 +451,8 @@ sub logBot {
 # include #, &, ! and +. Keep outbound helper classification consistent.
 # ---------------------------------------------------------------------------
 sub _is_irc_channel_target {
-    my ($target) = @_;
-    return defined($target) && $target =~ /^[#&!+]/ ? 1 : 0;
+    require Mediabot::IRC::Target;
+    return Mediabot::IRC::Target::is_channel(@_);
 }
 
 # MB391: public wrapper used by Context and command modules. Keep the RFC-style
@@ -494,67 +494,8 @@ sub getProcessStartTimestamp {
 # generate a release-blocking burst. Multiple callers share the same pending
 # queue: a second help request is scheduled after already queued lines.
 sub queueBotNotices {
-    my ($self, $nick, @lines) = @_;
-
-    @lines = map { defined($_) && !ref($_) ? "$_" : () } @lines;
-    return 1 unless @lines;
-
-    my $max_lines = 16;
-    if (@lines > $max_lines) {
-        @lines = (
-            @lines[0 .. $max_lines - 2],
-            '... output truncated; use help search <term> or help <command>',
-        );
-    }
-
-    my $loop = eval { $self->getLoop };
-    $loop ||= $self->{loop} if ref($self);
-
-    unless ($loop && $loop->can('add') && $loop->can('remove')) {
-        botNotice($self, $nick, $_) for @lines;
-        return 1;
-    }
-
-    my $delay_step = 1.5;
-    $self->{_notice_queue_timers} ||= [];
-    my $timers = $self->{_notice_queue_timers};
-    my $base_delay = scalar(grep { defined $_ } @$timers) * $delay_step;
-
-    for my $i (0 .. $#lines) {
-        my $line = $lines[$i];
-        my $timer;
-
-        $timer = IO::Async::Timer::Countdown->new(
-            delay => $base_delay + ($i * $delay_step),
-            on_expire => sub {
-                botNotice($self, $nick, $line);
-                eval { $loop->remove($timer) };
-                my $expired_id = refaddr($timer);
-                @$timers = grep {
-                    defined($_) && ref($_) && refaddr($_) != $expired_id
-                } @$timers;
-                undef $timer;
-            },
-        );
-
-        push @$timers, $timer;
-        my $started = eval {
-            $loop->add($timer);
-            $timer->start;
-            1;
-        };
-
-        unless ($started) {
-            my $failed_id = refaddr($timer);
-            @$timers = grep {
-                defined($_) && ref($_) && refaddr($_) != $failed_id
-            } @$timers;
-            botNotice($self, $nick, $line);
-            undef $timer;
-        }
-    }
-
-    return 1;
+    require Mediabot::IRC::PacedOutput;
+    return Mediabot::IRC::PacedOutput::queue_notices(@_);
 }
 
 
@@ -573,37 +514,8 @@ sub _sanitize_irc_text {
 
 
 sub _redact_irc_service_secret_for_log {
-    my ($msg) = @_;
-
-    return $msg unless defined($msg) && $msg ne '';
-
-    my $log_msg = $msg;
-
-    if ($log_msg =~ /^(identify|id|login|register|auth|ghost|recover|release|set\s+password)\b/i) {
-        my @parts = split /\s+/, $log_msg;
-        my $verb = lc($parts[0] // '');
-
-        if ($verb eq 'identify' || $verb eq 'id') {
-            if (@parts >= 3) { $parts[-1] = '****'; }
-            elsif (@parts >= 2) { $parts[1] = '****'; }
-        }
-        elsif ($verb eq 'login' || $verb eq 'auth'
-            || $verb eq 'ghost' || $verb eq 'recover' || $verb eq 'release')
-        {
-            $parts[2] = '****' if @parts >= 3;
-        }
-        elsif ($verb eq 'set' && lc($parts[1] // '') eq 'password') {
-            $parts[2] = '****' if @parts >= 3;
-        }
-        else {
-            # register <pass> <email> : pass is arg #1, email is not secret
-            $parts[1] = '****' if @parts >= 2;
-        }
-
-        $log_msg = join(' ', @parts);
-    }
-
-    return $log_msg;
+    require Mediabot::IRC::Text;
+    return Mediabot::IRC::Text::redact_service_secret(@_);
 }
 
 
@@ -1581,21 +1493,8 @@ sub make_password_hash {
 # quels pour ne jamais detruire une entree IRC non UTF-8. LEAVE_SRC garantit
 # que le diagnostic/decodage ne consomme jamais la chaine source.
 sub decode_irc_text {
-    my ($text) = @_;
-
-    return undef unless defined $text;
-    return $text if ref $text;
-    return $text if utf8::is_utf8($text);
-
-    my $decoded = eval {
-        Encode::decode(
-            'UTF-8',
-            $text,
-            Encode::FB_CROAK() | Encode::LEAVE_SRC(),
-        );
-    };
-
-    return (!$@ && defined $decoded) ? $decoded : $text;
+    require Mediabot::IRC::Text;
+    return Mediabot::IRC::Text::decode_irc_text(@_);
 }
 
 # mb411-R1: résolution CENTRALE de l'id d'un canal — cache interne d'abord

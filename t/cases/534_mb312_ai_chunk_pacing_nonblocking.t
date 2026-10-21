@@ -48,7 +48,8 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm')
     );
 
-    my $queue  = _extract_sub_mb312($src, '_queue_irc_chunks');
+    my $pacing = _slurp_mb312(File::Spec->catfile('.', 'Mediabot', 'IRC', 'PacedOutput.pm'));
+    my $queue = _extract_sub_mb312($pacing, '_queue_irc_chunks');
     my $openai = _extract_sub_mb312($src, '_chatgpt_deliver_answer');
     my $claude = _extract_sub_mb312($src, 'claudeAI');
     my $deliver = _extract_sub_mb312($src, '_claude_deliver_answer');

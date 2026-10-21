@@ -2,6 +2,7 @@ package Mediabot::RSS::Repository;
 
 use strict;
 use warnings;
+use Mediabot::IRC::Target qw(is_channel);
 use utf8;
 
 use Digest::SHA qw(sha256_hex);
@@ -17,7 +18,7 @@ sub dbh { $_[0]->{dbh} }
 
 sub channel_id {
     my ($self, $channel) = @_;
-    return undef unless defined $channel && $channel =~ /^[#&!+]/;
+    return undef unless is_channel($channel);
     my $sth = $self->dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1')
         or die "RSS channel lookup prepare failed";
     $sth->execute($channel) or die "RSS channel lookup execute failed";

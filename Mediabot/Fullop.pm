@@ -2,6 +2,7 @@ package Mediabot::Fullop;
 
 use strict;
 use warnings;
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 use utf8;
 
 # +Fullop keeps a channel deliberately open while allowing every participant
@@ -144,15 +145,7 @@ sub network_name {
 
 sub _fold {
     my ($self, $value) = @_;
-    $value = lc($value // '');
-    my $mapping = $self->{casemapping} // 'rfc1459';
-    if ($mapping eq 'rfc1459') {
-        $value =~ tr/[]\\^/{}|~/;
-    }
-    elsif ($mapping eq 'strict-rfc1459') {
-        $value =~ tr/[]\\/{}|/;
-    }
-    return $value;
+    return fold_irc($value, $self->{casemapping} // 'rfc1459');
 }
 
 sub names_from_blob {

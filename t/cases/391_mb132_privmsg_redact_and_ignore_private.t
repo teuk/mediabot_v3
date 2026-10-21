@@ -5,33 +5,8 @@ use FindBin qw($Bin);
 use File::Spec;
 
 sub _redact_for_test {
-    my ($msg) = @_;
-    my $log_msg = $msg;
-
-    if ($log_msg =~ /^(identify|id|login|register|auth|ghost|recover|release|set\s+password)\b/i) {
-        my @parts = split /\s+/, $log_msg;
-        my $verb = lc($parts[0] // '');
-
-        if ($verb eq 'identify' || $verb eq 'id') {
-            if (@parts >= 3) { $parts[-1] = '****'; }
-            elsif (@parts >= 2) { $parts[1] = '****'; }
-        }
-        elsif ($verb eq 'login' || $verb eq 'auth'
-            || $verb eq 'ghost' || $verb eq 'recover' || $verb eq 'release')
-        {
-            $parts[2] = '****' if @parts >= 3;
-        }
-        elsif ($verb eq 'set' && lc($parts[1] // '') eq 'password') {
-            $parts[2] = '****' if @parts >= 3;
-        }
-        else {
-            $parts[1] = '****' if @parts >= 2;
-        }
-
-        $log_msg = join(' ', @parts);
-    }
-
-    return $log_msg;
+    require Mediabot::IRC::Text;
+    return Mediabot::IRC::Text::redact_service_secret(@_);
 }
 
 my $case = sub {
@@ -69,9 +44,12 @@ my $case = sub {
 
     $assert->($src =~ /my \$log_msg = _redact_irc_service_secret_for_log\(\$sMsg\);/,
         'botPrivmsg redacts private service credentials before logging');
-    $assert->($src =~ /\$verb eq 'identify' \|\| \$verb eq 'id'/,
+    my $text_file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Text.pm');
+    open my $tfh, '<', $text_file or die $!;
+    my $text_src = do {local $/; <$tfh>};
+    $assert->($text_src =~ /\$verb eq 'identify' \|\| \$verb eq 'id'/,
         'identify and id are handled explicitly');
-    $assert->($src =~ /\$parts\[-1\] = '\*\*\*\*'/,
+    $assert->($text_src =~ /\$parts\[-1\] = '\*\*\*\*'/,
         'identify 3-token form redacts last argument');
 
     $assert->($src =~ /mb132-B6: channel-scoped ignores/,

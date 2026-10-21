@@ -1,6 +1,7 @@
 package Mediabot::XAuth;
 use strict;
 use warnings;
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 use Scalar::Util qw(refaddr weaken);
 use Digest::SHA qw(sha256_hex);
 use Encode qw(encode);
@@ -15,7 +16,7 @@ sub new {
     weaken($self->{bot}) if ref($self->{bot});
     return $self;
 }
-sub _fold {my $s=defined($_[0])&&!ref($_[0])?lc($_[0]):'';$s=~tr/[]\\^/{}|~/;return $s}
+sub _fold { return fold_irc(defined($_[0]) && !ref($_[0]) ? $_[0] : ''); }
 sub _x_mode {
     my ($modes)=@_;my ($plus,$x)=(1,0);
     for my $ch (split //,$modes) {if($ch eq '+'){$plus=1}elsif($ch eq '-'){$plus=0}elsif($ch eq 'x'){$x=$plus}}

@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB880 — Reusable IRC modules with compatible boundaries (2026-10-21)
+
+- Extract Target, CaseMapping, Text, Presentation and PacedOutput under
+  Mediabot::IRC. Share existing target classification, selected network
+  folding, UTF-8 decoding, diagnostic masking, compact Markdown rendering
+  and the two established output pacing policies.
+- Keep Helpers and AI/Claude entry points, exports, renderer symbols and
+  queue state compatible. Every paced send still passes through Helpers,
+  including worker output collection; preserve per-caller input guards,
+  ASCII before ISUPPORT, timers, budgets, styles and fallback behavior.
+- Retarget historical source checks and add isolated-load, boundary,
+  deterministic pacing and worker-facade regressions. Preserve actual send,
+  AntiFlood, NoColors, badword and log/history policies. No SQL schema,
+  migration, configuration or service change.
+
 ### MB879 — Share compatible IRC text budget primitives (2026-10-21)
 
 - Make IRC::TextBudget independent of Helpers. Move the existing outbound

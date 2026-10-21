@@ -95,7 +95,7 @@ return sub {
     # plutôt qu'un contexte exact (espaces/accents fragiles).
     my %checks = (
         'Mediabot/Mediabot.pm'        => [ qr/mb326-B1/, qr/undef \$who_timer;/, qr/undef \$timer;/ ],
-        'Mediabot/External/Claude.pm' => [ qr/mb326-B1/, qr/undef \$timer;/ ],
+        'Mediabot/IRC/PacedOutput.pm'  => [ qr/mb326-B1/, qr/undef \$timer;/ ],
         'Mediabot/UserCommands.pm'    => [ qr/mb326-B1/, qr/undef \$timer;/ ],
         'Mediabot/Radio/Request.pm'   => [ qr/mb326-B1/, qr/undef \$timer;/ ],
     );

@@ -2,6 +2,7 @@ package Mediabot::Context;
 
 use strict;
 use warnings;
+use Mediabot::IRC::Target qw(is_channel);
 
 =head1 NAME
 
@@ -79,7 +80,7 @@ sub command_obj { $_[0]->{command_obj} }
 sub is_private {
     my ($self) = @_;
     my $chan = $self->{channel} // '';
-    return $chan !~ /^[#&!+]/;
+    return !is_channel($chan);
 }
 
 # Return the Channel object for the current channel, or undef

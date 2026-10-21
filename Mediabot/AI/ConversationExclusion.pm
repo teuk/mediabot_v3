@@ -2,6 +2,7 @@ package Mediabot::AI::ConversationExclusion;
 
 use strict;
 use warnings;
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 
 use Carp qw(croak);
 
@@ -26,9 +27,7 @@ sub _raw_values {
 sub _irc_fold {
     my ($value) = @_;
     return undef unless _plain_scalar($value);
-    my $folded = lc "$value";
-    $folded =~ tr/[]\\^/{}|~/;
-    return $folded;
+    return fold_irc("$value");
 }
 
 sub _nick_key {
