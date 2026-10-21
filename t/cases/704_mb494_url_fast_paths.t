@@ -18,6 +18,7 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use JSON::PP ();
 
 use Mediabot::External;
 use Mediabot::External::URL;
@@ -62,6 +63,36 @@ return sub {
         $assert->like($line, qr/"just setting up my twttr"/, 'X: texte du tweet');
         $assert->like($line, qr/123\.5k likes, 98\.8k RTs/, 'X: stats compactées');
         $assert->is($CHROMIUM_CALLS, 0, 'X: chromium PAS appelé (fast path)');
+    }
+
+    # Each counter is optional independently of the other counter's validity.
+    for my $case (
+        ['malformed likes with numeric prefix', '999oops', 3, '3 RTs'],
+        ['malformed retweets with numeric prefix', 12, '7oops', '12 likes'],
+        ['non-numeric likes', 'oops', 3, '3 RTs'],
+    ) {
+        my ($label, $likes, $retweets, $expected) = @$case;
+        my $json = JSON::PP::encode_json({code=>200, tweet=>{
+            author=>{name=>'Fixture', screen_name=>'studio'}, text=>'Counter fixture',
+            likes=>$likes, retweets=>$retweets,
+        }});
+        my @warnings;
+        local $SIG{__WARN__} = sub { push @warnings, @_ };
+        local *Mediabot::External::_make_http = sub { H704->new($json) };
+        local *Mediabot::External::URL::_fetch_url_chromium_dumpdom = sub {
+            die 'unexpected browser for successful counter fixture';
+        };
+        @SENT = ();
+        my $self = {logger=>L704->new, _x_twitter_cache=>{}};
+        Mediabot::External::URL::_handle_x_twitter(
+            $self, undef, 'First', '#test', 'https://x.com/studio/status/123');
+        Mediabot::External::URL::_handle_x_twitter(
+            $self, undef, 'Second', '#i/o', 'https://x.com/studio/status/123');
+        $assert->is(join("\n", map { _strip($_) } @SENT),
+            "(First) [X] Fixture (\@studio) on X: \"Counter fixture\" ($expected)\n"
+                . "(Second) [X] Fixture (\@studio) on X: \"Counter fixture\" ($expected)",
+            "$label: keep the valid sibling in delivery and cached replay");
+        $assert->is(scalar(@warnings), 0, "$label: no numeric coercion warning");
     }
 
     # -------------------------------------------------------------------------

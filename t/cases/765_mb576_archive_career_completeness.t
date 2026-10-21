@@ -22,6 +22,8 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use IPC::Open3;
+use Symbol qw(gensym);
 
 sub _slurp_765 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; local $/; <$fh> }
 
@@ -56,6 +58,87 @@ return sub {
     my ($assert) = @_;
 
     require Mediabot::Helpers;
+    require Mediabot::ChannelLog::Reader;
+
+    # Reader must work without the general Helpers dependency; both load orders
+    # must also leave the historical entry points callable.
+    for my $order (
+        [qw(ChannelLog::Reader)],
+        [qw(ChannelLog::Reader Helpers)],
+        [qw(Helpers ChannelLog::Reader)],
+    ) {
+        my $code = join('', map { "require Mediabot::$_;\n" } @$order);
+        $code .= q{
+            package ColdLogConf765;
+            sub get {
+                return 'log_archive' if $_[1] eq 'mysql.CHANNEL_LOG_ARCHIVE_DBNAME';
+                return 7 if $_[1] eq 'mysql.CHANNEL_LOG_ARCHIVE_PRESENCE_DAYS';
+                return 0;
+            }
+            package ColdLogDb765;
+            sub prepare { bless {}, 'ColdLogSth765' }
+            package ColdLogSth765;
+            sub execute { 1 }
+            sub fetchrow_hashref { undef }
+            sub err { 0 }
+            sub errstr { '' }
+            sub finish { 1 }
+            package main;
+            my $cold = !exists $INC{'Mediabot/Helpers.pm'};
+            my $bot = {conf => bless({}, 'ColdLogConf765')};
+            die 'archive selection failed' unless
+                Mediabot::ChannelLog::Reader::channel_log_archive_table($bot)
+                    eq 'log_archive.CHANNEL_LOG_ARCHIVE';
+            die 'source selection failed' unless join(',',
+                Mediabot::ChannelLog::Reader::channel_log_sources($bot, 'presence'))
+                    eq 'CHANNEL_LOG,log_archive.CHANNEL_LOG_ARCHIVE';
+            my $g = Mediabot::ChannelLog::Reader::channel_log_gather($bot,
+                bless({}, 'ColdLogDb765'), 'SELECT n FROM __CLSRC__', [], sub {}, 'presence');
+            die 'empty read failed' unless $g->{live_ok} && $g->{ok_sources} == 2
+                && $g->{executed} == 2 && $g->{rows} == 0 && !$g->{tainted};
+            die 'read loaded Helpers' if $cold && exists $INC{'Mediabot/Helpers.pm'};
+            require Mediabot::Helpers;
+            die 'compatibility entry failed' unless
+                Mediabot::Helpers::channel_log_archive_table($bot)
+                    eq 'log_archive.CHANNEL_LOG_ARCHIVE';
+            print 'loaded';
+        };
+        my $err = gensym;
+        my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
+        my $stdout = do { local $/; <$out> } // '';
+        my $stderr = do { local $/; <$err> } // '';
+        waitpid($pid, 0);
+        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+            'channel-log reader works in load order: ' . join('/', @$order));
+    }
+    {
+        no warnings 'redefine';
+        local *Mediabot::Helpers::channel_log_archive_table = sub { 'hook_log.CHANNEL_LOG_ARCHIVE' };
+        $assert->is(join(',', Mediabot::ChannelLog::Reader::channel_log_sources({conf => undef})),
+            'CHANNEL_LOG,hook_log.CHANNEL_LOG_ARCHIVE',
+            'canonical source selection keeps late-bound legacy archive override');
+    }
+    {
+        no warnings 'redefine';
+        my @scopes;
+        local *Mediabot::Helpers::channel_log_sources = sub {
+            push @scopes, $_[1]; return ('CHANNEL_LOG', 'hook_log.CHANNEL_LOG_ARCHIVE');
+        };
+        my $dbh = Mb576::FakeDbh->new(
+            'FROM CHANNEL_LOG ' => [{n => 1}],
+            'FROM hook_log.CHANNEL_LOG_ARCHIVE ' => [{n => 2}],
+        );
+        my @rows;
+        my $g = Mediabot::ChannelLog::Reader::channel_log_gather({}, $dbh,
+            'SELECT n FROM __CLSRC__ cl WHERE nick = ?', ['Reader'],
+            sub {push @rows, $_[0]->{n} . ':' . $_[1]}, 'presence');
+        $assert->ok(join(',', @scopes) eq 'presence' && $g->{live_ok}
+                && $g->{executed} == 2 && $g->{rows} == 2
+                && join(',', @rows) eq '1:CHANNEL_LOG,2:hook_log.CHANNEL_LOG_ARCHIVE'
+                && join('|', @{$dbh->{seen}}) eq
+                    'SELECT n FROM CHANNEL_LOG cl WHERE nick = ?|SELECT n FROM hook_log.CHANNEL_LOG_ARCHIVE cl WHERE nick = ?',
+            'canonical gather keeps legacy source override, scope, query order and callback sources');
+    }
 
     # [1a] sources : sans archive -> vif seul ; avec -> vif + annexe
     my $bot_noarch = { conf => undef };
@@ -119,10 +202,11 @@ return sub {
     my @union_sql = grep { $_ !~ /^\s*#/ && /UNION ALL/ } split /\n/, $src;
     $assert->is(join('|', @union_sql), '',
         'aucun UNION ALL hors commentaires dans UserCommands');
-    my $helpers_src = _slurp_765(File::Spec->catfile('Mediabot', 'Helpers.pm'));
+    my $helpers_src = _slurp_765(File::Spec->catfile('Mediabot', 'Helpers.pm'))
+                    . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'ChannelLog', 'Reader.pm'));
     my @union_help = grep { $_ !~ /^\s*#/ && /UNION ALL/ } split /\n/, $helpers_src;
     $assert->is(join('|', @union_help), '',
-        'aucun UNION ALL hors commentaires dans Helpers');
+        'aucun UNION ALL hors commentaires dans Helpers et ChannelLog::Reader');
 
     # [5] fenetres recentes en vif dur
     my $dash = _sub_src_765($src, 'mbDashboard_ctx');

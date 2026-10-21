@@ -10,6 +10,35 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB895 — Separate channel-log reads from general helpers (2026-10-21)
+
+- Move archive-name validation, scope-based source selection and streaming
+  collection into ChannelLog::Reader. Keep the three Helpers entry points and
+  their call-time overrides; existing history/activity consumers use the new
+  owner through these compatibility wrappers.
+- Allow the reader to load and run on caller-owned handles without loading
+  Helpers, creating a connection or changing tables. Preserve live-first query
+  order, binds, callbacks, empty-read success and archive failure/taint policy.
+  Keep all 97 other Helpers function bodies and default exports unchanged.
+- Extend the existing archive-completeness case by five assertions for cold
+  loading and legacy hooks; keep the case count unchanged. This cumulative
+  snapshot patch also includes the pending MB894 counter fix below. No schema,
+  migration, configuration, VERSION, runner, audit-tool or service change.
+
+### MB894 — Validate X engagement counters independently (2026-10-21)
+
+- Apply the existing positive-integer check separately to likes and retweets
+  before numeric comparison and formatting. A valid sibling no longer admits
+  malformed scalar counters such as "999oops", which could produce numeric
+  warnings or misleading "0 likes"/"0 RTs" in the delivered and cached message.
+- Keep valid-counter formatting, the legacy formatter hook, JSON parsing,
+  fetching/fallback policy, cache, presentation and all other helper bodies
+  unchanged. Reuse the existing eligibility expression; add no numeric range
+  restriction or new scalar format policy.
+- Extend the existing fast-path case by six assertions covering three mixed
+  valid/malformed responses and their cache replays. Add no numbered case,
+  module, SQL schema, migration, configuration or service change.
+
 ### MB893 — Separate X/Twitter metadata from URL routing (2026-10-21)
 
 - Move the six X/Twitter functions into External::XTwitter. Retain all six URL

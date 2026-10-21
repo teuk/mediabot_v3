@@ -344,13 +344,13 @@ sub _handle_x_twitter {
         }
     }
     # mb494: engagement stats from the fxtwitter fast path
-    if ((defined $fx_likes && $fx_likes =~ /^\d+$/ && $fx_likes > 0)
-        || (defined $fx_rts && $fx_rts =~ /^\d+$/ && $fx_rts > 0)) {
-        my @st;
-        push @st, Mediabot::External::URL::_x_compact_count($fx_likes) . ' likes' if defined $fx_likes && $fx_likes > 0;
-        push @st, Mediabot::External::URL::_x_compact_count($fx_rts)   . ' RTs'   if defined $fx_rts   && $fx_rts > 0;
-        $line .= ' (' . join(', ', @st) . ')' if @st;
-    }
+    # Validate each optional counter before any numeric comparison or formatting.
+    my @st;
+    push @st, Mediabot::External::URL::_x_compact_count($fx_likes) . ' likes'
+        if defined $fx_likes && $fx_likes =~ /^\d+$/ && $fx_likes > 0;
+    push @st, Mediabot::External::URL::_x_compact_count($fx_rts) . ' RTs'
+        if defined $fx_rts && $fx_rts =~ /^\d+$/ && $fx_rts > 0;
+    $line .= ' (' . join(', ', @st) . ')' if @st;
 
     my $msg = "$badge\x0f " . substr($line, 0, 300);
 
