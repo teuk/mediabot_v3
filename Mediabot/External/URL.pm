@@ -1410,7 +1410,9 @@ sub _handle_facebook {
     $self->{logger}->log(4, "_handle_facebook() start url=$fb_url");
 
     # IMP10: serve from cache if fresh (TTL 10 min)
-    my $fb_cached = $self->{_facebook_cache}{lc($fb_url)};
+    # Resource IDs and query values retain their case, as at URL admission.
+    my $fb_cache_key = _url_cache_identity($fb_url);
+    my $fb_cached = $self->{_facebook_cache}{$fb_cache_key};
     if ($fb_cached && (time() - ($fb_cached->{ts} // 0)) < 600) {
         $self->{logger}->log(4, "_handle_facebook() cache hit for $fb_url");
         Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $fb_cached->{msg}");
@@ -1516,7 +1518,7 @@ sub _handle_facebook {
 
     my $msg = "$badge\x0f " . substr($fb_line, 0, 300);
     # IMP10: cache the result (TTL 10 min) to avoid redundant Chromium fetches
-    $self->{_facebook_cache}{lc($fb_url)} = { ts => time(), msg => $msg };
+    $self->{_facebook_cache}{$fb_cache_key} = { ts => time(), msg => $msg };
 
     Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");
     return 1;
@@ -1723,7 +1725,7 @@ sub _handle_x_twitter {
 
     # IMP10: cache x_twitter result (TTL 10 min) — Chromium is expensive
     my $tw_cache     = $self->{_x_twitter_cache} //= {};
-    my $tw_cache_key = lc($url);
+    my $tw_cache_key = _url_cache_identity($url);
     my $tw_now       = time();
     if (my $cached = $tw_cache->{$tw_cache_key}) {
         if ($tw_now - ($cached->{ts} // 0) < 600) {

@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB871 — Case-preserving Facebook and X metadata caches (2026-10-21)
+
+- Preserve resource path, query and fragment case in the dedicated Facebook
+  and X/Twitter metadata caches, using the existing URL identity shared by
+  admission and Instagram. Case-distinct links no longer replay another
+  resource's title after passing the channel admission gate.
+- Keep scheme/host case folding, Facebook URL normalization, ten-minute
+  metadata expiry, five-minute channel repeat suppression, current caller and
+  destination, and the existing HTTP/API/Chromium fallback paths.
+- Add offline runtime regressions through the real URL dispatcher and handlers,
+  including expiry, fallback messages and disabled-feature admission. No SQL
+  schema, migration, private configuration or service change.
+
 ### MB870 — Usable AI replies and complete fallback deadlines (2026-10-21)
 
 - Reject reference-valued Anthropic text and OpenAI chat content, malformed
