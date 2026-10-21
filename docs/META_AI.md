@@ -361,7 +361,7 @@ The source package never rewrites a private configuration.
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini contributor/synthesis model; LOW thinking for supported models. |
 | `GEMINI_FALLBACK_MODEL` | empty | Optional explicitly validated Gemini text model for the existing second transient attempt; never an extra third call. |
 | `SYNTHESIZER` | `openai` | Preferred synthesis provider; existing automatic provider fallback remains available. |
-| `TIMEOUT` | `25` | `5..45` seconds per HTTP attempt; existing worker deadline adds three seconds. |
+| `TIMEOUT` | `25` | `5..45` seconds per HTTP attempt; the worker covers planned sequential attempts plus three seconds. |
 | `MAX_TOKENS` | `2048` | `512..8192` output-token budget per AI request, including reasoning where applicable. |
 | `MAX_JOBS` | `2` | `1..4` concurrent channel jobs per instance; one job per channel. |
 | `RATE_MAX` | `4` | `1..12` accepted questions per channel per rolling minute. |

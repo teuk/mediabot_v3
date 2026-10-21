@@ -553,7 +553,8 @@ sub _run_plan {
 
             push @attempted, "$provider:$res->{effective_model}"
                 if $res->{model_fallback};
-            if ($res->{success} && defined($answer) && length($answer)) {
+            # MB870: adapters supply usable text, never containers or blank output.
+            if ($res->{success} && defined($answer) && !ref($answer) && $answer =~ /\S/) {
                 return {
                     ok                => 1,
                     provider          => $provider,
@@ -663,11 +664,14 @@ sub submit {
         return 0;
     }
 
-    my $max_timeout = 1;
+    # MB870: the child executes eligible attempts sequentially. Cover their
+    # validated per-HTTP budgets, including provider/model fallback, rather
+    # than killing later attempts at the first provider's deadline. Gemini's
+    # transient retry already shares one attempt budget and is counted once.
+    my $plan_timeout = 0;
     for my $provider (@{ $plan->{providers} }) {
         for my $attempt (@{ $provider->{attempts} || [] }) {
-            $max_timeout = $attempt->{timeout}
-                if $attempt->{timeout} > $max_timeout;
+            $plan_timeout += $attempt->{timeout};
         }
     }
 
@@ -698,7 +702,7 @@ sub submit {
         $worker = $self->_start_worker(
             loop        => $loop,
             label       => 'provider-neutral AI request',
-            timeout     => $max_timeout + 3,
+            timeout     => $plan_timeout + 3,
             term_grace  => 0.2,
             force_grace => 2.0,
             max_output  => 256 * 1024,

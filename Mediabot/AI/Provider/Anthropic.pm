@@ -84,6 +84,7 @@ sub extract_answer {
         next unless ref($blk) eq 'HASH'
             && ($blk->{type} // '') eq 'text'
             && defined($blk->{text})
+            && !ref($blk->{text})
             && length($blk->{text});
         push @texts, $blk->{text};
     }

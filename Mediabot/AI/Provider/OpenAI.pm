@@ -150,6 +150,7 @@ sub extract_answer {
         && ref($data->{choices}[0]) eq 'HASH'
         && ref($data->{choices}[0]{message}) eq 'HASH'
         && defined($data->{choices}[0]{message}{content})
+        && !ref($data->{choices}[0]{message}{content})
         && length($data->{choices}[0]{message}{content});
 
     return $data->{choices}[0]{message}{content};
@@ -173,7 +174,9 @@ sub extract_sources {
                 next unless defined($url) && !ref($url) && length($url) <= 2048
                     && $url =~ m{\Ahttps?://[A-Za-z0-9.-]+(?:/[^\s\x00-\x1f]*)?\z}
                     && !$seen{$url}++;
-                push @sources, { url => $url, title => substr($citation->{title} // '', 0, 160) };
+                my $title = defined($citation->{title}) && !ref($citation->{title})
+                    ? substr($citation->{title}, 0, 160) : '';
+                push @sources, { url => $url, title => $title };
                 return \@sources if @sources >= 8;
             }
         }
@@ -191,7 +194,7 @@ sub extract_error {
 
     my $error = $data->{error};
     my $clean = sub {
-        my $value = defined($_[0]) ? "$_[0]" : '';
+        my $value = defined($_[0]) && !ref($_[0]) ? "$_[0]" : '';
         $value =~ s/[\x00-\x1F\x7F]+/ /g;
         $value =~ s/\s+/ /g;
         $value =~ s/^\s+|\s+$//g;

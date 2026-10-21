@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB870 — Usable AI replies and complete fallback deadlines (2026-10-21)
+
+- Reject reference-valued Anthropic text and OpenAI chat content, malformed
+  OpenAI diagnostic fields and reference-valued citation titles. Preserve
+  usable text blocks, valid source URLs and normal diagnostic formatting.
+- Require a nonblank scalar answer at the common client boundary. Treat an
+  invalid successful body as a parse error; retain strict explicit-provider
+  routing and permit the existing authorized auto-provider fallback.
+- Size the async worker watchdog for all planned sequential HTTP attempt
+  budgets plus the existing three-second margin. Count Gemini's internal
+  retry once because it already shares an attempt deadline. Keep individual
+  HTTP timeouts, TLS, routing, quota handling and callback ownership unchanged.
+- Add offline response-shape and async fallback-budget regressions. No SQL
+  schema, migration, private configuration or service change.
+
 ### MB869 — Faster full-suite setup and test fixture teardown (2026-10-21)
 
 - Classify source capabilities only when class/fast/catalogue options need
