@@ -2,9 +2,9 @@ package Mediabot::PluginContext;
 
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
 
-use Encode qw(encode);
 use Scalar::Util qw(refaddr);
 
 my %STATE;
@@ -86,7 +86,7 @@ sub _text {
     $text =~ s/^\s+|\s+$//g;
     die "PluginContext: output must not be empty\n" unless length $text;
     die "PluginContext: output exceeds 400 bytes\n"
-        if length(encode('UTF-8', $text)) > 400;
+        if _utf8_text_bytes($text) > 400;
     return $text;
 }
 

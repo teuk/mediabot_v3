@@ -4,10 +4,9 @@ use strict;
 use warnings;
 use utf8;
 
-use Encode qw(encode);
+use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 use Exporter 'import';
 
-use Mediabot::Helpers ();
 
 our $VERSION = '1.00';
 our @EXPORT_OK = qw(
@@ -48,11 +47,7 @@ sub with_irc_output_instruction {
 }
 
 sub _wire_bytes {
-    my ($text) = @_;
-    return 0 unless defined $text;
-    return utf8::is_utf8($text)
-        ? length(encode('UTF-8', $text))
-        : length($text);
+    return _irc_wire_bytes(@_);
 }
 
 sub _decode_entity {
@@ -266,7 +261,7 @@ sub format_ai_reply {
     # Reserve four bytes for reopening the three permitted styles and closing
     # them with RESET. This keeps every returned line inside botPrivmsg's real
     # 400-byte payload boundary, including accented text and emoji.
-    my @raw = Mediabot::Helpers::_split_text_for_irc(
+    my @raw = Mediabot::IRC::TextBudget::_split_text_for_irc(
         $rendered,
         $wrap_bytes - 4,
     );

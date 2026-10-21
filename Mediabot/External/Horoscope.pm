@@ -17,6 +17,7 @@ package Mediabot::External::Horoscope;
 
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
             # Sans cela ils sont des OCTETS, et interpoler une variable
             # venue d'IRC (mediabot.pl decode les messages entrants) fait
@@ -227,7 +228,7 @@ sub clean_text {
 sub cap_text {
     my ($text, $bytes) = @_;
     return undef unless defined $text;
-    return $text if length(Encode::encode('UTF-8', $text)) <= $bytes;
+    return $text if _utf8_text_bytes($text) <= $bytes;
     return '' if $bytes < 4;
     # Fit a prefix of whole graphemes without repeatedly encoding/joining the
     # shrinking source. Only the bounded prefix needs per-cluster encoding.
@@ -235,7 +236,7 @@ sub cap_text {
     my $used = 0;
     while ($text =~ /(\X)/g) {
         my $cluster = $1;
-        my $size = length(Encode::encode('UTF-8', $cluster));
+        my $size = _utf8_text_bytes($cluster);
         last if $used + $size > $bytes - 3;
         $short .= $cluster;
         $used += $size;
@@ -387,7 +388,7 @@ sub compact_lines {
         : "🔮 " . 'Horoscope' . " · $date · $target — ";
     my $text = defined $sign ? clean_text($args{forecast}) : undef;
     $text //= $fr ? 'signe inconnu : essaie !horoscope lion.' : 'sign unknown: try !horoscope leo.';
-    my $remaining = 400 - length(Encode::encode('UTF-8', $prefix));
+    my $remaining = 400 - _utf8_text_bytes($prefix);
     my $first = $prefix . cap_text($text, $remaining);
     my $details = $fr
         ? sprintf("🍀 Nombre %d · Couleur %s · Chance %d%%", @args{qw(number colour luck)})

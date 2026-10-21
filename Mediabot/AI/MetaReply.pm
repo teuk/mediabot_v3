@@ -1,12 +1,12 @@
 package Mediabot::AI::MetaReply;
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
 use Exporter 'import';
 use Mediabot::AI::MetaPolicy qw(clean safe_url);
 use Mediabot::URLShortener qw(make_bot_shortener);
 use Mediabot::AI::IRCOutput qw(format_ai_reply);
-use Encode qw(encode);
 our @EXPORT_OK=qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label);
 
 sub source_label {
@@ -65,19 +65,19 @@ sub clean_answer {
 sub format_meta_reply {
     my ($answer)=@_;
     my $lines=format_ai_reply(clean_answer($answer),max_lines=>2,wrap_bytes=>400,truncation_suffix=>' …');
-    return $lines unless @$lines==2 && length(encode('UTF-8',$lines->[1]))<60;
+    return $lines unless @$lines==2 && _utf8_text_bytes($lines->[1])<60;
     return $lines if join('',@$lines) =~ /[\x00-\x1f]/;
     my ($first,$last)=@$lines;
     # Prefer a whole final sentence, otherwise move complete words. Preserve
     # content and the two-line wire envelope; do not touch styled replies.
     if ($first =~ /\A(.+[.!?])\s+([^.!?]+)\z/s) {
         my ($prefix,$suffix)=($1,$2);my $candidate="$suffix $last";
-        return [$prefix,$candidate] if length(encode('UTF-8',$candidate))<=400;
+        return [$prefix,$candidate] if _utf8_text_bytes($candidate)<=400;
     }
     my @words=split / /,$first;
-    while (@words>3 && length(encode('UTF-8',$last))<140) {
+    while (@words>3 && _utf8_text_bytes($last)<140) {
         my $word=pop @words;
-        if (length(encode('UTF-8',"$word $last"))>400) {push @words,$word;last}
+        if (_utf8_text_bytes("$word $last")>400) {push @words,$word;last}
         $last="$word $last";
     }
     return [join(' ',@words),$last];

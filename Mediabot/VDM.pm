@@ -2,10 +2,10 @@ package Mediabot::VDM;
 
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
 
 use Exporter qw(import);
-use Encode qw(encode);
 
 our @EXPORT_OK = qw(
     vdm_feed_url
@@ -116,7 +116,7 @@ sub format_vdm_line {
     my $story_part = "\x03" . "00,14" . $story . "\x0f";
     my $line = "$id_part $story_part";
 
-    return undef if length(encode("UTF-8", $line)) > VDM_MAX_WIRE_BYTES;
+    return undef if _utf8_text_bytes($line) > VDM_MAX_WIRE_BYTES;
     return $line;
 }
 

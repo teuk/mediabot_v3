@@ -10,6 +10,7 @@ package Mediabot::RSS;
 
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
 use Encode qw(encode);
 use Date::Parse qw(str2time);
@@ -421,10 +422,10 @@ sub format_rss_announcement {
         my $limit = int($args{max_bytes});
         $limit = 400 if $limit > 400;
         my $build = sub { "\001ACTION - news \002:\002 \00313[$label]\0036 $title \00313\002-\002\00314 $url\001" };
-        while (length(encode('UTF-8', $build->())) > $limit && length($title) > 1) { chop $title }
-        while (length(encode('UTF-8', $build->())) > $limit && length($label) > 1) { chop $label }
+        while (_utf8_text_bytes($build->()) > $limit && length($title) > 1) { chop $title }
+        while (_utf8_text_bytes($build->()) > $limit && length($label) > 1) { chop $label }
         # Keep the URL intact; skip an unshortened URL which cannot fit.
-        return undef if length(encode('UTF-8', $build->())) > $limit;
+        return undef if _utf8_text_bytes($build->()) > $limit;
         return $build->();
     }
 

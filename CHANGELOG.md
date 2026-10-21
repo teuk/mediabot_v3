@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB879 — Share compatible IRC text budget primitives (2026-10-21)
+
+- Make IRC::TextBudget independent of Helpers. Move the existing outbound
+  sanitizer, word splitter and legacy UTF-8 truncator there, retaining the
+  Helpers entry points and all caller-specific budget and suffix conventions.
+- Share explicit UTF-8 character accounting across compatible output paths;
+  retain separate wire-buffer accounting for already encoded text. Route AI
+  wrapping to the shared owner without changing rendering or line limits.
+- Preserve horoscope graphemes, news truncation, plugin/RSS/VDM rejection
+  rules, and the existing DTC/Radio/encode_utf8 paths. Add cold-load, boundary
+  and consumer regressions. No SQL schema, migration or configuration change.
+
 ### MB878 — Extract TMDB and share IRC text budgets (2026-10-21)
 
 - Move TMDB query repair, catalogue search and rendering out of Claude.pm

@@ -567,10 +567,8 @@ sub queueBotNotices {
 # recorded copy identical by replacing all forbidden line controls up front.
 # ---------------------------------------------------------------------------
 sub _sanitize_irc_text {
-    my ($text) = @_;
-    return $text unless defined $text;
-    $text =~ s/[\r\n\x00]+/ /g;
-    return $text;
+    require Mediabot::IRC::TextBudget;
+    return Mediabot::IRC::TextBudget::_sanitize_irc_text(@_);
 }
 
 
@@ -631,63 +629,8 @@ sub _redact_irc_service_secret_for_log {
 # (encode("UTF-8", ...) seulement si utf8::is_utf8). Pour de l'ASCII, le résultat
 # est identique octet pour octet à l'ancien découpage (équivalence vérifiée).
 sub _split_text_for_irc {
-    my ($text, $max_bytes) = @_;
-
-    return () unless defined($text) && $text ne '';
-
-    $max_bytes = 400
-        unless defined($max_bytes) && $max_bytes =~ /^\d+$/ && $max_bytes >= 16;
-
-    # Defence in depth: callers sanitise before logging/history, while the
-    # splitter also protects direct future callers.
-    $text = _sanitize_irc_text($text);
-
-    my $is_chars = utf8::is_utf8($text);
-    my $cost = $is_chars
-        ? sub { my $o = ord($_[0]); $o < 0x80 ? 1 : $o < 0x800 ? 2 : $o < 0x10000 ? 3 : 4 }
-        : sub { 1 };
-
-    my $wire_bytes = sub {
-        return utf8::is_utf8($_[0]) ? length(encode("UTF-8", $_[0])) : length($_[0]);
-    };
-
-    # Fast path: whole message already fits on the wire.
-    return ($text) if $wire_bytes->($text) <= $max_bytes;
-
-    my @chunks;
-    my $buf = $text;
-
-    while ($wire_bytes->($buf) > $max_bytes) {
-        # Largest leading character count whose encoded form fits the budget.
-        my $bytes = 0;
-        my $n     = 0;
-        for my $ch (split //, $buf) {
-            my $cb = $cost->($ch);
-            last if $bytes + $cb > $max_bytes;
-            $bytes += $cb;
-            $n++;
-        }
-        $n = 1 if $n < 1;    # always make progress, even if one char > budget
-
-        my $prefix = substr($buf, 0, $n);
-
-        # Prefer breaking at the last whitespace, but not before half the prefix,
-        # mirroring the historical .{200,399}\s word-wrap behaviour.
-        if ($prefix =~ /^(.*\s)\S+\z/s) {
-            my $ws = $1;
-            $prefix = $ws if length($ws) >= int($n / 2) && length($ws) >= 1;
-        }
-
-        my $cut = length($prefix);
-        $cut = $n if $cut < 1;
-
-        push @chunks, substr($buf, 0, $cut);
-        $buf = substr($buf, $cut);
-        $buf =~ s/^\s+//;
-    }
-
-    push @chunks, $buf if length($buf);
-    return @chunks;
+    require Mediabot::IRC::TextBudget;
+    return Mediabot::IRC::TextBudget::_split_text_for_irc(@_);
 }
 
 # mb568-B1: l'anti-flood JETAIT les messages du bot lui-meme — un
@@ -1666,38 +1609,11 @@ sub decode_irc_text {
 # et octets UTF-8 provenant de chemins legacy. Le budget reste exprime en
 # octets du fil IRC et aucune sequence multi-octets n'est coupee.
 # Généralise le _quote_excerpt de mb428 (Quotes.pm délègue ici).
+# mb435-B1/mb644: the representation-safe implementation now lives in
+# IRC::TextBudget; retain this exported legacy entry point and suffix contract.
 sub truncate_utf8 {
-    my ($s, $max, $ellipsis) = @_;
-    $s = '' unless defined $s;
-    $ellipsis = '...' unless defined $ellipsis;
-    $max = int($max // 0);
-    return $s if $max < 1;
-
-    # mb435-B1/mb644: callers may still provide either legacy raw UTF-8 bytes
-    # or character strings (DBD::MariaDB/JSON). Decoding an already-upgraded
-    # character string raises
-    # "Wide character" and could break `.ai context`. Preserve the input
-    # representation while applying the same wire-byte budget in both cases.
-    if (utf8::is_utf8($s)) {
-        my $wire = Encode::encode('UTF-8', $s);
-        return $s if length($wire) <= $max;
-
-        my $out  = '';
-        my $used = 0;
-        for my $ch (split //, $s) {
-            my $bytes = Encode::encode('UTF-8', $ch);
-            last if $used + length($bytes) > $max;
-            $out  .= $ch;
-            $used += length($bytes);
-        }
-        return $out . $ellipsis;
-    }
-
-    return $s if length($s) <= $max;
-    my $cut   = substr($s, 0, $max);
-    my $chars = Encode::decode('UTF-8', $cut, Encode::FB_DEFAULT);
-    $chars =~ s/\x{FFFD}+\z//;
-    return Encode::encode('UTF-8', $chars) . $ellipsis;
+    require Mediabot::IRC::TextBudget;
+    return Mediabot::IRC::TextBudget::truncate_utf8(@_);
 }
 
 sub channel_id_cached {

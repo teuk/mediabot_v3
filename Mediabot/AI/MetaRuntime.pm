@@ -1,9 +1,9 @@
 package Mediabot::AI::MetaRuntime;
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
 use Digest::SHA qw(sha256_hex);
-use Encode qw(encode);
 use File::Basename qw(dirname);
 use File::Spec;
 use JSON::PP ();
@@ -169,7 +169,7 @@ sub _source_line {
             $url="\x0312\x1f".$urls->{$url}."\x0f";
         }
         my $candidate=$line.($count?' | ':'').$label.' '.$url;
-        next if length(encode('UTF-8',$candidate))>400;
+        next if _utf8_text_bytes($candidate)>400;
         $line=$candidate;last if ++$count>=2;
     }
     return $count ? $line : undef;

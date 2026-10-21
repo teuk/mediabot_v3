@@ -551,7 +551,7 @@ sub _chatgpt_wrap {
     # dépasser le nombre de messages voulu). On délègue au découpeur byte-safe
     # partagé (_split_text_for_irc, mb325) — déjà utilisé par botPrivmsg — pour un
     # comportement unique et correct.
-    return Mediabot::Helpers::_split_text_for_irc($txt, $wrap_bytes);
+    return Mediabot::IRC::TextBudget::_split_text_for_irc($txt, $wrap_bytes);
 }
 
 

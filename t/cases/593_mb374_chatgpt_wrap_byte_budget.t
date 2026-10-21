@@ -110,7 +110,7 @@ return sub {
     my $src = _slurp_593(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
     my ($wrap) = $src =~ /(sub _chatgpt_wrap \{.*?\n\}\n)/s; $wrap //= '';
     $assert->ok($wrap ne '', 'sub _chatgpt_wrap présente');
-    $assert->like($wrap, qr/Mediabot::Helpers::_split_text_for_irc\(/,
+    $assert->like($wrap, qr/Mediabot::IRC::TextBudget::_split_text_for_irc\(/,
                   '_chatgpt_wrap délègue au découpeur byte-safe partagé');
     # plus de boucle char-based (rindex/substr manuel).
     (my $wrap_code = $wrap) =~ s/^\s*#.*$//mg;
@@ -124,6 +124,6 @@ return sub {
     );
     $assert->like($src, qr/format_ai_reply\(/,
         'OpenAI et Claude utilisent le renderer IRC commun');
-    $assert->like($irc_output, qr/Mediabot::Helpers::_split_text_for_irc\(/,
+    $assert->like($irc_output, qr/Mediabot::IRC::TextBudget::_split_text_for_irc\(/,
         'renderer IRC commun délègue au découpeur byte-safe partagé');
 };

@@ -2,8 +2,8 @@ package Mediabot::RSS::Runtime;
 
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
-use Encode qw(encode);
 use Scalar::Util qw(refaddr);
 
 use IO::Async::Timer::Countdown;
@@ -365,7 +365,7 @@ sub _enqueue_announcements {
         my $line = $item->{line};
         next unless defined($key) && $key =~ /^[0-9a-f]{64}$/i;
         next unless defined($line) && !ref($line) && length($line);
-        next if $paced && length(encode('UTF-8', $line)) > 400;
+        next if $paced && _utf8_text_bytes($line) > 400;
         my $qid = $feed_id . ':' . lc($key);
         next if $self->{queued}{$qid};
         last if $paced && $self->queued_count >= 1000;
@@ -450,7 +450,7 @@ sub _drain_channel {
             return 0 unless $ok;
             if ($enabled && $latest && @$latest
                 && $latest->[0]{item_key} eq $candidate->{item_key}
-                && length(encode('UTF-8', $candidate->{line})) <= 400) {
+                && _utf8_text_bytes($candidate->{line}) <= 400) {
                 push @ready, $candidate;
             }
             else {

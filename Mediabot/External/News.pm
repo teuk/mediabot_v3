@@ -7,6 +7,7 @@ package Mediabot::External::News;
 
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
 use Exporter 'import';
 use JSON::PP ();
@@ -397,10 +398,7 @@ sub _news_fetch_google_articles {
 }
 
 sub _utf8_bytes {
-    my ($s) = @_;
-    $s = '' unless defined $s;
-    require Encode;
-    return length(Encode::encode('UTF-8', $s));
+    return _utf8_text_bytes(@_);
 }
 
 sub _cap_bytes {

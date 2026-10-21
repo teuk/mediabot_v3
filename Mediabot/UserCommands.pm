@@ -6,6 +6,7 @@ package Mediabot::UserCommands;
 
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
             # Sans cela ils sont des OCTETS, et interpoler une variable
             # venue d'IRC (mediabot.pl decode les messages entrants) fait
@@ -6729,13 +6730,7 @@ sub mbAchievements_ctx {
 # sous-estimerait de l'autre, et une ligne tronquee par le serveur couperait
 # une sequence de couleur en deux.
 sub _irc_bytes {
-    my ($text) = @_;
-    return 0 unless defined $text;
-    # Le drapeau utf8 ne suffit PAS : un caractere < 256 (« point median »,
-    # « e accent ») peut etre stocke sans drapeau et pese pourtant 2 octets
-    # une fois encode. On mesure donc des qu'il y a du non-ASCII.
-    return length($text) unless $text =~ /[^\x00-\x7F]/;
-    return length(Encode::encode('UTF-8', $text));
+    return _utf8_text_bytes(@_);
 }
 
 

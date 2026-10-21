@@ -1,8 +1,8 @@
 package Mediabot::RandomQuote::Runtime;
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
-use Encode qw(encode);
 use Scalar::Util qw(refaddr);
 use Mediabot::AsyncWorker;
 use Mediabot::Helpers ();
@@ -151,11 +151,11 @@ sub _done {
     return 0 unless $text =~ /\S/;
     my $prefix="[id: \x02$id\x02] ";
     # truncate_utf8 appends its suffix outside the requested byte budget.
-    my $budget=400-length(encode('UTF-8',$prefix));
+    my $budget=400-_utf8_text_bytes($prefix);
     $text=Mediabot::Helpers::truncate_utf8($text,$budget-3,'...')
-        if length(encode('UTF-8',$text))>$budget;
+        if _utf8_text_bytes($text)>$budget;
     my $line=$prefix.$text;
-    return 0 unless length(encode('UTF-8',$line))<=400;
+    return 0 unless _utf8_text_bytes($line)<=400;
     # Consume once before wire delivery. Config changes invalidate the ticket;
     # duplicate/late callbacks and restarts cannot produce a catch-up burst.
     return 0 unless $self->{state}->consume($channel,$ticket->{revision});

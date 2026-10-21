@@ -2,6 +2,7 @@ package Mediabot::External::NewsBulletin;
 
 use strict;
 use warnings;
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
 use Encode qw(encode);
 use JSON::PP ();
@@ -143,8 +144,8 @@ sub parse_summary {
         return $reject->('unsafe_text') if $text =~ /[\x00-\x1f\x7f]|https?:|www\.|```|\*\*|\A\s*(?:\d+[.)]|[-*])/i;
         $text = clean_text($text, 2000);
         my $section_limit = @{$section->{sources}} > 1 ? 600 : 320;
-        return $reject->('section_length') if length($text) < 30 || length(encode('UTF-8', $text)) > $section_limit;
-        return $reject->('word_length') if grep { length(encode('UTF-8', $_)) > 80 } split /\s+/, $text;
+        return $reject->('section_length') if length($text) < 30 || _utf8_text_bytes($text) > $section_limit;
+        return $reject->('word_length') if grep { _utf8_text_bytes($_) > 80 } split /\s+/, $text;
         my @evidence;
         for my $id (@{$section->{sources}}) {
             return $reject->('source_id') unless defined($id) && !ref($id)
@@ -164,7 +165,7 @@ sub parse_summary {
         push @texts, $text;
     }
     return $reject->('source_coverage') unless join(',', @covered) eq join(',', 1 .. @$articles);
-    return $reject->('paragraph_length') if length(encode('UTF-8', join(' ', @texts))) > 600;
+    return $reject->('paragraph_length') if _utf8_text_bytes(join(' ', @texts)) > 600;
     return \@texts;
 }
 
@@ -184,7 +185,7 @@ sub parse_bulletin {
         my $text = $row->{text};
         return undef if $text =~ /[\x00-\x1f\x7f]|https?:|www\.|```|\*\*/i;
         $text = clean_text($text, 2000);
-        return undef if length($text) < 30 || length(encode('UTF-8', $text)) > 320;
+        return undef if length($text) < 30 || _utf8_text_bytes($text) > 320;
         my $a = $articles->[$i];
         my ($score, $common) = story_overlap($a->{title}, $text);
         return undef unless $common >= 2 && $score >= 0.20;
@@ -197,7 +198,7 @@ sub parse_bulletin {
         }
         my $publisher = clean_text($a->{source} || $a->{domain}, 80);
         $text .= " ($publisher)" unless index(lc($text), lc($publisher)) >= 0;
-        return undef if length(encode('UTF-8', $text)) > 355;
+        return undef if _utf8_text_bytes($text) > 355;
         push @lines, $text;
     }
     return \@lines;

@@ -9,49 +9,8 @@ BEGIN {
     use FindBin qw($Bin);
     unshift @INC, "$Bin/../lib", "$Bin/../..";
 
-    # Keep this test PURE. The production helper already has its own byte-split
-    # regression suite; this faithful stub isolates the new presentation layer.
-    package Mediabot::Helpers;
-    use Encode qw(encode);
-
-    sub _wire_bytes_1060 {
-        return utf8::is_utf8($_[0])
-            ? length(encode('UTF-8', $_[0]))
-            : length($_[0]);
-    }
-
-    sub _split_text_for_irc {
-        my ($text, $max) = @_;
-        return () unless defined($text) && length($text);
-        return ($text) if _wire_bytes_1060($text) <= $max;
-
-        my @chunks;
-        my $buffer = $text;
-        while (_wire_bytes_1060($buffer) > $max) {
-            my ($bytes, $chars) = (0, 0);
-            for my $char (split //, $buffer) {
-                my $cost = _wire_bytes_1060($char);
-                last if $bytes + $cost > $max;
-                $bytes += $cost;
-                $chars++;
-            }
-            $chars = 1 if $chars < 1;
-            my $prefix = substr($buffer, 0, $chars);
-            if ($prefix =~ /^(.*\s)\S+\z/s) {
-                my $word = $1;
-                $prefix = $word
-                    if length($word) >= int($chars / 2) && length($word);
-            }
-            my $cut = length($prefix) || $chars;
-            push @chunks, substr($buffer, 0, $cut);
-            $buffer = substr($buffer, $cut);
-            $buffer =~ s/^\s+//;
-        }
-        push @chunks, $buffer if length($buffer);
-        return @chunks;
-    }
-
-    $INC{'Mediabot/Helpers.pm'} = __FILE__;
+    # MB879: TextBudget is pure; use the actual shared splitter without
+    # installing a global Helpers stub for a dependency no longer used here.
 }
 
 use Encode qw(encode);

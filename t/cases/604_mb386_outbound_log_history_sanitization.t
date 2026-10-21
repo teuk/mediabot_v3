@@ -29,7 +29,8 @@ my $case = sub {
     my $redact = _extract_mb386(
         $src, '_redact_irc_service_secret_for_log', '_split_text_for_irc'
     );
-    my $split = _extract_mb386($src, '_split_text_for_irc', 'botPrivmsg');
+    my $budget = _slurp_mb386(File::Spec->catfile($root, 'Mediabot', 'IRC', 'TextBudget.pm'));
+    my ($split) = $budget =~ /(sub _split_text_for_irc \{.*?^\})/ms;
     my $privmsg = _extract_mb386($src, 'botPrivmsg', 'botAction');
     my $action = _extract_mb386($src, 'botAction', 'botNotice');
     my $notice = _extract_mb386($src, 'botNotice', 'joinChannel');
