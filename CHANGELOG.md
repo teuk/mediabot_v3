@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB887 — Validate Apple Music metadata before display (2026-10-21)
+
+- Reject reference-valued or blank lookup titles so the existing page fallback
+  can recover. Omit malformed optional lookup, JSON-LD and worker leaves while
+  keeping usable titles, valid mixed artist entries and track-array counts.
+- Reject non-finite or non-numeric duration components before formatting. Huge
+  or malformed optional durations no longer produce Inf/NaN text or warnings.
+- Validate worker results independently without changing the received data;
+  release pending state and leave the AppleMusic cache empty when no usable title exists.
+  Preserve badge colors/encoding, valid formatting, cache keys/TTL and workers.
+- Extend the existing Apple Music case by 14 focused assertions; add no numbered
+  case file. No SQL schema, migration, configuration or service change.
+
 ### MB886 — Give Apple Music its own module and full badge (2026-10-21)
 
 - Display `[AppleMusic]` in place of `[⌘Music]`, preserving white on grey,

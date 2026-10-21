@@ -8,6 +8,8 @@ use JSON::MaybeXS;
 use Mediabot::AsyncWorker;
 use URI::Escape qw(uri_escape_utf8);
 use String::IRC;
+use Scalar::Util qw(looks_like_number);
+use POSIX qw(isfinite);
 
 our $VERSION = '1.00';
 our @EXPORT_OK = qw(
@@ -43,8 +45,12 @@ sub _fetch_url_chromium_dumpdom {
 # ---------------------------------------------------------------------------
 sub _am_duration_from_iso {
     my ($iso) = @_;
-    return undef unless defined $iso && $iso =~ /^P(?:[\d.]+D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/i;
-    my ($h, $m, $s) = ($1 // 0, $2 // 0, int($3 // 0));
+    return undef unless defined $iso && !ref($iso) && $iso =~ /^P(?:[\d.]+D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/i;
+    my ($h, $m, $seconds) = ($1 // 0, $2 // 0, $3 // 0);
+    # Validate before numeric conversion/formatting: malformed or overflowing
+    # optional durations must not turn a usable title into warnings or NaN.
+    return undef if grep { !looks_like_number($_) || !isfinite(0 + $_) } ($h, $m, $seconds);
+    my $s = int($seconds);
     return undef unless $h || $m || $s;
     return sprintf('%dh%02dm%02ds', $h, $m, $s) if $h;
     return sprintf('%dm %02ds', $m, $s);
@@ -52,10 +58,10 @@ sub _am_duration_from_iso {
 
 sub _am_duration_from_ms {
     my ($ms) = @_;
-    return undef unless defined $ms && $ms =~ /^\d+$/;
+    return undef unless defined $ms && !ref($ms) && $ms =~ /^[0-9]+$/;
 
     my $total = int($ms / 1000);
-    return undef if $total <= 0;
+    return undef unless isfinite($total) && $total > 0;
 
     my $h = int($total / 3600);
     my $m = int(($total % 3600) / 60);
@@ -95,7 +101,8 @@ sub _applemusic_extract_details {
         for my $o (@objs) {
             next unless ref($o) eq 'HASH';
             my $t = $o->{'@type'} // '';
-            $t = join(' ', @$t) if ref($t) eq 'ARRAY';
+            $t = join(' ', grep { defined && !ref } @$t) if ref($t) eq 'ARRAY';
+            $t = '' if ref($t);
             if ($t =~ /MusicAlbum/i)                    { $am{type} //= 'album'; }
             elsif ($t =~ /MusicRecording|MusicSong/i)   { $am{type} //= 'song'; }
             elsif ($t =~ /MusicPlaylist/i)              { $am{type} //= 'playlist'; }
@@ -103,17 +110,17 @@ sub _applemusic_extract_details {
                 my @names = ref($a) eq 'ARRAY' ? map { ref($_) eq 'HASH' ? $_->{name} : $_ } @$a
                           : ref($a) eq 'HASH'  ? ($a->{name})
                           : ($a);
-                @names = grep { defined && $_ ne '' } @names;
+                @names = grep { defined && !ref && $_ ne '' } @names;
                 $am{artist} //= join(', ', @names) if @names;
             }
-            if (defined $o->{duration}) {
+            if (defined $o->{duration} && !ref($o->{duration})) {
                 my $d = _am_duration_from_iso($o->{duration});
                 $am{duration} //= $d if defined $d;
             }
-            if (defined $o->{datePublished} && $o->{datePublished} =~ /\b((?:19|20)\d{2})\b/) {
+            if (defined $o->{datePublished} && !ref($o->{datePublished}) && $o->{datePublished} =~ /\b((?:19|20)\d{2})\b/) {
                 $am{year} //= $1;
             }
-            if (defined $o->{numTracks} && $o->{numTracks} =~ /^\d+$/) {
+            if (defined $o->{numTracks} && !ref($o->{numTracks}) && $o->{numTracks} =~ /^[0-9]+$/) {
                 $am{tracks} //= $o->{numTracks};
             }
             elsif (ref($o->{tracks} // $o->{track} // '') eq 'ARRAY') {
@@ -143,7 +150,7 @@ sub _applemusic_extract_details {
 
 sub _applemusic_lookup_track {
     my ($self, $http, $storefront, $track_id) = @_;
-    return undef unless defined $track_id && $track_id =~ /^\d+$/;
+    return undef unless defined $track_id && !ref($track_id) && $track_id =~ /^\d+$/;
 
     my $lookup = 'https://itunes.apple.com/lookup?id=' . $track_id
                . '&country=' . uri_escape_utf8(uc($storefront // 'us'))
@@ -173,25 +180,25 @@ sub _applemusic_lookup_track {
     my $results = ref($data->{results}) eq 'ARRAY' ? $data->{results} : [];
     my ($r) = grep {
         ref($_) eq 'HASH'
-            && defined($_->{trackId})
+            && defined($_->{trackId}) && !ref($_->{trackId})
             && "$_->{trackId}" eq "$track_id"
-            && (!defined($_->{kind}) || $_->{kind} eq 'song')
+            && (!defined($_->{kind}) || (!ref($_->{kind}) && $_->{kind} eq 'song'))
     } @$results;
 
     return undef unless ref($r) eq 'HASH';
 
     my %am = (type => 'song');
     $am{artist} = $r->{artistName}
-        if defined $r->{artistName} && $r->{artistName} ne '';
+        if defined $r->{artistName} && !ref($r->{artistName}) && $r->{artistName} ne '';
     $am{album} = $r->{collectionName}
-        if defined $r->{collectionName} && $r->{collectionName} ne '';
+        if defined $r->{collectionName} && !ref($r->{collectionName}) && $r->{collectionName} ne '';
     $am{year} = $1
-        if defined($r->{releaseDate}) && $r->{releaseDate} =~ /^((?:19|20)\d{2})/;
+        if defined($r->{releaseDate}) && !ref($r->{releaseDate}) && $r->{releaseDate} =~ /^((?:19|20)\d{2})/;
     $am{duration} = _am_duration_from_ms($r->{trackTimeMillis})
         if defined $r->{trackTimeMillis};
 
     my $title = $r->{trackName};
-    return undef unless defined $title && $title ne '';
+    return undef unless defined $title && !ref($title) && $title =~ /\S/;
 
     return {
         title   => $title,
@@ -353,9 +360,14 @@ sub _handle_applemusic {
 
         $fetch = {} unless ref($fetch) eq 'HASH';
         my $title = $fetch->{title};
-        my $am = ref($fetch->{details}) eq 'HASH' ? $fetch->{details} : {};
+        my $details = ref($fetch->{details}) eq 'HASH' ? $fetch->{details} : {};
+        # The worker boundary is checked independently of the HTTP/HTML parser.
+        # Copy display leaves without mutating the received result.
+        my $am = { map { $_ => $details->{$_} }
+            grep { defined($details->{$_}) && !ref($details->{$_}) }
+            qw(artist album type year duration tracks) };
 
-        unless (defined $title && $title ne '') {
+        unless (defined $title && !ref($title) && $title =~ /\S/) {
             $self->{logger}->log(3,
                 "_handle_applemusic() could not extract title from $url worker="
                 . (defined($worker_status) ? $worker_status : 'sync'));
@@ -380,7 +392,7 @@ sub _handle_applemusic {
         push @parts, $am->{year} if defined $am->{year};
         push @parts, $am->{duration} if defined $am->{duration};
         push @parts, "$am->{tracks} tracks"
-            if defined $am->{tracks} && $am->{tracks} =~ /^\d+$/ && $am->{tracks} > 1;
+            if defined $am->{tracks} && $am->{tracks} =~ /^[0-9]+$/ && $am->{tracks} > 1;
 
         my $display = join(' - ', @parts);
         $display =~ s/\s+/ /g;

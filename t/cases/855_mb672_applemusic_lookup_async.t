@@ -53,6 +53,20 @@ use Mediabot::External::AppleMusic ();
     }
 }
 
+# Controlled lookup/page responses for the malformed-metadata regressions.
+{
+    package MB887AppleHTTP;
+    sub new { my ($class, $row, $html, $calls) = @_; bless {row=>$row, html=>$html, calls=>$calls}, $class }
+    sub get {
+        my ($self, $url) = @_;
+        push @{ $self->{calls} }, $url;
+        return {success=>1, status=>200,
+            content=>JSON::MaybeXS::encode_json({results=>[$self->{row}]})}
+            if $url =~ /itunes\.apple\.com/;
+        return {success=>1, status=>200, content=>$self->{html}};
+    }
+}
+
 sub _strip_855 {
     my ($s) = @_;
     $s //= '';
@@ -223,6 +237,95 @@ return sub {
             'mb886: facade fallback still resolves the dynamic URL browser hook');
         $assert->is($sent[0], "(nick) ${expected_badge}Browser & title",
             'mb886: browser fallback shares the exact badge and existing HTML decoder');
+    }
+
+    # MB887: required malformed metadata falls back; optional leaves are omitted.
+    {
+        my (@calls, @sent);
+        my $row = {trackId=>42, kind=>'song', trackName=>{unexpected=>'object'}};
+        local *Mediabot::External::_make_http = sub {
+            MB887AppleHTTP->new($row, '<title>Usable fallback - Apple Music</title>', \@calls)
+        };
+        local *Mediabot::External::URL::_fetch_url_chromium_dumpdom = sub { die "unexpected browser\n" };
+        local *Mediabot::Helpers::botPrivmsg = sub { push @sent, $_[2]; return 1; };
+        my $self = bless {logger=>L855->new}, 'Bot855';
+        Mediabot::External::_handle_applemusic($self, undef, 'nick', '#test', 'https://music.apple.com/us/song/42');
+        $assert->is(scalar(@calls), 2, 'mb887: a non-text lookup title permits the existing HTTP fallback');
+        $assert->is(_strip_855($sent[0]), '(nick) [AppleMusic] Usable fallback',
+            'mb887: a reference title never becomes display text');
+    }
+    {
+        my (@calls, @sent);
+        my $row = {trackId=>42, kind=>'song', trackName=>'Good title',
+            artistName=>{name=>'nested'}, collectionName=>['nested'],
+            releaseDate=>{}, trackTimeMillis=>'9' x 400};
+        local *Mediabot::External::_make_http = sub { MB887AppleHTTP->new($row, '', \@calls) };
+        local *Mediabot::Helpers::botPrivmsg = sub { push @sent, $_[2]; return 1; };
+        my $self = bless {logger=>L855->new}, 'Bot855';
+        Mediabot::External::_handle_applemusic($self, undef, 'nick', '#test', 'https://music.apple.com/us/song/42');
+        $assert->is(scalar(@calls), 1, 'mb887: malformed optional leaves do not discard a usable lookup title');
+        $assert->is(_strip_855($sent[0]), '(nick) [AppleMusic] Good title',
+            'mb887: lookup output omits nested text and non-finite duration');
+    }
+    {
+        my (@calls, @sent);
+        my $json = JSON::MaybeXS::encode_json({
+            '@type'=>[undef, {}, 'MusicAlbum'],
+            byArtist=>[{name=>'Artist'}, {name=>[]}, ['nested'], JSON::MaybeXS::true(), 'Solo'],
+            duration=>{}, datePublished=>[], numTracks=>{}, tracks=>[{}, {}],
+        });
+        my $html = '<title>Page title</title><script type="application/ld+json">' . $json . '</script>';
+        local *Mediabot::External::_make_http = sub { MB887AppleHTTP->new({}, $html, \@calls) };
+        local *Mediabot::Helpers::botPrivmsg = sub { push @sent, $_[2]; return 1; };
+        my $self = bless {logger=>L855->new}, 'Bot855';
+        Mediabot::External::_handle_applemusic($self, undef, 'nick', '#test', 'https://music.apple.com/us/album/page/42');
+        $assert->is(_strip_855($sent[0]), '(nick) [AppleMusic] Page title - by Artist, Solo - album - 2 tracks',
+            'mb887: mixed JSON-LD keeps valid artist order, type and track-array count');
+        my $details = Mediabot::External::AppleMusic::_applemusic_extract_details($self, $html);
+        $assert->is(join('|', map { "$_=$details->{$_}" } sort keys %$details),
+            'artist=Artist, Solo|tracks=2|type=album', 'mb887: extracted optional metadata contains only usable leaves');
+    }
+    {
+        my (@sent, %worker);
+        my $starts = 0;
+        local *Mediabot::External::_make_http = sub { die "parent HTTP forbidden\n" };
+        local *Mediabot::Helpers::botPrivmsg = sub { push @sent, $_[2]; return 1; };
+        local *Mediabot::AsyncWorker::start = sub {
+            my ($class, %args) = @_; %worker = %args; $starts++; return bless {}, 'Worker855';
+        };
+        my $self = bless {logger=>L855->new, loop=>Loop855->new}, 'Bot855';
+        my $url = 'https://music.apple.com/us/song/42';
+        Mediabot::External::_handle_applemusic($self, undef, 'nick', '#test', $url);
+        $worker{on_done}->({ok=>1, value=>{title=>[], details=>{artist=>'Artist'}}});
+        $assert->ok(!@sent && !keys(%{ $self->{_applemusic_cache} // {} }),
+            'mb887: an invalid worker title is neither sent nor cached');
+        $assert->is(scalar(keys %{ $self->{_applemusic_pending} // {} }), 0,
+            'mb887: invalid worker metadata releases pending state');
+        Mediabot::External::_handle_applemusic($self, undef, 'nick', '#test', $url);
+        $assert->is($starts, 2, 'mb887: a later request retries after invalid worker metadata');
+        my $value = {title=>'0', details=>{artist=>{}, album=>[], type=>{}, year=>[], duration=>{}, tracks=>[]}};
+        $worker{on_done}->({ok=>1, value=>$value});
+        $worker{on_done}->({ok=>1, value=>$value});
+        $assert->is(scalar(@sent), 1, 'mb887: repeated completion still emits the valid reply once');
+        $assert->is($sent[0], "(nick) ${expected_badge}0",
+            'mb887: scalar zero stays usable while malformed worker details are omitted');
+        $assert->ok(ref($value->{details}{artist}) eq 'HASH' && ref($value->{details}{tracks}) eq 'ARRAY',
+            'mb887: validating worker metadata leaves the received result untouched');
+    }
+    {
+        my @warnings;
+        my @bad;
+        {
+            local $SIG{__WARN__} = sub { push @warnings, @_ };
+            @bad = (
+                Mediabot::External::AppleMusic::_am_duration_from_ms('9' x 400),
+                Mediabot::External::AppleMusic::_am_duration_from_ms('١٢٣'),
+                Mediabot::External::AppleMusic::_am_duration_from_iso('PT1..2S'),
+                Mediabot::External::AppleMusic::_am_duration_from_iso('PT' . ('9' x 400) . 'H'),
+            );
+        }
+        $assert->ok(!grep({defined} @bad), 'mb887: non-finite and non-numeric durations are omitted');
+        $assert->is(scalar(@warnings), 0, 'mb887: rejected durations cause no numeric warnings');
     }
 
     {
