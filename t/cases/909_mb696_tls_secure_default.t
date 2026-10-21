@@ -65,6 +65,8 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'Helpers.pm')
     );
 
+    my $country = _slurp_909('Mediabot/External/Country.pm');
+
     my $admin = _slurp_909(
         File::Spec->catfile('.', 'Mediabot', 'AdminCommands.pm')
     );
@@ -88,7 +90,7 @@ return sub {
     );
 
     $assert->like(
-        $helpers,
+        $country,
         qr/HTTP::Tiny->new\(
            timeout\s*=>\s*3,\s*
            verify_SSL\s*=>\s*1

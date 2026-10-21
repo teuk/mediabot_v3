@@ -40,7 +40,7 @@ return sub {
     my ($assert) = @_;
 
     my $helpers = _slurp_mb314(
-        File::Spec->catfile('.', 'Mediabot', 'Helpers.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Country.pm')
     );
     my $main = _slurp_mb314('mediabot.pl');
 

@@ -109,7 +109,8 @@ return sub {
     );
 
     my $check_version = _extract_sub_207($src, 'getVersion');
-    my $whereis       = _extract_sub_207($src, 'whereis');
+    my $country = _slurp_207('Mediabot/External/Country.pm');
+    my $whereis = _extract_sub_207($country, 'whereis');
 
     $assert->ok(
         defined $check_version && $check_version ne '',

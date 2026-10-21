@@ -189,9 +189,10 @@ say_info("\n[2] TLS verification secure by default");
         fail("Tavily authenticated news search is not explicitly TLS-verified");
     }
 
-    my $helpers = slurp('Mediabot/Helpers.pm') // '';
+    # MB899: follow the implementation owner after country lookup extraction.
+    my $country = slurp('Mediabot/External/Country.pm') // '';
 
-    if ($helpers =~ /HTTP::Tiny->new\(timeout\s*=>\s*3,\s*verify_SSL\s*=>\s*1\)->get\(\$whereis_url\)/) {
+    if ($country =~ /HTTP::Tiny->new\(timeout\s*=>\s*3,\s*verify_SSL\s*=>\s*1\)->get\(\$whereis_url\)/) {
         pass("country.is HTTPS lookup explicitly verifies TLS");
     }
     else {

@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB899 — Give country lookups a dedicated external module (2026-10-22)
+
+- Move whereis and its existing asynchronous process adapter into
+  External::Country. Keep both Helpers entry points, default exports and all
+  98 unrelated function bodies unchanged. WHOIS routing remains in place.
+- Preserve IPv4/DNS resolution, hidden-host handling, verified HTTPS, fallback
+  values, deadlines, pipe bounds, TERM/KILL cleanup and existing encoding rules.
+  Retain late Helpers lookup, Socket and JSON hooks; make both APIs optional
+  imports without loading bot/database state or making requests at module load.
+- Follow the owner in five existing cases and the country.is TLS audit. Replace
+  the copied async test implementation with real API calls and add six focused
+  assertions for load orders, hooks and native timeout recovery. Keep all 37
+  security invariants and the numbered case catalogue. No schema, SQL, private
+  configuration, VERSION, service or test runner change.
+
+
 ### MB898 — Give remote version checks their own module (2026-10-22)
 
 - Move remote VERSION source selection, HTTP fetching and the AsyncWorker

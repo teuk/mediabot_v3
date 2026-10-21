@@ -59,7 +59,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_helpers_whereis(
-        File::Spec->catfile('.', 'Mediabot', 'Helpers.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Country.pm')
     );
 
     my $body = _extract_sub_body_helpers_whereis($src, 'whereis');
@@ -72,7 +72,7 @@ return sub {
     $assert->like(
         $src,
         qr/^use HTTP::Tiny;$/m,
-        'Helpers.pm imports HTTP::Tiny'
+        'Country.pm imports HTTP::Tiny'
     );
 
     $assert->like(
