@@ -84,8 +84,8 @@ return sub {
         'mb693-902: pending announcements are durable and oldest-first');
     $assert->like($repo, qr/sub mark_announced .*?SET announced_at = NOW\(\)/s,
         'mb693-902: post-send acknowledgement is explicit');
-    $assert->like($repo, qr/sub record_poll_success .*?last_success_at = NOW\(\).*?etag = COALESCE/s,
-        'mb693-902: successful poll records health plus HTTP validators');
+    $assert->like($repo, qr/sub _record_poll_success .*?last_success_at = NOW\(\).*?\$validators/s,
+        'mb693-902: successful poll records health plus response-specific HTTP validators');
     $assert->like($repo, qr/sub record_poll_error .*?last_error_at = NOW\(\).*?last_error = \?/s,
         'mb693-902: one broken feed gets isolated durable error state');
 

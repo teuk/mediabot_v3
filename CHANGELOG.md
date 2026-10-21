@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB868 — Relative HTTP redirects and current RSS validators (2026-10-21)
+
+- Resolve plugin HTTPS redirects with URI path/query semantics, including
+  `./`, `../` and query-only URLs without an explicit root path. Preserve
+  resource case, encoded path segments, per-hop DNS checks, peer pinning,
+  HTTPS-only admission and the existing redirect budget.
+- Replace RSS ETag and Last-Modified fields after a new accepted body, clearing
+  validators absent from that response. Preserve missing fields on a 304
+  revalidation and keep the previous validators after a failed poll.
+- Add offline redirect/cache and real in-memory SQL/wire-cycle regressions.
+  Update the legacy polling source assertion to reflect the split lifecycle.
+  No database schema, migration, private configuration or service change.
+
 ### MB867 — YouTube response validation and IPv6 transport recovery (2026-10-21)
 
 - Require an object at the public YouTube metadata JSON root, extending the

@@ -6,6 +6,7 @@ use utf8;
 
 use Encode qw(decode FB_CROAK);
 use HTTP::Tiny;
+use URI ();
 use Socket qw(AF_INET6 AF_UNSPEC SOCK_STREAM NI_NUMERICHOST NI_NUMERICSERV getaddrinfo getnameinfo inet_pton);
 
 use Mediabot::Plugin::HTTPResponseV3;
@@ -152,6 +153,8 @@ sub _url_parts {
     die "HTTPServiceV3: destination address is blocked\n"
         if defined($literal) && !$literal;
     $rest = '/' unless defined($rest) && length($rest);
+    # A query without an explicit path still targets the origin's root.
+    $rest = "/$rest" if $rest =~ /\A\?/;
     my $rendered_host = index($host, ':') >= 0 ? "[$host]" : $host;
     my $normalized = "https://$rendered_host$rest";
     return ($normalized, $host, 443, "https://$rendered_host");
@@ -161,18 +164,13 @@ sub _resolve_location {
     my ($base, $location) = @_;
     die "HTTPServiceV3: redirect location is invalid\n"
         unless defined($location) && !ref($location)
-            && length($location) <= 2048 && $location !~ /[\r\n\0]/;
-    return "$location" if $location =~ m{\Ahttps://}i;
-    return "https:$location" if $location =~ m{\A//};
+            && length($location) <= 2048 && $location !~ /[\x00-\x20\x7f]/;
     die "HTTPServiceV3: redirect changed scheme\n"
-        if $location =~ m{\A[A-Za-z][A-Za-z0-9+.-]*:};
-    my ($origin, $path) = $base =~ m{\A(https://[^/]+)(/[^?#]*)?};
-    die "HTTPServiceV3: redirect base is invalid\n" unless defined $origin;
-    $path = '/' unless defined($path) && length($path);
-    return "$origin$location" if $location =~ m{\A/};
-    return "$origin$path$location" if $location =~ m{\A\?};
-    $path =~ s{[^/]*\z}{};
-    return "$origin$path$location";
+        if $location =~ m{\A[A-Za-z][A-Za-z0-9+.-]*:}
+            && $location !~ m{\Ahttps://}i;
+    # MB868: URI resolution separates authority/path/query and removes relative
+    # dot segments. The caller still admits the resulting URL and DNS at every hop.
+    return URI->new_abs($location, $base)->as_string;
 }
 
 sub _default_resolver {

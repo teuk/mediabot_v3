@@ -299,16 +299,25 @@ sub mark_announced {
 
 sub record_poll_success {
     my ($self, $id_feed, %meta) = @_;
+    return $self->_record_poll_success($id_feed, 0, %meta);
+}
+
+sub _record_poll_success {
+    my ($self, $id_feed, $preserve_missing, %meta) = @_;
     die "invalid RSS feed id" unless defined($id_feed) && $id_feed =~ /^\d+$/;
     my $etag = defined($meta{etag}) && !ref($meta{etag}) ? substr($meta{etag}, 0, 255) : undef;
     my $modified = defined($meta{last_modified}) && !ref($meta{last_modified})
         ? substr($meta{last_modified}, 0, 255) : undef;
-    my $sth = $self->dbh->prepare(q{
+    # MB868: a new body replaces its validators, including their absence.
+    # A 304 only refreshes supplied fields of the already accepted body.
+    my $validators = $preserve_missing
+        ? 'etag = COALESCE(?, etag), last_modified = COALESCE(?, last_modified)'
+        : 'etag = ?, last_modified = ?';
+    my $sth = $self->dbh->prepare(qq{
         UPDATE RSS_FEED
            SET last_poll_at = NOW(), last_success_at = NOW(),
                last_error_at = NULL, last_error = NULL,
-               etag = COALESCE(?, etag),
-               last_modified = COALESCE(?, last_modified)
+               $validators
          WHERE id_rss_feed = ?
     }) or die "RSS poll-success prepare failed";
     $sth->execute($etag, $modified, $id_feed) or die "RSS poll-success execute failed";
@@ -318,7 +327,7 @@ sub record_poll_success {
 
 sub record_not_modified {
     my ($self, $id_feed, %meta) = @_;
-    return $self->record_poll_success($id_feed, %meta);
+    return $self->_record_poll_success($id_feed, 1, %meta);
 }
 
 sub record_poll_error {
