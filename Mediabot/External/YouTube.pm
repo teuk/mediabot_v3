@@ -412,7 +412,7 @@ sub displayWeather_ctx {
         my $cc = $1;
         $location =~ s/\s+[A-Za-z]{2}$/,$cc/;
     }
-    $location =~ s/\s+/,/g if $location =~ /^[^,]+ [^,]+$/ && $location !~ /^\s*[-+]?\d/; # "New York" -> "New,York"
+    # Preserve spaces inside city names; _uri_escape_bytes encodes them for HTTP.
     $location =~ s/^\s+|\s+$//g;
 
     # Cache (keyed by location)
@@ -486,7 +486,8 @@ sub displayWeather_ctx {
     # Save cache + reply
     $self->{_weather_cache}{$cache_key} = { ts => $now, text => $line };
 
-    # Evict cache entries older than ttl_stale to prevent unbounded growth.
+    # Remove expired data first, then the oldest excess entries, so a burst of
+    # recent locations cannot grow the cache beyond max_entries.
     # This runs lazily at write time rather than on a timer.
     my $max_age = 900;  # 15 minutes (ttl_stale)
     my $max_entries = 200;
@@ -495,6 +496,13 @@ sub displayWeather_ctx {
         for my $k (keys %$cache_ref) {
             delete $cache_ref->{$k}
                 if ($now - ($cache_ref->{$k}{ts} // 0)) > $max_age;
+        }
+        for my $k (sort {
+            ($cache_ref->{$a}{ts} // 0) <=> ($cache_ref->{$b}{ts} // 0)
+                || $a cmp $b
+        } grep { $_ ne $cache_key } keys %$cache_ref) {
+            last if scalar(keys %$cache_ref) <= $max_entries;
+            delete $cache_ref->{$k};
         }
     }
     Mediabot::Helpers::botPrivmsg($self, $channel, $line);

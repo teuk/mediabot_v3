@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB872 — Weather location spelling and bounded cache growth (2026-10-21)
+
+- Preserve spaces inside weather location names instead of replacing them
+  with commas. Send compound names through the existing byte-safe URL encoder;
+  retain the City CC shortcut, explicit comma qualifiers and coordinates.
+- Enforce the existing 200-entry weather cache bound even when all entries
+  are recent. Purge expired data first, then evict the oldest excess entries
+  with deterministic ties while retaining the newly fetched response.
+- Keep three-minute freshness, fifteen-minute outage fallback, original
+  timestamps after failed refreshes, verified TLS, HTTP timeouts and chanset
+  checks. Add offline runtime location/cache regressions. No SQL schema,
+  migration, private configuration or service change.
+
 ### MB871 — Case-preserving Facebook and X metadata caches (2026-10-21)
 
 - Preserve resource path, query and fragment case in the dedicated Facebook
