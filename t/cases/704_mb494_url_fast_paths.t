@@ -105,7 +105,7 @@ return sub {
     # 4. Gardes par scan : UA crawler social sur FB et Instagram
     # -------------------------------------------------------------------------
     {
-        my $src = _slurp_704(File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm'));
+        my $x_src = _slurp_704(File::Spec->catfile('.', 'Mediabot', 'External', 'XTwitter.pm'));
         my $instagram_src = _slurp_704(File::Spec->catfile('.', 'Mediabot', 'External', 'Instagram.pm'));
         my ($ig) = $instagram_src =~ /(sub _instagram_fetch_sync \{.*?\n\})\n\n/s; $ig //= '';
         my $facebook_src = _slurp_704(File::Spec->catfile('.', 'Mediabot', 'External', 'Facebook.pm'));
@@ -115,7 +115,7 @@ return sub {
         $assert->like($fb, qr/facebookexternalhit\/1\.1/,
             'Facebook: étape HTTP en UA crawler social');
         # le fast path X est bien AVANT le chromium dans le source
-        my ($x) = $src =~ /(sub _handle_x_twitter \{.*?\n\})\n\n/s; $x //= '';
+        my ($x) = $x_src =~ /(sub _handle_x_twitter \{.*?\n\})\n\n/s; $x //= '';
         my $p_fx = index($x, 'api.fxtwitter.com');
         my $p_ch = index($x, '_fetch_url_chromium_dumpdom');
         $assert->ok($p_fx >= 0 && $p_ch >= 0 && $p_fx < $p_ch,

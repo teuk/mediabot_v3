@@ -1,9 +1,53 @@
 use strict;
 use warnings;
+use utf8;
 use Test::More;
 use JSON::PP qw(encode_json);
 use Mediabot::External ();
 use Mediabot::External::URL ();
+use Mediabot::External::XTwitter ();
+use IPC::Open3;
+use Symbol qw(gensym);
+
+for my $order (
+    [qw(External::XTwitter)],
+    [qw(External::URL External::XTwitter External)],
+    [qw(External External::XTwitter External::URL)],
+) {
+    my $code = "use Scalar::Util qw(refaddr);\n"
+        . join('', map { "require Mediabot::$_;\n" } @$order);
+    if (@$order == 1) {
+        $code .= q{die 'eager URL load' if $INC{'Mediabot/External/URL.pm'};
+            die 'eager AI load' if $INC{'Mediabot/External/Claude.pm'};
+            die 'normalizer failed' unless
+                Mediabot::External::XTwitter::_x_url('http://twitter.com/Studio/status/123')
+                    eq 'https://x.com/Studio/status/123';
+            die 'count formatting failed' unless
+                Mediabot::External::XTwitter::_x_compact_count(999999) eq '1M';
+            die 'lazy fallback failed' unless
+                Mediabot::External::XTwitter::_x_fallback_title_from_url('https://twitter.com/Studio')
+                    eq 'X profile: @Studio';};
+    }
+    $code .= q{require Mediabot::External;
+        for my $name (@Mediabot::External::XTwitter::EXPORT_OK) {
+            die 'legacy URL alias differs' unless
+                refaddr(Mediabot::External::URL->can($name)) ==
+                refaddr(Mediabot::External::XTwitter->can($name));
+        }
+        for my $name (qw(_x_url _x_title_from_html _x_fallback_title_from_url _handle_x_twitter)) {
+            die 'facade alias differs' unless
+                refaddr(Mediabot::External->can($name)) ==
+                refaddr(Mediabot::External::XTwitter->can($name));
+        }
+        print 'loaded';};
+    my $err = gensym;
+    my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
+    my $stdout = do { local $/; <$out> } // '';
+    my $stderr = do { local $/; <$err> } // '';
+    waitpid($pid, 0);
+    ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+        'X/Twitter loads and retains aliases in order: ' . join('/', @$order));
+}
 
 {
     package MB871XLog;
@@ -21,6 +65,51 @@ use Mediabot::External::URL ();
 sub x_bot_871 { return {logger => bless({}, 'MB871XLog'), out => []}; }
 
 no warnings qw(redefine once);
+
+{
+    local *Mediabot::External::URL::_decode_html = sub { 'legacy decoded text' };
+    my $bot = x_bot_871();
+    is_deeply([
+        Mediabot::External::XTwitter::_x_title_from_html($bot, '<title>input</title>', 'override'),
+        Mediabot::External::XTwitter::_x_desc_from_html($bot, '<meta property="og:description" content="input">', 'override'),
+    ], ['legacy decoded text', 'legacy decoded text'],
+        'X/Twitter title and description still resolve the URL decoder at call time');
+}
+{
+    my (@hooks, @out);
+    local *Mediabot::External::URL::_x_url = sub {
+        push @hooks, 'normalize'; return 'https://x.com/Hook/status/123';
+    };
+    local *Mediabot::External::URL::_url_cache_identity = sub {
+        push @hooks, 'cache'; return 'legacy cache key';
+    };
+    local *Mediabot::External::URL::decode_json = sub {
+        push @hooks, 'json';
+        return {code=>200, tweet=>{author=>{name=>'Émission 🦉', screen_name=>'Hook'},
+            text=>'Legacy text', likes=>12, retweets=>0}};
+    };
+    local *Mediabot::External::URL::_x_compact_count = sub {
+        push @hooks, 'count'; return '12*';
+    };
+    local *Mediabot::External::_make_http = sub {
+        push @hooks, 'http'; return bless {calls=>[]}, 'MB871XHTTP';
+    };
+    local *Mediabot::External::URL::_fetch_url_chromium_dumpdom = sub { die 'unexpected browser' };
+    local *Mediabot::Helpers::botPrivmsg = sub { push @out, [$_[1], $_[2]]; 1 };
+    my $bot = x_bot_871();
+    my $ret = Mediabot::External::_handle_x_twitter($bot, undef, 'First', '#test', 'legacy input');
+    my $replay = Mediabot::External::URL::_handle_x_twitter($bot, undef, 'Second', '#i/o', 'legacy replay');
+    my @plain = map {my $s=$_->[1]; $s =~ s/\x03\d{0,2}(?:,\d{1,2})?|\x0f|\x02//g; $s} @out;
+    ok($ret && $replay && @out == 2
+        && join('|', @hooks) eq 'normalize|cache|http|json|count|normalize|cache'
+        && $out[0][0] eq '#test' && $out[1][0] eq '#i/o'
+        && $plain[0] eq '(First) [X] Émission 🦉 (@Hook) on X: "Legacy text" (12* likes)'
+        && $plain[1] eq '(Second) [X] Émission 🦉 (@Hook) on X: "Legacy text" (12* likes)'
+        && utf8::is_utf8($out[0][1]) && utf8::is_utf8($out[1][1])
+        && exists $bot->{_x_twitter_cache}{'legacy cache key'},
+        'legacy normalization, JSON, counters and cache hooks survive facade delivery and replay');
+}
+
 my $http = bless({calls => []}, 'MB871XHTTP');
 my @rendered;
 our $shell = 0;

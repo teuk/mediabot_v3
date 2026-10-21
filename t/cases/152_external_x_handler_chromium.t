@@ -63,11 +63,15 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm')
     );
 
+    my $x_src = _slurp_external_x_handler(
+        File::Spec->catfile('.', 'Mediabot', 'External', 'XTwitter.pm')
+    );
+
     my $display_body = _extract_sub_body_external_x_handler($src, 'displayUrlTitle');
-    my $url_body     = _extract_sub_body_external_x_handler($src, '_x_url');
-    my $title_body   = _extract_sub_body_external_x_handler($src, '_x_title_from_html');
-    my $fallback     = _extract_sub_body_external_x_handler($src, '_x_fallback_title_from_url');
-    my $handler_body = _extract_sub_body_external_x_handler($src, '_handle_x_twitter');
+    my $url_body     = _extract_sub_body_external_x_handler($x_src, '_x_url');
+    my $title_body   = _extract_sub_body_external_x_handler($x_src, '_x_title_from_html');
+    my $fallback     = _extract_sub_body_external_x_handler($x_src, '_x_fallback_title_from_url');
+    my $handler_body = _extract_sub_body_external_x_handler($x_src, '_handle_x_twitter');
 
     $assert->ok(defined $display_body, 'displayUrlTitle body found');
     $assert->ok(defined $url_body,     '_x_url body found');

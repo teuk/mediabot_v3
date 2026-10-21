@@ -130,16 +130,21 @@ Mediabot::External::Facebook->import(qw(
     _handle_facebook
 ));
 
-# mb99-R1: sous-module URL/X
+# MB893: X/Twitter metadata and delivery have an independent owner.
+require Mediabot::External::XTwitter;
+Mediabot::External::XTwitter->import(qw(
+    _x_url
+    _x_title_from_html
+    _x_fallback_title_from_url
+    _handle_x_twitter
+));
+
+# mb99-R1: URL router and shared helpers
 require Mediabot::External::URL;
 Mediabot::External::URL->import(qw(
     _extract_url
     _decode_html
     _decode_http_content_utf8
-    _x_url
-    _x_title_from_html
-    _x_fallback_title_from_url
-    _handle_x_twitter
     _clean_generic_url_title
     _handle_generic_title
     displayUrlTitle

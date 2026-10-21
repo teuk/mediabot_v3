@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB893 — Separate X/Twitter metadata from URL routing (2026-10-21)
+
+- Move the six X/Twitter functions into External::XTwitter. Retain all six URL
+  aliases and the four historical facade entries; keep the 17 URL optional
+  exports and the 33 facade default exports unchanged.
+- Preserve normalization, FxTwitter-first fetching, browser/URL fallback,
+  parsing, counters, character limits, badge/reset and cache policy. Resolve
+  legacy helper and decoder symbols at call time. Load Time::HiRes explicitly
+  without importing time, retaining the whole-second cache clock.
+- Keep all eight remaining URL function bodies identical; remove an obsolete
+  Spotify ownership comment. URL drops from 827 to 489 lines. Retarget three
+  existing ownership checks and extend the existing X cache case by five
+  cold-load/runtime-hook assertions. Add no numbered case, SQL schema,
+  migration, configuration or service change.
+
 ### MB892 — Separate Facebook metadata from URL routing (2026-10-21)
 
 - Move the four Facebook functions into External::Facebook. Import their owner
