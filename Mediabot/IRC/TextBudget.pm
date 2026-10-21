@@ -33,8 +33,7 @@ sub _irc_prefix_for_budget {
     return $text if _irc_wire_bytes($text) <= $max_bytes;
 
     if ($max_bytes >= 16) {
-        my @chunks = _split_text_for_irc($text, $max_bytes);
-        return $chunks[0] // '';
+        return _irc_chunk_prefix(_sanitize_irc_text($text), $max_bytes);
     }
 
     my ($prefix, $used) = ('', 0);
@@ -76,48 +75,51 @@ sub _split_text_for_irc {
     # splitter also protects direct future callers.
     $text = _sanitize_irc_text($text);
 
-    my $is_chars = utf8::is_utf8($text);
-    my $cost = $is_chars
-        ? sub { my $o = ord($_[0]); $o < 0x80 ? 1 : $o < 0x800 ? 2 : $o < 0x10000 ? 3 : 4 }
-        : sub { 1 };
-
     # Fast path: whole message already fits on the wire.
     return ($text) if _irc_wire_bytes($text) <= $max_bytes;
 
     my @chunks;
     my $buf = $text;
-
-    while (_irc_wire_bytes($buf) > $max_bytes) {
-        # Largest leading character count whose encoded form fits the budget.
-        my $bytes = 0;
-        my $n     = 0;
-        for my $ch (split //, $buf) {
-            my $cb = $cost->($ch);
-            last if $bytes + $cb > $max_bytes;
-            $bytes += $cb;
-            $n++;
-        }
-        $n = 1 if $n < 1;    # always make progress, even if one char > budget
-
-        my $prefix = substr($buf, 0, $n);
-
-        # Prefer breaking at the last whitespace, but not before half the prefix,
-        # mirroring the historical .{200,399}\s word-wrap behaviour.
-        if ($prefix =~ /^(.*\s)\S+\z/s) {
-            my $ws = $1;
-            $prefix = $ws if length($ws) >= int($n / 2) && length($ws) >= 1;
-        }
-
-        my $cut = length($prefix);
-        $cut = $n if $cut < 1;
-
-        push @chunks, substr($buf, 0, $cut);
-        $buf = substr($buf, $cut);
+    while (length($buf)) {
+        my $prefix = _irc_chunk_prefix($buf, $max_bytes);
+        push @chunks, $prefix;
+        last if length($prefix) == length($buf);
+        $buf = substr($buf, length($prefix));
         $buf =~ s/^\s+//;
     }
-
-    push @chunks, $buf if length($buf);
     return @chunks;
+}
+
+# Inspect only enough characters to decide the next chunk. Every input
+# character occupies at least one wire byte, so budget + 1 characters also
+# suffice to distinguish a final chunk from one needing a cut. Keep this
+# decision shared with prefix-only callers without building unused chunks.
+sub _irc_chunk_prefix {
+    my ($text, $max_bytes) = @_;
+    my $window = substr($text, 0, $max_bytes + 1);
+    return $text
+        if length($window) <= $max_bytes && _irc_wire_bytes($window) <= $max_bytes;
+
+    my $is_chars = utf8::is_utf8($window);
+    my ($bytes, $n) = (0, 0);
+    for my $ch (split //, $window) {
+        my $o = ord($ch);
+        my $cb = !$is_chars || $o < 0x80 ? 1
+            : $o < 0x800 ? 2 : $o < 0x10000 ? 3 : 4;
+        last if $bytes + $cb > $max_bytes;
+        $bytes += $cb;
+        $n++;
+    }
+    $n = 1 if $n < 1;
+
+    my $prefix = substr($text, 0, $n);
+    # Preserve the historical half-prefix word-break rule, including trailing
+    # whitespace and the distinction between character and raw byte input.
+    if ($prefix =~ /^(.*\s)\S+\z/s) {
+        my $ws = $1;
+        $prefix = $ws if length($ws) >= int($n / 2) && length($ws) >= 1;
+    }
+    return $prefix;
 }
 
 # Legacy contract: max bounds the content; ellipsis is appended OUTSIDE max.

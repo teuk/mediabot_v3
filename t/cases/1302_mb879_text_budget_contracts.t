@@ -77,4 +77,44 @@ for my $row (
 }
 is(length(Mediabot::Helpers::truncate_utf8('x' x 20, 4)), 7,
     'the legacy suffix remains outside max; it is not a total-line cap');
+# MB885: preserve representation even when a Unicode message ends in ASCII.
+my @unicode_tail = Mediabot::IRC::TextBudget::_split_text_for_irc(('é' x 8) . 'x', 16);
+is_deeply([map {[$_, utf8::is_utf8($_) ? 1 : 0]} @unicode_tail],
+    [[('é' x 8), 1], ['x', 1]], 'a final ASCII chunk retains the input character representation');
+my $flagged_ascii = 'a' x 41;
+utf8::upgrade($flagged_ascii);
+my $ascii_prefix = Mediabot::IRC::TextBudget::_irc_prefix_for_budget($flagged_ascii, 16);
+is_deeply([$ascii_prefix, utf8::is_utf8($ascii_prefix) ? 1 : 0],
+    [('a' x 16), 0], 'prefix-only ASCII keeps the legacy normalized scalar representation');
+is_deeply([Mediabot::IRC::TextBudget::_split_text_for_irc(('x' x 16) . (' ' x 30), 16)],
+    ['x' x 16], 'whitespace after a full chunk is still discarded');
+is(Mediabot::IRC::TextBudget::_irc_prefix_for_budget("a\r\n\0" x 8, 16), 'a ' x 8,
+    'prefix overflow is decided before normalization, then uses sanitized text');
+is_deeply([
+    scalar Mediabot::IRC::TextBudget::_split_text_for_irc('short', 16),
+    scalar Mediabot::IRC::TextBudget::_split_text_for_irc('x' x 33, 16),
+], ['short', 3], 'legacy scalar context retains the short string or wrapped chunk count');
+
+# Bound actual byte-accounting work, without machine-dependent timing limits.
+# The input is long enough to catch repeated scans of the shrinking tail.
+my $long_text = 'été 🙂 words ' x 600;
+for my $mode (qw(split prefix)) {
+    my ($work, $result) = (0);
+    my $wire_bytes = \&Mediabot::IRC::TextBudget::_irc_wire_bytes;
+    {
+        no warnings 'redefine';
+        local *Mediabot::IRC::TextBudget::_irc_wire_bytes = sub {
+            $work += length($_[0] // '');
+            return $wire_bytes->(@_);
+        };
+        $result = $mode eq 'split'
+            ? [Mediabot::IRC::TextBudget::_split_text_for_irc($long_text, 400)]
+            : [Mediabot::IRC::TextBudget::_irc_prefix_for_budget($long_text, 400)];
+    }
+    ok($work <= 4 * length($long_text), "$mode avoids repeated full-tail byte accounting")
+        or diag("accounted $work characters for " . length($long_text) . ' input characters');
+    is($result->[0], ('été 🙂 words ' x 23) . 'été ',
+        "$mode retains the established first word boundary while limiting work");
+}
+
 done_testing;

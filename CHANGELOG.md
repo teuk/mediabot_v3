@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB885 — Bound shared IRC wrapping work (2026-10-21)
+
+- Share the next-chunk decision between full wrapping and prefix-only callers.
+  Inspect a budget-sized window instead of splitting and encoding the whole
+  remaining message for every chunk; stop prefix-only work after the first cut.
+- Preserve word boundaries, whitespace cleanup, byte/character representation,
+  normalization order, defaults, scalar returns and legacy truncation policies.
+  Keep senders, pacing, filters and caller hooks unchanged.
+- Extend the existing text-budget case with nine focused representation,
+  boundary and deterministic work checks. Add no numbered test file. No SQL
+  schema, migration, configuration or service change.
+
 ### MB884 — Prune low-value tests and remove fixture idle waits (2026-10-21)
 
 - Retire 38 reviewed prose/layout, copied-algorithm and superseded source-shape
