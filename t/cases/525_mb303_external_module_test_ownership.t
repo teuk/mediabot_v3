@@ -59,18 +59,25 @@ return sub {
             150_youtube_search_uses_imported_uri_escape_utf8.t
             151_youtube_search_same_colors_as_link.t
             169_youtube_search_three_results_colored.t
-            170_fortnite_stats_nested_hash_guards.t
-            171_fortnite_stats_mode_fallback.t
             172_display_youtube_details_structure_guards.t
             173_youtube_oembed_requires_hash.t
-            174_fortnite_response_must_be_hash.t
             199_youtube_colors_transparent_background.t
             203_youtube_helpers_getdetails_regression.t
             204_youtube_helpers_ownership_regression.t
             205_youtube_search_http_guard_regression.t
-            212_fortnite_comment_cleanup_regression.t
             223_external_yt_search.t
+        )],
+        'Fortnite.pm' => [qw(
+            170_fortnite_stats_nested_hash_guards.t
+            171_fortnite_stats_mode_fallback.t
+            174_fortnite_response_must_be_hash.t
+            212_fortnite_comment_cleanup_regression.t
+            636_mb421_fortnite_float_formatting.t
             74_fortniteid_db_safety.t
+        )],
+        'Weather.pm' => [qw(
+            102_weather_user_agent_configurable.t
+            653_mb438_weather_accent_url.t
         )],
         'Spotify.pm' => [qw(
             201_spotify_rich_metadata_regression.t

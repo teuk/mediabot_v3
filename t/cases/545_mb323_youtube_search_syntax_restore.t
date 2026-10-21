@@ -26,7 +26,8 @@ return sub {
     );
 
     my $start = index($src, 'sub youtubeSearch_ctx {');
-    my $end   = index($src, "\n\n# Return the Fortnite account id", $start);
+    my $end   = index($src, "\n}\n", $start);
+    $end += 3 if $end >= 0;
 
     $assert->ok($start >= 0, 'youtubeSearch_ctx start marker found');
     $assert->ok($end > $start, 'youtubeSearch_ctx end marker found');

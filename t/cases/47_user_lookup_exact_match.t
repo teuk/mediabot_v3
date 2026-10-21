@@ -29,7 +29,7 @@ return sub {
     my ($assert) = @_;
 
     my $chan     = _slurp_user_lookup_exact(File::Spec->catfile('.', 'Mediabot', 'ChannelCommands.pm'));
-    my $external = _slurp_user_lookup_exact(File::Spec->catfile('.', 'Mediabot', 'External.pm'));
+    my $external = _slurp_user_lookup_exact(File::Spec->catfile('.', 'Mediabot', 'External', 'Fortnite.pm'));
     my $main     = _slurp_user_lookup_exact(File::Spec->catfile('.', 'mediabot.pl'));
 
     $assert->ok(

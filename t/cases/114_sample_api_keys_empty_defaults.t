@@ -39,7 +39,7 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'AdminCommands.pm'),
         File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'),
         File::Spec->catfile('.', 'Mediabot', 'External', 'Gemini.pm'),
-        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm'),
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Fortnite.pm'),
         File::Spec->catfile('.', 'mediabot.pl'),
     );
 

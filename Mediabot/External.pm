@@ -85,13 +85,12 @@ Mediabot::External::News->import(qw(
     _news_search_params
 ));
 
-# mb99-R1: sous-module YouTube/Weather/Fortnite
+# MB876: each external feature imports from its implementation owner.
 require Mediabot::External::YouTube;
 Mediabot::External::YouTube->import(qw(
     getYoutubeDetails
     _youtube_html_fallback
     displayYoutubeDetails
-    displayWeather_ctx
     _irc_color
     _yt_text
     _yt_sep
@@ -101,10 +100,14 @@ Mediabot::External::YouTube->import(qw(
     _yt_label
     _is_youtube_url
     youtubeSearch_ctx
-    getFortniteId
-    fortniteStats_ctx
     ytSearch_ctx
 ));
+
+require Mediabot::External::Weather;
+Mediabot::External::Weather->import(qw(displayWeather_ctx));
+
+require Mediabot::External::Fortnite;
+Mediabot::External::Fortnite->import(qw(getFortniteId fortniteStats_ctx));
 
 # mb99-R1: sous-module URL/Instagram/Facebook/X/AppleMusic
 require Mediabot::External::URL;
@@ -165,9 +168,8 @@ our @EXPORT = qw(
 );
 
 
-# mb99-R1: getYoutubeDetails, displayYoutubeDetails, _yt_*, displayWeather_ctx,
-# getFortniteId, fortniteStats_ctx, youtubeSearch_ctx, ytSearch_ctx
-# déplacés dans Mediabot::External::YouTube
+# Video functions belong to YouTube; weather and Fortnite use their own
+# modules. This facade preserves the existing public exports.
 
 # _extract_url($text) — pull the first URL out of a message
 # ---------------------------------------------------------------------------
@@ -232,7 +234,6 @@ sub _chanset_ok {
 # déplacés dans Mediabot::External::URL
 
 
-# mb99-R1: youtubeSearch_ctx, getFortniteId, fortniteStats_ctx, ytSearch_ctx
-# déplacés dans Mediabot::External::YouTube
+# YouTube search implementations remain in Mediabot::External::YouTube.
 
 1;

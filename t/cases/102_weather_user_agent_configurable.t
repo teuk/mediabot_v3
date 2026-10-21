@@ -2,8 +2,7 @@
 # =============================================================================
 # Regression checks for the wttr.in/weather HTTP User-Agent.
 #
-# Weather code lives in Mediabot::External::YouTube after the External module
-# split. The User-Agent must use main.MAIN_PROG_URL when available and fall back
+# Weather code lives in Mediabot::External::Weather after the MB876 extraction. The User-Agent must use main.MAIN_PROG_URL when available and fall back
 # to a neutral project URL.
 # =============================================================================
 
@@ -54,9 +53,7 @@ sub _extract_sub_body_weather_user_agent {
 return sub {
     my ($assert) = @_;
 
-    my $weather_module = File::Spec->catfile(
-        '.', 'Mediabot', 'External', 'YouTube.pm'
-    );
+    my $weather_module = File::Spec->catfile('.', 'Mediabot', 'External', 'Weather.pm');
     my $external = _slurp_weather_user_agent($weather_module);
     my $sample = _slurp_weather_user_agent(
         File::Spec->catfile('.', 'mediabot.sample.conf')
@@ -67,7 +64,7 @@ return sub {
     );
 
     $assert->ok(-f $weather_module, 'weather implementation module exists');
-    $assert->ok(defined $weather, 'displayWeather_ctx body found in External/YouTube.pm');
+    $assert->ok(defined $weather, 'displayWeather_ctx body found in External/Weather.pm');
     $assert->like($sample, qr/^MAIN_PROG_URL=/m, 'sample config documents main.MAIN_PROG_URL');
     $assert->like(
         $weather // '',

@@ -63,7 +63,8 @@ sub run_fortnite {
         local *Mediabot::Helpers::logBot = sub { push @{$_[0]{audit}}, [@_[2 .. $#_]]; 1 };
         local $SIG{__WARN__} = sub { push @warnings, @_ };
         my %handlers = Mediabot::_builtin_public_command_handlers();
-        $ok = eval { $result = $handlers{f}->($ctx); 1 };
+        my $handler = $args{handler} // $handlers{f};
+        $ok = eval { $result = $handler->($ctx); 1 };
         $error = $@;
     }
     $dbh->disconnect;

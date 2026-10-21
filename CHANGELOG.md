@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB876 — Separate YouTube, weather and Fortnite modules (2026-10-21)
+
+- Move weather and Fortnite implementations out of YouTube.pm into dedicated
+  modules. Extract their byte-safe URL encoder to URLCodec for shared use
+  with video search. Preserve the original function bodies and behavior.
+- Import each feature from its owner in the External facade. Keep existing
+  facade exports, YouTube optional imports and fully qualified legacy calls
+  through aliases to the same implementations. Remove unrelated headings
+  and unused dependencies from YouTube.pm.
+- Retarget historical source checks to the implementation owners and add
+  cold-load, import-order and runtime entry-point compatibility coverage.
+  Preserve cache state, access checks, HTTP/TLS settings, parsing and output.
+  No SQL schema, migration, private configuration or service change.
+
 ### MB875 — Fortnite response status and scalar display fields (2026-10-21)
 
 - Validate a declared API status before numeric comparison. Reject malformed

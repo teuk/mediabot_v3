@@ -30,7 +30,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_212(
-        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Fortnite.pm')
     );
 
     $assert->unlike(

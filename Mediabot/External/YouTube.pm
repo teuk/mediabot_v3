@@ -1,6 +1,6 @@
 package Mediabot::External::YouTube;
 # =============================================================================
-# Mediabot::External::YouTube — YouTube, Weather, Fortnite
+# Mediabot::External::YouTube — video metadata, formatting and search
 # =============================================================================
 # mb99-R1: extrait de Mediabot::External.
 # =============================================================================
@@ -16,8 +16,12 @@ use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
 use Exporter 'import';
 use JSON::MaybeXS;
 use URI::Escape qw(uri_escape_utf8);
-use String::IRC;
-use Encode qw(encode decode);
+use Mediabot::External::URLCodec qw(_uri_escape_bytes);
+
+# MB876: preserve legacy imports and fully-qualified calls while each feature
+# has one implementation in its own module. External imports the owners directly.
+use Mediabot::External::Weather qw(displayWeather_ctx);
+use Mediabot::External::Fortnite qw(getFortniteId fortniteStats_ctx);
 
 our $VERSION = '1.00';
 
@@ -362,167 +366,6 @@ sub displayYoutubeDetails {
     return 1;
 }
 
-# Weather command using wttr.in
-
-# mb438-B1: échappement d'URL byte-safe. Les entrées (villes tapées sur IRC,
-# format contenant des emojis) sont des OCTETS UTF-8 ; uri_escape_utf8() les
-# double-encode (Genève -> %C3%83%C2%A8..., emojis cassés). On échappe les
-# octets déjà UTF-8 (repli d'encodage si la chaîne était en caractères).
-sub _uri_escape_bytes {
-    my ($s) = @_;
-    $s = '' unless defined $s;
-    my $bytes = utf8::is_utf8($s) ? Encode::encode('UTF-8', $s) : $s;
-    return URI::Escape::uri_escape($bytes, "^A-Za-z0-9\-\._~");
-}
-
-sub displayWeather_ctx {
-    my ($ctx) = @_;
-
-    my $self    = $ctx->bot;
-    my $nick    = $ctx->nick;
-    my $channel = $ctx->channel; # may be undef in private
-    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-
-    # Require to be used in channel (your original behavior)
-    unless (defined $channel && $channel =~ /^#/) {
-        Mediabot::Helpers::botNotice($self, $nick, "Syntax (in channel): weather <City|City,CC|lat,lon>");
-        return;
-    }
-
-    # Respect your chanset gate: Weather
-    my $id_chanset_list = Mediabot::External::getIdChansetList($self, "Weather");
-    return unless defined $id_chanset_list;
-
-    my $id_channel_set = Mediabot::External::getIdChannelSet($self, $channel, $id_chanset_list);
-    return unless defined $id_channel_set;
-
-    my $q = join(' ', grep { defined && $_ ne '' } @args);
-    $q =~ s/^\s+|\s+$//g;
-
-    unless ($q ne '') {
-        Mediabot::Helpers::botNotice($self, $nick, "Syntax (no accents): weather <City|City,CC|lat,lon>");
-        return;
-    }
-
-    # Normalize input a bit:
-    # - allow "Paris FR" => "Paris,FR"
-    # - keep "lat,lon"
-    my $location = $q;
-    if ($location !~ /,/ && $location =~ /\s+([A-Za-z]{2})$/) {
-        my $cc = $1;
-        $location =~ s/\s+[A-Za-z]{2}$/,$cc/;
-    }
-    # Preserve spaces inside city names; _uri_escape_bytes encodes them for HTTP.
-    $location =~ s/^\s+|\s+$//g;
-
-    # Cache (keyed by location)
-    my $cache_key = lc($location);
-    $self->{_weather_cache} ||= {};
-    my $cache = $self->{_weather_cache}{$cache_key};
-
-    my $now = time();
-    my $ttl_ok = 180;  # 3 minutes
-    my $ttl_stale = 900; # 15 minutes (fallback if provider unhappy)
-
-    if ($cache && ($now - ($cache->{ts}||0) <= $ttl_ok) && ($cache->{text}||'') ne '') {
-        Mediabot::Helpers::botPrivmsg($self, $channel, $cache->{text});
-        return 1;
-    }
-
-    # Build wttr request
-    # A bit richer than before, still short:
-    # %l location, %c icon, %t temp, %f feelslike, %h humidity, %w wind, %p precip
-    my $format = '%l: %c %t (feels %f) | 💧%h | 🌬%w | ☔%p';
-
-    my $encoded = _uri_escape_bytes($location);
-    my $url = "https://wttr.in/$encoded?format=" . _uri_escape_bytes($format) . "&m";
-
-    my $project_url = eval { $self->{conf}->get('main.MAIN_PROG_URL') }
-        || 'https://github.com/teuk/mediabot_v3';
-
-    my $weather_agent = "mediabot_v3 weather/1.0 (+$project_url)";
-
-    my $http = Mediabot::External::_make_http(
-        timeout    => 4,
-        agent      => $weather_agent,
-        verify_SSL => 1,   # explicit verified TLS for the weather endpoint
-    );
-
-    my $res = eval { $http->get($url, {
-        headers => {
-            'Accept'          => 'text/plain',
-            'Accept-Language' => 'fr-FR,fr;q=0.9,en;q=0.5',
-        }
-    }) } // { success => 0, status => 0, reason => $@ };
-
-    # Helper to use cached text when provider is flaky
-    my $use_cache_or_msg = sub {
-        my ($msg) = @_;
-        if ($cache && ($now - ($cache->{ts}||0) <= $ttl_stale) && ($cache->{text}||'') ne '') {
-            Mediabot::Helpers::botPrivmsg($self, $channel, $cache->{text} . "  (cached)");
-        } else {
-            Mediabot::Helpers::botPrivmsg($self, $channel, $msg);
-        }
-    };
-
-    unless ($res && $res->{success}) {
-        my $code = $res ? ($res->{status} // '??') : '??';
-        $self->{logger}->log(2, "displayWeather_ctx(): wttr HTTP failure code=$code url=$url");
-        $use_cache_or_msg->("Weather service unavailable (HTTP $code), try again later.");
-        return;
-    }
-
-    my $line = $res->{content} // '';
-    $line =~ s/^\s+|\s+$//g;
-    $line =~ s/\r//g;
-
-    # wttr sometimes replies with “Unknown location” or throttling texts
-    if ($line eq '' || $line =~ /^Unknown location/i || $line =~ /try again later/i || $line =~ /Service unavailable/i) {
-        $self->{logger}->log(2, "displayWeather_ctx(): wttr unhappy reply for '$location': '$line'");
-        $use_cache_or_msg->("No answer from wttr.in for '$location'. Try again later.");
-        return;
-    }
-
-    # Save cache + reply
-    $self->{_weather_cache}{$cache_key} = { ts => $now, text => $line };
-
-    # Remove expired data first, then the oldest excess entries, so a burst of
-    # recent locations cannot grow the cache beyond max_entries.
-    # This runs lazily at write time rather than on a timer.
-    my $max_age = 900;  # 15 minutes (ttl_stale)
-    my $max_entries = 200;
-    my $cache_ref = $self->{_weather_cache};
-    if (scalar(keys %$cache_ref) > $max_entries) {
-        for my $k (keys %$cache_ref) {
-            delete $cache_ref->{$k}
-                if ($now - ($cache_ref->{$k}{ts} // 0)) > $max_age;
-        }
-        for my $k (sort {
-            ($cache_ref->{$a}{ts} // 0) <=> ($cache_ref->{$b}{ts} // 0)
-                || $a cmp $b
-        } grep { $_ ne $cache_key } keys %$cache_ref) {
-            last if scalar(keys %$cache_ref) <= $max_entries;
-            delete $cache_ref->{$k};
-        }
-    }
-    Mediabot::Helpers::botPrivmsg($self, $channel, $line);
-    Mediabot::Helpers::logBot($self, $ctx->message, $channel, "weather", $location);
-
-    return 1;
-}
-
-# Display URL title
-# =============================================================================
-# URL handling — displayUrlTitle and helpers
-# Architecture:
-#   displayUrlTitle() → dispatch by URL type → specific handler
-#
-# Chanset guards:
-#   Youtube    → YouTube (watch/shorts/live/youtu.be/youtube-nocookie)
-#   UrlTitle   → Spotify, Instagram, generic pages
-#   AppleMusic → Apple Music
-# =============================================================================
-
 # ---------------------------------------------------------------------------
 # _yt_label — shared YouTube IRC label
 # ---------------------------------------------------------------------------
@@ -645,16 +488,6 @@ sub _yt_label {
     return "\x0301,00[You\x0300,04Tube\x0301,00]\x0f";
 }
 
-# ---------------------------------------------------------------------------
-# _extract_url($text) — pull the first URL out of a message
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Mediabot::External::_make_http(%opts) — shared HTTP::Tiny factory, verified TLS by default
-# HTTP 599 on HTTPS URLs usually means IO::Socket::SSL is present but
-# certificate verification fails. SSL_options forces no-verify mode.
-# ---------------------------------------------------------------------------
-
 sub _is_youtube_url {
     # mb406-B1: match the outer URL's supported host, never an embedded URL.
     # MB863: routing, public metadata and radio metadata share one identity.
@@ -686,11 +519,6 @@ sub _is_youtube_url {
     return undef;
 }
 
-
-# ---------------------------------------------------------------------------
-# _handle_instagram($self, $message, $nick, $channel, $url)
-# Parses Instagram page for a title. Instagram's
-# ---------------------------------------------------------------------------
 
 # Parse the YouTube search endpoint without performing network I/O.
 sub _youtube_search_parse_ids {
@@ -1310,251 +1138,7 @@ sub youtubeSearch_ctx {
     return 1;
 }
 
-# Return the Fortnite account id stored for a Mediabot user nickname.
-# This is used by fortniteStats_ctx() before calling fortnite-api.com.
 
-sub getFortniteId {
-    my ($self, $sUser) = @_;
-
-    return undef unless defined($sUser) && $sUser ne '';
-    return undef unless $self->{dbh};
-
-    my $sQuery = "SELECT fortniteid FROM USER WHERE nickname = ?";
-    my $sth = $self->{dbh}->prepare($sQuery);
-
-    unless ($sth) {
-        $self->{logger}->log(1, "getFortniteId() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
-            if $self->{logger};
-        return undef;
-    }
-
-    unless ($sth->execute($sUser)) {
-        $self->{logger}->log(1, "getFortniteId() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
-            if $self->{logger};
-        $sth->finish;
-        return undef;
-    }
-
-    my $fortniteid;
-    if (my $ref = $sth->fetchrow_hashref()) {
-        $fortniteid = $ref->{fortniteid};
-    }
-
-    $sth->finish;
-    return $fortniteid;
-}
-
-
-# Fortnite stats:
-#   f <username>
-#
-# Requires:
-#   - Logged in
-#   - Level >= User
-
-sub fortniteStats_ctx {
-    my ($ctx) = @_;
-
-    my $self    = $ctx->bot;
-    my $nick    = $ctx->nick;
-    my $channel = $ctx->channel;
-    my $message = $ctx->message;
-
-    # Reply target (notice in private, privmsg in channel)
-    my $is_private = (!defined($channel) || $channel eq '');
-    my $reply_to   = $is_private ? $nick : $channel;
-
-    # Normalize args (only accept ARRAY)
-    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    unless (@args && defined $args[0] && $args[0] ne '') {
-        Mediabot::Helpers::botNotice($self, $nick, "Syntax: f <username>");
-        return;
-    }
-
-    # API key from config
-    my $api_key = eval { $self->{conf}->get('fortnite.API_KEY') } // '';
-    unless ($api_key) {
-        $self->{logger}->log(1, "fortniteStats_ctx(): fortnite.API_KEY is undefined in config file");
-        return;
-    }
-
-    # Auth + level checks (Context)
-    my $user = $ctx->user || $self->Mediabot::External::get_user_from_message($message);
-    unless ($user && $user->is_authenticated) {
-        my $who = $user ? ($user->nickname // 'unknown') : 'unknown';
-        my $msg = $message->prefix . " f command attempt (user $who is not logged in)";
-        Mediabot::Helpers::noticeConsoleChan($self, $msg);
-        Mediabot::Helpers::botNotice($self, $nick,
-            "You must be logged to use this command - /msg "
-          . $self->{irc}->nick_folded
-          . " login username password"
-        );
-        Mediabot::Helpers::logBot($self, $message, undef, "f", $msg);
-        return;
-    }
-
-    unless (eval { $user->has_level("User") }) {
-        my $lvl = eval { $user->level_description } || eval { $user->level } || '?';
-        my $msg = $message->prefix . " f command attempt (requires User for "
-                . ($user->nickname // $nick) . " [$lvl])";
-        Mediabot::Helpers::noticeConsoleChan($self, $msg);
-        Mediabot::Helpers::botNotice($self, $nick, "This command is not available for your level. Contact a bot master.");
-        Mediabot::Helpers::logBot($self, $message, undef, "f", $msg);
-        return;
-    }
-
-    my $target_name = $args[0];
-
-    # Resolve internal user + fortniteid (keep legacy helpers)
-    my $id_user = Mediabot::External::getIdUser($self, $target_name);
-    unless (defined $id_user) {
-        Mediabot::Helpers::botNotice($self, $nick, "Undefined user $target_name");
-        return;
-    }
-
-    my $account_id = getFortniteId($self, $target_name);
-    unless (defined $account_id && $account_id ne '') {
-        Mediabot::Helpers::botNotice($self, $nick, "Undefined fortniteid for user $target_name");
-        return;
-    }
-
-    # Call API
-    my $url = "https://fortnite-api.com/v2/stats/br/v2/$account_id";
-
-    my $http = Mediabot::External::_make_http(timeout => 10, verify_SSL => 1);
-    my $http_response = eval { $http->get(
-        $url,
-        { headers => { 'Authorization' => $api_key } }
-    ) } // { success => 0, status => 0, reason => $@ };
-
-    unless ($http_response->{success}) {
-        $self->{logger}->log(3, "fortniteStats_ctx(): HTTP error $http_response->{status} $http_response->{reason}");
-        Mediabot::Helpers::botPrivmsg($self, $reply_to, "Fortnite stats: service unavailable, try again later.");
-        return;
-    }
-
-    my $json_details = $http_response->{content};
-    unless (defined $json_details && $json_details ne '') {
-        $self->{logger}->log(3, "fortniteStats_ctx(): empty API response for $target_name/$account_id");
-        Mediabot::Helpers::botPrivmsg($self, $reply_to, "Fortnite stats: service unavailable, try again later.");
-        return;
-    }
-
-    my $data = eval { decode_json($json_details) };
-    if ($@ || ref($data) ne 'HASH') {
-        $self->{logger}->log(3, "fortniteStats_ctx(): JSON decode/structure error: $@");
-        Mediabot::Helpers::botPrivmsg($self, $reply_to, "Fortnite stats: unexpected API response.");
-        return;
-    }
-
-    # mb875: a declared API status is a three-digit scalar, never a JSON
-    # container/boolean or a number inferred from the prefix of arbitrary text.
-    if (exists $data->{status}
-        && (!defined $data->{status} || ref($data->{status})
-            || $data->{status} !~ /\A[0-9]{3}\z/)) {
-        $self->{logger}->log(3, 'fortniteStats_ctx(): invalid API status');
-        Mediabot::Helpers::botPrivmsg($self, $reply_to, 'Fortnite stats: unexpected API response.');
-        return;
-    }
-
-    # API may return {status:..., error:...}
-    if (exists $data->{status} && $data->{status} != 200) {
-        my $err = defined $data->{error} && !ref($data->{error})
-            ? $data->{error} : "API error";
-        $self->{logger}->log(3, "fortniteStats_ctx(): API status=$data->{status} error=$err");
-        Mediabot::Helpers::botPrivmsg($self, $reply_to, "Fortnite stats: $err");
-        return;
-    }
-
-    my $payload = $data->{data};
-    unless ($payload && ref($payload) eq 'HASH') {
-        Mediabot::Helpers::botPrivmsg($self, $reply_to, "Fortnite stats: no data for this account.");
-        return;
-    }
-
-    my $account    = ref($payload->{account})    eq 'HASH' ? $payload->{account}    : {};
-    my $battlepass = ref($payload->{battlePass}) eq 'HASH' ? $payload->{battlePass} : {};
-    my $stats      = ref($payload->{stats})      eq 'HASH' ? $payload->{stats}      : {};
-    my $all_stats  = ref($stats->{all})          eq 'HASH' ? $stats->{all}          : {};
-
-    # Some payloads are nested differently depending on API versions / modes.
-    # Keep this defensive: API responses can be valid JSON but missing parts.
-    #
-    # Preferred:
-    #   stats.all.overall
-    #
-    # Fallback:
-    #   stats.all.solo / duo / trio / squad
-    my $overall = {};
-
-    if (ref($all_stats->{overall}) eq 'HASH') {
-        $overall = $all_stats->{overall};
-    }
-    else {
-        for my $mode (qw(solo duo trio squad)) {
-            next unless ref($all_stats->{$mode}) eq 'HASH';
-
-            $overall = $all_stats->{$mode};
-            last;
-        }
-    }
-
-    # Nested objects are guarded above; their display leaves must also be
-    # scalars. Keep all existing scalar values and missing-field defaults.
-    my $scalar_or = sub {
-        my ($value, $fallback) = @_;
-        return defined $value && !ref($value) ? $value : $fallback;
-    };
-    my $name        = $scalar_or->($account->{name}, $target_name);
-    my $matches     = $scalar_or->($overall->{matches}, 0);
-    my $wins        = $scalar_or->($overall->{wins}, 0);
-    my $win_rate    = $scalar_or->($overall->{winRate}, 0);
-    my $kills       = $scalar_or->($overall->{kills}, 0);
-    my $kd          = $scalar_or->($overall->{kd}, 0);
-    my $top3        = $scalar_or->($overall->{top3}, 0);
-    my $top5        = $scalar_or->($overall->{top5}, 0);
-    my $top10       = $scalar_or->($overall->{top10}, 0);
-    my $bp_level    = $scalar_or->($battlepass->{level}, 0);
-    my $bp_progress = $scalar_or->($battlepass->{progress}, 0);
-
-    # mb421-R1: l'API renvoie winRate/kd en flottants non bornés
-    # (ex. kd=1.2345678901). Les afficher bruts est illisible sur IRC. On
-    # arrondit pour l'affichage : K/D à 2 décimales, taux de victoire à 1.
-    # Les valeurs non numériques (API inattendue) retombent sur la brute.
-    my $fmt_num = sub {
-        my ($v, $dp) = @_;
-        return $v unless defined $v && $v =~ /\A-?\d+(?:\.\d+)?\z/;
-        my $s = sprintf("%.${dp}f", $v);
-        $s =~ s/\.?0+\z// if index($s, '.') >= 0;   # 1.50 -> 1.5, 2.00 -> 2
-        return $s;
-    };
-    $kd       = $fmt_num->($kd, 2);
-    $win_rate = $fmt_num->($win_rate, 1);
-
-    # Readable on dark/light: bold labels only (no background colors)
-    my $user_tag = String::IRC->new('[' . $name . ']')->bold;
-
-    my $line =
-        "Fortnite -- $user_tag "
-      . (String::IRC->new('Matches:')->bold . " $matches")
-      . " | " . (String::IRC->new('Wins:')->bold . " $wins ($win_rate%)")
-      . " | " . (String::IRC->new('Kills:')->bold . " $kills")
-      . " | " . (String::IRC->new('K/D:')->bold . " $kd")
-      . " | " . (String::IRC->new('BP:')->bold . " L$bp_level ($bp_progress%)")
-      . " | " . (String::IRC->new('Top3/5/10:')->bold . " $top3/$top5/$top10");
-
-    Mediabot::Helpers::botPrivmsg($self, $reply_to, $line);
-
-    Mediabot::Helpers::logBot($self, $message, $channel, "f", @args);
-    return 1;
-}
-
-
-# ------------------------------------------------------------------
-# mb95-R1: CONSTANTS, ChatGPT, Claude, TMDB déplacés dans
-# Mediabot::External::Claude (Mediabot/External/Claude.pm)
-# et importés en tête de ce fichier.
-# ------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # ytSearch_ctx --- !yt search <query>

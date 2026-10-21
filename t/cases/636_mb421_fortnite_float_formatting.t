@@ -39,7 +39,7 @@ return sub {
     $assert->is(_fmt('n/a', 2),          'n/a',  'valeur non numérique laissée telle quelle');
 
     # --- 2. Câblage réel ---------------------------------------------------
-    my $src = _slurp_636(File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm'));
+    my $src = _slurp_636(File::Spec->catfile('.', 'Mediabot', 'External', 'Fortnite.pm'));
     my ($body) = $src =~ /(sub fortniteStats_ctx \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
     $assert->like($code, qr/\$kd\s*=\s*\$fmt_num->\(\$kd, 2\);/,       'K/D formaté à 2 décimales');

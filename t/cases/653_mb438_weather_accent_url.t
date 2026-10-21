@@ -40,7 +40,7 @@ return sub {
     $assert->is($esc->($drop), '%F0%9F%92%A7', 'emoji encodé octet par octet');
 
     # --- 2. Câblage réel ---------------------------------------------------
-    my $src = _slurp_653(File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm'));
+    my $src = _slurp_653(File::Spec->catfile('.', 'Mediabot', 'External', 'URLCodec.pm'));
 
     $assert->like($src, qr/sub _uri_escape_bytes \{/, 'helper _uri_escape_bytes défini');
     my ($h) = $src =~ /(sub _uri_escape_bytes \{.*?\n\}\n)/s; $h //= '';
@@ -48,7 +48,8 @@ return sub {
         'octets normalisés');
     $assert->like($h, qr/URI::Escape::uri_escape\(\$bytes/, 'uri_escape sur octets');
 
-    my ($w) = $src =~ /(sub displayWeather_ctx \{.*?\n\}\n)/s; $w //= '';
+    my $weather_src = _slurp_653(File::Spec->catfile('.', 'Mediabot', 'External', 'Weather.pm'));
+    my ($w) = $weather_src =~ /(sub displayWeather_ctx \{.*?\n\}\n)/s; $w //= '';
     (my $wcode = $w) =~ s/^\s*#.*$//mg;
     $assert->like($wcode, qr/_uri_escape_bytes\(\$location\)/, 'location encodée byte-safe');
     $assert->like($wcode, qr/_uri_escape_bytes\(\$format\)/, 'format encodé byte-safe');

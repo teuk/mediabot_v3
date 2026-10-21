@@ -61,7 +61,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_fortnite_nested_guards(
-        File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm')
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Fortnite.pm')
     );
 
     my $body = _extract_sub_body_fortnite_nested_guards($src, 'fortniteStats_ctx');
