@@ -26,6 +26,8 @@ use Exporter 'import';
 # Le viewer de log brut .logs (_cmd_chanlog) reste volontairement non filtre.
 use Encode qw(encode decode);
 use JSON::MaybeXS;
+use Scalar::Util qw(looks_like_number);
+use POSIX qw(isfinite);
 require Mediabot::Helpers;   # mb624-B1: suggest_keyword/edit_distance_1 partages
 use Mediabot::AI::Transport ();
 use Mediabot::AI::Client ();
@@ -714,10 +716,15 @@ sub mbTMDBSearch_ctx {
         $info->{title}, $info->{name},
         $info->{original_title}, $info->{original_name},
     ) // "Unknown title";
-    my $overview = $info->{overview} || "No synopsis available.";
-    my $date     = $info->{release_date} || $info->{first_air_date} || "????";
+    my $overview = $info->{overview};
+    $overview = "No synopsis available."
+        unless defined($overview) && !ref($overview) && $overview =~ /\S/;
+    my $date     = _tmdb_first_nonempty($info->{release_date}, $info->{first_air_date}) // "????";
     my $year     = ($date =~ /^(\d{4})/) ? $1 : "????";
-    my $rating   = defined($info->{vote_average}) ? sprintf("%.1f", $info->{vote_average}) : "?";
+    my $vote     = $info->{vote_average};
+    my $rating   = defined($vote) && !ref($vote)
+        && looks_like_number($vote) && isfinite(0 + $vote)
+        ? sprintf("%.1f", $vote) : "?";
     my $type     = (($info->{media_type} // '') eq 'tv') ? "TV Series" : "Movie";
 
     # Build the final IRC message first, then truncate the complete line.
@@ -731,11 +738,15 @@ sub mbTMDBSearch_ctx {
     my $prefix = "($nick) [$type] \"$title\" ($year) - Rating: $rating/10 - ";
     my $reply  = $prefix . $overview;
 
-    if (length($reply) > $maxlen) {
+    # MB877: the complete IRC payload is bounded in UTF-8 bytes, including
+    # its prefix and the three-byte truncation suffix.
+    if (_irc_wire_bytes($reply) > $maxlen) {
         my $cut = $maxlen - 3;
         $cut = 1 if $cut < 1;
 
-        $reply = substr($reply, 0, $cut);
+        # No more than $cut characters can fit in $cut bytes. Limit the
+        # shared splitter's input before it considers the UTF-8 byte costs.
+        $reply = _irc_prefix_for_budget(substr($reply, 0, $cut), $cut);
         $reply =~ s/\s+\S*$// if length($reply) > 40;  # backtrack to last complete word when useful
         $reply =~ s/[\s.,;:!?-]+\z//;
         $reply .= "...";

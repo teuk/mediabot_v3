@@ -136,8 +136,8 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/if\s+\(length\(\$reply\)\s+>\s+\$maxlen\)/,
-        'TMDB truncates the full final reply'
+        qr/if\s+\(_irc_wire_bytes\(\$reply\)\s+>\s+\$maxlen\)/,
+        'TMDB measures the full final reply in wire bytes'
     );
 
     $assert->like(

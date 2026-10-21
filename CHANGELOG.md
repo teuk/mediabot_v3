@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB877 — TMDB optional metadata and UTF-8 reply limits (2026-10-21)
+
+- Guard optional synopsis/date leaves and require a finite numeric scalar
+  before rating formatting. Preserve usable metadata and existing fallback
+  text; malformed values no longer display references or fabricated ratings.
+- Measure the complete TMDB reply in UTF-8 wire bytes, reserve its truncation
+  suffix and reuse the existing byte-safe prefix helper with bounded input.
+  Keep configuration limits, word cleanup and healthy ASCII formatting.
+- Add offline regressions through the real command and update the historical
+  truncation check to measure bytes. Preserve result order, title fallback,
+  HTTP/TLS settings and routing. No SQL schema, migration, private configuration
+  or service change.
+
 ### MB876 — Separate YouTube, weather and Fortnite modules (2026-10-21)
 
 - Move weather and Fortnite implementations out of YouTube.pm into dedicated
