@@ -117,13 +117,16 @@ Mediabot::External::AppleMusic->import(qw(_handle_applemusic));
 require Mediabot::External::Chromium;
 Mediabot::External::Chromium->import(qw(_fetch_url_chromium_dumpdom));
 
-# mb99-R1: sous-module URL/Instagram/Facebook/X
+# MB891: import Instagram from its implementation owner.
+require Mediabot::External::Instagram;
+Mediabot::External::Instagram->import(qw(_handle_instagram));
+
+# mb99-R1: sous-module URL/Facebook/X
 require Mediabot::External::URL;
 Mediabot::External::URL->import(qw(
     _extract_url
     _decode_html
     _decode_http_content_utf8
-    _handle_instagram
     _facebook_url
     _facebook_title_from_html
     _facebook_fallback_title_from_url

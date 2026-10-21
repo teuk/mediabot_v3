@@ -4,7 +4,11 @@ use warnings;
 use utf8;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use IPC::Open3;
+use Symbol qw(gensym);
+use Mediabot::External ();
 use Mediabot::External::URL;
+use Mediabot::External::Instagram ();
 
 {
     package L853;
@@ -51,6 +55,91 @@ return sub {
     my ($assert) = @_;
     no warnings 'redefine';
     no warnings 'once';
+
+    for my $order (
+        [qw(External::Instagram)],
+        [qw(External::URL External::Instagram External)],
+        [qw(External External::Instagram External::URL)],
+    ) {
+        my $code = "use Scalar::Util qw(refaddr);\n"
+            . join('', map { "require Mediabot::$_;\n" } @$order);
+        if (@$order == 1) {
+            $code .= q{die 'eager URL load' if $INC{'Mediabot/External/URL.pm'};
+                die 'eager AI load' if $INC{'Mediabot/External/Claude.pm'};
+                die 'missing URL kind' unless
+                    Mediabot::External::Instagram::_instagram_url_info(
+                        'https://instagram.com/reel/AbC123/')->{kind} eq 'reel';
+                die 'lazy metadata decode failed' unless
+                    Mediabot::External::Instagram::_instagram_meta_from_html(
+                        '<title>A &amp; B</title>')->{title} eq 'A & B';};
+        }
+        $code .= q{require Mediabot::External;
+            for my $name (@Mediabot::External::Instagram::EXPORT_OK) {
+                die 'legacy alias differs' unless
+                    refaddr(Mediabot::External::URL->can($name)) ==
+                    refaddr(Mediabot::External::Instagram->can($name));
+            }
+            die 'facade differs' unless
+                refaddr(Mediabot::External->can('_handle_instagram')) ==
+                refaddr(Mediabot::External::Instagram->can('_handle_instagram'));
+            print 'loaded';};
+        my $err = gensym;
+        my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
+        my $stdout = do { local $/; <$out> } // '';
+        my $stderr = do { local $/; <$err> } // '';
+        waitpid($pid, 0);
+        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+            'Instagram loads and retains aliases in order: ' . join('/', @$order));
+    }
+
+    {
+        local *Mediabot::External::URL::_decode_html = sub { 'legacy decoder' };
+        $assert->is(Mediabot::External::Instagram::_instagram_clean_meta_value('input'),
+            'legacy decoder', 'Instagram still resolves the URL decoder at call time');
+    }
+    {
+        local *Mediabot::External::URL::_instagram_clean_meta_value = sub { 'legacy metadata' };
+        $assert->is(Mediabot::External::Instagram::_instagram_meta_from_html('<title>input</title>')->{title},
+            'legacy metadata', 'Instagram still resolves the URL metadata hook at call time');
+    }
+
+    for my $async (0, 1) {
+        my $calls = 0;
+        my @sent;
+        my %worker;
+        local *Mediabot::External::URL::_instagram_fetch_sync = sub {
+            $calls++;
+            return { ok => 1, status => 200, meta => { 'og:title' => 'Émission 🦉' } };
+        };
+        local *Mediabot::External::URL::_url_cache_identity = sub { 'legacy cache key' };
+        local *Mediabot::External::_make_http = sub { die 'legacy fetch override bypassed' };
+        local *Mediabot::Helpers::botPrivmsg = sub { push @sent, [$_[1], $_[2]]; 1 };
+        local *Mediabot::AsyncWorker::start = sub {
+            my ($class, %args) = @_; %worker = %args;
+            return bless {}, 'Worker853';
+        };
+        my $self = bless { logger => L853->new,
+            ($async ? (loop => Loop853->new) : ()) }, 'Bot853';
+        my $ret = Mediabot::External::_handle_instagram(
+            $self, undef, 'First', '#test', 'https://instagram.com/p/AbC123/');
+        my $deferred = !$async || ($calls == 0 && @sent == 0);
+        if ($async && ref($worker{child}) eq 'CODE' && ref($worker{on_done}) eq 'CODE') {
+            my $value = $worker{child}->();
+            $worker{on_done}->({ ok => 1, value => $value });
+            $worker{on_done}->({ ok => 1, value => $value });
+        }
+        Mediabot::External::URL::_handle_instagram(
+            $self, undef, 'Second', '#i/o', 'HTTPS://INSTAGRAM.COM/p/AbC123/');
+        $assert->ok($ret && $deferred && $calls == 1 && @sent == 2
+            && $sent[0][0] eq '#test' && $sent[1][0] eq '#i/o'
+            && _strip_853($sent[0][1]) eq '(First) [Instagram] 📷 Post · Émission 🦉'
+            && _strip_853($sent[1][1]) eq '(Second) [Instagram] 📷 Post · Émission 🦉'
+            && utf8::is_utf8($sent[0][1]) && utf8::is_utf8($sent[1][1])
+            && exists $self->{_instagram_cache}{'legacy cache key'}
+            && !keys(%{ $self->{_instagram_pending} // {} }),
+            'legacy fetch/cache hooks, Unicode, replay and single completion survive '
+                . ($async ? 'the worker adapter' : 'the synchronous adapter'));
+    }
 
     {
         my @cases = (
@@ -222,7 +311,7 @@ return sub {
     }
 
     {
-        my $src = _slurp_853(File::Spec->catfile('.', 'Mediabot', 'External', 'URL.pm'));
+        my $src = _slurp_853(File::Spec->catfile('.', 'Mediabot', 'External', 'Instagram.pm'));
         my ($handler) = $src =~ /(sub _handle_instagram \{.*?\n\})\n\n/s; $handler //= '';
         my ($fetch)   = $src =~ /(sub _instagram_fetch_sync \{.*?\n\})\n\n/s; $fetch //= '';
 

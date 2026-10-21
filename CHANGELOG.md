@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB891 — Give Instagram metadata its own module (2026-10-21)
+
+- Move the seven Instagram helpers and handler from URL into External::Instagram.
+  Import the canonical handler in External and retain all seven historical URL
+  aliases, the 17 URL optional exports and the 33 facade default exports.
+- Preserve parsing, rendering, byte budgets, badges, metadata cache, pending
+  coalescing and AsyncWorker policies. Resolve legacy helper symbols at call
+  time so existing overrides remain effective. Keep all 18 remaining URL
+  function bodies unchanged; URL drops from 1,457 to 1,099 lines.
+- Retarget four existing ownership checks and extend the existing Instagram
+  case by seven cold-load and runtime-hook assertions. Add no numbered case,
+  SQL schema, migration, configuration or service change.
+
 ### MB890 — Enforce Chromium retained-output byte bounds (2026-10-21)
 
 - Share bounded raw-chunk retention between Chromium stdout and stderr. A

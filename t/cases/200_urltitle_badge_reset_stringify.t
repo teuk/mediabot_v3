@@ -68,6 +68,10 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'External', 'AppleMusic.pm')
     );
 
+    my $instagram_src = _slurp_200(
+        File::Spec->catfile('.', 'Mediabot', 'External', 'Instagram.pm')
+    );
+
     my %handlers = (
         _handle_instagram => {
             badge => q{String::IRC->new("Instagram")->white('pink')},
@@ -94,7 +98,8 @@ return sub {
 
     for my $sub (sort keys %handlers) {
         my $body = _extract_sub_body_200(
-            $sub eq '_handle_applemusic' ? $applemusic_src : $src, $sub
+            $sub eq '_handle_applemusic' ? $applemusic_src
+                : $sub eq '_handle_instagram' ? $instagram_src : $src, $sub
         );
 
         $assert->ok(defined $body, "$sub body found");
