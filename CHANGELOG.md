@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB890 — Enforce Chromium retained-output byte bounds (2026-10-21)
+
+- Share bounded raw-chunk retention between Chromium stdout and stderr. A
+  read crossing max_stdout/max_stderr now appends only the remaining bytes;
+  surplus data is still drained so the subprocess can complete normally.
+- Preserve defaults, option normalization, process/timeout handling, diagnostics,
+  prefix-return policy and the existing raw-buffer fallback when a retained
+  prefix ends inside UTF-8. Keep zero/negative-cap behaviour unchanged.
+- Extend the existing native Chromium case by four assertions and force its
+  fixture conditions into scalar context so an empty grep result cannot hide
+  a failure. Add no numbered case, SQL schema, migration or configuration change.
+
 ### MB889 — Isolate the Chromium subprocess wrapper (2026-10-21)
 
 - Move DOM fetching, bounded child reaping and wait-status decoding from URL

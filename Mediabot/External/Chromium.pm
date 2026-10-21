@@ -24,6 +24,18 @@ our @EXPORT_OK = qw(
 sub _chromium_binary { return '/usr/bin/chromium'; }
 sub _chromium_profile_base { return '/tmp/mediabot-chromium'; }
 
+# Retain at most the remaining raw pipe-byte budget. Reading must continue
+# after it is exhausted so a child cannot block on its stdout/stderr pipe.
+sub _append_bounded_chunk {
+    my ($buffer, $chunk, $limit) = @_;
+    my $remaining = $limit - length($$buffer);
+    return unless $remaining > 0;
+    $$buffer .= length($chunk) > $remaining
+        ? substr($chunk, 0, $remaining)
+        : $chunk;
+    return;
+}
+
 # Wait for Chromium without allowing a child that closed its pipes early to
 # block the whole IRC event loop indefinitely. Returns:
 #   ($waited_pid, $raw_wait_status, $timed_out, $error)
@@ -227,10 +239,10 @@ sub _fetch_url_chromium_dumpdom {
                 }
 
                 if (($kind{fileno($fh)} // '') eq 'stdout') {
-                    $stdout .= $chunk if length($stdout) < $max_stdout;
+                    _append_bounded_chunk(\$stdout, $chunk, $max_stdout);
                 }
                 else {
-                    $stderr_txt .= $chunk if length($stderr_txt) < $max_stderr;
+                    _append_bounded_chunk(\$stderr_txt, $chunk, $max_stderr);
                 }
             }
         }
@@ -352,5 +364,10 @@ C</tmp/mediabot-chromium> profile base. There is no new configuration or caller
 option for choosing either path. URL and External retain
 their historical fetch symbols; URL also retains the two private wait helpers.
 Shared HTML parsing and content decoding remain with their existing owners.
+
+The existing C<max_stdout> and C<max_stderr> options bound retained raw bytes
+exactly, including a read crossing a limit. Surplus bytes are still drained.
+This is prefix retention, not whole-response rejection. A retained prefix that
+ends inside a UTF-8 sequence uses the existing raw-buffer decode fallback.
 
 =cut

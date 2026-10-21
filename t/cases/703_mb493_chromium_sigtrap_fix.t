@@ -126,8 +126,8 @@ return sub {
     my $rc = $?;
     require JSON::PP;
     my $checks = eval {JSON::PP::decode_json($stdout)};
-    $assert->ok($rc == 0 && $stderr eq '' && ref($checks) eq 'ARRAY' && @$checks == 8,
-        'mb889: native browser probe completes all eight checks in a fresh process');
+    $assert->ok($rc == 0 && $stderr eq '' && ref($checks) eq 'ARRAY' && @$checks == 12,
+        'mb890: native browser probe completes all twelve checks in a fresh process');
     for my $check (@{ref($checks) eq 'ARRAY' ? $checks : []}) {
         $assert->ok($check->[0], $check->[1]);
     }

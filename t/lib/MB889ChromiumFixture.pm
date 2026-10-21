@@ -40,7 +40,8 @@ if ($mode eq 'signal') {
     POSIX::_exit(99);
 }
 if ($mode eq 'stderr') { print STDERR 'e' x 200_000; }
-if ($mode eq 'invalid-utf8') { print STDOUT "\xff<title>legacy</title>"; }
+if ($mode eq 'stdout') { print STDOUT 'd' x 200_000; }
+elsif ($mode eq 'invalid-utf8') { print STDOUT "\xff<title>legacy</title>"; }
 elsif ($mode ne 'empty') { print STDOUT "<html><title>Caf\xc3\xa9</title></html>"; }
 exit($mode eq 'nonzero' ? 7 : 0);
 CHILD
@@ -100,42 +101,42 @@ sub native_results {
     my $success = $run->('success');
     my @argv = @{$success->{child}{argv} // []};
     my $expected = Encode::decode('UTF-8', "<html><title>Caf\xc3\xa9</title></html>");
-    $ok->(defined($success->{value}) && $success->{value} eq $expected
+    $ok->(scalar(defined($success->{value}) && $success->{value} eq $expected
         && utf8::is_utf8($success->{value})
         && @argv && $argv[-1] eq $url && $argv[-2] eq '--dump-dom'
         && grep($_ eq '--user-agent=fixture agent with spaces', @argv)
         && grep($_ eq '--virtual-time-budget=4100', @argv)
-        && grep($_ eq '--lang=en-GB', @argv),
+        && grep($_ eq '--lang=en-GB', @argv)),
         'mb889: native argv preserves spaces/metacharacters and successful UTF-8 DOM');
 
     my $large = $run->('stderr');
-    $ok->(defined($large->{value}) && $large->{value} eq $expected
-        && grep($_->[1] =~ /stderr=e{500}\z/, @{$large->{logs}}),
+    $ok->(scalar(defined($large->{value}) && $large->{value} eq $expected
+        && grep($_->[1] =~ /stderr=e{500}\z/, @{$large->{logs}})),
         'mb889: native stderr exceeding a pipe buffer is drained beside stdout');
     my $nonzero = $run->('nonzero');
-    $ok->(!defined($nonzero->{value})
-        && grep($_->[1] =~ /rc=7 signal=0/, @{$nonzero->{logs}}),
+    $ok->(scalar(!defined($nonzero->{value})
+        && grep($_->[1] =~ /rc=7 signal=0/, @{$nonzero->{logs}})),
         'mb889: native nonzero exit rejects an otherwise populated DOM');
     my $signal = $run->('signal');
-    $ok->(!defined($signal->{value})
+    $ok->(scalar(!defined($signal->{value})
         && grep($_->[1] =~ /terminated by signal 15/, @{$signal->{logs}})
-        && grep($_->[1] =~ /fixture signal diagnostic/, @{$signal->{logs}}),
+        && grep($_->[1] =~ /fixture signal diagnostic/, @{$signal->{logs}})),
         'mb889: native signal termination preserves its stderr diagnostic');
     my $empty = $run->('empty');
-    $ok->(!defined($empty->{value})
-        && grep($_->[1] =~ /returned no usable DOM/, @{$empty->{logs}}),
+    $ok->(scalar(!defined($empty->{value})
+        && grep($_->[1] =~ /returned no usable DOM/, @{$empty->{logs}})),
         'mb889: a successful empty subprocess still has no usable DOM');
     my $raw = $run->('invalid-utf8');
-    $ok->(defined($raw->{value}) && $raw->{value} eq "\xff<title>legacy</title>"
+    $ok->(scalar(defined($raw->{value}) && $raw->{value} eq "\xff<title>legacy</title>"
         && !utf8::is_utf8($raw->{value})
-        && grep($_->[1] =~ /UTF-8 decode failed/, @{$raw->{logs}}),
+        && grep($_->[1] =~ /UTF-8 decode failed/, @{$raw->{logs}})),
         'mb889: invalid UTF-8 keeps the historical raw-buffer fallback');
 
     my $late = $run->('closed-pipes');
     my $late_pid = $late->{child}{pid};
-    $ok->(!defined($late->{value}) && $late_pid
+    $ok->(scalar(!defined($late->{value}) && $late_pid
         && waitpid($late_pid, POSIX::WNOHANG()) == -1
-        && grep($_->[1] =~ /exceeded alarm timeout after closing its pipes/, @{$late->{logs}}),
+        && grep($_->[1] =~ /exceeded alarm timeout after closing its pipes/, @{$late->{logs}})),
         'mb889: native child closing both pipes and ignoring TERM is killed and reaped');
     my @refused;
     for my $bad ('--headless=old', 'file:///fixture', 'javascript:alert(1)', 'ftp://fixture') {
@@ -145,8 +146,30 @@ sub native_results {
             && @{$result->{logs}} == 1
             && $result->{logs}[0][1] =~ /refused non-http\(s\) argument/;
     }
-    $ok->(@refused == 4 && !grep(!$_, @refused),
+    $ok->(scalar(@refused == 4 && !grep(!$_, @refused)),
         'mb889: actual unsafe-argument refusals precede all executable/profile IO');
+
+    # MB890: retain only the allowed bytes while continuing to drain the pipes.
+    my $stdout_cap = $run->('stdout', max_stdout => 1000);
+    $ok->(scalar(defined($stdout_cap->{value}) && $stdout_cap->{value} eq ('d' x 1000)
+        && $stdout_cap->{child}
+        && waitpid($stdout_cap->{child}{pid}, POSIX::WNOHANG()) == -1),
+        'mb890: native stdout retains exactly its cap and drains/reaps a much larger stream');
+    my $stderr_cap = $run->('stderr', max_stderr => 7);
+    $ok->(scalar(defined($stderr_cap->{value}) && $stderr_cap->{value} eq $expected
+        && grep($_->[1] =~ /stderr=e{7}\z/, @{$stderr_cap->{logs}})),
+        'mb890: native stderr retention respects a sub-chunk cap without blocking stdout');
+    my $boundary = $run->('success', max_stdout => 17);
+    $ok->(scalar(defined($boundary->{value}) && $boundary->{value} eq "<html><title>Caf\xc3"
+        && !utf8::is_utf8($boundary->{value})
+        && grep($_->[1] =~ /UTF-8 decode failed/, @{$boundary->{logs}})),
+        'mb890: an exact byte cap cutting UTF-8 keeps the existing raw-prefix fallback');
+    my $zero = $run->('stderr', max_stdout => 0, max_stderr => 0);
+    $ok->(scalar(!defined($zero->{value}) && $zero->{child}
+        && waitpid($zero->{child}{pid}, POSIX::WNOHANG()) == -1
+        && !grep($_->[1] =~ /\) stderr=/, @{$zero->{logs}})
+        && grep($_->[1] =~ /returned no usable DOM/, @{$zero->{logs}})),
+        'mb890: zero caps still drain both streams and reap the child without retained output');
     return \@checks;
 }
 
