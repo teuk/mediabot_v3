@@ -110,7 +110,7 @@ return sub {
     $a->ok(!exists $off->{wit_dryrun},'mb732: no flags means no provider runtime creation');
 
     # Run the actual helper body with deterministic transport/DB boundaries.
-    my $helper_source=do { open my $fh,'<:encoding(UTF-8)','Mediabot/Helpers.pm' or die $!;local $/;<$fh> };
+    my $helper_source=do { open my $fh,'<:encoding(UTF-8)','Mediabot/IRC/Sender.pm' or die $!;local $/;<$fh> };
     my($privmsg)=$helper_source =~ /(sub botPrivmsg \{.*?\n\})/s;
     die 'Missing transport helper' unless $privmsg;
     my $helper_ok=eval 'package MB732Transport; use strict; use warnings; use Encode qw(encode);'.$privmsg.' 1;';

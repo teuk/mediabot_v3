@@ -122,7 +122,7 @@ return sub {
     # [4] Gardes statiques Helpers
     # ------------------------------------------------------------------
     {
-        my $src = _slurp_758(File::Spec->catfile('Mediabot', 'Helpers.pm'));
+        my $src = _slurp_758(File::Spec->catfile('Mediabot', 'IRC', 'Sender.pm'));
         $assert->unlike($src, qr/return undef if checkAntiFlood/,
             'botPrivmsg: plus de drop sec');
         my ($ba) = $src =~ /(sub botAction \{.*?\n\})/s;

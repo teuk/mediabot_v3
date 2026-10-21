@@ -33,9 +33,8 @@ my $case = sub {
     my $split = _extract_between_mb385(
         $src, '_split_text_for_irc', 'botPrivmsg'
     );
-    my $notice = _extract_between_mb385(
-        $src, 'botNotice', 'joinChannel'
-    );
+    my $sender = _slurp_mb385(File::Spec->catfile($root, 'Mediabot', 'IRC', 'Sender.pm'));
+    my ($notice) = $sender =~ /(sub botNotice \{.*?^\})/ms;
 
     $assert->(defined($is_channel), 'channel-target helper extracted');
     $assert->(defined($redact), 'outbound redaction helper extracted');

@@ -56,7 +56,8 @@ return sub {
     my $src = _slurp_549(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
 
     # --- 1. Scan de source de botAction ----------------------------------
-    my $action = _extract_sub_549($src, 'botAction');
+    my $sender = _slurp_549(File::Spec->catfile('.', 'Mediabot', 'IRC', 'Sender.pm'));
+    my $action = _extract_sub_549($sender, 'botAction');
     $assert->ok(defined $action && $action ne '', 'botAction source extrait');
 
     $assert->like(

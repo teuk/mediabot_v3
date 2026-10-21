@@ -67,20 +67,24 @@ my $case = sub {
     my $src = do { local $/; <$hfh> };
     close $hfh;
 
+    my $sender_file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Sender.pm');
+    open my $sfh, '<', $sender_file or die $!;
+    my $sender_src = do {local $/; <$sfh>};
+
     $assert->($src =~ /sub\s+_redact_irc_service_secret_for_log\b/,
         'shared redaction helper exists');
 
     $assert->($src =~ /mb133-B7: keep outbound private-message logs safe/,
         'helper has mb133-B7 marker');
 
-    $assert->($src =~ /my \$log_msg = _redact_irc_service_secret_for_log\(\$sMsg\);\s*\$self->\{logger\}->log\(0, "-> \*\$sTo\* \$log_msg"\);/s,
+    $assert->($sender_src =~ /my \$log_msg = _redact_irc_service_secret_for_log\(\$sMsg\);\s*\$self->\{logger\}->log\(0, "-> \*\$sTo\* \$log_msg"\);/s,
         'botPrivmsg private log uses shared helper');
 
-    my $bot_action_block = ($src =~ /sub botAction \{(.*?)sub botNotice \{/s) ? $1 : '';
+    my $bot_action_block = ($sender_src =~ /sub botAction \{(.*?)sub botNotice \{/s) ? $1 : '';
     $assert->($bot_action_block =~ /_redact_irc_service_secret_for_log\(\$sMsg\)/,
         'botAction private log uses shared helper');
 
-    my $bot_notice_block = ($src =~ /sub botNotice \{(.*?)sub joinChannel \{/s) ? $1 : '';
+    my $bot_notice_block = ($sender_src =~ /sub botNotice \{(.*?)^\}/ms) ? $1 : '';
     $assert->($bot_notice_block =~ /my \$safe_log_text = \$is_channel_target\s*\? \$text\s*:\s*_redact_irc_service_secret_for_log\(\$text\)/s,
         'botNotice redacts the complete private message before logging');
 

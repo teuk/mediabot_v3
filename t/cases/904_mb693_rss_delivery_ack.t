@@ -7,7 +7,7 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 return sub {
     my ($assert) = @_;
 
-    my $helpers = do { open my $fh,'<','Mediabot/Helpers.pm' or die $!; local $/; <$fh> };
+    my $helpers = do { open my $fh,'<','Mediabot/IRC/Sender.pm' or die $!; local $/; <$fh> };
     $assert->like(
         $helpers,
         qr/sub botPrivmsg .*?_defer_flooded_send.*?return 1;\s*\n}/s,

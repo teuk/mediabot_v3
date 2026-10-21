@@ -292,20 +292,30 @@ say_info("\n[3] External commands run without a shell");
 # ===========================================================================
 say_info("\n[4] CR/LF/NUL sanitisation on IRC output");
 {
+    # MB881: follow the forwarding facade, the three implementation bodies
+    # and the shared normalizer. Unrelated newline handling elsewhere in
+    # Helpers must not mask a disconnected or missing output owner.
     my $help = slurp('Mediabot/Helpers.pm') // '';
-    # on cherche une neutralisation explicite de \r \n \0 dans les helpers de sortie
-    if ($help =~ /(?:tr|s)\S*[\\]r|[\\]x0d|[\\]x0a|[\\]0|[\\]n.*=>.*''/i
-        || $help =~ /s\/\[\\r\\n\\0\]/ ) {
-        pass("CR/LF/NUL neutralisation present in Helpers");
+    my $sender = slurp('Mediabot/IRC/Sender.pm') // '';
+    my $budget = slurp('Mediabot/IRC/TextBudget.pm') // '';
+    my $safe = index($help,
+        'return Mediabot::IRC::TextBudget::_sanitize_irc_text(@_);') >= 0
+        && index($sender,
+        'sub _sanitize_irc_text { return Mediabot::Helpers::_sanitize_irc_text(@_); }') >= 0
+        && index($budget, q{$text =~ s/[\r\n\x00]+/ /g;}) >= 0;
+    for my $row ([botPrivmsg => '$sMsg'], [botAction => '$sMsg'], [botNotice => '$text']) {
+        my ($name, $arg) = @$row;
+        my ($facade) = $help =~ /(^sub \Q$name\E \{.*?^\})/ms;
+        my ($body) = $sender =~ /(^sub \Q$name\E \{.*?^\})/ms;
+        $safe &&= defined($facade) && defined($body)
+            && index($facade, 'return Mediabot::IRC::Sender::' . $name . '(@_);') >= 0
+            && index($body, $arg . ' = _sanitize_irc_text(' . $arg . ');') >= 0;
+    }
+    if ($safe) {
+        pass("IRC output sanitizer wiring covers all three senders and shared normalizer");
     }
     else {
-        # deuxième chance : recherche plus large de patterns de strip
-        if ($help =~ /\\r|\\n|\\x0[da]|\\0/ && $help =~ /(?:tr|s)[\/\{]/){
-            pass("newline/NUL handling present in Helpers");
-        }
-        else {
-            fail("no explicit CR/LF/NUL sanitisation found in Helpers.pm");
-        }
+        fail("IRC output sanitizer wiring or implementation is incomplete");
     }
 }
 

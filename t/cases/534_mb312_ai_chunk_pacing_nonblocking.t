@@ -98,11 +98,13 @@ return sub {
     # Exercise the actual helper body in isolation with a deterministic fake
     # loop and fake countdown timers.
     my $probe = <<'PROBE';
+use Mediabot::IRC::Output ();
 use strict;
 use warnings;
 
 BEGIN {
     $INC{'IO/Async/Timer/Countdown.pm'} = __FILE__;
+    $INC{'Mediabot/Helpers.pm'} = __FILE__;
 }
 
 {
@@ -210,7 +212,7 @@ PROBE
 
     $probe =~ s/HELPER_BODY/$queue/;
 
-    open my $fh, '-|', $^X, '-e', $probe
+    open my $fh, '-|', $^X, '-I.', '-It/lib', '-e', $probe
         or die "could not start MB312 probe: $!";
 
     local $/;

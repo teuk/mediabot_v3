@@ -28,6 +28,8 @@ return sub {
 
     my $src = _slurp_563(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
 
+    my $sender = _slurp_563(File::Spec->catfile('.', 'Mediabot', 'IRC', 'Sender.pm'));
+
     my ($sanitize_text) = $src =~ /(sub _sanitize_irc_text \{.*?\n\})/s;
     my ($split_text) = $src =~ /(sub _split_text_for_irc \{.*?\n\})/s;
 
@@ -77,7 +79,7 @@ return sub {
         'ordinary ACTION remains one IRC message');
 
     for my $name (qw(botPrivmsg botNotice botAction)) {
-        my ($body) = $src =~ /(sub \Q$name\E \{.*?\n\}\n)/s;
+        my ($body) = $sender =~ /(sub \Q$name\E \{.*?\n\}\n)/s;
         $body //= '';
         $assert->like($body, qr/_sanitize_irc_text\(\$\w+\)/,
             "$name uses the shared CR/LF/NUL sanitizer");

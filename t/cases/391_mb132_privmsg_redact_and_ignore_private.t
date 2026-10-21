@@ -42,7 +42,11 @@ my $case = sub {
     my $src = do { local $/; <$hfh> };
     close $hfh;
 
-    $assert->($src =~ /my \$log_msg = _redact_irc_service_secret_for_log\(\$sMsg\);/,
+    my $sender_file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Sender.pm');
+    open my $sfh, '<', $sender_file or die $!;
+    my $sender_src = do {local $/; <$sfh>};
+
+    $assert->($sender_src =~ /my \$log_msg = _redact_irc_service_secret_for_log\(\$sMsg\);/,
         'botPrivmsg redacts private service credentials before logging');
     my $text_file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Text.pm');
     open my $tfh, '<', $text_file or die $!;

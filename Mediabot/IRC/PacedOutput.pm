@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use Mediabot::IRC::Output ();
 use Scalar::Util qw(refaddr);
 
 our @EXPORT_OK = qw(queue_privmsg_chunks queue_notices);
@@ -22,7 +23,7 @@ sub queue_notices {
 }
 
 sub botNotice {
-    return Mediabot::Helpers::botNotice(@_);
+    return Mediabot::IRC::Output::notice(@_);
 }
 
 # Legacy state keys and the two scheduling algorithms are intentionally kept.
@@ -59,7 +60,7 @@ sub _queue_irc_chunks {
         && @payload > 1;
 
     unless ($can_schedule) {
-        Mediabot::Helpers::botPrivmsg($self, $target, $_) for @payload;
+        Mediabot::IRC::Output::privmsg($self, $target, $_) for @payload;
         return $queued_count;
     }
 
@@ -137,7 +138,7 @@ sub _queue_irc_chunks {
 
         if (defined($chunk) && $chunk ne '') {
             my $ok = eval {
-                Mediabot::Helpers::botPrivmsg($self, $target, $chunk);
+                Mediabot::IRC::Output::privmsg($self, $target, $chunk);
                 1;
             };
 

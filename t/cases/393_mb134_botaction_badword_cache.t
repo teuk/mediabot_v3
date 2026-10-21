@@ -8,7 +8,7 @@ my $case = sub {
     my ($assert) = @_;
 
     my $root = File::Spec->catdir($Bin, '..', '..');
-    my $helpers_file = File::Spec->catfile($root, 'Mediabot', 'Helpers.pm');
+    my $helpers_file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Sender.pm');
 
     open my $hfh, '<', $helpers_file
         or do { $assert->(0, "cannot open Helpers.pm: $!"); return; };

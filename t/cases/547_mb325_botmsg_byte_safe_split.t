@@ -61,6 +61,7 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'Helpers.pm')
     );
 
+    my $sender = _slurp_547(File::Spec->catfile('.', 'Mediabot', 'IRC', 'Sender.pm'));
     my $sanitize_text = _extract_sub_547($src, '_sanitize_irc_text');
     my $sub_text = _extract_sub_547($src, '_split_text_for_irc');
     $assert->ok(
@@ -131,12 +132,12 @@ return sub {
 
     # --- 7. Helper réellement utilisé par botPrivmsg ET botNotice ---------
     $assert->like(
-        $src,
+        $sender,
         qr/my\s+\@chunks\s*=\s*_split_text_for_irc\(\$sMsg,\s*400\)/,
         'botPrivmsg utilise _split_text_for_irc'
     );
     $assert->like(
-        $src,
+        $sender,
         qr/my\s+\@chunks\s*=\s*_split_text_for_irc\(\$text,\s*400\)/,
         'botNotice utilise _split_text_for_irc'
     );

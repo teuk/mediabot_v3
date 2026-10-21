@@ -20,7 +20,7 @@ my $case = sub {
     my ($assert) = @_;
 
     my $root = File::Spec->catdir($Bin, '..', '..');
-    my $file = File::Spec->catfile($root, 'Mediabot', 'Helpers.pm');
+    my $file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Sender.pm');
     my $src = _slurp_mb387($file);
 
     my $privmsg = _extract_mb387($src, 'botPrivmsg', 'botAction');

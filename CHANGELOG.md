@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB881 — Complete the shared IRC output boundary (2026-10-21)
+
+- Add IRC::Output as the reusable PRIVMSG/ACTION/NOTICE facade. Keep public
+  calls routed through Helpers so existing worker capture and overrides
+  remain effective. PacedOutput adopts the same facade.
+- Move the three existing send bodies into internal IRC::Sender and the
+  bounded AntiFlood queue into IRC::DeferredOutput. Preserve sender-specific
+  return values, filters, metrics, logs, history, wire bytes, queue state and
+  dynamic legacy callbacks rather than merging their policies.
+- Follow the new sanitizer owner chain in the security audit. Retarget
+  historical source tests and add actual-output, deferred-drain, worker
+  capture and audit-mutation regressions. No SQL schema, migration,
+  configuration or service change.
+
 ### MB880 — Reusable IRC modules with compatible boundaries (2026-10-21)
 
 - Extract Target, CaseMapping, Text, Presentation and PacedOutput under

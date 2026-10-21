@@ -31,9 +31,10 @@ my $case = sub {
     );
     my $budget = _slurp_mb386(File::Spec->catfile($root, 'Mediabot', 'IRC', 'TextBudget.pm'));
     my ($split) = $budget =~ /(sub _split_text_for_irc \{.*?^\})/ms;
-    my $privmsg = _extract_mb386($src, 'botPrivmsg', 'botAction');
-    my $action = _extract_mb386($src, 'botAction', 'botNotice');
-    my $notice = _extract_mb386($src, 'botNotice', 'joinChannel');
+    my $sender = _slurp_mb386(File::Spec->catfile($root, 'Mediabot', 'IRC', 'Sender.pm'));
+    my $privmsg = _extract_mb386($sender, 'botPrivmsg', 'botAction');
+    my $action = _extract_mb386($sender, 'botAction', 'botNotice');
+    my ($notice) = $sender =~ /(sub botNotice \{.*?^\})/ms;
 
     $assert->(defined $sanitize, 'shared outbound sanitizer extracted');
     $assert->(defined $redact, 'private credential redactor extracted');

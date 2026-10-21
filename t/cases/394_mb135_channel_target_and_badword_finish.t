@@ -15,6 +15,10 @@ my $case = sub {
     my $src = do { local $/; <$hfh> };
     close $hfh;
 
+    my $sender_file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Sender.pm');
+    open my $sfh, '<', $sender_file or die $!;
+    my $sender_src = do {local $/; <$sfh>};
+
     $assert->($src =~ /sub\s+_is_irc_channel_target\b/,
         '_is_irc_channel_target helper exists');
     my $target_file = File::Spec->catfile($root, 'Mediabot', 'IRC', 'Target.pm');
@@ -23,9 +27,9 @@ my $case = sub {
     $assert->($target_src =~ /return defined\(\$target\) && \$target =~ \/\^\[#&!\+\]\//,
         '_is_irc_channel_target recognizes # & ! + prefixes');
 
-    my $privmsg_block = ($src =~ /sub botPrivmsg \{(.*?)sub botAction \{/s) ? $1 : '';
-    my $action_block  = ($src =~ /sub botAction \{(.*?)sub botNotice \{/s) ? $1 : '';
-    my $notice_block  = ($src =~ /sub botNotice \{(.*?)sub joinChannel \{/s) ? $1 : '';
+    my $privmsg_block = ($sender_src =~ /sub botPrivmsg \{(.*?)sub botAction \{/s) ? $1 : '';
+    my $action_block  = ($sender_src =~ /sub botAction \{(.*?)sub botNotice \{/s) ? $1 : '';
+    my $notice_block  = ($sender_src =~ /sub botNotice \{(.*?)^\}/ms) ? $1 : '';
 
     $assert->($privmsg_block =~ /if \(_is_irc_channel_target\(\$sTo\)\) \{/,
         'botPrivmsg uses shared channel target detection');
