@@ -525,13 +525,6 @@ my $ts_start = time();
 my $cases_dir = "$FindBin::Bin/cases";
 my @all_test_files = sort glob("$cases_dir/*.t");
 my %case_classification;
-
-for my $file (@all_test_files) {
-    my ($isolate) = _case_requires_isolation($file);
-    $case_classification{$file} =
-        classify_test_file($file, isolated => $isolate ? 1 : 0);
-}
-
 my @test_files = @all_test_files;
 
 if ($opt_fast) {
@@ -543,8 +536,6 @@ if ($opt_fast) {
         . "\nRefusing to run a silently weakened fast lane.\n"
         unless $sentinels_ok;
 
-    @test_files =
-        select_fast_files(\@test_files, \%case_classification);
 }
 
 if ($opt_filter) {
@@ -555,6 +546,26 @@ if ($opt_filter) {
         die "Invalid --filter regex '$opt_filter': $err\n";
     }
     @test_files = grep { basename($_) =~ $filter_re } @test_files;
+}
+
+# MB869: classification is selection metadata, not an execution prerequisite.
+# Filter names before reading sources, and classify only when an option needs
+# these tags. Nested filtered runner probes otherwise rescan the full catalogue
+# dozens of times. The default full suite still executes every discovered file
+# in its original order and inspects each isolation contract immediately before
+# execution; no test result or source classification is persisted or cached.
+if ($opt_fast || @opt_classes || @opt_exclude_classes
+    || $opt_class_summary || $opt_list_selected) {
+    for my $file (@test_files) {
+        my ($isolate) = _case_requires_isolation($file);
+        $case_classification{$file} =
+            classify_test_file($file, isolated => $isolate ? 1 : 0);
+    }
+}
+
+if ($opt_fast) {
+    @test_files =
+        select_fast_files(\@test_files, \%case_classification);
 }
 
 if (@opt_classes) {

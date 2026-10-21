@@ -79,7 +79,9 @@ SH
 close $perl;
 chmod 0755, "$fakebin/perl";
 
-for my $name (qw(cpan wget tar chown make)) {
+# Keep the real helper wait/exit contract, without a five-second UI spinner
+# delay around an already mocked installer command.
+for my $name (qw(cpan wget tar chown make sleep)) {
     open my $fh, '>', "$fakebin/$name" or die $!;
     print {$fh} "#!/usr/bin/env bash\nexit 0\n";
     close $fh;

@@ -75,7 +75,9 @@ SH
 close $perl;
 chmod 0755, "$fakebin/perl";
 
-for my $name (qw(cpan wget tar chown make)) {
+# The fake helper completes locally; spinner sleeps are not this test's subject.
+# wait_for_cmd still checks/reaps the actual helper PID and its exit status.
+for my $name (qw(cpan wget tar chown make sleep)) {
     open my $fh, '>', "$fakebin/$name" or die $!;
     print {$fh} "#!/usr/bin/env bash\nexit 0\n";
     close $fh;

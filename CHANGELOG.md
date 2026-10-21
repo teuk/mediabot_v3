@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB869 — Faster full-suite setup and test fixture teardown (2026-10-21)
+
+- Classify source capabilities only when class/fast/catalogue options need
+  them, and apply the filename filter before classification. Keep the complete
+  default catalogue, lexical execution order and per-case isolation inspection.
+- Keep mandatory fast-lane sentinel validation against the entire discovered
+  catalogue, even when a filter selects a single file. Do not persist results
+  or classification metadata between invocations.
+- Replace spinner delays in the two already mocked CPAN installer fixtures
+  with a local no-op sleep command; preserve the real helper PID wait and exit
+  checks. Reduce the test-only HTTP server idle shutdown poll while keeping
+  actual HTTP/TLS exchanges and request deadlines unchanged.
+- Add executable launcher regressions for coverage, filtered metadata reads,
+  capability selection, sentinels, changed sources and failure verdicts.
+  No application runtime, SQL/schema or production timeout changes.
+
 ### MB868 — Relative HTTP redirects and current RSS validators (2026-10-21)
 
 - Resolve plugin HTTPS redirects with URI path/query semantics, including

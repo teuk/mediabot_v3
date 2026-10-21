@@ -67,7 +67,8 @@ class StatsTest(unittest.TestCase):
                 'counts':{'users':100,'visible_users':30,'invisible_users':70,'channels':22,'operators':0}}
     def tearDown(self):self.tmp.cleanup()
     def server(self):
-        srv=n.Server(('127.0.0.1',0),self.cfg);thread=threading.Thread(target=srv.serve_forever,daemon=True);thread.start()
+        # Only shorten the fixture's idle shutdown poll, not request/TLS timeouts.
+        srv=n.Server(('127.0.0.1',0),self.cfg);thread=threading.Thread(target=srv.serve_forever,kwargs={'poll_interval':0.01},daemon=True);thread.start()
         self.addCleanup(srv.server_close);self.addCleanup(srv.shutdown)
         return srv
     def request(self,srv,path,body=None,token=None,headers=None):
@@ -123,7 +124,7 @@ class StatsTest(unittest.TestCase):
         srv=n.Server(('127.0.0.1',0),self.cfg)
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(cert,key)
         srv.socket=context.wrap_socket(srv.socket,server_side=True)
-        thread=threading.Thread(target=srv.serve_forever,daemon=True);thread.start()
+        thread=threading.Thread(target=srv.serve_forever,kwargs={'poll_interval':0.01},daemon=True);thread.start()
         self.addCleanup(srv.server_close);self.addCleanup(srv.shutdown)
         cfg=self.publisher_cfg(srv);cfg['url']=cfg['url'].replace('http://127.0.0.1','https://localhost')
         Path(cfg['snapshot']).write_bytes(n.encode(self.s))
