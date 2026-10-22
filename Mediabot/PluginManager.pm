@@ -1298,6 +1298,14 @@ sub v3_channel_explanation {
         policies => \@policies);
 }
 
+# A package name can be reused after unload. Retained v3 callbacks and output
+# scopes belong to the exact registered entry, never its same-name successor.
+sub _v3_entry_is_current {
+    my ($self, $key, $entry) = @_;
+    my $current = $self->plugin($key) or return 0;
+    return refaddr($current) == refaddr($entry) ? 1 : 0;
+}
+
 sub _v3_policy_for_entry {
     my ($self, $entry, $channel) = @_;
     my $policy = $self->_v3_policy_object($entry);
@@ -2498,6 +2506,7 @@ sub _mount_v3_commands {
                 replace     => $migration ? 1 : 0,
                 handler     => sub {
                     my ($ctx) = @_;
+                    return unless $self->_v3_entry_is_current($key, $entry);
                     my $fallback = $migration && $fallback_handler
                         ? sub { $fallback_handler->($ctx) } : undef;
                     return $fallback ? $fallback->() : undef
@@ -2540,6 +2549,7 @@ sub _mount_v3_commands {
                             $ctx, $channel),
                         origin_token => $self->{v3_invocation_authority},
                         output_guard => sub {
+                            return 0 unless $self->_v3_entry_is_current($key, $entry);
                             return 0 unless $self->is_enabled($key);
                             my $current = $self->_v3_policy_for_entry(
                                 $entry, $channel);
@@ -2642,6 +2652,7 @@ sub _mount_v3_events {
         defer       => sub { $loop->later($_[0]) },
         dispatch    => sub {
             my ($item) = @_;
+            return unless $self->_v3_entry_is_current($key, $entry);
             return unless $self->is_enabled($key);
             my $policy = $self->_v3_policy_for_entry(
                 $entry, $item->{channel});
@@ -2699,6 +2710,7 @@ sub _mount_v3_events {
         my $listener = eval {
             $bus->on($bus_event, sub {
                 my ($raw) = @_;
+                return unless $self->_v3_entry_is_current($key, $entry);
                 return unless $self->is_enabled($key);
                 return unless $context->has_capability('events.subscribe');
                 my $envelope = Mediabot::Plugin::EventCatalogV3->envelope(
@@ -2800,6 +2812,7 @@ sub _mount_v3_jobs {
                 first_interval => $first,
                 autostart      => 0,
                 cb             => sub {
+                    return unless $self->_v3_entry_is_current($key, $entry);
                     return unless $self->is_enabled($key);
                     return unless $context->has_capability('scheduler.jobs');
                     my $fired_at = time();
@@ -2808,6 +2821,8 @@ sub _mount_v3_jobs {
                     my $sequence = ++$clock->{sequence};
                     $clock->{next_expected} = $fired_at + $interval;
                     for my $policy ($self->_v3_active_policies($entry)) {
+                        last unless $self->_v3_entry_is_current($key, $entry)
+                            && $self->is_enabled($key);
                         if ($self->_v3_resource_quarantined($key,
                                 kind => 'job', resource => $job,
                                 channel => $policy->{channel})) {
@@ -2824,6 +2839,7 @@ sub _mount_v3_jobs {
                             config       => $policy->{config},
                             authority    => $context,
                             output_guard => sub {
+                                return 0 unless $self->_v3_entry_is_current($key, $entry);
                                 return 0 unless $self->is_enabled($key);
                                 my $current = $self->_v3_policy_for_entry(
                                     $entry, $policy->{channel});

@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB908 — Bind API v3 dispatch and output to the loaded instance (2026-10-22)
+
+- Share one exact-entry ownership check across v3 command handlers, event
+  listeners/dispatch, job callbacks and command/job output guards. Unload/reload
+  under the same name cannot revive old callbacks or old output capabilities,
+  including when the replacement has fewer grants.
+- Recheck lifecycle ownership between job channels so a handler that disables
+  or unloads its package cannot continue the old fan-out. Preserve current
+  instance policies, quarantine, observe mode and legacy command fallbacks.
+- Add 14 behavior assertions to existing case 1072 with a temporary witness
+  package, real PluginManager, registry, EventBus, IO::Async loop and Scheduler.
+  Compare 18 nominal vectors; keep all numbered cases. No manifest/API schema,
+  database schema, production SQL, private configuration, VERSION, service,
+  Partyline, plugin package, HTTP/data facade, runner or audit change.
+
+
 ### MB907 — Recover RSS output after timer failures and stale callbacks (2026-10-22)
 
 - Give each unpaced RSS countdown an owned arm, revoke it before cancellation

@@ -151,6 +151,14 @@ The invocation also exposes `activation_mode`, `config`, `config_value` and
 return without writing to IRC. The sink checks current policy again at emission
 time, so a late switch to `off` or `observe` revokes output.
 
+Command and job output scopes belong to the exact loaded package instance.
+Unloading and reloading the same name does not renew an older invocation's
+reply, notice or channel-message permission. Retained command, event and job
+callbacks from the removed instance stay inert. A job already executing may
+finish its current handler, but a disable or unload during channel fan-out
+stops dispatch to the remaining channels. Normal disable/enable of the same
+loaded instance retains its existing semantics.
+
 Event and job handlers receive equally narrow values:
 
 ```perl

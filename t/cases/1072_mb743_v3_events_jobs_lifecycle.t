@@ -210,4 +210,18 @@ return sub {
         'failed resource transaction rolls back mounted commands');
     $assert->is($atomic_bot->{event_bus}->listener_count('plugin_cron_observed'), 0,
         'failed resource transaction rolls back event listeners');
+    # MB908: exact instance ownership through real registry/loop/scheduler paths.
+    require JSON::PP;
+    open my $probe, '-|', $^X, '-I.', '-It/lib', '-MMB908PluginFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->encode(MB908PluginFixture::run_contracts())'
+        or die "MB908 plugin fixture: $!";
+    my $json = do { local $/; <$probe> };
+    close $probe or die "MB908 plugin fixture failed: $?";
+    my $contracts = JSON::PP->new->decode($json);
+    die "MB908 plugin fixture returned an invalid matrix"
+        unless ref($contracts) eq 'ARRAY' && @$contracts == 14;
+    for my $contract (@$contracts) {
+        $assert->ok($contract->{ok}, "mb908: $contract->{case}");
+    }
 };
