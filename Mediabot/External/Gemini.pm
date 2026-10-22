@@ -15,6 +15,7 @@ use Mediabot::AI::Request qw(build_request);
 use Mediabot::AI::Transport ();
 use Mediabot::AI::Provider::Gemini ();
 use Mediabot::Helpers ();
+use Mediabot::IRC::DeliveryContext qw(capture_delivery_context delivery_context_current);
 use Mediabot::External::Claude ();
 
 our $VERSION = '1.0';
@@ -84,6 +85,12 @@ sub _strict_chanset_enabled {
     return defined($set_id) && "$set_id" ne '' ? 1 : 0;
 }
 
+sub _can_deliver {
+    my ($self, $state) = @_;
+    return delivery_context_current($self, $state->{delivery})
+        && _strict_chanset_enabled($self, $state->{channel});
+}
+
 sub _deliver_answer {
     my ($self, $state, $answer) = @_;
     return undef unless defined($answer) && !ref($answer) && length($answer);
@@ -99,7 +106,8 @@ sub _deliver_answer {
 
     my @out = @chunks;
     my $queued = Mediabot::External::Claude::_queue_irc_chunks(
-        $self, $state->{channel}, \@out, $state->{sleep_us}, 'Gemini'
+        $self, $state->{channel}, \@out, $state->{sleep_us}, 'Gemini',
+        { can_send => sub { _can_deliver($self, $state) } }
     );
     $self->{logger}->log(4, "geminiAI() queued $queued PRIVMSG");
     return $answer;
@@ -107,6 +115,7 @@ sub _deliver_answer {
 
 sub _accept_result {
     my ($self, $state, $result) = @_;
+    return undef unless _can_deliver($self, $state);
 
     unless (ref($result) eq 'HASH' && $result->{ok}
         && ($result->{provider} // '') eq 'gemini') {
@@ -249,6 +258,7 @@ sub geminiAI {
     }
 
     my $state = {
+        delivery    => capture_delivery_context($self, $channel),
         nick        => $nick,
         channel     => $channel,
         max_privmsg => _conf_int(

@@ -12,6 +12,8 @@ our @EXPORT_OK = qw(queue_privmsg_chunks queue_notices);
 
 # Keep runtime loading lazy. Every send re-enters Helpers so workers, normal
 # output policy and existing instrumentation still see the same facade.
+# An optional sixth argument {can_send => CODE} is checked before each
+# PRIVMSG; false or an exception cancels only that batch.
 # PRIVMSG batches serialize behind existing work even when a later batch has
 # one chunk or no requested delay; idle immediate-send behavior is unchanged.
 sub queue_privmsg_chunks {
@@ -30,7 +32,9 @@ sub botNotice {
 
 # Legacy state keys and the two scheduling algorithms are intentionally kept.
 sub _queue_irc_chunks {
-    my ($self, $target, $chunks, $sleep_us, $label) = @_;
+    my ($self, $target, $chunks, $sleep_us, $label, $options) = @_;
+    my $can_send = ref($options) eq 'HASH' && ref($options->{can_send}) eq 'CODE'
+        ? $options->{can_send} : undef;
 
     return 0 unless ref($chunks) eq 'ARRAY';
 
@@ -73,7 +77,10 @@ sub _queue_irc_chunks {
         || ($can_add && ($has_pending || $can_start));
 
     unless ($can_schedule) {
-        Mediabot::IRC::Output::privmsg($self, $target, $_) for @payload;
+        for my $chunk (@payload) {
+            last if $can_send && !eval { $can_send->() };
+            Mediabot::IRC::Output::privmsg($self, $target, $chunk);
+        }
         return $queued_count;
     }
 
@@ -89,6 +96,7 @@ sub _queue_irc_chunks {
         chunks => \@payload,
         delay  => $sleep_us / 1_000_000,
         label  => $label,
+        can_send => $can_send,
     };
 
     return $queued_count if $state->{active};
@@ -138,6 +146,11 @@ sub _queue_irc_chunks {
             return;
         }
 
+        # A revoked or failed guard drops this batch only. The normal boundary
+        # delay and successor ordering still apply; unguarded callers are unchanged.
+        if ($batch->{can_send} && !eval { $batch->{can_send}->() }) {
+            @{ $batch->{chunks} } = ();
+        }
         my $chunk = shift @{ $batch->{chunks} };
 
         if (defined($chunk) && $chunk ne '') {

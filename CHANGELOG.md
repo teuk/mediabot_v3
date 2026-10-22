@@ -10,6 +10,23 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB917 — Bind delayed Gemini replies to their delivery context (2026-10-22)
+
+- Reuse CommandAsync's exact transport/channel-generation checks in the shared
+  IRC::DeliveryContext module, retaining both existing CommandAsync entry points.
+- Capture the context when Gemini starts and check it again when a result arrives,
+  including failure/empty-answer messages. Revalidate the strict Gemini chanset.
+- Add an optional per-batch predicate to PacedOutput, checked before each line
+  in paced and immediate paths. Cancel only a rejected batch's remaining chunks,
+  preserving successor batches and boundary delays. Unguarded callers keep their
+  behavior; already accepted output and provider work are not recalled.
+- Extend existing Gemini case 1029 with nine assertions covering 52 native
+  lifecycle scenarios; retain its earlier 19. Let compact-runner case 891 accept
+  a growing passing probe count. Compare 72 nominal pacing traces and 40 existing
+  binding decisions. Add no fixture or numbered case. No database schema,
+  private configuration, service, plugin, Partyline, radio or runner change.
+
+
 ### MB916 — Preserve UTF-8 track metadata from yt-dlp sidecars (2026-10-22)
 
 - Read .info.json sidecars as bytes for the existing JSON::PP UTF-8 decoder.

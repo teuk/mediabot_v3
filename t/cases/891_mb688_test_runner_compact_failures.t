@@ -63,7 +63,8 @@ return sub {
 
         $assert->is($rc, 0,
             'compact runner success probe exits successfully');
-        $assert->like($output, qr/PASSED\s*:\s*19\/19/,
+        # The probe's test count can grow without changing the summary format.
+        $assert->like($output, qr/PASSED\s*:\s*([1-9][0-9]*)\/\1\b/,
             'compact runner success probe retains its passing summary');
         $assert->unlike($output, qr/failure detected/,
             'passing isolated TAP is silent in compact mode');
