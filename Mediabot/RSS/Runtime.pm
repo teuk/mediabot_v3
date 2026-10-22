@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use utf8;
-use Scalar::Util qw(refaddr);
+use Scalar::Util qw(refaddr weaken);
 
 use IO::Async::Timer::Countdown;
 use Mediabot::AsyncWorker;
@@ -354,7 +354,12 @@ sub _enqueue_announcements {
     # Changing mode discards prepared output from the old policy.
     if ($q->{paced} != $paced) {
         delete $self->{queued}{$_->{qid}} for @{$q->{items}};
-        if (my $timer = delete $q->{timer}) { eval { $self->{loop}->remove($timer) } }
+        my $arm = delete $q->{arm};
+        $arm->{cancelled} = 1 if $arm;
+        if (my $timer = delete $q->{timer}) {
+            eval { $timer->stop };
+            eval { $self->{loop}->remove($timer) };
+        }
         $q->{items} = []; $q->{paced} = $paced;
     }
     $self->_drop_feed_candidate($ckey, $feed_id) if $paced;
@@ -388,19 +393,61 @@ sub _arm_next {
     return 0 unless @{ $q->{items} || [] };
     return 1 if $q->{timer};
 
-    my $timer;
-    $timer = IO::Async::Timer::Countdown->new(
-        delay => $self->{output_delay},
-        on_expire => sub {
-            my $current = $self->{outq}{$ckey} or return;
-            my $owned = delete $current->{timer};
-            eval { $self->{loop}->remove($owned) } if $owned;
-            $self->_drain_channel($ckey);
-        },
-    );
-    $q->{timer} = $timer;
-    $self->{loop}->add($timer);
-    $timer->start;
+    my ($owner, $queue, $loop) = ($self, $q, $self->{loop});
+    weaken($owner); weaken($queue); weaken($loop);
+    my $arm = $q->{arm} = {};
+    my $owned = sub {
+        return unless $owner && $queue && $owner->{outq}{$ckey}
+            && refaddr($owner->{outq}{$ckey}) == refaddr($queue)
+            && $queue->{arm} && refaddr($queue->{arm}) == refaddr($arm);
+        return ($owner, $queue);
+    };
+    my $cleanup = sub {
+        my ($timer) = @_; return unless $timer;
+        eval { $timer->stop };
+        eval { $loop->remove($timer) } if $loop;
+    };
+    my ($timer, $weak_timer);
+    my $started = eval {
+        $timer = IO::Async::Timer::Countdown->new(
+            delay => $self->{output_delay},
+            on_expire => sub {
+                return if $arm->{cancelled} || $arm->{done}++;
+                my ($current_owner, $current) = $owned->();
+                if ($current_owner) {
+                    delete $current->{arm};
+                    delete $current->{timer};
+                }
+                $cleanup->($weak_timer);
+                return unless $current_owner && $current_owner->{outq}{$ckey}
+                    && refaddr($current_owner->{outq}{$ckey}) == refaddr($current)
+                    && !$current->{arm} && !$current->{timer};
+                $current_owner->_drain_channel($ckey);
+            },
+        );
+        $weak_timer = $timer; weaken($weak_timer);
+        if ($owned->()) {
+            $q->{timer} = $timer;
+            $self->{loop}->add($timer);
+            $timer->start if $owned->();
+        }
+        1;
+    };
+    return 1 if $started && $owned->();
+    if (!$started && $owned->()) {
+        # Revoke prepared output before cleanup can reenter. Unsent articles
+        # remain pending in SQL and can be prepared again by a later poll.
+        $arm->{cancelled} = 1;
+        delete $q->{arm}; delete $q->{timer};
+        delete $self->{queued}{$_->{qid}} for @{$q->{items}};
+        $q->{items} = [];
+        delete $self->{outq}{$ckey};
+        $cleanup->($timer);
+        $self->_log(1, 'rss_poll_dispatch: output timer unavailable; unsent items remain pending');
+        return 0;
+    }
+    # Inline expiry or cleanup may already have installed a successor.
+    $cleanup->($timer);
     return 1;
 }
 

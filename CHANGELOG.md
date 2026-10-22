@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB907 — Recover RSS output after timer failures and stale callbacks (2026-10-22)
+
+- Give each unpaced RSS countdown an owned arm, revoke it before cancellation
+  or cleanup, and make retained/cancelled/duplicate expiry callbacks harmless.
+  Preserve successors installed during cleanup and release runtime references.
+- Contain constructor/add/start failures, stop/remove partial timers and clear
+  only the affected prepared queue/index before cleanup can reenter. Unsent
+  articles remain unacknowledged for a later poll, without an immediate burst.
+- Add 13 behavior assertions to existing case 904, including native spacing,
+  injected failures, retained callbacks, mode changes and cleanup reentrancy.
+  Compare 24 nominal output/ack/queue vectors. Preserve SQL/acknowledgement,
+  quotas/rotation, paced delivery, formatter, fetchers and workers. No Partyline,
+  schema, private configuration, VERSION, service, runner or audit change.
+
+
 ### MB906 — Share JSON decoding and restore AppleMusic Unicode details (2026-10-22)
 
 - Add pure `Mediabot::JSON::decode_json_payload`, retaining UTF-8 bytes and encoding

@@ -30,4 +30,19 @@ return sub {
         'mb693-904: rejected output remains durable pending work');
     $assert->like($runtime, qr/dropped queued item for deleted\/disabled feed/,
         'mb693-904: deleted/disabled feed cannot leak stale queued output');
+    # MB907: native RSS spacing and retained/failing timer callbacks.
+    require JSON::PP;
+    open my $timers, '-|', $^X, '-I.', '-It/lib', '-MMB907RSSTimerFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->encode(MB907RSSTimerFixture::run_contracts())'
+        or die "MB907 RSS timer fixture: $!";
+    my $json = do { local $/; <$timers> };
+    close $timers or die "MB907 RSS timer fixture failed: $?";
+    my $results = JSON::PP::decode_json($json);
+    die 'MB907 incomplete RSS timer matrix' unless @$results == 13;
+    for my $result (@$results) {
+        $assert->ok($result->{ok}, "MB907 RSS timers: $result->{case}"
+            . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
+    }
+
 };
