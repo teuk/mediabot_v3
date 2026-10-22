@@ -2481,6 +2481,7 @@ sub _mount_v3_commands {
         my $migration = $spec->{migration} // '';
         my $previous;
         my $fallback_handler;
+        my $registration;
         my $ok = eval {
             if ($migration eq 'legacy-public-fallback') {
                 $previous = $registry->command_for($command, $source);
@@ -2493,7 +2494,7 @@ sub _mount_v3_commands {
                         && !defined($previous->{plugin});
                 $fallback_handler = $previous->{handler};
             }
-            $registry->register_command(
+            $registration = $registry->register_command(
                 name        => $command,
                 source      => $source,
                 aliases     => ($spec->{aliases} || []),
@@ -2601,15 +2602,13 @@ sub _mount_v3_commands {
         unless ($ok) {
             my $error = _plugin_error_text($@, 'register_command failed');
             for my $mounted (reverse @mounted) {
-                $registry->unregister_command(
-                    $mounted->{name}, $mounted->{source});
-                _restore_command_entry($registry, $mounted->{restore})
-                    if $mounted->{restore};
+                _unmount_command_registration($registry, $mounted);
             }
             die "PluginManager: mounting API v3 command '$command' for '$key' failed: $error\n";
         }
         push @mounted, {
             name => $command, source => $source,
+            registration => $registration,
             ($previous ? (restore => $previous) : ()),
         };
     }
@@ -2963,6 +2962,20 @@ sub _remove_v3_jobs {
     return $removed;
 }
 
+# Teardown owns an exact registration, not every future use of its name.
+# A vacant slot may still recover its saved built-in; a successor stays intact.
+sub _unmount_command_registration {
+    my ($registry, $mounted) = @_;
+    if (ref($mounted->{registration})) {
+        my $current = $registry->command_for($mounted->{name}, $mounted->{source});
+        return 0 if $current
+            && refaddr($current) != refaddr($mounted->{registration});
+    }
+    $registry->unregister_command($mounted->{name}, $mounted->{source});
+    _restore_command_entry($registry, $mounted->{restore}) if $mounted->{restore};
+    return 1;
+}
+
 sub _unmount_entry_commands {
     my ($self, $entry) = @_;
     return 0 unless $entry && ref($entry->{mounted_commands}) eq 'ARRAY';
@@ -2970,10 +2983,7 @@ sub _unmount_entry_commands {
     return 0 unless $registry;
     for my $mounted (@{ $entry->{mounted_commands} }) {
         if (ref($mounted) eq 'HASH') {
-            $registry->unregister_command(
-                $mounted->{name}, $mounted->{source});
-            _restore_command_entry($registry, $mounted->{restore})
-                if $mounted->{restore};
+            _unmount_command_registration($registry, $mounted);
         }
         else {
             $registry->unregister_command($mounted, 'public');

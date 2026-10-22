@@ -224,4 +224,20 @@ return sub {
     for my $contract (@$contracts) {
         $assert->ok($contract->{ok}, "mb908: $contract->{case}");
     }
+    {
+        # MB911: teardown must preserve newer registry owners and aliases.
+        require JSON::PP;
+        open my $probe, '-|', $^X, '-I.', '-It/lib', '-MMB908PluginFixture',
+            '-MJSON::PP', '-e',
+            'print JSON::PP->new->encode(MB908PluginFixture::run_command_ownership_contracts())'
+            or die "MB911 command ownership fixture: $!";
+        my $json = do { local $/; <$probe> };
+        close $probe or die "MB911 command ownership fixture failed: $?";
+        my $contracts = JSON::PP->new->decode($json);
+        die "MB911 command ownership fixture returned an invalid matrix"
+            unless ref($contracts) eq 'ARRAY' && @$contracts == 10;
+        for my $contract (@$contracts) {
+            $assert->ok($contract->{ok}, "mb911: $contract->{case}");
+        }
+    }
 };

@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB911 — Preserve successor commands during plugin teardown (2026-10-22)
+
+- Retain the exact registry entry for each v3 command mount. Share one guarded
+  cleanup helper between partial command rollback and plugin unload, including
+  cleanup after a later resource-mount failure.
+- Preserve newer canonical entries and alias owners, even under the same plugin
+  label. Keep nominal removal, restoration into a vacant slot, exact historical
+  fallback handlers and legacy descriptor behavior.
+- Reuse the MB908 native fixture and add ten assertions to existing case 1072.
+  Compare 24 nominal cycles across all six bundled v3 packages, with empty/full
+  grants and enabled/disabled lifecycle. Add no fixture or numbered case.
+  No schema, production SQL, plugin package, private configuration, VERSION,
+  service, Partyline, runner or audit change.
+
+
 ### MB910 — Clean up partially started API v3 plugins (2026-10-22)
 
 - Mark the start attempt before invoking the hook, so activation rollback tries

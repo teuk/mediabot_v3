@@ -175,6 +175,13 @@ reports its historical grants. Such calls fail before service delegation with
 to the registration. Current-instance policies, disabled results and normal
 service arguments/return values keep their existing behavior.
 
+V3 command teardown tracks the exact CommandRegistry registration created by
+its mount. Unload and mounting rollback preserve a later registration at the
+same name/source, including a same-label replacement or an alias belonging to
+another command. The old saved built-in is restored when the slot is still
+owned or vacant; it does not overwrite a successor. Nominal removal and the
+historical descriptor forms keep their existing behavior.
+
 Event and job handlers receive equally narrow values:
 
 ```perl

@@ -1,6 +1,7 @@
 package MB908PluginFixture;
 use strict;
 use warnings;
+use Scalar::Util qw(refaddr);
 use File::Temp qw(tempdir);
 use File::Path qw(make_path);
 use JSON::PP ();
@@ -189,5 +190,98 @@ sub run_contracts {
         retained_command_reply retained_command_notice retained_job_output reduced_grants
         retained_command_handler retained_fallback_handler retained_job_callback
         retained_event_listener retained_event_dispatch job_disable_mid_fanout job_reload_mid_fanout)];
+}
+
+# MB911: reuse the native lifecycle witness for command registration ownership.
+sub _replacement {
+    my ($registry,$name,$owner)=@_;
+    return $registry->register_command(name=>$name,source=>'public',replace=>1,
+        plugin=>$owner||'other',aliases=>['new_'.$name],metadata=>{fixture=>'successor'},
+        handler=>sub {"replacement:$name"});
+}
+sub _command_ownership_case {
+    my ($case)=@_;my ($m,$entry,$bot,$ctx)=_context();my $reg=$bot->{registry};
+    my ($saved)=grep {$_->{name} eq 'fallback'} @{$entry->{mounted_commands}};
+    my $builtin=$saved->{restore};my $private=sub {'private'};
+    $reg->register_command(name=>'capture',source=>'private',handler=>$private);
+    my $weak_capture=$reg->command_for('capture','public');Scalar::Util::weaken($weak_capture);
+    my ($replacement,$load_error,$unload_error,$unloaded);my $ok=0;
+    if ($case =~ /\A(?:command|resource)_rollback_/) {
+        $m->unregister_plugin('witness');
+        my $register=Mediabot::CommandRegistry->can('register_command');
+        my $subscribe=Mediabot::EventBus->can('on');my $fired=0;
+        no warnings 'redefine';
+        local *Mediabot::CommandRegistry::register_command=sub {
+            my ($r,%args)=@_;
+            if ($case =~ /\Acommand_/ && !$fired && ($args{plugin}//'') eq 'witness' && $args{name} eq 'fallback') {
+                $fired=1;$replacement=_replacement($r,'capture') if $case =~ /_replacement\z/;
+                die "MB911 command mount failure\n";
+            }
+            return $register->(@_);
+        };
+        local *Mediabot::EventBus::on=sub {
+            my ($bus,$event,$cb,%opts)=@_;
+            if ($case =~ /\Aresource_/ && !$fired && ($opts{plugin}//'') eq 'witness') {
+                $fired=1;$replacement=_replacement($reg,'fallback') if $case =~ /_replacement\z/;
+                die "MB911 event mount failure\n";
+            }
+            return $subscribe->(@_);
+        };
+        my $loaded=eval {_load($m);1};$load_error=$@;
+        my $name=$case =~ /\Acommand_/?'capture':'fallback';
+        my $current=$reg->command_for($name,'public');
+        if ($replacement) {
+            $ok=!$loaded && $load_error =~ /MB911 (?:command|event) mount failure/
+                && !$m->is_registered('witness') && $current && refaddr($current)==refaddr($replacement)
+                && $reg->handler_for('new_'.$name,'public')->() eq "replacement:$name";
+        }
+        else {
+            my $fallback=$reg->command_for('fallback','public');
+            $ok=!$loaded && $load_error =~ /MB911 (?:command|event) mount failure/
+                && !$m->is_registered('witness') && !$reg->has_command('capture','public')
+                && $fallback && refaddr($fallback->{handler})==refaddr($builtin->{handler});
+        }
+    }
+    else {
+        if ($case eq 'unload_regular_replacement') {$replacement=_replacement($reg,'capture')}
+        elsif ($case eq 'unload_migrated_replacement') {$replacement=_replacement($reg,'fallback')}
+        elsif ($case eq 'unload_same_owner_replacement') {$replacement=_replacement($reg,'fallback','witness')}
+        elsif ($case eq 'unload_alias_successor') {
+            $reg->unregister_command('fallback','public');
+            $replacement=$reg->register_command(name=>'successor',source=>'public',aliases=>['fallback'],
+                plugin=>'other',handler=>sub {'replacement:alias'});
+        }
+        elsif ($case eq 'unload_vacant_builtin') {$reg->unregister_command('fallback','public')}
+        elsif ($case ne 'unload_nominal') {die "unknown ownership case: $case"}
+        $unloaded=eval {$m->unregister_plugin('witness');1};$unload_error=$@;
+        if ($replacement) {
+            my $name=$case eq 'unload_regular_replacement'?'capture':'fallback';
+            my $current=$reg->command_for($name,'public');
+            $ok=$unloaded && !$m->is_registered('witness') && $current && refaddr($current)==refaddr($replacement)
+                && $current->{handler}->() eq ($case eq 'unload_alias_successor'?'replacement:alias':"replacement:$name");
+        }
+        else {
+            my $fallback=$reg->command_for('fallback','public');
+            $ok=$unloaded && !$m->is_registered('witness') && !$reg->has_command('capture','public')
+                && $fallback && refaddr($fallback->{handler})==refaddr($builtin->{handler})
+                && !defined($weak_capture) && !@{$entry->{mounted_commands}};
+        }
+    }
+    $ok &&= refaddr($reg->handler_for('capture','private'))==refaddr($private);
+    # A failing reference may have stopped halfway through alias restoration.
+    if ($m->is_registered('witness')) {
+        $reg->unregister_command('successor','public');$m->unregister_plugin('witness');
+    }
+    return {case=>$case,ok=>$ok?1:0};
+}
+sub run_command_ownership_contracts {
+    return [map {
+        my $case=$_;my (@warnings,$result);
+        {local $SIG{__WARN__}=sub {push @warnings,@_};$result=eval {_command_ownership_case($case)}}
+        my $error=$@;$result||={case=>$case,ok=>0};$result->{ok}=0 if $error || @warnings;
+        $result->{error}="$error" if $error;$result->{warnings}=\@warnings if @warnings;$result;
+    } qw(unload_nominal unload_regular_replacement unload_migrated_replacement
+        unload_same_owner_replacement unload_alias_successor unload_vacant_builtin
+        command_rollback_replacement resource_rollback_replacement command_rollback_nominal resource_rollback_nominal)];
 }
 1;
