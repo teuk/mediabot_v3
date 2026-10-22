@@ -126,6 +126,13 @@ The object may implement `start(context => $context)` and
 `stop(context => $context)`. Constructors must be side-effect free. `start`
 runs only after an explicit enable; `stop` runs before disable or unload.
 
+If an attempted `start` throws, activation rollback also tries
+`stop(context => $context)` with the same context, even when `start` did not
+return. A plugin's `stop` should tolerate partial initialization. Cleanup is
+best-effort: a cleanup exception does not replace the original activation error.
+A false hook return without an exception keeps its existing semantics. When no
+`start` hook was attempted, this rollback does not add a call to `stop`.
+
 A command handler receives exactly:
 
 ```perl

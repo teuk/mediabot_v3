@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB910 — Clean up partially started API v3 plugins (2026-10-22)
+
+- Mark the start attempt before invoking the hook, so activation rollback tries
+  stop even when start creates resources and then throws. Keep the existing
+  job cleanup order and pass the same PluginContext to stop.
+- Preserve the original activation error if cleanup throws, normal activation,
+  false returns without exceptions and rollback behavior when no start hook
+  was attempted. Keep the v1/v2 paths unchanged.
+- Add nine behavior assertions to existing case 1068 with real native timers,
+  listeners, registry and Scheduler, including retry, load+enable failure and
+  cleanup exceptions. Retain every numbered case. No schema, production SQL,
+  plugin package, private configuration, VERSION, service, Partyline, runner
+  or audit change.
+
+
 ### MB909 — Bind API v3 service bridges to their registration (2026-10-22)
 
 - Factor the eight RuntimeV3 service sinks through one registration-scoped

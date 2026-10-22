@@ -133,4 +133,20 @@ return sub {
     for my $contract (@$contracts) {
         $assert->ok($contract->{ok}, "mb909: $contract->{case}");
     }
+    {
+        # MB910: partial starts own real timers/listeners and need best-effort stop.
+        require JSON::PP;
+        open my $probe, '-|', $^X, '-I.', '-It/lib', '-MMB910PluginFixture',
+            '-MJSON::PP', '-e',
+            'print JSON::PP->new->encode(MB910PluginFixture::run_contracts())'
+            or die "MB910 activation fixture: $!";
+        my $json = do { local $/; <$probe> };
+        close $probe or die "MB910 activation fixture failed: $?";
+        my $contracts = JSON::PP->new->decode($json);
+        die "MB910 activation fixture returned an invalid matrix"
+            unless ref($contracts) eq 'ARRAY' && @$contracts == 9;
+        for my $contract (@$contracts) {
+            $assert->ok($contract->{ok}, "mb910: $contract->{case}");
+        }
+    }
 };

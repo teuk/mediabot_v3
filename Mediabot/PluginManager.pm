@@ -1578,11 +1578,11 @@ sub enable {
     if ($api == 3) {
         my $object = $entry->{object};
         my $context = $entry->{metadata}{plugin_context};
-        my $object_started = 0;
+        my $start_attempted = 0;
         my $ok = eval {
             if (ref($object) && eval { $object->can('start') }) {
+                $start_attempted = 1;
                 $object->start(context => $context);
-                $object_started = 1;
             }
             $self->_start_v3_jobs($entry);
             1;
@@ -1590,8 +1590,10 @@ sub enable {
         unless ($ok) {
             my $error = _plugin_error_text($@, 'plugin activation failed');
             eval { $self->_stop_v3_jobs($entry) };
+            # A throwing start may already own resources. Give stop a chance
+            # to release them without replacing the original activation error.
             eval { $object->stop(context => $context) }
-                if $object_started && ref($object)
+                if $start_attempted && ref($object)
                     && eval { $object->can('stop') };
             die "PluginManager: failed to start API v3 plugin '$entry->{name}': $error\n";
         }
