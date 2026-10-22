@@ -235,4 +235,22 @@ return sub {
     my $raw_line_loops = () = $src =~ /while \(\$\$buffref =~ s\/\^\(\[\^\\n\]\*\)\\n\/\/\) \{/g;
     $assert->is($raw_line_loops, 1,
         'raw line loop remains only inside the shared bounded extractor');
+
+    # MB901: exercise installed owners in a fresh process with real streams and
+    # a private in-memory DB, isolated from legacy catalogue BEGIN stubs.
+    require JSON::PP;
+    open my $native, '-|', $^X, '-I.', '-It/lib', '-MMB901PartylineFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->utf8->encode(MB901PartylineFixture::run_all())'
+        or die "MB901 native fixture: $!";
+    my $json = do { local $/; <$native> };
+    close $native or die "MB901 native fixture failed: $?";
+    my $results = JSON::PP::decode_json($json);
+    die 'MB901 incomplete fixture matrix' unless @$results == 32;
+    for my $result (@$results) {
+        $assert->ok($result->{ok},
+            "MB901 $result->{transport}: $result->{case} preserves session ownership"
+            . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
+    }
+
 };

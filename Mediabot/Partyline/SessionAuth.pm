@@ -557,6 +557,7 @@ sub _do_login {
         $bot->{logger}->log(1, "Partyline: too many login failures for fd=$id - closing connection");
         $stream->write("Too many authentication failures. Disconnecting.\r\n");
         $stream->close_when_empty;  # flush write before closing
+        $self->_close_session($id);  # MB901: stop buffered input before the flush completes
         return;
     }
 
@@ -588,6 +589,7 @@ sub _do_login {
         $bot->{logger}->log(1, "Partyline: address $bf_ip temporarily blocked (brute-force) - closing fd=$id");
         $stream->write("Too many authentication failures from your address. Try again later.\r\n");
         $stream->close_when_empty;
+        $self->_close_session($id);  # MB901: stop buffered input before the flush completes
         return;
     }
 

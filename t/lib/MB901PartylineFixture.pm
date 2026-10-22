@@ -1,0 +1,222 @@
+package MB901PartylineFixture;
+
+# Run in a fresh Perl process: older catalogue cases install IO::Async stubs.
+# Only listener acceptance, credentials, logging and status publication are fixtures.
+# Transport callbacks, dispatcher, SQL login lookup, streams, timers and cleanup are real.
+use strict;
+use warnings;
+use Socket qw(AF_UNIX SOCK_STREAM PF_UNSPEC);
+use Scalar::Util qw(weaken);
+use IO::Async::Loop;
+use IO::Async::Stream;
+use Future;
+use DBI;
+use Mediabot::Partyline;
+
+{
+    package MB901::Logger;
+    sub log { push @{$_[0]{lines}}, $_[2] }
+    sub remove_console_hook { push @{$_[0]{removed}}, $_[1] }
+    package MB901::Metrics;
+    sub get { $_[0]{$_[1]} // 0 }
+    sub add { $_[0]{$_[1]} += $_[2] }
+    sub inc { $_[0]{$_[1]}++ }
+    package MB901::Conf;
+    sub get_int { my ($s, $key, %opt) = @_; return $key eq 'main.PARTYLINE_LOGIN_MAX_FAILURES' ? 1 : $opt{default} }
+    package MB901::Auth;
+    sub verify_credentials {
+        my ($s, $id, $login, $pass) = @_;
+        $s->{calls}++;
+        return $id == 1 && $login eq 'tester' && $pass eq 'fixture-password';
+    }
+    package MB901::Partyline;
+    our @ISA = ('Mediabot::Partyline');
+    sub _write_runtime_status { $_[0]{status_writes}++ }
+    package MB901::Stream;
+    our @ISA = ('IO::Async::Stream');
+    sub configure {
+        my ($s, %args) = @_;
+        $s->{test_read} = $args{on_read} if $args{on_read};
+        $s->{test_closed} = $args{on_closed} if $args{on_closed};
+        return $s->SUPER::configure(%args);
+    }
+    sub write {
+        my $s = shift;
+        push @{$s->{test_writes}}, $_[0];
+        return $s->SUPER::write(@_);
+    }
+}
+
+sub _pair {
+    socketpair(my $server, my $peer, AF_UNIX, SOCK_STREAM, PF_UNSPEC) or die "socketpair: $!";
+    return (MB901::Stream->new(handle => $server), $peer, fileno($server));
+}
+
+sub _run_one {
+    my ($transport, $case) = @_;
+    my $loop = IO::Async::Loop->new;
+    my ($stream, $peer, $id) = _pair();
+    my $dbh = DBI->connect('dbi:SQLite:dbname=:memory:', '', '', { RaiseError => 1, PrintError => 0 });
+    $dbh->do('CREATE TABLE USER (id_user INTEGER, nickname TEXT, id_user_level INTEGER)');
+    $dbh->do('CREATE TABLE USER_LEVEL (id_user_level INTEGER, level INTEGER, description TEXT)');
+    $dbh->do("INSERT INTO USER VALUES (1, 'tester', 1)");
+    $dbh->do("INSERT INTO USER_LEVEL VALUES (1, 0, 'Owner')");
+    my $log = bless { lines => [], removed => [] }, 'MB901::Logger';
+    my $metrics = bless {}, 'MB901::Metrics';
+    my $auth = bless { calls => 0 }, 'MB901::Auth';
+    my $p = bless {
+        loop => $loop, users => {}, streams => {}, motd => [],
+        bot => { logger => $log, metrics => $metrics, dbh => $dbh,
+                 auth => $auth, conf => bless({}, 'MB901::Conf') },
+    }, 'MB901::Partyline';
+    if ($transport eq 'telnet') {
+        no warnings 'redefine';
+        local *IO::Async::Loop::listen = sub {
+            my (undef, %args) = @_;
+            $args{on_stream}->($stream);
+            return Future->done;
+        };
+        $p->_start_listener;
+    }
+    else {
+        $p->_init_dcc_session($stream, 'tester', 'dcc');
+    }
+    my $gauge = 'mediabot_partyline_sessions_current';
+    my $deliver = sub {
+        my ($text, $eof) = @_;
+        $stream->{test_read}->($stream, \$text, $eof // 0);
+        return $text;
+    };
+    my $login_case = $case =~ /^(?:pipeline|fragment|legacy|session_limit|ip_limit)$/;
+    unless ($login_case) {
+        @{$p->{users}{$id}}{qw(authenticated login level)} = (1, 'tester', 0);
+    }
+    my ($ok, $detail, $replacement, $other_peer);
+    if ($case =~ /^(?:quit|flood|quit_oversize|wire_quit|wire_flood)$/) {
+        my $input = $case =~ /flood$/ ? (".unknown901\n" x 30) . "NEVER-DISPATCH\n"
+                  : $case eq 'quit_oversize' ? ".quit\n" . ('x' x 4097) . "\n"
+                  : ".quit\nNEVER-DISPATCH\nfixture-password\n";
+        if ($case =~ /^wire_/) {
+            # Also drive the installed callback through IO::Async's real read path.
+            syswrite($peer, $input) == length($input) or die "short fixture write: $!";
+            for (1 .. 20) {
+                $loop->loop_once(0.01);
+                last unless $stream->read_handle;
+            }
+        }
+        else { $deliver->($input) }
+        my $out = join '', @{$stream->{test_writes}};
+        my $logs = join "\n", @{$log->{lines}};
+        $ok = !exists($p->{users}{$id}) && !exists($p->{streams}{$id})
+            && $metrics->get($gauge) == 0 && ($p->{status_writes} // 0) == 1
+            && @{$log->{removed}} == 1 && !$auth->{calls}
+            && $logs !~ /NEVER-DISPATCH|fixture-password|exception/
+            && $out !~ /Internal error|Input line too long|Enter your password/;
+        $ok &&= $case =~ /flood$/
+            ? (($p->{_rate_stats}{flood_boots} // 0) == 1
+                && ($p->{_rate_stats}{silent_drops} // 0) == 18
+                && (() = $out =~ /Rate limit exceeded/g) == 1
+                && (() = $out =~ /Flood protection: disconnecting/g) == 1)
+            : (() = $out =~ /Goodbye/g) == 1;
+    }
+    elsif ($case =~ /^(?:absent_read|replaced_read|replaced_eof|replaced_closed)$/) {
+        $p->_close_session($id);
+        if ($case ne 'absent_read') {
+            ($replacement, $other_peer) = _pair();
+            $p->{users}{$id} = { authenticated => 1, login => 'replacement', level => 0 };
+            $p->{streams}{$id} = $replacement;
+            $p->{"_eval_pending_$id"} = { marker => 'replacement' };
+            $metrics->add($gauge, 1);
+        }
+        my $before_logs = @{$log->{lines}};
+        my $before_writes = @{$stream->{test_writes}};
+        if ($case eq 'replaced_closed') { $stream->{test_closed}->($stream) }
+        elsif ($case eq 'replaced_eof') { $deliver->('', 1) }
+        else { $deliver->(".quit\nNEVER-DISPATCH\n") }
+        $ok = @{$log->{lines}} == $before_logs && @{$stream->{test_writes}} == $before_writes
+            && @{$log->{removed}} == 1 && ($p->{status_writes} // 0) == 1 && !$auth->{calls};
+        $ok &&= $case eq 'absent_read'
+            ? (!exists($p->{users}{$id}) && !exists($p->{streams}{$id}) && $metrics->get($gauge) == 0)
+            : (($p->{users}{$id}{login} // '') eq 'replacement'
+                && ($p->{streams}{$id} // 0) == $replacement && $metrics->get($gauge) == 1
+                && ($p->{"_eval_pending_$id"}{marker} // '') eq 'replacement');
+    }
+    elsif ($case eq 'normal_closed' || $case eq 'normal_eof') {
+        if ($case eq 'normal_closed') { $stream->close_now }
+        else { $deliver->(".unknown901\n", 1); $stream->close_now }
+        $ok = !exists($p->{users}{$id}) && !exists($p->{streams}{$id})
+            && $metrics->get($gauge) == 0 && ($p->{status_writes} // 0) == 1
+            && @{$log->{removed}} == 1;
+        # Catch an accidental stream -> on_closed -> stream reference cycle.
+        $stream->{test_read} = undef;
+        $stream->{test_closed} = undef;
+        $deliver = undef;
+        my $weak = $stream;
+        weaken($weak);
+        $stream = undef;
+        $ok &&= !defined($weak);
+    }
+    elsif ($case eq 'session_limit' || $case eq 'ip_limit') {
+        if ($case eq 'ip_limit') {
+            $p->{users}{$id}{peer_ip} = '192.0.2.1';
+            $p->{_pl_login_fail_by_ip}{'192.0.2.1'} = { count => 15, first_ts => time() };
+        }
+        $deliver->("login tester wrong\nlogin tester wrong\nlogin tester fixture-password\nNEVER-DISPATCH\n");
+        my $out = join '', @{$stream->{test_writes}};
+        my $logs = join "\n", @{$log->{lines}};
+        $ok = !exists($p->{users}{$id}) && !exists($p->{streams}{$id})
+            && $metrics->get($gauge) == 0 && ($p->{status_writes} // 0) == 1
+            && $auth->{calls} == ($case eq 'session_limit' ? 1 : 0)
+            && $out =~ /Too many authentication failures/ && $out !~ /Connected to Mediabot/
+            && $logs !~ /NEVER-DISPATCH|fixture-password|exception/;
+    }
+    else {
+        if ($case eq 'legacy') { $deliver->("login tester fixture-password\n.unknown901\n") }
+        elsif ($case eq 'fragment') {
+            my $rest = $deliver->('tes');
+            $rest = $deliver->($rest . "ter\r\nfixture-");
+            $deliver->($rest . "password\r\n.unknown901\r\n");
+        }
+        else { $deliver->("tester\r\nfixture-password\r\n.unknown901\r\n") }
+        my $out = join '', @{$stream->{test_writes}};
+        my $logs = join "\n", @{$log->{lines}};
+        $ok = $p->{users}{$id}{authenticated} && $p->{streams}{$id} == $stream
+            && $metrics->get($gauge) == 1 && $auth->{calls} == 1
+            && ($p->{status_writes} // 0) == 1 && $out =~ /Connected to Mediabot Partyline/
+            && $out =~ /Unknown command/ && $logs !~ /fixture-password|exception/
+            && !exists($p->{users}{$id}{auth_timeout_timer});
+    }
+    $detail = { logs => $log->{lines}, writes => $stream ? $stream->{test_writes} : [],
+        gauge => $metrics->get($gauge), auth_calls => $auth->{calls},
+        user_exists => exists($p->{users}{$id}) ? 1 : 0 } unless $ok;
+    # Close the original only after evaluating the assertions, especially stale callbacks.
+    $stream->close_now if $stream;
+    $p->_close_session($id);
+    $replacement->close_now if $replacement;
+    close $peer;
+    close $other_peer if $other_peer;
+    $dbh->disconnect;
+    return { transport => $transport, case => $case, ok => $ok ? 1 : 0,
+             ($detail ? (detail => $detail) : ()) };
+}
+
+sub run_all {
+    my @results;
+    for my $transport (qw(telnet dcc)) {
+        for my $case (qw(quit flood quit_oversize wire_quit wire_flood absent_read replaced_read replaced_eof
+                         replaced_closed normal_closed normal_eof pipeline fragment legacy
+                         session_limit ip_limit)) {
+            my (@warnings, $result);
+            {
+                local $SIG{__WARN__} = sub { push @warnings, @_ };
+                $result = eval { _run_one($transport, $case) };
+                $result = { transport => $transport, case => $case, ok => 0, error => "$@" } unless $result;
+            }
+            if (@warnings) { $result->{ok} = 0; $result->{warnings} = \@warnings }
+            push @results, $result;
+        }
+    }
+    return \@results;
+}
+
+1;

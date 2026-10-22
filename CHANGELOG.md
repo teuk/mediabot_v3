@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB901 — Keep closed Partyline sessions closed (2026-10-22)
+
+- Stop Telnet/DCC buffered lines immediately after a command removes its session.
+  Reject stale read, EOF and close callbacks unless the registered stream still
+  belongs to that callback, protecting sessions that reuse a connection number.
+- Remove authentication state immediately when per-session or per-address limits
+  require disconnection, while retaining the queued refusal message. Preserve
+  credentials, access levels, thresholds, command routing, input bounds and SQL.
+- Add 32 native behavior assertions to the existing input/lifecycle case, including
+  real stream reads, late callbacks, metrics, stream release and nominal login
+  forms. Keep all numbered cases, 37 security invariants and startup checks.
+  No schema, private configuration, VERSION, service or test-runner change.
+
+
 ### MB900 — Keep pipe EOF separate from asynchronous child collection (2026-10-22)
 
 - Disable automatic EOF closure on the six IO::Async streams backed by Perl
