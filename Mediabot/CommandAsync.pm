@@ -378,6 +378,27 @@ sub _worker_completion_barrier {
     return 1;
 }
 
+# Bound the serialized bytes, not just the number of replies. Keep the
+# historical ten-intent fallback, shrinking its ordered prefix until it fits.
+sub _encode_worker_result {
+    my ($result) = @_;
+    my $payload = eval { JSON::PP::encode_json($result) };
+    return $payload if defined($payload) && length($payload) <= $MAX_PAYLOAD;
+
+    my @intents = @{ $result->{intents} || [] };
+    splice @intents, 10 if @intents > 10;
+    while (1) {
+        $payload = eval { JSON::PP::encode_json({
+            ok => $result->{ok} ? 1 : 0, truncated => 1,
+            intents => [ @intents ],
+        }) };
+        return $payload if defined($payload) && length($payload) <= $MAX_PAYLOAD;
+        last unless @intents;
+        pop @intents;
+    }
+    return '{"ok":0,"stage":"encode","detail":"payload"}';
+}
+
 sub run_ctx_async {
     my ($self, $ctx, $label, $code) = @_;
     return 0 unless $self && $ctx && ref($code) eq 'CODE';
@@ -476,14 +497,7 @@ sub run_ctx_async {
             }
         }
 
-        my $payload = eval { JSON::PP::encode_json($result) };
-        if (!defined($payload) || length($payload) > $MAX_PAYLOAD) {
-            # Trop gros : tronquer les intents plutot que perdre la reponse.
-            my $r2 = { ok => $result->{ok} ? 1 : 0, truncated => 1,
-                       intents => [ @{ $result->{intents} || [] }[0 .. 9] ] };
-            $payload = eval { JSON::PP::encode_json($r2) }
-                // '{"ok":0,"stage":"encode","detail":"payload"}';
-        }
+        my $payload = _encode_worker_result($result);
         my $offset = 0;
         while ($offset < length($payload)) {
             my $written = syswrite($child_write, $payload,

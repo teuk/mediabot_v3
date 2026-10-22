@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB913 — Bound heavy-command results before the worker pipe (2026-10-22)
+
+- Check the serialized UTF-8 bytes of CommandAsync's oversized-result fallback.
+  Keep at most ten real intents and shrink their ordered prefix until the JSON
+  fits the unchanged 64 KiB limit. Avoid clipped JSON and false Database errors.
+- Stop padding short fallback arrays with null entries, which could throw
+  during parent replay when large worker logs triggered the fallback. Keep
+  the existing truncation notice, log-dropping fallback and in-budget behavior.
+- Reuse the MB840 fixture and add eight native fork/pipe/reap assertions to
+  existing case 1226. Compare 43 nominal worker scenarios and a large Unicode
+  probe. Add no fixture or numbered case. No SQL/schema, plugin, private config,
+  VERSION, service, Partyline, runner or audit change.
+
+
 ### MB912 — Preserve Unicode in restart-persistent plugin settings (2026-10-22)
 
 - Serialize the API v3 boot ledger as ASCII JSON with Unicode escapes, avoiding
