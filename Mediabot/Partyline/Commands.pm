@@ -15,6 +15,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Encode qw(encode);
+use Mediabot::IRC::Text qw(decode_irc_text);
 use Mediabot::Helpers ();
 use Mediabot::External ();
 
@@ -1385,10 +1386,11 @@ sub _cmd_plugins {
 # .help
 # ---------------------------------------------------------------------------
 sub _cmd_help {
-    my ($self, $stream, $id) = @_;
-    $stream->write(
+    my ($self, $stream, $id, $arg) = @_;
+    my $help = (
         "Available commands:\r\n"
-      . "  .help               - this help\r\n"
+      . "  .help [command]     - full help or help for one command\r\n"
+      . "  .help search <text> - search command help\r\n"
       . "  .stat               - channel status (owner, chansets, nick count)\r\n"
       . "  .dccstat            - show DCC Partyline listeners and sessions\r\n"
       . "  .whom               - list users currently on the partyline\r\n"
@@ -1407,13 +1409,12 @@ sub _cmd_help {
       . "  .scriptdryrun [status|last|config|timers|canceltimers|events|clearevents|reload] - show external script bridge status and last run, pending timers, event windows\r\n"
       . "  .ai <prompt>        - ask Claude (subcommands: quota, stats, models, history, reset, forget, pin, summary [Administrator+])\r\n"
       . "  .aistats            - show Claude AI usage stats\r\n"
-      . "  .top [n]            - top N speakers across all channels (default 5)\r\n"
-      . "  .seen <nick>        - last activity for a nick in channel logs\r\n"
+      . "  .top <#chan|all> [n] - top speakers (default 5, max 15)\r\n"
       . "  .logs <#chan> [n]   - show last N lines from CHANNEL_LOG (default 10)\r\n"
       . "  .nickinfo <nick>    - show DB info for a registered nick\r\n"
       . "  .kick <nick> <#chan> [reason] - kick a nick from channel\r\n"
       . "  .unmute <nick>               - lift a CC3/AF7 temporary nick mute\r\n"
-      . "  .kv set|get|del|list [key] [val]- persistent in-memory key-value store\r\n"
+      . "  .kv set|get|del|list [key] [val]- shared in-memory key-value store\r\n"
       . "  .floodset <#chan> [w] [n] [s]- override AF4 params (window/max/silence)\r\n"
       . "  .cmdcooldown <#chan> <cmd> <s>- set per-cmd cooldown in seconds (CC1)\r\n"
       . "  .netsplit                    - show netsplit state and channel nicklist status\r\n"
@@ -1421,7 +1422,6 @@ sub _cmd_help {
       . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
       . "  .achievementprofile <nick> <#chan> - explain durable achievement identity (read-only)\r\n"
       . "  .dbstats            - show DB connection and query stats\r\n"
-      . "  .remind <nick> <#chan> <msg> - set a reminder from Partyline\r\n"
       . "  .karmahist [nick]   - show karma history for a channel or nick\r\n"
       . "  .persona [nick]     - view/clear Claude persona (all or specific nick)\r\n"
       . "  .quota [nick]       - show Claude rate limit (all or specific nick)\r\n"
@@ -1431,7 +1431,6 @@ sub _cmd_help {
       . "  .reload             - reload bot configuration (Owner)\r\n"
       . "  .seen <nick>        - last seen event for a nick\r\n"
       . "  .purgereminders     - clean up delivered reminders\r\n"
-      . "  .top [#chan] [n]    - top nicks on a channel\r\n"
       . "  .remind <nick> <msg> - set IRC reminder from partyline\r\n"
       . "  .who <nick>         - find nick on joined channels\r\n"
       . "  .bcast <msg>        - broadcast to all joined channels (Master+)\r\n"
@@ -1456,7 +1455,7 @@ sub _cmd_help {
       . "  .bans #chan         - list active channel bans\r\n"
       . "  .unban #chan <mask|id> - remove an active ban\r\n"
       . "  .topic #chan [text] - show or change channel topic\r\n"
-      . "  .history          - show last 10 commands this session\r\n"
+      . "  .history [1-10|find <text>|clear] - private session command history\r\n"
       . "  .boot <handle>      - kick a user off the partyline (Owner)\r\n"
       . "  .motd [text|add <line>|clear]  - show/set/append/clear MOTD (Owner)\r\n"
       . "  .quit               - close this partyline session\r\n"
@@ -1464,6 +1463,39 @@ sub _cmd_help {
       . "Chat:\r\n"
       . "  <text>              - broadcast to all partyline users\r\n"
     );
+
+    $arg //= '';
+    $arg =~ s/^\s+|\s+$//g;
+    if ($arg eq '') {
+        $stream->write($help);
+        return;
+    }
+
+    my @matches;
+    my @lines = grep { /^  \./ } split /\r\n/, $help;
+    if ($arg =~ /^search(?:\s+(.*))?$/i) {
+        my $query = lc(decode_irc_text($1 // ''));
+        unless (length($query) && length($query) <= 128) {
+            $stream->write("Usage: .help [command] or .help search <text> (1-128 characters)\r\n");
+            return;
+        }
+        @matches = grep { index(lc(decode_irc_text($_)), $query) >= 0 } @lines;
+    }
+    else {
+        my $command = lc($arg);
+        $command =~ s/^\.//;
+        $command = 'dccstat' if $command eq 'dcc';
+        @matches = grep { /^  \.([a-z0-9]+)/i && lc($1) eq $command } @lines;
+    }
+    unless (@matches) {
+        $stream->write("No matching command help. Use .help or .help search <text>.\r\n");
+        return;
+    }
+    my $total = scalar @matches;
+    splice @matches, 12 if @matches > 12;
+    $stream->write("Command help:\r\n" . join("\r\n", @matches) . "\r\n");
+    $stream->write("Showing 12 of $total matches; refine your search.\r\n") if $total > 12;
+
 }
 
 # ---------------------------------------------------------------------------
@@ -4602,17 +4634,43 @@ sub _cmd_flushcooldown {
 # =============================================================================
 
 sub _cmd_history {
-    my ($self, $stream, $id) = @_;
+    my ($self, $stream, $id, $arg) = @_;
+    $arg //= '';
+    $arg =~ s/^\s+|\s+$//g;
 
     my $hist = $self->{users}{$id}{history} // [];
-    unless (@$hist) {
-        $stream->write("No command history for this session.\r\n");
+    my @entries = @$hist;
+    my $finding = 0;
+    if (lc($arg) eq 'clear') {
+        delete $self->{users}{$id}{history};
+        $stream->write("Session command history cleared.\r\n");
+        return;
+    }
+    elsif ($arg =~ /^(?:[1-9]|10)$/) {
+        @entries = @entries[-$arg .. -1] if @entries > $arg;
+    }
+    elsif ($arg =~ /^find\s+(.+)$/i) {
+        my $query = lc(decode_irc_text($1));
+        if (length($query) > 128) {
+            $stream->write("History search is limited to 128 characters.\r\n");
+            return;
+        }
+        $finding = 1;
+        @entries = grep { index(lc(decode_irc_text($_)), $query) >= 0 } @entries;
+    }
+    elsif ($arg ne '') {
+        $stream->write("Usage: .history [1-10|find <text>|clear]\r\n");
+        return;
+    }
+    unless (@entries) {
+        $stream->write($finding ? "No matching commands in this session's history.\r\n"
+                               : "No command history for this session.\r\n");
         return;
     }
 
-    $stream->write("Recent commands:\r\n");
+    $stream->write($finding ? "Matching commands:\r\n" : "Recent commands:\r\n");
     my $i = 1;
-    for my $cmd (@$hist) {
+    for my $cmd (@entries) {
         $stream->write(sprintf("  %2d  %s\r\n", $i++, $cmd));
     }
 }

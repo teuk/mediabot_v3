@@ -324,6 +324,35 @@ Keep DCC ports restricted to the smallest useful range.
 
 ---
 
+## Finding commands and using session history
+
+The same tools are available after authentication on Telnet and DCC CHAT.
+They use the existing help text and per-connection memory; no database schema
+or persistent storage is required.
+
+| Command | Result |
+| --- | --- |
+| `.help` | Full command list. |
+| `.help plugins` | Help lines for the exact command. A leading dot is optional. |
+| `.help dcc` | Help for the existing `.dccstat` / `.dcc` alias. |
+| `.help search timer` | Literal, case-insensitive search in command names and descriptions. |
+| `.history` | The last ten recorded commands in the current session. |
+| `.history 5` | The five most recent retained commands, oldest first. |
+| `.history find café` | Literal, case-insensitive search in the retained history, including valid UTF-8. |
+| `.history clear` | Clear only this connection's in-memory history. |
+
+Help search returns at most twelve lines and asks you to refine broader matches.
+Search text is limited to 128 characters. Session history retains ten commands;
+it cannot retrieve older commands, history from another connection, or history
+from a previous login. History requests are neither recorded in that history nor
+announced to other Partyline users. Server-side input logging retains its existing
+policy. No history operation re-executes a stored command.
+
+These tools keep the normal authentication and rate limits. They do not change
+the permissions or execution of the commands described in the help output.
+
+---
+
 ## Quick validation checklist
 
 After changing DCC settings or Partyline code:

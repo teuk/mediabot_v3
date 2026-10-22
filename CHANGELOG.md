@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB903 — Add focused Partyline help and private history tools (2026-10-22)
+
+- Add `.help <command>` and `.help search <text>` using the existing help text,
+  with literal matching, a twelve-line search bound and the existing DCC alias.
+  Remove duplicate help entries and correct the top/remind syntax and KV storage
+  description without changing those command implementations.
+- Extend `.history` with a recent-count selector, literal UTF-8-aware search and
+  current-session clearing. Keep the existing ten-entry capacity and default
+  output. History requests stay out of stored history and peer announcements;
+  searches never replay commands. Reuse IRC::Text for safe comparison decoding.
+- Add 26 behavior assertions to the existing unit case, reusing the native
+  Partyline fixture for authentication, privacy, rate limits and Telnet/DCC
+  routing. Keep every numbered case and all 37 security invariants. No schema,
+  production SQL, private configuration, VERSION, service or runner change.
+
+
 ### MB902 — Decode Partyline Telnet framing once per wire byte (2026-10-22)
 
 - Add a small stateful Partyline::Telnet input filter. Keep decoded partial lines

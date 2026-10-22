@@ -92,7 +92,30 @@ sub _run_one {
         @{$p->{users}{$id}}{qw(authenticated login level)} = (1, 'tester', 0);
     }
     my ($ok, $detail, $replacement, $other_peer);
-    if ($case =~ /^(?:quit|flood|quit_oversize|wire_quit|wire_flood)$/) {
+    if ($case eq 'tools') {
+        require Encode;
+        $p->{users}{$id}{history} = _tools_history();
+        $p->{bot}{dbh} = bless {}, 'MB903::NoIO';
+        $p->{bot}{db} = bless {}, 'MB903::NoIO';
+        $p->{bot}{irc} = bless {}, 'MB903::NoIO';
+        my $observer = bless {out => ''}, 'MB903::Buffer';
+        $p->{users}{9999} = {authenticated=>1,login=>'observer',level=>1,history=>['11:00 .ping']};
+        $p->{streams}{9999} = $observer;
+        my $input = Encode::encode('UTF-8', ".help plugins\n.history 2\n.history find CAF\x{c9}\n.history clear\n");
+        syswrite($peer,$input)==length($input) or die "short native tools write: $!";
+        $loop->loop_once(0.01) for 1..10;
+        my $out = join '', @{$stream->{test_writes}};
+        $ok = $out =~ /Command help:/ && $out =~ /plugin lifecycle \(v2\)/
+            && $out =~ /Recent commands:/ && $out =~ /Matching commands:/
+            && $out =~ /Session command history cleared/
+            && index($out, _tools_history()->[5]) >= 0
+            && !exists($p->{users}{$id}{history}) && !$auth->{calls}
+            && (()=$observer->{out}=~/\[tester\@/g)==1
+            && $observer->{out} !~ /history/i
+            && $p->{users}{9999}{history}[0] eq '11:00 .ping';
+        delete $p->{users}{9999}; delete $p->{streams}{9999};
+    }
+    elsif ($case =~ /^(?:quit|flood|quit_oversize|wire_quit|wire_flood)$/) {
         my $input = $case =~ /flood$/ ? (".unknown901\n" x 30) . "NEVER-DISPATCH\n"
                   : $case eq 'quit_oversize' ? ".quit\n" . ('x' x 4097) . "\n"
                   : ".quit\nNEVER-DISPATCH\nfixture-password\n";
@@ -349,6 +372,138 @@ sub run_telnet {
         $r->{case} = $spec->[0];
         if (@warnings) { $r->{ok} = 0; $r->{warnings} = \@warnings }
         push @results, $r;
+    }
+    return \@results;
+}
+
+# MB903: help/history features operate on existing per-session state only.
+{
+    package MB903::Buffer;
+    sub write { $_[0]{out} .= $_[1]; 1 }
+    package MB903::NoIO;
+    our $AUTOLOAD;
+    sub AUTOLOAD { die "Unexpected external operation: $AUTOLOAD\n" }
+    sub DESTROY { }
+}
+
+sub _tools_history {
+    require Encode;
+    return [
+        '10:00 .ping', '10:01 .status', '10:02 .channels',
+        '10:03 .say #test literal .*', '10:04 .unknown903',
+        Encode::encode('UTF-8', "10:05 .say #test caf\x{e9}"),
+        '10:06 .metrics', '10:07 .ping', '10:08 .whom', '10:09 .help',
+    ];
+}
+
+sub _tools_context {
+    my $out = bless {out => ''}, 'MB903::Buffer';
+    my $other = bless {out => ''}, 'MB903::Buffer';
+    my $p = bless {
+        users => {7 => {authenticated=>1,login=>'tester',level=>1,history=>_tools_history()},
+                  8 => {authenticated=>1,login=>'other',level=>0,history=>['11:00 .ping']}},
+        streams => {7=>$out,8=>$other},
+        bot => {logger=>bless({lines=>[],removed=>[]},'MB901::Logger'),
+                metrics=>bless({},'MB901::Metrics'),
+                dbh=>bless({},'MB903::NoIO'),db=>bless({},'MB903::NoIO'),
+                irc=>bless({},'MB903::NoIO')},
+    }, 'MB901::Partyline';
+    return ($p, $out, $other);
+}
+
+sub run_tools {
+    my @specs = (
+        ['help_full', ['.help'], sub {
+            my ($p,$s)=@_; my $x=$s->{out};
+            my $seen=()=$x=~/^  \.seen /mg; my $top=()=$x=~/^  \.top /mg; my $remind=()=$x=~/^  \.remind /mg;
+            $x =~ /^Available commands:/ && $x =~ /\.help search <text>/ && $x =~ /\.history \[1-10\|find/
+                && $seen==1 && $top==1 && $remind==1 && $x =~ /plugin lifecycle \(v2\)/;
+        }],
+        ['help_command', ['.help plugins'], sub {$_[1]{out}=~/^Command help:/ && (()=$_[1]{out}=~/^  \.plugins /mg)==6 && $_[1]{out}!~/^  \.whois /m}],
+        ['help_case_dot', ['.HeLp .PiNg'], sub {$_[1]{out}=~/^Command help:\r\n  \.ping / && $_[1]{out}!~/Unknown command/}],
+        ['help_alias', ['.help dcc'], sub {$_[1]{out}=~/^Command help:\r\n  \.dccstat /}],
+        ['help_search', ['.help search TiMeR'], sub {$_[1]{out}=~/^Command help:/ && $_[1]{out}=~/\.timers / && $_[1]{out}=~/\.scriptdryrun / && $_[1]{out}!~/^  \.raw /m}],
+        ['help_literal', ['.help search .*'], sub {$_[1]{out}=~/^No matching command help\./}],
+        ['help_bounded', ['.help search -'], sub {(()=$_[1]{out}=~/^  \./mg)==12 && $_[1]{out}=~/Showing 12 of \d+ matches; refine/}],
+        ['help_missing_search', ['.help search'], sub {$_[1]{out}=~/^Usage: \.help /}],
+        ['help_query_limit', ['.help search '.('x'x129)], sub {$_[1]{out}=~/^Usage: \.help /}],
+        ['help_unknown', ['.help unknown903'], sub {$_[1]{out}=~/^No matching command help\./}],
+        ['help_corrected_usage', ['.help top','.help remind'], sub {$_[1]{out}=~/\.top <#chan\|all> \[n\]/ && $_[1]{out}=~/\.remind <nick> <msg>/ && $_[1]{out}!~/\.remind <nick> <#chan>/}],
+        ['history_default', ['.history'], sub {
+            my $expected="Recent commands:\r\n"; my $i=1;
+            $expected.=sprintf("  %2d  %s\r\n",$i++,$_) for @{_tools_history()};
+            $_[1]{out} eq $expected;
+        }],
+        ['history_recent', ['.history 2'], sub {$_[1]{out} eq "Recent commands:\r\n   1  10:08 .whom\r\n   2  10:09 .help\r\n"}],
+        ['history_search', ['.history find PiNg'], sub {$_[1]{out} eq "Matching commands:\r\n   1  10:00 .ping\r\n   2  10:07 .ping\r\n"}],
+        ['history_utf8', [Encode::encode('UTF-8',".history find CAF\x{c9}")], sub {
+            $_[1]{out} eq "Matching commands:\r\n   1  "._tools_history()->[5]."\r\n";
+        }],
+        ['history_literal', ['.history find .*'], sub {$_[1]{out} eq "Matching commands:\r\n   1  10:03 .say #test literal .*\r\n"}],
+        ['history_no_match', ['.history find unknown-no-match'], sub {$_[1]{out} eq "No matching commands in this session's history.\r\n"}],
+        ['history_bad_arguments', [map {'.history '.$_} ('0','11','-1','replay 1','clear now')], sub {(()=$_[1]{out}=~/Usage: \.history/g)==5}],
+        ['history_clear', ['.history clear'], sub {$_[1]{out} eq "Session command history cleared.\r\n" && !exists $_[0]{users}{7}{history}}],
+        ['history_empty', ['.history clear','.history','.history find ping'], sub {$_[1]{out} eq "Session command history cleared.\r\nNo command history for this session.\r\nNo matching commands in this session's history.\r\n"}],
+        ['history_limit', ['.history find '.('x'x129)], sub {$_[1]{out} eq "History search is limited to 128 characters.\r\n"}],
+        ['history_retention', [(map {'.unknown'.$_} 1..12),'.history 2'], sub {
+            my $h=$_[0]{users}{7}{history};
+            @$h==10 && $h->[0]=~/\.unknown3$/ && $h->[-1]=~/\.unknown12$/
+                && $_[1]{out}=~/Recent commands:\r\n   1  \d\d:\d\d \.unknown11\r\n   2  \d\d:\d\d \.unknown12\r\n$/;
+        }],
+    );
+    my @results;
+    for my $spec (@specs) {
+        my ($name,$lines,$check)=@$spec;
+        my ($p,$out,$other)=_tools_context();
+        my $before=join "\0", @{$p->{users}{7}{history}};
+        my (@warnings,$ok,$error);
+        { local $SIG{__WARN__}=sub {push @warnings,@_};
+          $ok=eval {
+            for my $line (@$lines) {
+                # Exercise history capacity without intentionally triggering the separate flood policy.
+                $p->{users}{7}{rate_count}=0 if $name eq 'history_retention';
+                $p->_handle_line($out,7,$line);
+            }
+            $check->($p,$out,$other);
+          }; $error=$@; }
+        $ok &&= join("\0",@{$p->{users}{8}{history}}) eq '11:00 .ping';
+        if ($name =~ /^history_/ && $name ne 'history_retention') {
+            $ok &&= $other->{out} eq '';
+            $ok &&= join("\0",@{$p->{users}{7}{history}//[]}) eq $before
+                unless $name eq 'history_clear' || $name eq 'history_empty';
+        }
+        push @results,{case=>$name,ok=>$ok && !@warnings && !$error ? 1:0,
+            (@warnings?(warnings=>\@warnings):()),($error?(error=>$error):())};
+    }
+    my $preauth_ok = 1;
+    for my $line ('.history clear', '.help plugins') {
+        my ($p,$out,$other) = _tools_context();
+        $p->{users}{7}{authenticated} = 0;
+        $p->{users}{7}{auth_stage} = 'nick';
+        my $before = join "\0", @{$p->{users}{7}{history}};
+        $p->_handle_line($out,7,$line);
+        $preauth_ok &&= ($p->{users}{7}{auth_stage} // '') eq 'pass'
+            && join("\0",@{$p->{users}{7}{history}}) eq $before
+            && $other->{out} eq '' && $out->{out} !~ /Command help|history cleared/;
+    }
+    push @results, {case=>'authentication_gate',ok=>$preauth_ok?1:0};
+    {
+        my ($p,$out,$other) = _tools_context();
+        my $before = join "\0", @{$p->{users}{7}{history}};
+        $p->_handle_line($out,7,'.history 1') for 1..12;
+        push @results, {case=>'history_rate_limit',ok=>
+            (()=$out->{out}=~/Recent commands:/g)==10
+            && (()=$out->{out}=~/Rate limit exceeded/g)==1
+            && $other->{out} eq ''
+            && join("\0",@{$p->{users}{7}{history}}) eq $before ? 1:0};
+    }
+    for my $transport (qw(telnet dcc)) {
+        my (@warnings,$r);
+        { local $SIG{__WARN__}=sub {push @warnings,@_};
+          $r=eval {_run_one($transport,'tools')}; $r||={ok=>0,error=>"$@"}; }
+        $r->{case}='native_tools_'.$transport;
+        if (@warnings) {$r->{ok}=0;$r->{warnings}=\@warnings}
+        push @results,$r;
     }
     return \@results;
 }

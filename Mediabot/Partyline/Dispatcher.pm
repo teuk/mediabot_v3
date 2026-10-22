@@ -132,8 +132,8 @@ sub _handle_line {
     }
 
     # ---- Authenticated : dispatch commands --------------------------------
-    # Record command in per-session history (max 10, skip .history itself)
-    if ($line =~ /^\./ && $line !~ /^\.history$/i) {
+    # Record command in per-session history (max 10, skip all .history requests).
+    if ($line =~ /^\./ && $line !~ /^\.history(?:\s|$)/i) {
         $self->{users}{$id}{history} //= [];
         # Z8: store with timestamp for .history display
         my @_ht = localtime(time); my $_hts = sprintf('%02d:%02d', $_ht[2], $_ht[1]);
@@ -145,7 +145,8 @@ sub _handle_line {
 
     # Announce dot-commands to all other partyline users so every session
     # knows who triggered what, without needing to run .whom.
-    if ($line =~ /^\./ && $line !~ /^\.quit$/i) {
+    # History inspection and clearing are private to the requesting session.
+    if ($line =~ /^\./ && $line !~ /^\.(?:quit$|history(?:\s|$))/i) {
         my $cmd_display = $self->_display_nick($id);
         $self->_broadcast("[${cmd_display}] $line", $id);
     }
@@ -290,9 +291,9 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.topic' }) if $self->{bot}->{metrics};
         $self->_cmd_topic($stream, $id, $1, $2)
     }
-    elsif ($line =~ /^\.history$/i) {
+    elsif ($line =~ /^\.history(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.history' }) if $self->{bot}->{metrics};
-        $self->_cmd_history($stream, $id)
+        $self->_cmd_history($stream, $id, $1)
     }
     elsif ($line =~ /^\.ban\s+(#\S+)\s+(\S+)(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.ban' }) if $self->{bot}->{metrics};
@@ -304,9 +305,9 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.bans' }) if $self->{bot}->{metrics};
         $self->_cmd_bans($stream, $id, $1)
     }
-    elsif ($line =~ /^\.help$/i) {
+    elsif ($line =~ /^\.help(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.help' }) if $self->{bot}->{metrics};
-        $self->_cmd_help($stream, $id)
+        $self->_cmd_help($stream, $id, $1)
     }
     elsif ($line =~ /^\.stat$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.stat' }) if $self->{bot}->{metrics};

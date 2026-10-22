@@ -204,4 +204,19 @@ return sub {
             . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
     }
 
+
+    # MB903: use real routing with guarded local state and native Telnet/DCC reads.
+    open my $tools, '-|', $^X, '-I.', '-It/lib', '-MMB901PartylineFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->utf8->encode(MB901PartylineFixture::run_tools())'
+        or die "MB903 tools fixture: $!";
+    my $tools_json = do { local $/; <$tools> };
+    close $tools or die "MB903 tools fixture failed: $?";
+    my $tool_results = JSON::PP::decode_json($tools_json);
+    die 'MB903 incomplete tools matrix' unless @$tool_results == 26;
+    for my $result (@$tool_results) {
+        $assert->ok($result->{ok}, "MB903 Partyline tools: $result->{case}"
+            . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
+    }
+
 };
