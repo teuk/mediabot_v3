@@ -92,7 +92,35 @@ sub _run_one {
         @{$p->{users}{$id}}{qw(authenticated login level)} = (1, 'tester', 0);
     }
     my ($ok, $detail, $replacement, $other_peer);
-    if ($case eq 'tools') {
+    if ($case eq 'presence') {
+        $p->{bot}{dbh} = bless {}, 'MB903::NoIO';
+        $p->{bot}{db} = bless {}, 'MB903::NoIO';
+        $p->{bot}{irc} = bless {}, 'MB903::NoIO';
+        my $observer = bless {out => ''}, 'MB903::Buffer';
+        $p->{users}{9999} = {authenticated=>1,login=>'observer',level=>1,history=>['11:00 .ping']};
+        $p->{streams}{9999} = $observer;
+        for my $input (".away caf\xc3", "\xa9\n.whom away\n.back\n.whom away\n") {
+            syswrite($peer,$input)==length($input) or die "short native presence write: $!";
+            $loop->loop_once(0.01) for 1..5;
+        }
+        require Fcntl;
+        fcntl($peer,Fcntl::F_SETFL(),fcntl($peer,Fcntl::F_GETFL(),0)|Fcntl::O_NONBLOCK())
+            or die "presence peer nonblocking: $!";
+        my $wire = '';
+        while (sysread($peer,my $chunk,65536)) {$wire.=$chunk}
+        my $out = join '', @{$stream->{test_writes}};
+        $ok = $out =~ /Marked away: caf\xc3\xa9\r\n/
+            && $wire =~ /Marked away: caf\xc3\xa9\r\n/ && $wire !~ /caf\xc3\x83\xc2\xa9/
+            && $wire =~ /You are back/
+            && $out =~ /Partyline users \(1\):/ && $out =~ /away: caf\xc3\xa9/
+            && $out =~ /You are back/ && $out =~ /No matching partyline sessions/
+            && !exists($p->{users}{$id}{away}) && !$auth->{calls}
+            && (()=$observer->{out}=~/is away:/g)==1 && (()=$observer->{out}=~/is back\./g)==1
+            && $p->{users}{9999}{history}[0] eq '11:00 .ping'
+            && @{$p->{users}{$id}{history}}==4;
+        delete $p->{users}{9999}; delete $p->{streams}{9999};
+    }
+    elsif ($case eq 'tools') {
         require Encode;
         $p->{users}{$id}{history} = _tools_history();
         $p->{bot}{dbh} = bless {}, 'MB903::NoIO';
@@ -502,6 +530,178 @@ sub run_tools {
         { local $SIG{__WARN__}=sub {push @warnings,@_};
           $r=eval {_run_one($transport,'tools')}; $r||={ok=>0,error=>"$@"}; }
         $r->{case}='native_tools_'.$transport;
+        if (@warnings) {$r->{ok}=0;$r->{warnings}=\@warnings}
+        push @results,$r;
+    }
+    return \@results;
+}
+
+# MB904: connection-scoped presence, actual routing and guarded external I/O.
+sub _presence_context {
+    my ($p,$out,$other) = _tools_context();
+    @{$p->{users}{7}}{qw(peer_host peer_ip level_desc)} = ('host7','192.0.2.7','Master');
+    @{$p->{users}{8}}{qw(peer_host peer_ip level_desc is_dcc)} = ('host8','192.0.2.8','Owner',1);
+    $p->{users}{9} = {authenticated=>1,login=>'third',level=>1,level_desc=>'Master',
+        peer_host=>'host9',away=>'Lunch'};
+    $p->{users}{10} = {authenticated=>0,login=>'hidden',away=>'hidden-reason',is_dcc=>1};
+    $p->{streams}{9} = bless {out=>''}, 'MB903::Buffer';
+    $p->{streams}{10} = bless {out=>''}, 'MB903::Buffer';
+    return ($p,$out,$other);
+}
+
+sub run_presence {
+    require Encode;
+    my @specs = (
+        ['away_default', ['.away'], sub {
+            $_[0]{users}{7}{away} eq 'Away' && $_[1]{out} eq "Marked away: Away\r\n"
+                && $_[2]{out} eq "*** tester\@host7/192.0.2.7 is away: Away ***\r\n";
+        }],
+        ['away_update', ['.away Lunch','.away Maintenance'], sub {
+            $_[0]{users}{7}{away} eq 'Maintenance'
+                && $_[2]{out} eq "*** tester\@host7/192.0.2.7 is away: Lunch ***\r\n*** tester\@host7/192.0.2.7 is away: Maintenance ***\r\n";
+        }],
+        ['away_repeat', ['.away Lunch','.away Lunch'], sub {
+            $_[1]{out} eq "Marked away: Lunch\r\nAlready away: Lunch\r\n"
+                && (()=$_[2]{out}=~/is away:/g)==1;
+        }],
+        ['away_utf8_bytes', [Encode::encode('UTF-8',".AwAy  caf\x{e9} \x{1f600}  ")], sub {
+            $_[0]{users}{7}{away} eq Encode::encode('UTF-8',"caf\x{e9} \x{1f600}")
+                && !utf8::is_utf8($_[0]{users}{7}{away})
+                && index($_[2]{out},$_[0]{users}{7}{away})>=0;
+        }],
+        ['away_exact_budget', [Encode::encode('UTF-8', '.away '.("\x{1f600}"x40))], sub {
+            length($_[0]{users}{7}{away})==160 && $_[1]{out}=~/^Marked away:/;
+        }],
+        ['away_reject_budget', ['.away Good', '.away '.('x'x161),Encode::encode('UTF-8','.away '.("\x{1f600}"x40).'x')], sub {
+            $_[0]{users}{7}{away} eq 'Good' && (()=$_[1]{out}=~/Usage: \.away/g)==2
+                && (()=$_[2]{out}=~/is away:/g)==1 && $_[2]{out}!~/xxxxxxxx/;
+        }],
+        ['away_reject_controls', ['.away Good',".away a\e[31mb",".away a\x00b",Encode::encode('UTF-8',".away a\x{9b}b")], sub {
+            $_[0]{users}{7}{away} eq 'Good' && (()=$_[1]{out}=~/Usage: \.away/g)==3
+                && (()=$_[2]{out}=~/is away:/g)==1 && $_[2]{out}!~/\e|\x00/;
+        }],
+        ['away_reject_utf8', ['.away Good',".away bad\xc3",".away bad\xff"], sub {
+            $_[0]{users}{7}{away} eq 'Good' && (()=$_[1]{out}=~/Usage: \.away/g)==2
+                && (()=$_[2]{out}=~/is away:/g)==1;
+        }],
+        ['back', ['.away Lunch','.BaCk'], sub {
+            !exists($_[0]{users}{7}{away}) && $_[1]{out} eq "Marked away: Lunch\r\nYou are back.\r\n"
+                && $_[2]{out}=~/is back\. \*\*\*\r\n\z/;
+        }],
+        ['back_repeat', ['.back','.back'], sub {
+            !exists($_[0]{users}{7}{away}) && $_[1]{out} eq ("You are already back.\r\n"x2) && $_[2]{out} eq '';
+        }],
+        ['back_invalid', ['.away Lunch','.back now'], sub {
+            $_[0]{users}{7}{away} eq 'Lunch' && $_[1]{out}=~/Usage: \.back\r\n\z/
+                && $_[2]{out}!~/is back|\.back now/;
+        }],
+        ['whom_all', ['.whom'], sub {
+            $_[1]{out}=~/^Partyline users \(3\):/ && $_[1]{out}=~/fd=7 / && $_[1]{out}=~/fd=8 /
+                && $_[1]{out}=~/fd=9 .*away: Lunch/ && $_[1]{out}!~/hidden/;
+        }],
+        ['whom_away', ['.whom AwAy'], sub {
+            $_[1]{out}=~/^Partyline users \(1\):/ && $_[1]{out}=~/third\@host9/ && $_[1]{out}!~/tester\@|other\@|hidden/;
+        }],
+        ['whom_here', ['.whom here'], sub {
+            $_[1]{out}=~/^Partyline users \(2\):/ && $_[1]{out}=~/tester\@/ && $_[1]{out}=~/other\@/ && $_[1]{out}!~/third\@|hidden/;
+        }],
+        ['whom_telnet', ['.whom telnet'], sub {
+            $_[1]{out}=~/^Partyline users \(2\):/ && $_[1]{out}=~/tester\@/ && $_[1]{out}=~/third\@/ && $_[1]{out}!~/other\@|hidden/;
+        }],
+        ['whom_dcc', ['.whom DCC'], sub {
+            $_[1]{out}=~/^Partyline users \(1\):/ && $_[1]{out}=~/other\@/ && $_[1]{out}!~/tester\@|third\@|hidden/;
+        }],
+        ['whom_invalid', ['.whom nobody','.whom away dcc'], sub {
+            $_[1]{out} eq ("Usage: .whom [all|away|here|telnet|dcc]\r\n"x2);
+        }],
+        ['chat_while_away', ['.away Lunch','still talking'], sub {
+            $_[0]{users}{7}{away} eq 'Lunch' && $_[1]{out}=~/<tester\@host7\/192\.0\.2\.7> still talking\r\n\z/
+                && $_[2]{out}=~/<tester\@host7\/192\.0\.2\.7> still talking\r\n\z/;
+        }],
+        ['help_presence', ['.help away','.help back','.help whom'], sub {
+            $_[1]{out}=~/\.away \[reason\]/ && $_[1]{out}=~/\.back / && $_[1]{out}=~/\.whom \[all\|away\|here\|telnet\|dcc\]/;
+        }],
+    );
+    my @results;
+    for my $spec (@specs) {
+        my ($name,$lines,$check)=@$spec;
+        my ($p,$out,$other)=_presence_context();
+        my (@warnings,$ok,$error);
+        { local $SIG{__WARN__}=sub {push @warnings,@_};
+          $ok=eval {$p->_handle_line($out,7,$_) for @$lines; $check->($p,$out,$other)}; $error=$@; }
+        $ok &&= !exists($p->{users}{8}{away}) && $p->{users}{9}{away} eq 'Lunch'
+            && $p->{streams}{10}{out} eq '' && $p->{users}{8}{history}[0] eq '11:00 .ping';
+        push @results,{case=>$name,ok=>$ok && !@warnings && !$error ? 1:0,
+            (@warnings?(warnings=>\@warnings):()),($error?(error=>$error):())};
+    }
+    # Check connection isolation even when one account has two simultaneous sessions.
+    for my $case (qw(same_account close_and_reuse flagged_unicode empty_filter rate_limit preauth)) {
+        my ($p,$out,$other)=_presence_context();
+        my (@warnings,$ok,$error);
+        { local $SIG{__WARN__}=sub {push @warnings,@_};
+          $ok=eval {
+            if ($case eq 'same_account') {
+                $p->{users}{8}{login}='tester';
+                $p->_handle_line($out,7,'.away Lunch');
+                $p->_handle_line($other,8,'.back');
+                $p->{users}{7}{away} eq 'Lunch' && !exists($p->{users}{8}{away})
+                    && $other->{out}=~/You are already back/;
+            }
+            elsif ($case eq 'close_and_reuse') {
+                $p->_handle_line($out,7,'.away Lunch');
+                $p->_close_session(7);
+                my $gone=!exists($p->{users}{7}) && !exists($p->{streams}{7});
+                $p->{users}{7}={authenticated=>1,login=>'fresh',level=>1};
+                $p->{streams}{7}=$out; $out->{out}='';
+                $p->_handle_line($out,7,'.back');
+                $gone && $out->{out} eq "You are already back.\r\n" && !exists($p->{users}{7}{away});
+            }
+            elsif ($case eq 'flagged_unicode') {
+                $p->_cmd_away($out,7,"caf\x{e9} \x{1f600}");
+                $p->{users}{7}{away} eq Encode::encode('UTF-8',"caf\x{e9} \x{1f600}")
+                    && !utf8::is_utf8($p->{users}{7}{away});
+            }
+            elsif ($case eq 'empty_filter') {
+                delete $p->{users}{9}{away};
+                $p->_handle_line($out,7,'.whom away');
+                $out->{out} eq "No matching partyline sessions.\r\n";
+            }
+            elsif ($case eq 'rate_limit') {
+                $p->_handle_line($out,7,'.away Lunch') for 1..12;
+                $p->{users}{7}{away} eq 'Lunch' && (()=$out->{out}=~/Marked away:/g)==1
+                    && (()=$out->{out}=~/Already away:/g)==9 && (()=$out->{out}=~/Rate limit exceeded/g)==1
+                    && (()=$other->{out}=~/is away:/g)==1;
+            }
+            else {
+                my $gated=1;
+                for my $line ('.away Lunch','.back','.whom away') {
+                    my ($q,$s,$o)=_presence_context();
+                    $q->{users}{7}{authenticated}=0; $q->{users}{7}{auth_stage}='nick';
+                    $q->_handle_line($s,7,$line);
+                    $gated &&= !exists($q->{users}{7}{away}) && $o->{out} eq ''
+                        && ($q->{users}{7}{auth_stage}//'') eq 'pass';
+                }
+                for my $method (qw(_cmd_away _cmd_back)) {
+                    for my $existing (0,1) {
+                        my ($q,$s,$o)=_presence_context();
+                        if ($existing) {$q->{users}{7}{authenticated}=0}
+                        else {delete $q->{users}{7}}
+                        $q->$method($s,7,'');
+                        $gated &&= $s->{out} eq "Authentication required.\r\n" && $o->{out} eq ''
+                            && ($existing ? !exists($q->{users}{7}{away}) : !exists($q->{users}{7}));
+                    }
+                }
+                $gated;
+            }
+          }; $error=$@; }
+        push @results,{case=>$case,ok=>$ok && !@warnings && !$error ? 1:0,
+            (@warnings?(warnings=>\@warnings):()),($error?(error=>$error):())};
+    }
+    for my $transport (qw(telnet dcc)) {
+        my (@warnings,$r);
+        {local $SIG{__WARN__}=sub {push @warnings,@_};
+         $r=eval {_run_one($transport,'presence')}; $r||={ok=>0,error=>"$@"};}
+        $r->{case}='native_presence_'.$transport;
         if (@warnings) {$r->{ok}=0;$r->{warnings}=\@warnings}
         push @results,$r;
     }

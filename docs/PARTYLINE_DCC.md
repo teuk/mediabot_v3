@@ -353,6 +353,39 @@ the permissions or execution of the commands described in the help output.
 
 ---
 
+## Connection presence and session filters (MB904)
+
+Authenticated Telnet and DCC users can mark one connection away and filter the
+existing session list. These commands use memory only, with no database or
+configuration change.
+
+| Command | Result |
+| --- | --- |
+| `.away` | Mark this connection away with the default reason `Away`. |
+| `.away Maintenance en cours` | Set or update the reason, visible to other authenticated Partyline users. |
+| `.back` | Clear this connection's away state. |
+| `.whom` or `.whom all` | All authenticated sessions; away sessions show their reason. |
+| `.whom away` | Away sessions only. |
+| `.whom here` | Sessions without an away state. |
+| `.whom telnet` | Telnet sessions only, whether away or here. |
+| `.whom dcc` | DCC sessions only, whether away or here. |
+
+Filters are case-insensitive and select a single category. With no away users,
+the original unfiltered `.whom` output is preserved. Presence is independent for
+two connections using the same account and disappears on disconnect; it is not
+published to IRC or persisted in the runtime-status JSON. Chat and commands still
+work while away; chatting does not automatically clear the away state.
+
+Reasons must be valid UTF-8, without control characters, and at most 160 encoded
+bytes (for example, 40 four-byte emoji). Oversized or invalid reasons are refused
+without changing the previous state or announcing the rejected input to peers.
+Only real state changes are announced: repeating the same reason or `.back`
+while already here does not create another announcement. Reasons are public to
+authenticated Partyline peers. Presence commands use the existing session history,
+server logging and rate limits; `.history` privacy rules remain unchanged.
+
+---
+
 ## Quick validation checklist
 
 After changing DCC settings or Partyline code:

@@ -1393,7 +1393,9 @@ sub _cmd_help {
       . "  .help search <text> - search command help\r\n"
       . "  .stat               - channel status (owner, chansets, nick count)\r\n"
       . "  .dccstat            - show DCC Partyline listeners and sessions\r\n"
-      . "  .whom               - list users currently on the partyline\r\n"
+      . "  .whom [all|away|here|telnet|dcc] - list/filter partyline sessions\r\n"
+      . "  .away [reason]      - mark this connection away (160 UTF-8 bytes)\r\n"
+      . "  .back               - clear this connection\'s away state\r\n"
       . "  .whois <nick>       - send WHOIS to IRC and display result\r\n"
       . "  .timers             - list all scheduled tasks\r\n"
       . "  .schedule <list|status|start|stop|restart> [name] - control scheduler tasks\r\n"
@@ -1626,7 +1628,13 @@ sub _send_motd {
 
 # .whom - list all authenticated partyline sessions (Eggdrop style)
 sub _cmd_whom {
-    my ($self, $stream, $id) = @_;
+    my ($self, $stream, $id, $filter) = @_;
+    $filter = lc($filter // '');
+    $filter =~ s/^\s+|\s+$//g;
+    unless ($filter =~ /^(?:all|away|here|telnet|dcc)?\z/) {
+        $stream->write("Usage: .whom [all|away|here|telnet|dcc]\r\n");
+        return;
+    }
 
     my @rows;
     my $count = 0;
@@ -1635,6 +1643,10 @@ sub _cmd_whom {
     for my $fid (sort { $a <=> $b } keys %{ $self->{users} }) {
         my $u = $self->{users}{$fid};
         next unless $u && $u->{authenticated};
+        next if $filter eq 'away' && !defined($u->{away});
+        next if $filter eq 'here' && defined($u->{away});
+        next if $filter eq 'telnet' && $u->{is_dcc};
+        next if $filter eq 'dcc' && !$u->{is_dcc};
 
         # Keep full IP visible. _display_nick only truncates reverse DNS.
         my $nick       = $self->_display_nick($fid, 48);
@@ -1643,6 +1655,7 @@ sub _cmd_whom {
             ? "console:" . $u->{console_level}
             : "console:off";
         my $is_me      = ($fid == $id) ? " *" : "";
+        my $away       = defined($u->{away}) ? "  away: " . $u->{away} : "";
 
         $nick_width = length($nick) if length($nick) > $nick_width;
 
@@ -1652,13 +1665,16 @@ sub _cmd_whom {
             fd         => $fid,
             con_level  => $con_level,
             is_me      => $is_me,
+            away       => $away,
         };
 
         $count++;
     }
 
     if ($count == 0) {
-        $stream->write("No users currently on the partyline.\r\n");
+        $stream->write($filter ne '' && $filter ne 'all'
+            ? "No matching partyline sessions.\r\n"
+            : "No users currently on the partyline.\r\n");
         return;
     }
 
@@ -1667,13 +1683,14 @@ sub _cmd_whom {
 
     my @lines;
     for my $row (@rows) {
-        push @lines, sprintf("  %-*s  %-14s  fd=%-4d  %s%s",
+        push @lines, sprintf("  %-*s  %-14s  fd=%-4d  %s%s%s",
             $nick_width,
             $row->{nick},
             $row->{level_desc},
             $row->{fd},
             $row->{con_level},
-            $row->{is_me}
+            $row->{is_me},
+            $row->{away}
         );
     }
 

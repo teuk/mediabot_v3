@@ -10,6 +10,23 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB904 — Add connection-scoped Partyline presence (2026-10-22)
+
+- Add `.away [reason]` and `.back` in Partyline::Presence, imported by the stable
+  facade. Keep reasons in the current authenticated connection only; disconnect
+  cleanup removes them with the session. Announce changes once and retain chat
+  access while away. Validate UTF-8, reject control characters and cap reasons
+  at 160 encoded bytes before changing or announcing state.
+- Extend `.whom` with all/away/here/telnet/dcc filters and show away reasons on
+  matching rows. Preserve the default output when no session is away and keep
+  unauthenticated connections out of every view.
+- Add 27 behavior assertions to the existing Partyline unit case using the native
+  fixture, including fragmented UTF-8 over real Telnet/DCC reads, wire output,
+  connection isolation, cleanup, authentication and throttling. Keep the 1,156
+  numbered cases, schema, production SQL, private configuration, VERSION, service,
+  runtime-status payload, test runner and all 37 security invariants unchanged.
+
+
 ### MB903 — Add focused Partyline help and private history tools (2026-10-22)
 
 - Add `.help <command>` and `.help search <text>` using the existing help text,

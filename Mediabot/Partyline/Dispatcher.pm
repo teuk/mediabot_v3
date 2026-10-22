@@ -145,8 +145,8 @@ sub _handle_line {
 
     # Announce dot-commands to all other partyline users so every session
     # knows who triggered what, without needing to run .whom.
-    # History inspection and clearing are private to the requesting session.
-    if ($line =~ /^\./ && $line !~ /^\.(?:quit$|history(?:\s|$))/i) {
+    # History is private; presence commands announce only validated state changes.
+    if ($line =~ /^\./ && $line !~ /^\.(?:quit$|(?:history|away|back)(?:\s|$))/i) {
         my $cmd_display = $self->_display_nick($id);
         $self->_broadcast("[${cmd_display}] $line", $id);
     }
@@ -321,9 +321,17 @@ sub _handle_line {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.console' }) if $self->{bot}->{metrics};
         $self->_cmd_console($stream, $id, $1)
     }
-    elsif ($line =~ /^\.whom$/i) {
+    elsif ($line =~ /^\.away(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.away' }) if $self->{bot}->{metrics};
+        $self->_cmd_away($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.back(?:\s+(.*))?$/i) {
+        $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.back' }) if $self->{bot}->{metrics};
+        $self->_cmd_back($stream, $id, $1)
+    }
+    elsif ($line =~ /^\.whom(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.whom' }) if $self->{bot}->{metrics};
-        $self->_cmd_whom($stream, $id)
+        $self->_cmd_whom($stream, $id, $1)
     }
     elsif ($line =~ /^\.match\s+(\S+)$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.match' }) if $self->{bot}->{metrics};

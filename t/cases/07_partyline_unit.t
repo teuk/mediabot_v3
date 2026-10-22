@@ -219,4 +219,18 @@ return sub {
             . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
     }
 
+    # MB904: presence and filtered session views through actual command owners.
+    open my $presence, '-|', $^X, '-I.', '-It/lib', '-MMB901PartylineFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->utf8->encode(MB901PartylineFixture::run_presence())'
+        or die "MB904 presence fixture: $!";
+    my $presence_json = do { local $/; <$presence> };
+    close $presence or die "MB904 presence fixture failed: $?";
+    my $presence_results = JSON::PP::decode_json($presence_json);
+    die 'MB904 incomplete presence matrix' unless @$presence_results == 27;
+    for my $result (@$presence_results) {
+        $assert->ok($result->{ok}, "MB904 Partyline presence: $result->{case}"
+            . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
+    }
+
 };
