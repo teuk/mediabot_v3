@@ -7,7 +7,7 @@ use utf8;
 use Cwd qw(realpath);
 use File::Spec;
 use JSON::PP ();
-use Scalar::Util qw(blessed);
+use Scalar::Util qw(blessed weaken);
 
 use Mediabot::Plugin::ManifestV3;
 use Mediabot::PluginContext;
@@ -139,34 +139,31 @@ sub load_package {
     die "Plugin API v3 runtime: class '$class' has no constructor\n"
         unless $class->can('new');
 
+    # Service grants belong to this registration. A retained context must not
+    # borrow a same-name replacement's services; keep its entry reference weak
+    # so the scope itself cannot retain an unloaded/failed registration.
+    my $service_entry;
+    my $service_sink = sub {
+        my ($method) = @_;
+        return sub {
+            die "Plugin API v3 runtime: service scope is no longer registered\n"
+                unless $service_entry
+                    && $manager->_v3_entry_is_current($name, $service_entry);
+            return $manager->$method($name, @_);
+        };
+    };
     my $context = Mediabot::PluginContext->new(
         plugin    => $name,
         requested => $manifest->{capabilities},
         granted   => $grants,
-        http_fetch_sink => sub {
-            return $manager->_v3_http_fetch($name, @_);
-        },
-        storage_snapshot_sink => sub {
-            return $manager->_v3_storage_snapshot($name, @_);
-        },
-        storage_commit_sink => sub {
-            return $manager->_v3_storage_commit($name, @_);
-        },
-        quotes_read_sink => sub {
-            return $manager->_v3_quotes_read($name, @_);
-        },
-        quotes_write_sink => sub {
-            return $manager->_v3_quotes_write($name, @_);
-        },
-        factoids_read_sink => sub {
-            return $manager->_v3_factoids_read($name, @_);
-        },
-        factoids_write_sink => sub {
-            return $manager->_v3_factoids_write($name, @_);
-        },
-        channel_activity_read_sink => sub {
-            return $manager->_v3_channel_activity_read($name, @_);
-        },
+        http_fetch_sink => $service_sink->('_v3_http_fetch'),
+        storage_snapshot_sink => $service_sink->('_v3_storage_snapshot'),
+        storage_commit_sink => $service_sink->('_v3_storage_commit'),
+        quotes_read_sink => $service_sink->('_v3_quotes_read'),
+        quotes_write_sink => $service_sink->('_v3_quotes_write'),
+        factoids_read_sink => $service_sink->('_v3_factoids_read'),
+        factoids_write_sink => $service_sink->('_v3_factoids_write'),
+        channel_activity_read_sink => $service_sink->('_v3_channel_activity_read'),
     );
     # The plugin receives a detached manifest snapshot. It cannot rewrite the
     # already validated core-owned contract between validation and mounting.
@@ -217,6 +214,9 @@ sub load_package {
             channel_policy         => $channel_policy,
         },
     );
+
+    $service_entry = $entry;
+    weaken($service_entry);
 
     my $mounted = eval {
         $manager->_mount_v3_commands($name, $entry);

@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB909 — Bind API v3 service bridges to their registration (2026-10-22)
+
+- Factor the eight RuntimeV3 service sinks through one registration-scoped
+  factory, reusing MB908's exact-entry identity check. An unloaded context or
+  one retained after failed mounting cannot borrow a same-name successor's
+  HTTP, KV, quote, factoid or activity services, even with fewer grants.
+- Keep the registration link weak and reject expired/unbound scopes with a
+  constant diagnostic before delegation. Preserve current-instance disabled,
+  observe/on/off behavior, service arguments, return values and data authority.
+- Add 13 behavior assertions to existing case 1068 with real package loading,
+  PluginContext and core-created invocations, plus controlled service backends.
+  Compare 12 nominal vectors / 96 facade calls; retain all numbered cases.
+  No schema, production SQL, plugin package, private configuration, VERSION,
+  service, Partyline, manager, data-domain, runner or audit change.
+
+
 ### MB908 — Bind API v3 dispatch and output to the loaded instance (2026-10-22)
 
 - Share one exact-entry ownership check across v3 command handlers, event

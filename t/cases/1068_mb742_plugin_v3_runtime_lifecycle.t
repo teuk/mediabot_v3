@@ -119,4 +119,18 @@ return sub {
         'operator cannot grant a capability absent from manifest');
     $assert->is($manager->count, 0,
         'failed grant validation leaves no registered plugin');
+    # MB909: service scopes stay attached to their exact runtime registration.
+    require JSON::PP;
+    open my $probe, '-|', $^X, '-I.', '-It/lib', '-MMB909PluginFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->encode(MB909PluginFixture::run_contracts())'
+        or die "MB909 service fixture: $!";
+    my $json = do { local $/; <$probe> };
+    close $probe or die "MB909 service fixture failed: $?";
+    my $contracts = JSON::PP->new->decode($json);
+    die "MB909 service fixture returned an invalid matrix"
+        unless ref($contracts) eq 'ARRAY' && @$contracts == 13;
+    for my $contract (@$contracts) {
+        $assert->ok($contract->{ok}, "mb909: $contract->{case}");
+    }
 };

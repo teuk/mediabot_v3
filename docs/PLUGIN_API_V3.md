@@ -159,6 +159,15 @@ finish its current handler, but a disable or unload during channel fan-out
 stops dispatch to the remaining channels. Normal disable/enable of the same
 loaded instance retains its existing semantics.
 
+RuntimeV3 also binds each PluginContext service bridge to that exact
+registration: HTTP, KV snapshot/commit, quote and factoid reads/writes, and
+channel-activity reads. A retained context from an unloaded or failed package
+cannot use a later package's services under the same name, even if it still
+reports its historical grants. Such calls fail before service delegation with
+`service scope is no longer registered`. The scope keeps only a weak reference
+to the registration. Current-instance policies, disabled results and normal
+service arguments/return values keep their existing behavior.
+
 Event and job handlers receive equally narrow values:
 
 ```perl
