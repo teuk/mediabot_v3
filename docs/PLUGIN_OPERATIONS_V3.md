@@ -215,6 +215,15 @@ The first command returns the channel to the saved historical handler, disable
 stops the package while retaining its configuration, and unload removes it
 from both the live registry and the next boot.
 
+Since MB912, new boot ledgers use ASCII JSON with Unicode escapes. Typed text
+settings and Unicode channel names survive a cold restore through the existing
+reader. The schema remains 1; ASCII-only ledgers retain their exact bytes and
+historical Latin-1 files remain readable. The unchanged 1 MiB limit counts the
+bytes actually written, including escape sequences, and rejects an oversized
+document before publication. Existing files are not migrated and text already
+corrupted by an earlier save is not automatically repaired. This change applies
+to the boot ledger only; plugin KV repositories keep their existing behavior.
+
 The second controlled development promotion follows the same boundary:
 
 ```text

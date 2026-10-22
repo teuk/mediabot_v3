@@ -949,7 +949,9 @@ sub store_v3_runtime_state {
     my $document = eval { $self->v3_runtime_state_snapshot };
     return (0, _plugin_error_text($@, 'cannot snapshot API v3 state'))
         unless $document;
-    my $json = eval { JSON::PP->new->canonical->encode($document) };
+    # Raw files need byte JSON. ASCII escapes preserve Unicode with the
+    # historical reader and make the existing byte limit count written bytes.
+    my $json = eval { JSON::PP->new->canonical->ascii->encode($document) };
     return (0, 'API v3 state is not JSON-serializable') unless defined $json;
     return (0, 'API v3 state exceeds the byte limit')
         if length($json) > $V3_RUNTIME_STATE_MAX_BYTES;

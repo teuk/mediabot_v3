@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB912 — Preserve Unicode in restart-persistent plugin settings (2026-10-22)
+
+- Serialize the API v3 boot ledger as ASCII JSON with Unicode escapes, avoiding
+  raw-file wide-character warnings, altered text/channel keys after restart and
+  Latin-1 output that is not valid UTF-8 JSON. Keep the historical reader and
+  schema 1, while applying the unchanged 1 MiB bound to actual serialized bytes.
+- Keep ASCII-only files byte-identical and historical Latin-1 state readable.
+  Retain grants, policies, activation, private atomic publication and rollback;
+  do not migrate existing files or repair already altered values automatically.
+- Extend existing boot case 1135 with eight assertions. Compare 72 native
+  persistent load/cold restore cycles across all six bundled packages. Add no
+  fixture or numbered case. No database schema, KV repository, plugin package,
+  private configuration, VERSION, service, Partyline, runner or audit change.
+
+
 ### MB911 — Preserve successor commands during plugin teardown (2026-10-22)
 
 - Retain the exact registry entry for each v3 command mount. Share one guarded
