@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use JSON::MaybeXS;
+use Mediabot::JSON qw(decode_json_payload);
 use Mediabot::AsyncWorker;
 use URI::Escape qw(uri_escape_utf8);
 use String::IRC;
@@ -95,7 +96,7 @@ sub _applemusic_extract_details {
 
     while ($html =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
         my $raw  = _decode_html($1);
-        my $data = eval { decode_json($raw) };
+        my $data = eval { decode_json_payload($raw) };
         next unless defined $data;
         my @objs = ref($data) eq 'ARRAY' ? @$data : ($data);
         for my $o (@objs) {
@@ -168,7 +169,7 @@ sub _applemusic_lookup_track {
         return undef;
     }
 
-    my $data = eval { decode_json($res->{content} // '') };
+    my $data = eval { decode_json_payload($res->{content} // '') };
     unless (ref($data) eq 'HASH') {
         my $error = $@ || 'not a JSON object';
         $error =~ s/\s+/ /g;

@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB906 — Share JSON decoding and restore AppleMusic Unicode details (2026-10-22)
+
+- Add pure `Mediabot::JSON::decode_json_payload`, retaining UTF-8 bytes and encoding
+  character input once. Move the existing Spotify MB905 conversion behind this
+  helper without changing its parser or display behavior.
+- Use the shared decoder for AppleMusic JSON-LD and iTunes lookup, recovering
+  details lost when HTTP/browser text contains literal non-ASCII characters.
+  Preserve invalid-JSON handling, formats/colors, cache, HTTP/browser limits,
+  timeouts and worker lifecycle.
+- Add 13 behavior assertions to existing case 855, including two native workers
+  and cache reuse. Compare 39 shared-decoder and 27 nominal AppleMusic vectors;
+  retain all 18 MB905 Spotify scenarios and all numbered cases. No Partyline,
+  schema, production SQL, private configuration, VERSION, service, runner or
+  audit change. Based on the MB905 validated payload state.
+
+
 ### MB905 — Preserve Unicode and scalar contracts in Spotify metadata (2026-10-22)
 
 - Encode already-decoded character strings once before the three Spotify JSON

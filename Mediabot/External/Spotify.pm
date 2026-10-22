@@ -16,7 +16,7 @@ use strict;
 use warnings;
 use Exporter 'import';
 use JSON::MaybeXS;
-use Encode qw(encode);
+use Mediabot::JSON qw(decode_json_payload);
 use Mediabot::AsyncWorker ();
 use URI::Escape qw(uri_escape_utf8);
 use String::IRC;
@@ -36,8 +36,7 @@ our @EXPORT_OK = qw(
 # JSON decoders expect UTF-8 bytes; HTTP/meta helpers can already return text.
 # Keep raw payloads unchanged and encode character strings exactly once.
 sub _spotify_decode_json {
-    my ($raw) = @_;
-    return decode_json(utf8::is_utf8($raw) ? encode('UTF-8', $raw) : $raw);
+    return decode_json_payload($_[0]);
 }
 
 # ---------------------------------------------------------------------------

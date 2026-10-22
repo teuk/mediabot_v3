@@ -350,4 +350,19 @@ return sub {
             'mb672-855: Apple Music badge keeps reset/display contract'
         );
     }
+    # MB906: Unicode details through actual parsers and native worker/cache paths.
+    require JSON::PP;
+    open my $contracts, '-|', $^X, '-I.', '-It/lib', '-MMB906AppleMusicFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->utf8->encode(MB906AppleMusicFixture::run_contracts())'
+        or die "MB906 AppleMusic fixture: $!";
+    my $json = do { local $/; <$contracts> };
+    close $contracts or die "MB906 AppleMusic fixture failed: $?";
+    my $results = JSON::PP::decode_json($json);
+    die 'MB906 incomplete AppleMusic matrix' unless @$results == 13;
+    for my $result (@$results) {
+        $assert->ok($result->{ok}, "MB906 AppleMusic: $result->{case}"
+            . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
+    }
+
 };
