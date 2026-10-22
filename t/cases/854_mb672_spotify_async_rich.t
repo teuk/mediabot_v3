@@ -203,4 +203,19 @@ return sub {
             'mb672-854: Spotify badge/reset/display contract remains unchanged'
         );
     }
+    # MB905: real source parsers and native worker completion in a fresh process.
+    require JSON::PP;
+    open my $contracts, '-|', $^X, '-I.', '-It/lib', '-MMB905SpotifyFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->utf8->encode(MB905SpotifyFixture::run_contracts())'
+        or die "MB905 Spotify fixture: $!";
+    my $json = do { local $/; <$contracts> };
+    close $contracts or die "MB905 Spotify fixture failed: $?";
+    my $results = JSON::PP::decode_json($json);
+    die 'MB905 incomplete Spotify matrix' unless @$results == 18;
+    for my $result (@$results) {
+        $assert->ok($result->{ok}, "MB905 Spotify: $result->{case}"
+            . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
+    }
+
 };

@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB905 — Preserve Unicode and scalar contracts in Spotify metadata (2026-10-22)
+
+- Encode already-decoded character strings once before the three Spotify JSON
+  readers, preserving raw UTF-8 bytes. Recover valid literal accents/emoji in
+  oEmbed, NEXT_DATA and JSON-LD without changing invalid-JSON fallback handling.
+- Reject reference-valued display fields, let a valid entity name replace an
+  unusable title, and stop the legacy album regex borrowing a sibling name after
+  structured album processing. Preserve the unparsed nested-album fallback.
+- Add 18 behavior assertions to existing case 854 with controlled HTTP replies
+  and five native AsyncWorker completions. Compare 51 nominal metadata/request
+  vectors against the reference. Preserve formatter, badge, pending identity,
+  HTTP order/limits and worker lifecycle. No Partyline, schema, production SQL,
+  private configuration, VERSION, service, runner or audit change.
+
+
 ### MB904 — Add connection-scoped Partyline presence (2026-10-22)
 
 - Add `.away [reason]` and `.back` in Partyline::Presence, imported by the stable

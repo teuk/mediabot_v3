@@ -16,6 +16,7 @@ use strict;
 use warnings;
 use Exporter 'import';
 use JSON::MaybeXS;
+use Encode qw(encode);
 use Mediabot::AsyncWorker ();
 use URI::Escape qw(uri_escape_utf8);
 use String::IRC;
@@ -32,13 +33,20 @@ our @EXPORT_OK = qw(
     _handle_spotify
 );
 
+# JSON decoders expect UTF-8 bytes; HTTP/meta helpers can already return text.
+# Keep raw payloads unchanged and encode character strings exactly once.
+sub _spotify_decode_json {
+    my ($raw) = @_;
+    return decode_json(utf8::is_utf8($raw) ? encode('UTF-8', $raw) : $raw);
+}
+
 # ---------------------------------------------------------------------------
 # _spotify_is_bad($v)
 # Retourne 1 si la valeur est inutilisable (vide, générique Spotify).
 # ---------------------------------------------------------------------------
 sub _spotify_is_bad {
     my ($v) = @_;
-    return 1 unless defined $v;
+    return 1 unless defined($v) && !ref($v);
     $v = Mediabot::External::_decode_html($v);
     $v =~ s/[\r\n\t]/ /g; $v =~ s/\s+/ /g; $v =~ s/^\s+|\s+$//g;
     return 1 if $v eq '';
@@ -55,7 +63,7 @@ sub _spotify_is_bad {
 # ---------------------------------------------------------------------------
 sub _spotify_clean {
     my ($v) = @_;
-    return undef unless defined $v;
+    return undef unless defined($v) && !ref($v);
     $v = Mediabot::External::_decode_html($v);
     $v =~ s/\\u0026/&/g; $v =~ s/\\\//\//g; $v =~ s/\\"/"/g;
     $v =~ s/[\r\n\t]/ /g; $v =~ s/\s{2,}/ /g; $v =~ s/^\s+|\s+$//g;
@@ -142,6 +150,7 @@ sub _spotify_extract_meta {
 sub _spotify_extract_jsonish {
     my ($self, $info, $text, $context) = @_;
     return unless defined $text && $text ne '';
+    my $structured_album = 0;
 
     # Spotify's lightweight /embed page exposes a compact __NEXT_DATA__ JSON
     # payload. Prefer that structured server-side data before broader regex
@@ -151,13 +160,13 @@ sub _spotify_extract_jsonish {
         next unless $attrs =~ /\bid=["']__NEXT_DATA__["']/i;
         next unless $attrs =~ /\btype=["']application\/json["']/i;
 
-        my $data = eval { decode_json($raw) };
+        my $data = eval { _spotify_decode_json($raw) };
         next unless ref($data) eq 'HASH';
 
         my $entity = eval { $data->{props}{pageProps}{state}{data}{entity} };
         next unless ref($entity) eq 'HASH';
 
-        $info->{title} //= _spotify_clean($entity->{title} // $entity->{name});
+        $info->{title} //= _spotify_clean($entity->{title}) // _spotify_clean($entity->{name});
 
         if (!defined $info->{artist} && ref($entity->{artists}) eq 'ARRAY') {
             my @artists = grep { defined $_ && $_ ne '' }
@@ -167,6 +176,7 @@ sub _spotify_extract_jsonish {
         }
 
         if (!defined $info->{album} && ref($entity->{album}) eq 'HASH') {
+            $structured_album = 1;
             $info->{album} = _spotify_clean($entity->{album}{name});
         }
 
@@ -183,7 +193,7 @@ sub _spotify_extract_jsonish {
     }
     while ($text =~ m{<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>}sig) {
         my $json = Mediabot::External::_decode_html($1);
-        my $data = eval { decode_json($json) }; next unless defined $data;
+        my $data = eval { _spotify_decode_json($json) }; next unless defined $data;
         my @items = ref($data) eq 'ARRAY' ? @$data : ($data);
         for my $item (@items) {
             next unless ref($item) eq 'HASH';
@@ -196,7 +206,10 @@ sub _spotify_extract_jsonish {
                         @{ $item->{byArtist} };
                 $info->{artist} //= join(', ', @a) if @a;
             }
-            if (ref($item->{inAlbum}) eq 'HASH') { $info->{album} //= _spotify_clean($item->{inAlbum}{name}); }
+            if (ref($item->{inAlbum}) eq 'HASH') {
+                $structured_album = 1;
+                $info->{album} //= _spotify_clean($item->{inAlbum}{name});
+            }
             if (defined $item->{duration} && !defined $info->{duration}) {
                 $info->{duration} = _spotify_duration_from_iso($item->{duration});
             }
@@ -217,7 +230,9 @@ sub _spotify_extract_jsonish {
         }
         $info->{artist} //= join(', ', @a) if @a;
     }
-    if (!defined $info->{album} && $text =~ /"album"\s*:\s*\{.{0,2000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
+    # A parsed album with no usable name must not borrow a sibling's name
+    # through the broad legacy fallback. Keep that fallback for unparsed data.
+    if (!defined $info->{album} && !$structured_album && $text =~ /"album"\s*:\s*\{.{0,2000}?"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/s) {
         (my $v = $1) =~ s/\\"/"/g; $info->{album} = _spotify_clean($v);
     }
     $info->{year} //= $1 if !defined $info->{year} && $text =~ /"release_date"\s*:\s*"(\d{4})/;
@@ -249,7 +264,7 @@ sub _spotify_fetch_sync {
             my $json = Mediabot::External::_decode_http_content_utf8(
                 $self, $res->{content} // '', 'spotify-oembed'
             );
-            my $data = eval { decode_json($json) };
+            my $data = eval { _spotify_decode_json($json) };
 
             if (ref($data) eq 'HASH') {
                 $info{title}  //= _spotify_clean($data->{title});
