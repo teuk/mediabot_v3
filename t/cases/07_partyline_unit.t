@@ -187,4 +187,21 @@ return sub {
         my $port = $pl->get_port;
         $assert->ok(defined $port && $port > 0, 'get_port : retourne un port valide');
     }
+
+    # MB902: actual Telnet framing, including native socket reads and login,
+    # isolated from the legacy catalogue's IO::Async stubs.
+    require JSON::PP;
+    open my $native, '-|', $^X, '-I.', '-It/lib', '-MMB901PartylineFixture',
+        '-MJSON::PP', '-e',
+        'print JSON::PP->new->utf8->encode(MB901PartylineFixture::run_telnet())'
+        or die "MB902 Telnet fixture: $!";
+    my $json = do { local $/; <$native> };
+    close $native or die "MB902 Telnet fixture failed: $?";
+    my $results = JSON::PP::decode_json($json);
+    die 'MB902 incomplete Telnet matrix' unless @$results == 24;
+    for my $result (@$results) {
+        $assert->ok($result->{ok}, "MB902 Telnet: $result->{case}"
+            . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
+    }
+
 };

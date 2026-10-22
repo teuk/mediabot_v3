@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB902 — Decode Partyline Telnet framing once per wire byte (2026-10-22)
+
+- Add a small stateful Partyline::Telnet input filter. Keep decoded partial lines
+  separate from wire input, preserve escaped IAC data across reads and discard
+  Telnet subnegotiation content and basic two-byte control sequences before line
+  dispatch. Retain bounded state without storing subnegotiation payloads.
+- Preserve the historical one-shot helper, method dispatch, DCC raw input, line
+  budgets, ECHO policy, login/command routing and MB901 session lifecycle guards.
+- Reuse the native Partyline fixture and add 24 assertions to the existing unit
+  case, including fragmented input, native reads, byte limits and real login
+  paths. Keep every numbered case and all 37 security invariants. No schema,
+  SQL, private configuration, VERSION, service or test-runner change.
+
+
 ### MB901 — Keep closed Partyline sessions closed (2026-10-22)
 
 - Stop Telnet/DCC buffered lines immediately after a command removes its session.

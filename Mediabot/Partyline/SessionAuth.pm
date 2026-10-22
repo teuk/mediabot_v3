@@ -19,6 +19,7 @@ use IO::Async::Stream;
 use IO::Async::Timer::Countdown;
 use POSIX qw(WNOHANG);
 use Socket qw(inet_aton AF_INET);
+use Mediabot::Partyline::Telnet qw(decode_input);
 
 our @EXPORT_OK = qw(
     _cancel_auth_timeout
@@ -450,7 +451,10 @@ sub _telnet_echo_on {
 }
 
 sub _strip_telnet_iac {
-    my ($self, $data) = @_;
+    my ($self, $data, $state) = @_;
+
+    # MB902: stream callers retain framing state; one-shot callers keep their API.
+    return decode_input($state, $data) if ref($state) eq 'HASH';
 
     return '' unless defined $data;
 

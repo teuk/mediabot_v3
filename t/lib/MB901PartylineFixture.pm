@@ -53,7 +53,7 @@ sub _pair {
 }
 
 sub _run_one {
-    my ($transport, $case) = @_;
+    my ($transport, $case, $chunks) = @_;
     my $loop = IO::Async::Loop->new;
     my ($stream, $peer, $id) = _pair();
     my $dbh = DBI->connect('dbi:SQLite:dbname=:memory:', '', '', { RaiseError => 1, PrintError => 0 });
@@ -171,7 +171,11 @@ sub _run_one {
             && $logs !~ /NEVER-DISPATCH|fixture-password|exception/;
     }
     else {
-        if ($case eq 'legacy') { $deliver->("login tester fixture-password\n.unknown901\n") }
+        if ($chunks) {
+            my $buffer = '';
+            for my $chunk (@$chunks) { $buffer = $deliver->($buffer . $chunk) }
+        }
+        elsif ($case eq 'legacy') { $deliver->("login tester fixture-password\n.unknown901\n") }
         elsif ($case eq 'fragment') {
             my $rest = $deliver->('tes');
             $rest = $deliver->($rest . "ter\r\nfixture-");
@@ -215,6 +219,136 @@ sub run_all {
             if (@warnings) { $result->{ok} = 0; $result->{warnings} = \@warnings }
             push @results, $result;
         }
+    }
+    return \@results;
+}
+
+# MB902: reuse the native session fixtures for incremental Telnet input.
+{
+    package MB902::Capture;
+    our @ISA = ('MB901::Partyline');
+    sub _handle_line { push @{$_[0]{frames}}, $_[3] }
+}
+
+sub _telnet_frames {
+    my ($chunks, $transport, $wire) = @_;
+    $transport //= 'telnet';
+    my $loop = IO::Async::Loop->new;
+    my ($stream, $peer, $id) = _pair();
+    my $metrics = bless {}, 'MB901::Metrics';
+    my $p = bless { loop => $loop, users => {}, streams => {}, frames => [],
+        bot => { logger => bless({lines => [], removed => []}, 'MB901::Logger'),
+                 metrics => $metrics } }, 'MB902::Capture';
+    if ($transport eq 'dcc') { $p->_init_dcc_session($stream, 'tester', 'dcc') }
+    else {
+        no warnings 'redefine';
+        local *IO::Async::Loop::listen = sub {
+            my (undef, %args) = @_;
+            $args{on_stream}->($stream);
+            return Future->done;
+        };
+        $p->_start_listener;
+    }
+    my $callback = $stream->{test_read};
+    $stream->configure(on_read => sub {
+        my ($io) = @_;
+        $io->{wire_reads}++;
+        goto &$callback;
+    }) if $wire;
+    my $buffer = '';
+    for my $chunk (@$chunks) {
+        if ($wire) {
+            next unless length $chunk;
+            my $before = $stream->{wire_reads} // 0;
+            syswrite($peer, $chunk) == length($chunk) or die "short Telnet fixture write: $!";
+            for (1 .. 30) {
+                $loop->loop_once(0.01);
+                last if ($stream->{wire_reads} // 0) > $before;
+            }
+            die 'native Telnet read not observed' unless ($stream->{wire_reads} // 0) > $before;
+        }
+        else {
+            $buffer .= $chunk;
+            $callback->($stream, \$buffer, 0);
+        }
+    }
+    my $result = { frames => $p->{frames}, alive => exists($p->{users}{$id}) ? 1 : 0,
+                   gauge => $metrics->get('mediabot_partyline_sessions_current') };
+    $stream->close_now;
+    $p->_close_session($id);
+    close $peer;
+    return $result;
+}
+
+sub run_telnet {
+    my $sb = "\xff\xfa\x1f\x00\x50\x00\x0a\xff\xf0";
+    my $fake_commands = "\xff\xfa\x18\nlogin tester fixture-password\n.quit\n\xff\xf0";
+    my $controls = join '', map { "\xff" . chr($_) } 240 .. 249;
+    my $negotiations = join '', map { "\xff" . chr($_) . "\x0a" } 251 .. 254;
+    my $utf8 = "caf\xc3\xa9";
+    my $all_data = join '', map { chr($_) } grep { $_ != 10 && $_ != 13 } 0 .. 254;
+    my @specs = (
+        ['plain_chunks', ['tes', "ter\r", "\nnext\n"], ['tester', 'next']],
+        ['negotiations', [split //, $negotiations . "tester\n"], ['tester']],
+        ['subnegotiation_lf', [$sb . "tester\n"], ['tester']],
+        ['subnegotiation_commands', [$fake_commands . "tester\n"], ['tester']],
+        ['escaped_iac_repeated', ["a\xff\xff", "\xff\xff", "b\n"], ["a\xff\xffb"]],
+        ['escaped_iac_data', ["a\xff\xff", "\xfb\x01b\n"], ["a\xff\xfb\x01b"]],
+        ['escaped_iac_in_sb', ["\xff\xfa\x18\xff\xff\xf0\n.quit\n\xff\xf0tester\n"], ['tester']],
+        ['two_byte_controls', [split //, "tes" . $controls . "ter\n"], ['tester']],
+        ['unknown_iac_pair', ["a\xff", "\x01b\n"], ["a\xff\x01b"]],
+        ['transparent_data_bytes', [split //, $all_data . "\n"], [$all_data]],
+        ['utf8_chunks', [split //, $utf8 . "\xff\xfb\x01\n"], [$utf8]],
+        ['exact_byte_limit', [('x' x 4095) . "\xff", "\xff\r", "\n"], [('x' x 4095) . "\xff"]],
+        ['over_byte_limit', [('x' x 4096), "x\n"], [], 0],
+        ['discard_large_sb', ["\xff\xfa\x18", (('p' x 8192) x 32), "\xff\xf0tester\n"], ['tester']],
+        ['native_subnegotiation', [split //, $sb . "tester\n"], ['tester'], 1, 'telnet', 1],
+        ['dcc_raw_data', [$sb . "tester\n"], ["\xff\xfa\x1f\x00\x50\x00", "\xff\xf0tester"], 1, 'dcc'],
+    );
+    my @results;
+    for my $spec (@specs) {
+        my ($name, $chunks, $expected, $alive, $transport, $wire) = @$spec;
+        $alive //= 1;
+        my (@warnings, $r, $error);
+        { local $SIG{__WARN__} = sub { push @warnings, @_ };
+          $r = eval { _telnet_frames($chunks, $transport, $wire) }; $error = $@; }
+        my $same = $r && @{$r->{frames}} == @$expected;
+        if ($same) {
+            for my $i (0 .. $#$expected) { $same &&= $r->{frames}[$i] eq $expected->[$i] }
+        }
+        push @results, { case => $name,
+            ok => $same && $r->{alive} == $alive && $r->{gauge} == $alive && !@warnings && !$error ? 1 : 0,
+            (@warnings ? (warnings => \@warnings) : ()), ($error ? (error => $error) : ()) };
+    }
+    # Every two-chunk split of two literal protocol examples must yield the same text.
+    my $split_ok = 1;
+    for my $wire ($sb . "tester\n", "a\xff\xff\xff\xffb\n") {
+        my $expected = $wire eq $sb . "tester\n" ? 'tester' : "a\xff\xffb";
+        for my $offset (0 .. length($wire)) {
+            my $r = _telnet_frames([substr($wire, 0, $offset), substr($wire, $offset)]);
+            $split_ok &&= $r->{alive} && @{$r->{frames}} == 1 && $r->{frames}[0] eq $expected;
+        }
+    }
+    push @results, { case => 'all_two_chunk_splits', ok => $split_ok ? 1 : 0 };
+    my $first = _telnet_frames(["\xff\xfa\x18unfinished"]);
+    my $second = _telnet_frames(["tester\n"]);
+    push @results, { case => 'independent_connections',
+        ok => !@{$first->{frames}} && @{$second->{frames}} == 1 && $second->{frames}[0] eq 'tester' ? 1 : 0 };
+    for my $spec (
+        ['login_plain', ["tester\nfixture-password\n.unknown901\n"]],
+        ['login_negotiation', [split //, "\xff\xfb\x01tester\nfixture-password\n.unknown901\n"]],
+        ['login_nop', ["tes\xff\xf1ter\nfixture-password\n.unknown901\n"]],
+        ['login_sb', [$sb . "tester\nfixture-password\n.unknown901\n"]],
+        ['login_sb_commands', [$fake_commands . "tester\nfixture-password\n.unknown901\n"]],
+        ['login_sb_fragmented', [split //, $sb . "tester\nfixture-password\n.unknown901\n"]],
+    ) {
+        my (@warnings, $r);
+        { local $SIG{__WARN__} = sub { push @warnings, @_ };
+          $r = eval { _run_one('telnet', 'pipeline', $spec->[1]) };
+          $r ||= { ok => 0, error => "$@" }; }
+        $r->{case} = $spec->[0];
+        if (@warnings) { $r->{ok} = 0; $r->{warnings} = \@warnings }
+        push @results, $r;
     }
     return \@results;
 }
