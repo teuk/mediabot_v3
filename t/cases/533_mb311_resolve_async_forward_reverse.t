@@ -169,4 +169,11 @@ return sub {
         0,
         'resolver child program compiles independently'
     );
+    # MB900: exercise the real owner with native pipes, timers and reaping.
+    require MB900PipeFixture;
+    for my $mode ('nominal', 'exit-failure', 'early-eof') {
+        my $result = MB900PipeFixture::probe('resolve', $mode);
+        $assert->ok($result->{ok},
+            "mb900: resolve native $mode preserves status and loop responsiveness: " . $result->{detail});
+    }
 };

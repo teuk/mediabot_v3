@@ -59,4 +59,11 @@ return sub {
         'timeout is reported at most once');
     $assert->like($body // '', qr/Preserve a final line that is not newline-terminated/,
         'final partial eval output is preserved');
+    # MB900: exercise the real owner with native pipes, timers and reaping.
+    require MB900PipeFixture;
+    for my $mode ('nominal', 'early-eof') {
+        my $result = MB900PipeFixture::probe('eval', $mode);
+        $assert->ok($result->{ok},
+            "mb900: eval native $mode preserves status and loop responsiveness: " . $result->{detail});
+    }
 };

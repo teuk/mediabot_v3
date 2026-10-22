@@ -314,6 +314,10 @@ sub whereis_async {
 
     $stream = IO::Async::Stream->new(
         read_handle => $pipe,
+        # MB900: closing a Perl '-|' handle waits for and collects its child.
+        # Keep EOF separate from reaping; finish closes only after WNOHANG
+        # has recorded the status, so EOF cannot block the IRC event loop.
+        close_on_read_eof => 0,
         on_read     => sub {
             my ($io, $buffref, $eof) = @_;
 

@@ -3413,6 +3413,8 @@ sub resolve_ctx {
 
     $stream = IO::Async::Stream->new(
         read_handle => $pipe,
+        # MB900: EOF must not close a Perl '-|' pipe before async reaping.
+        close_on_read_eof => 0,
         on_read     => sub {
             my ($io, $buffref, $eof) = @_;
 

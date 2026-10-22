@@ -324,4 +324,11 @@ return sub {
         !defined($bad_entry) && !defined($bad_text) && !defined($bad_lang),
         'malformed Wiktionary response shapes are rejected safely'
     );
+    # MB900: exercise the real owner with native pipes, timers and reaping.
+    require MB900PipeFixture;
+    for my $mode ('nominal', 'early-eof') {
+        my $result = MB900PipeFixture::probe('define', $mode);
+        $assert->ok($result->{ok},
+            "mb900: define native $mode preserves status and loop responsiveness: " . $result->{detail});
+    }
 };

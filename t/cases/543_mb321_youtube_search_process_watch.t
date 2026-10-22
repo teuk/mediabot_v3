@@ -86,4 +86,11 @@ return sub {
         'MB322 keeps the experimental worker out of the production command');
     $assert->like($command // '', qr/_youtube_search_fetch_sync\(\$api_key,\s*\$query_txt\)/,
         'MB322 production command uses the reliable transport');
+    # MB900: exercise the real owner with native pipes, timers and reaping.
+    require MB900PipeFixture;
+    for my $mode ('nominal', 'early-eof') {
+        my $result = MB900PipeFixture::probe('youtube', $mode);
+        $assert->ok($result->{ok},
+            "mb900: youtube native $mode preserves status and loop responsiveness: " . $result->{detail});
+    }
 };

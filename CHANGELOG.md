@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB900 — Keep pipe EOF separate from asynchronous child collection (2026-10-22)
+
+- Disable automatic EOF closure on the six IO::Async streams backed by Perl
+  process pipes: country and definition lookups, YouTube search, DNS resolve,
+  Partyline reverse DNS and Owner eval. Their existing asynchronous reapers
+  retain ownership of child status; finalizers close the pipes after collection.
+- Fix valid country/definition results being discarded, failed DNS children
+  being mistaken for successful lookups, and event-loop stalls or lost YouTube
+  completion when a child closes its output before exiting. Preserve existing
+  deadlines, output bounds, TERM/KILL policy, caller interfaces and access gates.
+- Add fourteen native assertions to six existing cases, using the real owners
+  with controlled offline producers, heartbeat timers and collected-child checks.
+  Keep the numbered case catalogue unchanged. No schema, SQL, private setting,
+  VERSION, service, test runner or audit-tool change.
+
+
 ### MB899 — Give country lookups a dedicated external module (2026-10-22)
 
 - Move whereis and its existing asynchronous process adapter into

@@ -175,6 +175,7 @@ sub _cmd_eval {
         $remove_timer->(\$kill_timer);
         $remove_timer->(\$reap_timer);
         eval { $bot->{loop}->remove($io) if $io };
+        eval { close $pipe }; # The child has already been collected.
 
         if ($eval_ctx->{timed_out}) {
             $report_timeout->();
@@ -298,6 +299,8 @@ sub _cmd_eval {
 
     $io = IO::Async::Stream->new(
         read_handle => $pipe,
+        # MB900: EOF must not close a Perl '-|' pipe before async reaping.
+        close_on_read_eof => 0,
         on_read     => sub {
             my ($s, $buffref, $eof) = @_;
 

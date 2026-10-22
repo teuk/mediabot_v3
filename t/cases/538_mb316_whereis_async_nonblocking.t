@@ -298,4 +298,11 @@ return sub {
         $assert->ok($? == 0 && $stdout eq 'ok' && $stderr eq '',
             "native country worker $mode calls back once and reaps its child ($stderr)");
     }
+    # MB900: exercise the real owner with native pipes, timers and reaping.
+    require MB900PipeFixture;
+    for my $mode ('nominal', 'early-eof') {
+        my $result = MB900PipeFixture::probe('country', $mode);
+        $assert->ok($result->{ok},
+            "mb900: country native $mode preserves status and loop responsiveness: " . $result->{detail});
+    }
 };
