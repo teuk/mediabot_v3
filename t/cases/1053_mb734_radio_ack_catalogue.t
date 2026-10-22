@@ -1,6 +1,8 @@
 use strict;
 use warnings;
 use JSON::PP qw(decode_json);
+use File::Basename qw(dirname);
+use Cwd qw(abs_path);
 use Mediabot::Liquidsoap;
 
 return sub {
@@ -146,4 +148,99 @@ PROBE
         'mb734: failed sharing check contacts neither catalogue nor Liquidsoap');
     $assert->like(join(' ',@{$decoded->{blocked_messages}||[]}),qr/storage permissions.*not been queued/,
         'mb734: failed sharing check reported honestly');
+
+    # MB916: real UTF-8 sidecar files must reach the existing metadata reader
+    # and download completion path without being decoded twice.
+    my $metadata_probe=<<'MB916_METADATA_PROBE';
+use strict;
+use warnings;
+use utf8;
+use File::Temp qw(tempdir);
+use JSON::PP ();
+use Mediabot::Radio::Request;
+{
+    package MB916Metadata;
+    our @ISA=('Mediabot::Radio::Request');
+    sub _logger {push @{$_[0]{logs}},[$_[1],$_[2]]}
+    sub _insert_mp3 {my ($s,%row)=@_;push @{$s->{events}},'catalogue';$s->{row}=\%row;return 7}
+    sub _liquidsoap_client {my ($s)=@_;push @{$s->{events}},'client';bless {parent=>$s},'MB916Queue'}
+    sub _say {push @{$_[0]{messages}},$_[2]}
+    package MB916Queue;
+    sub push {push @{$_[0]{parent}{events}},'push';$_[0]{parent}{queued}=$_[1];return (1,'0')}
+    package MB916Context;
+    sub message {undef} sub channel {'#test'}
+}
+sub same916 {JSON::PP->new->canonical->encode($_[0]) eq JSON::PP->new->canonical->encode($_[1])}
+sub bytes916 {my ($p)=@_;open my $f,'<:raw',$p or die $!;local $/;return <$f>}
+sub write916 {my ($p,$v)=@_;open my $f,'>:raw',$p or die $!;print {$f} $v or die $!;close $f or die $!}
+my $dir=tempdir(CLEANUP=>1);my $path="$dir/track.mp3";my $info="$dir/track.info.json";
+my @rows;
+for my $case (
+    ['latin1','Björk','Déjà vu'],
+    ['bmp','東京','世界の音楽'],
+    ['emoji','Artist 🦉','Title 🎵'],
+    ['combining',"Cafe\x{301}",'Été 東京 🦉'],
+) {
+    my ($name,$artist,$title)=@$case;
+    my $raw=JSON::PP->new->utf8->canonical->encode({id=>'abcdefghijk',artist=>" $artist ",title=>" $title "});
+    write916($info,$raw);my $r=bless {logs=>[]},'MB916Metadata';my (@values,@warnings);
+    {local $SIG{__WARN__}=sub {push @warnings,@_};@values=$r->_metadata_from_info_json($path);}
+    push @rows,{case=>$name,ok=>same916(\@values,['abcdefghijk',$artist,$title]) && !@warnings && !@{$r->{logs}} && bytes916($info) eq $raw ? 1:0};
+}
+my $nominal=1;
+for my $v (
+    [{id=>'abcdefghijk',artist=>' Artist ',title=>' Track '},['abcdefghijk','Artist','Track']],
+    [{id=>'abcdefghijk',creator=>' Créateur 🦉 ',title=>' Titre 東京 '},['abcdefghijk','Créateur 🦉','Titre 東京']],
+    [{uploader=>'Uploader',channel=>'Channel'},['','Uploader','']],
+    [{channel=>'Channel'},['','Channel','']],
+    [{artist=>'',creator=>'Creator',title=>''},['','Unknown','']],
+    [{id=>0,artist=>'0',title=>'0'},[0,'0','0']],
+    [{},['','Unknown','']],
+) {
+    # ASCII escapes remain a valid historical serialization of Unicode fields.
+    write916($info,JSON::PP->new->ascii->canonical->encode($v->[0]));
+    my $r=bless {logs=>[]},'MB916Metadata';my (@values,@warnings);
+    {local $SIG{__WARN__}=sub {push @warnings,@_};@values=$r->_metadata_from_info_json($path);}
+    $nominal &&=same916(\@values,$v->[1]) && !@warnings && !@{$r->{logs}};
+}
+push @rows,{case=>'nominal',ok=>$nominal?1:0};
+my $rejected=1;
+for my $raw ('{bad','[]','null','true','0',"{\"title\":\"\xff\"}",undef) {
+    defined($raw) ? write916($info,$raw) : unlink($info);
+    my $r=bless {logs=>[]},'MB916Metadata';my (@values,@warnings);
+    {local $SIG{__WARN__}=sub {push @warnings,@_};@values=$r->_metadata_from_info_json($path);}
+    $rejected &&=same916(\@values,['','Unknown','']) && !@warnings
+        && @{$r->{logs}}==(defined($raw)?1:0) && (!defined($raw) || bytes916($info) eq $raw);
+}
+push @rows,{case=>'invalid_documents',ok=>$rejected?1:0};
+my $doc={id=>'abcdefghijk',artist=>'Björk 🦉',title=>'東京 — Déjà vu'};
+my $raw=JSON::PP->new->utf8->canonical->encode($doc);write916($info,$raw);write916($path,'MP3 fixture');
+my $out="$dir/stdout";my $err="$dir/stderr";write916($out,"$path\n");write916($err,'');
+my $r=bless {bot=>{},logs=>[],events=>[],messages=>[]},'MB916Metadata';my @warnings;
+{
+    no warnings 'redefine';
+    local *Mediabot::Radio::Request::logBot=sub {push @{$r->{events}},'log'};
+    local $SIG{__WARN__}=sub {push @warnings,@_};
+    $r->_finish_download(ctx=>bless({},'MB916Context'),query=>'fixture',id_user=>4,
+        stdout=>$out,stderr=>$err,exitcode=>0,timedout=>0);
+}
+my $row=$r->{row} || {};
+my $pipeline=!@warnings && !@{$r->{logs}} && same916([@$row{qw(id_youtube artist title)}],[@$doc{qw(id artist title)}])
+    && same916($r->{events},[qw(catalogue client push log)]) && $r->{queued} eq $path
+    && same916($r->{messages},['Radio: downloaded, cached and queued: '.$doc->{artist}.' - '.$doc->{title}])
+    && bytes916($path) eq 'MP3 fixture' && bytes916($info) eq $raw && !-e $out && !-e $err;
+push @rows,{case=>'download_pipeline',ok=>$pipeline?1:0};
+print JSON::PP->new->canonical->encode({rows=>\@rows});
+MB916_METADATA_PROBE
+    my $root=dirname(dirname(abs_path($INC{'Mediabot/Liquidsoap.pm'})));
+    open my $metadata_run,'-|',$^X,'-I'.$root,'-e',$metadata_probe or die $!;
+    my $metadata_raw=do {local $/;<$metadata_run> // ''};
+    close $metadata_run;my $metadata_status=$?;
+    my $metadata=eval {decode_json($metadata_raw)};
+    my %metadata_rows=ref($metadata) eq 'HASH' && ref($metadata->{rows}) eq 'ARRAY'
+        ? map {($_->{case}=>$_->{ok})} @{$metadata->{rows}} : ();
+    for my $name (qw(latin1 bmp emoji combining nominal invalid_documents download_pipeline)) {
+        $assert->ok($metadata_status==0 && $metadata_rows{$name},
+            "mb916: $name keeps sidecar metadata and completion outcomes correct");
+    }
 };

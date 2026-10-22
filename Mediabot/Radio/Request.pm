@@ -612,7 +612,7 @@ sub _metadata_from_info_json {
     my $json_path = _info_json_path_for_mp3($path);
     return ('', 'Unknown', '') unless defined($json_path) && -r $json_path;
 
-    open my $fh, '<:encoding(UTF-8)', $json_path or do {
+    open my $fh, '<:raw', $json_path or do {
         $self->_logger(2, "could not read yt-dlp info json: $json_path: $!");
         return ('', 'Unknown', '');
     };

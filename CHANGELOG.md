@@ -10,6 +10,19 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB916 — Preserve UTF-8 track metadata from yt-dlp sidecars (2026-10-22)
+
+- Read .info.json sidecars as bytes for the existing JSON::PP UTF-8 decoder.
+  Avoid rejecting valid accents, Japanese text and emoji after a second decode.
+  Preserve YouTube ID, artist and title through download completion while
+  retaining the parser, artist fallback order, trimming and error returns.
+- Add seven assertions to existing case 1053 using real files and the download
+  completion path; preserve its 50 earlier assertions. Compare 81 previously
+  working files, including ASCII-escaped Unicode, with identical values and
+  UTF-8 flags. Add no fixture file or numbered case. Keep SQL schema/queries,
+  MP3 files, sidecars, private configuration and services unchanged.
+
+
 ### MB915 — Survive a broken Liquidsoap connection (2026-10-22)
 
 - Locally ignore SIGPIPE while sending a Liquidsoap command so a closed peer
