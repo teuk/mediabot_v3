@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB914 — Keep malformed Icecast metadata out of public views (2026-10-22)
+
+- Normalize optional display fields before interpreting them as titles, server
+  metadata, dates or mount identities. Ignore JSON references while preserving
+  valid scalars and raw snapshots, avoiding HASH/ARRAY text and phantom mounts.
+- Reject references and non-finite conversions in numeric normalization; retain
+  finite values and the existing decimal/comma/zero behavior without a new cap.
+- Add eight assertions to existing case 1256. Compare 72 nominal snapshots
+  through all six public views and use a real loopback HTTP recovery probe.
+  Add no fixture or numbered case. Keep request count, source/mount selection,
+  failures and sorting. No SQL/schema, plugin, private config, VERSION, service,
+  Liquidsoap, Partyline, runner or audit change.
+
+
 ### MB913 — Bound heavy-command results before the worker pipe (2026-10-22)
 
 - Check the serialized UTF-8 bytes of CommandAsync's oversized-result fallback.

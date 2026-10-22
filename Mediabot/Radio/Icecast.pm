@@ -5,6 +5,7 @@ use warnings;
 
 use HTTP::Tiny;
 use JSON::MaybeXS qw(decode_json);
+use POSIX qw(isfinite);
 
 our $VERSION = '0.02';
 
@@ -48,13 +49,13 @@ sub _status_from_icestats {
     my ($icestats) = @_;
     return {
         ok        => 1,
-        host      => $icestats->{host},
-        admin     => $icestats->{admin},
-        location  => $icestats->{location},
-        server_id => $icestats->{server_id},
+        host      => _scalar($icestats->{host}),
+        admin     => _scalar($icestats->{admin}),
+        location  => _scalar($icestats->{location}),
+        server_id => _scalar($icestats->{server_id}),
         sources   => _num($icestats->{sources}),
         listeners => _num($icestats->{listeners}),
-        started   => $icestats->{server_start_iso8601} || $icestats->{server_start},
+        started   => _scalar($icestats->{server_start_iso8601}) || _scalar($icestats->{server_start}),
         raw       => $icestats,
     };
 }
@@ -304,29 +305,31 @@ sub _normalize_mount {
     } unless ref($src) eq 'HASH';
 
     my $mount = '';
+    my $listenurl = _scalar($src->{listenurl});
+    my $server_name = _scalar($src->{server_name});
 
-    if (defined $src->{listenurl} && $src->{listenurl} =~ m{https?://[^/]+(/.*)\z}) {
+    if (defined $listenurl && $listenurl =~ m{https?://[^/]+(/.*)\z}) {
         $mount = $1;
     }
-    elsif (defined $src->{server_name} && $src->{server_name} ne '') {
-        $mount = $src->{server_name};
+    elsif (defined $server_name && $server_name ne '') {
+        $mount = $server_name;
         $mount = "/$mount" unless $mount =~ m{^/};
     }
 
     return {
         mount            => $mount,
-        server_name      => $src->{server_name},
-        description      => $src->{server_description},
-        listenurl        => $src->{listenurl},
-        server_url       => $src->{server_url},
-        title            => defined $src->{title} ? $src->{title} : '',
+        server_name      => $server_name,
+        description      => _scalar($src->{server_description}),
+        listenurl        => $listenurl,
+        server_url       => _scalar($src->{server_url}),
+        title            => _scalar($src->{title}) // '',
         bitrate          => _num($src->{bitrate}),
         samplerate       => _num($src->{samplerate}),
         channels         => _num($src->{channels}),
         listeners        => _num($src->{listeners}),
         listener_peak    => _num($src->{listener_peak}),
         source_ip        => $src->{source_ip},
-        stream_start     => $src->{stream_start_iso8601} || $src->{stream_start},
+        stream_start     => _scalar($src->{stream_start_iso8601}) || _scalar($src->{stream_start}),
         server_type      => $src->{server_type},
         audio_info       => $src->{audio_info},
         user_agent       => $src->{user_agent},
@@ -334,17 +337,24 @@ sub _normalize_mount {
     };
 }
 
+# Optional display fields must not stringify JSON containers or booleans.
+# Keep valid scalars and the original raw snapshot available to callers.
+sub _scalar {
+    return ref($_[0]) ? undef : $_[0];
+}
+
 sub _num {
     my ($v) = @_;
 
-    return 0 unless defined $v;
+    return 0 unless defined $v && !ref($v);
 
     $v =~ s/^\s+|\s+\z//g;
     $v =~ s/,//g;
 
     return 0 unless $v =~ /^\d+(?:\.\d+)?\z/;
 
-    return int($v);
+    my $number = 0 + $v;
+    return isfinite($number) ? int($number) : 0;
 }
 
 sub _log {
