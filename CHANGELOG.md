@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB915 — Survive a broken Liquidsoap connection (2026-10-22)
+
+- Locally ignore SIGPIPE while sending a Liquidsoap command so a closed peer
+  reaches the existing write-failure return, socket cleanup and diagnostic.
+  Restore the caller's signal handler on return; add no retry or global policy.
+- Add six assertions to existing case 582 using real loopback TCP sockets and
+  DEFAULT, IGNORE and callback handlers. Preserve its 17 previous assertions.
+  Compare 120 normal exchanges and exercise the cached-radio error path.
+  Add no fixture or numbered case. Keep command framing, acknowledgements,
+  read limits/timeouts, SQL schema, private configuration and services unchanged.
+
+
 ### MB914 — Keep malformed Icecast metadata out of public views (2026-10-22)
 
 - Normalize optional display fields before interpreting them as titles, server

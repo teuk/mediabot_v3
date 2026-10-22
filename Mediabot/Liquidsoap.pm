@@ -80,6 +80,9 @@ sub command {
 
     $sock->autoflush(1);
 
+    # A peer can close between connect and write. Return the existing write
+    # failure instead of letting SIGPIPE terminate the calling process.
+    local $SIG{PIPE} = 'IGNORE';
     my $payload = $command . "\nquit\n";
     unless (print {$sock} $payload) {
         my $err = "write failed to $host:$port: $!";
