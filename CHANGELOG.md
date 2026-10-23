@@ -11,6 +11,21 @@ release. The current development line is `3.6dev`.
 ## [Unreleased] — 3.6dev
 
 
+### MB922 — Follow the current connection owner for persistent bans (2026-10-23)
+
+- Resolve ChannelBan's database handle through the bot's existing connection
+  owner before each of its five SQL operations. Cached helpers now follow
+  a replacement handle after reconnect instead of retaining the startup handle.
+- Clear stale handles when the owner is unavailable, including an independently
+  live fallback, and allow the same helper to recover on a later operation.
+  Preserve the standalone dbh-only API, SQL/binds and existing error contracts.
+- Extend existing case 69 with five grouped native assertions while retaining
+  its 32 prior checks and all 1,156 case files. Compare ten unchanged native
+  calls, exercise both reconnect paths and the real expiry pipeline after outage,
+  and detect eight mutations. No new module, shared fixture or schema change.
+
+
+
 ### MB921 — Validate note deletion ordinals before numeric conversion (2026-10-23)
 
 - Reject partial, fractional, scientific, Unicode-digit and reference indexes

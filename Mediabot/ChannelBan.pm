@@ -47,6 +47,18 @@ sub new {
     return bless $self, $class;
 }
 
+# MB922: the bot may replace its DBI handle after a reconnect. Follow the
+# existing connection owner before each SQL operation; never retain a stale
+# fallback when that owner is unavailable. Keep standalone dbh-only callers.
+sub _current_dbh {
+    my ($self) = @_;
+    my $db = $self->{bot} && $self->{bot}{db};
+    if ($db && $db->can('ensure_connected')) {
+        $self->{dbh} = $db->ensure_connected();
+    }
+    return $self->{dbh};
+}
+
 sub min_ban_level {
     return MIN_BAN_LEVEL;
 }
@@ -302,7 +314,7 @@ sub _mask_matches_irc {
 sub active_ban_for_mask {
     my ($self, $id_channel, $hostmask) = @_;
 
-    return undef unless $self->{dbh};
+    return undef unless $self->_current_dbh;
     return undef unless defined($id_channel) && $id_channel ne '';
     return undef unless defined($hostmask)   && $hostmask   ne '';
 
@@ -362,7 +374,7 @@ sub add_ban {
     my $mask       = $args{mask};
     my $ban_level  = $args{ban_level} || MIN_BAN_LEVEL;
 
-    return (undef, "no database handle") unless $self->{dbh};
+    return (undef, "no database handle") unless $self->_current_dbh;
     return (undef, "missing id_channel") unless $id_channel;
     return (undef, "missing mask")       unless $mask;
 
@@ -441,7 +453,7 @@ sub add_ban {
 sub list_active_bans {
     my ($self, $id_channel, $limit) = @_;
 
-    return () unless $self->{dbh};
+    return () unless $self->_current_dbh;
     return () unless defined($id_channel) && $id_channel ne '';
 
     # A1: optional $limit — avoids loading all bans into memory
@@ -498,7 +510,7 @@ sub mark_removed {
     my $id_channel = $args{id_channel};
     my $selector   = $args{selector};
 
-    return (0, "no database handle") unless $self->{dbh};
+    return (0, "no database handle") unless $self->_current_dbh;
     return (0, "missing id_channel") unless $id_channel;
     return (0, "missing selector")   unless defined $selector && $selector ne '';
 
@@ -558,7 +570,7 @@ sub mark_removed {
 sub expired_bans {
     my ($self) = @_;
 
-    return () unless $self->{dbh};
+    return () unless $self->_current_dbh;
 
     my $sql = q{
         SELECT
