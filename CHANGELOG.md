@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB938 — Start the new roadmap with private channel diagnostics (2026-10-23)
+
+- Add a reusable, read-only channel observation report and the Master/Owner
+  Partyline command `.diagnose #channel`. Separate fresh persisted flags from
+  observed transport/runtime/JOIN state, missing catalogue entries and unknowns.
+- Explain AppleMusicFallback's AppleMusic prerequisite and independent URL
+  gates. Keep requests and bounded UTF-8 replies private; expose no credentials,
+  raw errors or conversation content. Existing feature policies stay unchanged.
+- Update the development roadmap around administration, channel personality,
+  community memory, contributor plugins and adoption. This first lot adds no
+  web endpoint, schema, configuration change or live provider probe.
+- Extend the existing Partyline case with seven native DBI/IO::Async groups;
+  keep 1,158 case files with eight explicit assertions and six existing module
+  structure checks automatically covering the two new modules.
+
 ### MB937 — Acknowledge quote deletions only after a confirmed DELETE (2026-10-23)
 
 - Check affected rows in historical and v3 quote deletion paths. A concurrent

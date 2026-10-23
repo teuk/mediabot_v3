@@ -80,6 +80,8 @@ use Mediabot::Partyline::Privileged qw(
     _cmd_die
 );
 
+use Mediabot::Partyline::Diagnostics qw(_cmd_diagnose);
+
 use Mediabot::Partyline::Presence qw(_cmd_away _cmd_back);
 
 use Mediabot::Partyline::Commands qw(

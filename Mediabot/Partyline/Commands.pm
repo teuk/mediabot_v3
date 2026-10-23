@@ -1391,6 +1391,7 @@ sub _cmd_help {
         "Available commands:\r\n"
       . "  .help [command]     - full help or help for one command\r\n"
       . "  .help search <text> - search command help\r\n"
+      . "  .diagnose <#chan>   - private channel configuration/runtime diagnosis (Master+)\r\n"
       . "  .stat               - channel status (owner, chansets, nick count)\r\n"
       . "  .dccstat            - show DCC Partyline listeners and sessions\r\n"
       . "  .whom [all|away|here|telnet|dcc] - list/filter partyline sessions\r\n"

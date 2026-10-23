@@ -146,7 +146,7 @@ sub _handle_line {
     # Announce dot-commands to all other partyline users so every session
     # knows who triggered what, without needing to run .whom.
     # History is private; presence commands announce only validated state changes.
-    if ($line =~ /^\./ && $line !~ /^\.(?:quit$|(?:history|away|back)(?:\s|$))/i) {
+    if ($line =~ /^\./ && $line !~ /^\.(?:quit$|(?:history|away|back|diagnose)(?:\s|$))/i) {
         my $cmd_display = $self->_display_nick($id);
         $self->_broadcast("[${cmd_display}] $line", $id);
     }
@@ -170,6 +170,9 @@ sub _handle_line {
     elsif ($line =~ /^\.metrics$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.metrics' }) if $self->{bot}->{metrics};
         $self->_cmd_metrics($stream, $id);
+    }
+    elsif ($line =~ /^\.diagnose(?:\s+(.*))?$/i) {
+        $self->_cmd_diagnose($stream, $id, $1);
     }
     elsif ($line =~ /^\.plugins(?:\s+(.*))?$/i) {
         $self->{bot}->{metrics}->inc('mediabot_commands_partyline_total', { command => '.plugins' }) if $self->{bot}->{metrics};

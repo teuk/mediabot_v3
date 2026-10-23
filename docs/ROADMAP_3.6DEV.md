@@ -1,81 +1,133 @@
-# Mediabot 3.6dev — development roadmap
+# Mediabot 3.6dev — roadmap actualisée
 
-Stable 3.5 remains published. There is no scheduled 3.7 release or production
-upgrade. The operator considers the `#i/o` exclusion inventory and Hailo reply
-observation complete for the current planning sequence. This decision does not
-turn a development commit into an nbot deployment.
+Date : 23 octobre 2026. Base : snapshot après MB937,
+`3.6dev-20261023_211143`. Cette feuille de route traduit les orientations
+retenues avec Christophe ; elle ne programme aucune mise à jour de production.
+La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
 
-## Current position
+## Le cap
 
-| Area | Delivered | Current work |
-| --- | --- | --- |
-| Hailo | Channel brains, `braininfo`, `savebrain`, `edits`, policy `check`, and the development reply work through MB803. | MB805 rehearses backup and isolated rebuild with synthetic input. `forget` and `forgetword` still need an exact authorized corpus and a safe live replacement protocol. |
-| Spark | MB798 offline replay uses the production exclusion, observer and pacing logic without a sender. | MB805 aligns replay's command prefix with its supplied configuration; measure anonymized `#i/o` windows before a separate live-send decision. |
-| URLs | MB804 distinguishes DNS unavailability from a blocked RSS destination. A Journal du Geek probe returned HTTP 200 and a news item was announced on development. | Revisit TinyURL or RSS only with a reproducible failure; keep unsafe destinations blocked and safe original links usable. |
-| mbweb | MB814 hardens current roles, session revocation, authenticated dashboards and quote channel visibility on the development source. | Validate the dev deployment, then improve channel/RSS/RandomQuote views before implementing a bounded local bot action bridge for writes. |
-| API v3 plugins | Five packages are accepted with their nbot policies and the MB784/786 preservation contracts. | Recheck source contracts and live Doctor/policy/boot state after an upgrade; retain the existing rollback boundary. |
+Faire de Mediabot un compagnon de salon utile, discret, doté d'une mémoire
+communautaire facile à retrouver et dont l'opérateur comprend les décisions.
+Les améliorations techniques servent désormais des objectifs d'usage précis.
 
-## Next sequence
+Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
+les budgets de texte, les sorties différées, les timers, les reconnexions,
+l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
+Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
+MB937 est validé sur le serveur : 30 681 assertions, sécurité GO/37 et intégrité
+de démarrage OK. Cette validation ne constitue pas une certification exhaustive.
 
-1. **Selective Hailo maintenance.** Run the synthetic MB805 rehearsal on the
-   development host. Determine whether a complete, authorized per-channel
-   training corpus can be retained for future brains. Prove exact selection,
-   interruption recovery, isolated rebuild, generation-gated switch, restart
-   persistence and rollback before adding Owner-only `forget` or `forgetword`.
-   An old brain without a faithful corpus remains ineligible for selective
-   deletion; a whole-brain reset is a different operation.
-2. **Spark measurement.** Replay anonymized quiet, solo, small and busy windows
-   using the target instance's configuration, including its actual command
-   prefix. Require correct bot pressure and pacing, no excluded-line influence,
-   and at most one momentum candidate in an unchanged human conversation
-   window. A live send requires its own acceptance and rollback.
-3. **Plugin and release maintenance.** Preserve all five API v3 packages,
-   manifest capabilities, policies, boot ledger and business data after an
-   upgrade. Keep Doctor and failures readable; run the existing MB784/786
-   source contracts before a source commit. A future stable release needs a
-   separate decision.
-4. **URLs on evidence.** If a TinyURL/news failure recurs, record the exact
-   failure class and test a controlled destination without weakening the
-   destination guard or causing a retry flood.
+## Les cinq directions
 
-## Source and runtime boundary
+| Priorité | Direction | Bénéfice recherché | Premier résultat observable |
+| --- | --- | --- | --- |
+| 1 | Administration lisible | Comprendre la configuration et l'état réellement observé de chaque salon | Un diagnostic privé explique les réglages, observations et inconnues sans modifier le bot |
+| 2 | Personnalité du salon | Accorder Hailo, Spark et les conversations IA au rythme du salon | Des scénarios montrent des interventions mieux choisies, avec moins de chevauchements |
+| 3 | Mémoire communautaire reliée | Retrouver les références et souvenirs déjà conservés | Des parcours relient citations, factoids, mémoire et portraits du salon |
+| 4 | Plugins accessibles | Faciliter une contribution indépendante et maintenable | Un exemple complet accompagne création, validation, activation et retrait d'une extension |
+| 5 | Adoption facilitée | Rendre installation, découverte et exploitation plus simples | Un parcours vérifié mène une nouvelle installation à son premier salon fonctionnel |
 
-MB829 records a cross-cutting maintenance round in
-[the dated maintenance review](MAINTENANCE_20261017.md): equivalent nick changes,
-reentrant one-shot events, fresh dashboard membership, deterministic privacy
-tests and statistics setup permissions. The review also identifies configuration
-save durability and incremental decomposition as follow-up work. Applying source
-changes does not deploy mbweb or restart an IRC instance.
+## Étape 1 — Comprendre un salon
 
-Run focused tests, the fast lane, then one visible full suite immediately
-before each source commit. A dev restart does not change nbot. An offline
-replay or synthetic brain proves only the behavior it exercises; nbot work
-requires its own observed before-state, window and rollback.
+**MB938 : premier lot préparé, à installer et valider sur le serveur.**
 
-## mbweb development sequence
+Ajouter `.diagnose #salon` dans la partyline, réservée aux sessions Master/Owner.
+Un module commun retourne un rapport structuré, indépendant de sa présentation,
+qui pourra ensuite alimenter mbweb.
 
-Work first on the dev console. The first source round is MB814 authorization
-and scoped reads, with the Node lane, focused Perl contracts, fast lane and
-full suite before commit. Verify source/runtime convergence and the public
-health endpoint, then check Owner and lower-level accounts on permitted and
-non-permitted channels. Revoke a disposable test account and downgrade its role
-without leaving privileged content accessible through the existing session.
+Ce premier lot distingue :
 
-Next, make navigation, instance identity, freshness and channel detail useful:
-RSS feeds and pacing, RandomQuote state/frequency, complete chansets and the
-accepted Hailo/Spark capability views. Separate desired persisted configuration
-from confirmed runtime state.
+- les chansets persistés, relus au moment de la demande : on, off, absent du
+  catalogue ou inconnu après une erreur ;
+- la connexion IRC et le JOIN connus du runtime ; un objet Channel en mémoire
+  ne suffit pas à prouver un JOIN ;
+- quelques relations utiles entre previews : AppleMusicFallback dépend de
+  l'entrée AppleMusic ; Reddit et Youtube ont leurs propres portes d'activation ;
+- les limites : un réglage on ne prouve ni l'accès à un fournisseur distant,
+  ni l'absence de quota, ni une sortie effectivement livrée.
 
-A later write round should introduce named, bounded local actions handled by
-Mediabot itself, with revalidated actor/channel rights, CSRF, explicit results,
-rate limits and audit events. Start with RSS pacing and RandomQuote, then quote
-management and selected chansets. A generic SQL editor, arbitrary partyline
-command input and shell execution are outside this sequence.
+Le diagnostic ne recharge aucun cache, ne lance aucun fetch et n'active aucune
+fonction. Les commandes existantes `!features`, `.stat` et `.plugins why` gardent
+leur comportement. Les erreurs brutes, secrets et historiques de conversation
+ne font pas partie du rapport.
 
-## MB818 collective AI pilot
+**Critères de réussite :** lecture seule démontrée ; droits contrôlés avant SQL ;
+sortie privée et bornée ; erreurs présentées comme inconnues ; distinction
+configuration/runtime testée ; configuration et schéma inchangés.
 
-The addressed conversation pilot combines concurrent contributors, a single
-synthesis, scoped persistent memory and bounded current-source research. It is
-disabled by default. Validate provider access, French/English delivery,
-multi-participant follow-ups, generation cancellation, restart and `/forget`
-on dev before a source commit or another instance update. See [META_AI](META_AI.md).
+## Étape 2 — Enrichir puis présenter le diagnostic
+
+Étendre progressivement le rapport avec les observations des composants
+existants : cadence RSS, état RandomQuote, tâches attendues et présentes,
+fraîcheur des observations, motifs d'échec bornés et état des plugins.
+Chaque indicateur doit avoir une source identifiable et une valeur inconnue.
+
+Présenter ensuite ces informations dans mbweb avec les droits par salon déjà
+en place. Distinguer configuration souhaitée, source sur disque et runtime
+chargé. Un état non observé ne doit jamais apparaître comme confirmé.
+Le premier lot MB938 ne crée pas encore cette interface web.
+
+Les écritures web viendront dans un lot séparé : actions nommées exécutées par
+le bot, droits revérifiés, protection CSRF, résultat explicite et audit.
+Commencer par les réglages RSS et RandomQuote. Conserver la séparation entre
+lecture et mutation ; aucun éditeur SQL ou exécuteur de commandes arbitraires.
+
+## Étape 3 — Accorder les interventions
+
+Construire des scénarios de salon calme, solo, animé et technique. Observer
+comment Hailo, Spark et l'IA sollicitée se répartissent les occasions de réponse.
+Réutiliser exclusions, budgets et mécanismes de temporisation existants.
+Définir des profils compréhensibles, avec retour simple au comportement courant.
+
+Mesurer la pertinence, les répétitions, les chevauchements et le rythme, puis
+faire une observation sur développement avant toute activation en production.
+Les replays Spark emploient le véritable préfixe et la configuration visée.
+Le pilote collectif MetaAI garde son activation explicite et ses contrôles de
+langue, quotas, mémoire, annulation de génération, redémarrage et `/forget`.
+
+La maintenance sélective Hailo reste un chantier spécifique : `forget` et
+`forgetword` exigent un corpus fidèle et autorisé, une reconstruction isolée,
+une bascule contrôlée et une restauration prouvée. La répétition synthétique
+MB805 reste un outil de qualification ; un ancien cerveau sans corpus fidèle
+ne reçoit pas de promesse d'effacement sélectif.
+
+## Étape 4 — Relier la mémoire existante
+
+Partir des fonctions déjà présentes : quotes, factoids, recap, memory,
+onthisday, awards, yearbook et chronologie. Définir quelques parcours utiles,
+avec des renvois clairs entre résultats et commandes plutôt qu'une multiplication
+de syntaxes indépendantes. Respecter visibilité du salon, attribution, limites
+et possibilités d'effacement déjà définies. Toute annonce automatique demande
+un choix explicite du salon et une cadence maîtrisée.
+
+## Étape 5 — Faciliter contribution et adoption
+
+Préparer un petit nombre d'exemples de plugins aboutis : capacités minimales,
+permissions expliquées, tests de cycle de vie, gestion des erreurs et retrait
+sans ressources résiduelles. Préserver les cinq packages API v3 acceptés,
+leurs politiques, capacités, données et ledger de démarrage lors des mises à jour.
+
+Vérifier ensuite le parcours d'installation Debian, la documentation, l'aide
+et une démonstration sobre. Une future version stable fera l'objet d'une décision
+séparée, avec les contrôles de préservation MB784/MB786 et une répétition de
+restauration. Une modification de source ne déploie pas mbweb et ne redémarre
+aucune instance IRC.
+
+## Discipline commune à tous les lots
+
+- Garder le schéma actuel de la base ; réutiliser les interfaces existantes.
+- Livrer des périmètres courts avec un bénéfice observable et une restauration.
+- Choisir des tests de comportement et de frontières ; remplacer les doublons
+  et les contrôles de structure devenus peu utiles ; conserver les protections
+  importantes plutôt qu'un objectif de nombre d'assertions.
+- Exécuter les contrôles ciblés et la suite complète
+  `perl t/test_commands.pl --progress`, puis sécurité et intégrité de démarrage.
+  Documenter les limites locales ; ne pas les transformer en dérogations serveur.
+- Mesurer les coûts et les lenteurs avant optimisation. Poursuivre les
+  refactorisations lorsqu'elles débloquent ces objectifs ou corrigent un défaut
+  démontré, en conservant les comportements spécialisés nécessaires.
+
+Références dans le dépôt : `docs/CHANNEL_DIAGNOSTICS.md`, `docs/META_AI.md`,
+`docs/HAILO_BRAIN_MAINTENANCE.md`, `docs/PLUGIN_API_V3.md`,
+`docs/PLUGIN_V3_UPDATE_ACCEPTANCE.md`, `contrib/mbweb/README.md`.
