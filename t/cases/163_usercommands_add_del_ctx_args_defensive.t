@@ -352,4 +352,19 @@ MB928_NATIVE
         'MB928: failed begin neither commits nor rolls back another caller transaction');
     $assert->is($json->encode([$nominal_count,\@nominal_errors]), '[48,[]]',
         'MB928: confirmation, exact 30s boundary, permissions, empty links and Unicode retain native contracts');
+
+    # MB933: exercise actual userAdd/adduser/register against isolated DBI.
+    {
+        open my $probe, '-|', $^X, '-I.', '-It/lib',
+            't/lib/MB933AdminFixture.pm', 'add' or die "user creation probe: $!";
+        my $raw = do { local $/; <$probe> };
+        my $closed = close $probe;
+        my $results = eval { JSON::PP->new->utf8->decode($raw // '') };
+        $assert->ok($closed && ref($results) eq 'ARRAY' && @$results == 4,
+            'MB933: native user creation probe completed');
+        for my $result (@{ref($results) eq 'ARRAY' ? $results : []}) {
+            $assert->ok($result->{ok}, 'MB933: ' . $result->{name}
+                . ($result->{detail} ? ': ' . $result->{detail} : ''));
+        }
+    }
 };

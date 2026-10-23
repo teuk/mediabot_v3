@@ -36,6 +36,20 @@ my $case = sub {
     $assert->($pl =~ /purge_claude_session_for_nick\(\$mediabot,\s*\$sNick\)/, 'QUIT handler purges nick Claude state');
     $assert->($pl !~ /my\s+\$prefix\s*=\s*lc\(\$sNick\)\s*\.\s*"\\x00"/, 'old QUIT lc(nick) history-only cleanup is gone');
     $assert->($pl !~ /my\s+\$prefix\s*=\s*lc\(\$sNick_n\)\s*\.\s*"\\x00"/, 'old NICK lc(nick) history-only cleanup is gone');
+
+    # MB933: check native transaction failures before PART/cache publication.
+    require JSON::PP;
+    open my $probe, '-|', $^X, '-I.', '-It/lib',
+        't/lib/MB933AdminFixture.pm', 'purge' or die "channel purge probe: $!";
+    my $raw = do { local $/; <$probe> };
+    my $closed = close $probe;
+    my $results = eval { JSON::PP->new->utf8->decode($raw // '') };
+    $assert->($closed && ref($results) eq 'ARRAY' && @$results == 4,
+        'MB933: native channel purge probe completed');
+    for my $result (@{ref($results) eq 'ARRAY' ? $results : []}) {
+        $assert->($result->{ok}, 'MB933: ' . $result->{name}
+            . ($result->{detail} ? ': ' . $result->{detail} : ''));
+    }
 };
 
 if (caller) { return $case; }

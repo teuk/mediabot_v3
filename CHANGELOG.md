@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB933 — Make user creation and channel purges atomic (2026-10-23)
+
+- Commit a new USER and its initial USER_HOSTMASK together. Check SQL results,
+  capture the user id once and report success only after commit; failed initial
+  Owner registration leaves no orphan account blocking a clean retry.
+- Check channel purge begin/commit and deletion results before PART, timer/cache
+  cleanup or success output. Keep the original diagnostic and roll back only
+  transactions owned by the operation. Preserve successful zero-row deletions.
+- Retain existing privilege gates, password hashing, bound values, optional
+  helper hostmasks, purge scope and schema. Add grouped native DBI regressions
+  to two existing cases without increasing the case catalogue.
+
 ### MB932 — Preserve achievement merit and aliases across SQL failures (2026-10-23)
 
 - Transfer exact IRC aliases to the retained profile before deleting a merged

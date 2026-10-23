@@ -712,39 +712,49 @@ sub userAdd {
     push @bind, $hashed_pw if defined $hashed_pw;
     push @bind, ($username, $level_id);
 
-    my $sth = $dbh->prepare($sql);
-    # H3/fix: guard undef $sth
-    my $ok  = ($sth && $sth->execute(@bind)) ? 1 : 0;
-    $sth->finish if $sth;
+    # MB933: account + initial hostmask are one operation. DBI can return
+    # failure without throwing; do not leave an orphan or report a false success.
+    my ($id, $transaction_started);
+    my $ok = eval {
+        die "existing transaction\n" unless $dbh->{AutoCommit};
+        $dbh->begin_work or die "begin_work failed: " . ($dbh->errstr || 'unknown DBI error');
+        $transaction_started = 1;
 
-    unless ($ok) {
-        $logger->log(1, "userAdd() INSERT failed: $DBI::errstr");
-        return undef;
-    }
+        my $sth = $dbh->prepare($sql)
+            or die "USER prepare failed: " . ($dbh->errstr || 'unknown DBI error');
+        $sth->execute(@bind)
+            or die "USER insert failed: " . ($dbh->errstr || 'unknown DBI error');
 
-    # Capture id ONCE immediately after INSERT USER — before any other statement
-    my $id = $dbh->last_insert_id(undef, undef, undef, undef);
-    unless ($id) {
-        $logger->log(1, "userAdd() last_insert_id returned undef after INSERT USER");
-        return undef;
-    }
+        # Capture id ONCE immediately after INSERT USER, before any other write.
+        $id = $dbh->last_insert_id(undef, undef, undef, undef);
+        die "last_insert_id returned no valid user id\n"
+            unless defined($id) && "$id" =~ /\A[1-9][0-9]*\z/;
+        $sth->finish;
 
-    # Insert initial hostmask into USER_HOSTMASK if provided
-    if (defined $hostmask && $hostmask ne '') {
-        my $hm_sth = $dbh->prepare(
-            "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
-        );
-
-        unless ($hm_sth && $hm_sth->execute($id, $hostmask)) {
-            $logger->log(1, "userAdd() USER_HOSTMASK insert failed for id_user=$id: " . ($DBI::errstr || 'unknown DBI error'));
-            $hm_sth->finish if $hm_sth;
-        }
-        else {
+        if (defined $hostmask && $hostmask ne '') {
+            my $hm_sth = $dbh->prepare(
+                "INSERT INTO USER_HOSTMASK (id_user, hostmask) VALUES (?, ?)"
+            ) or die "USER_HOSTMASK prepare failed: " . ($dbh->errstr || 'unknown DBI error');
+            $hm_sth->execute($id, $hostmask)
+                or die "USER_HOSTMASK insert failed: " . ($dbh->errstr || 'unknown DBI error');
             $hm_sth->finish;
         }
+
+        $dbh->commit or die "commit failed: " . ($dbh->errstr || 'unknown DBI error');
+        $transaction_started = 0;
+        1;
+    };
+    unless ($ok) {
+        my $error = $@ || 'unknown user creation error';
+        if ($transaction_started) {
+            my $rolled_back = eval { $dbh->rollback or die 'rollback returned failure'; 1 };
+            $error .= "; rollback failed: " . ($@ || 'unknown DBI error') unless $rolled_back;
+        }
+        $logger->log(1, "userAdd() transaction failed: $error") if $logger;
+        return undef;
     }
 
-    $logger->log(1, "userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)");
+    $logger->log(1, "userAdd() created user '$nickname' (id_user=$id, level_id=$level_id)") if $logger;
     return $id;
 }
 

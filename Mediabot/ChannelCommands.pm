@@ -809,8 +809,12 @@ sub purgeChannel_ctx {
 
     # B1/A1: atomic transaction — cascade all related tables
     my $dbh = $self->{dbh};
+    my $transaction_started = 0;
     my $purge_ok = eval {
-        $dbh->begin_work;
+        # MB933: never commit or roll back a transaction owned by the caller.
+        die "existing transaction\n" unless $dbh->{AutoCommit};
+        $dbh->begin_work or die "begin_work failed: " . ($dbh->errstr || 'unknown DBI error');
+        $transaction_started = 1;
 
         # Archive first (before deleting, so we have the data)
         my $sth_arch = $dbh->prepare(q{
@@ -830,20 +834,25 @@ sub purgeChannel_ctx {
         for my $table (qw(CHANNEL_BAN CHANNEL_SET CHANNEL_LOG BADWORDS QUOTES USER_CHANNEL)) {
             my $rv = $dbh->do("DELETE FROM $table WHERE id_channel = ?", undef, $id_channel);
             die "delete from $table failed: " . ($DBI::errstr || 'unknown DBI error')
-                unless defined $rv;
+                unless $rv;
         }
 
         my $rv = $dbh->do("DELETE FROM CHANNEL WHERE id_channel = ?", undef, $id_channel);
         die "delete from CHANNEL failed: " . ($DBI::errstr || 'unknown DBI error')
-            unless defined $rv;
+            unless $rv;
 
-        $dbh->commit;
+        $dbh->commit or die "commit failed: " . ($dbh->errstr || 'unknown DBI error');
+        $transaction_started = 0;
         1;
     };
 
     unless ($purge_ok) {
-        eval { $dbh->rollback };
-        $self->{logger}->log(0, "purgeChannel_ctx: transaction failed for $sChannel: $@");
+        my $error = $@ || 'unknown channel purge error';
+        if ($transaction_started) {
+            my $rolled_back = eval { $dbh->rollback or die 'rollback returned failure'; 1 };
+            $error .= "; rollback failed: " . ($@ || 'unknown DBI error') unless $rolled_back;
+        }
+        $self->{logger}->log(0, "purgeChannel_ctx: transaction failed for $sChannel: $error");
  Mediabot::botNotice($self, $nick, "Database error during purge -- channel not deleted.");
         return;
     }
