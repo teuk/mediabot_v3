@@ -111,6 +111,14 @@ sub policy_for {
     return _clone($self->{policies}{$key});
 }
 
+sub observation_for {
+    my ($self,$channel)=@_;
+    my $key=_channel_key($channel,1);
+    my $policy=$self->{policies}{$key};
+    return {channel=>"$channel",configured=>$policy ? 1:0,
+        mode=>$policy ? "$policy->{mode}" : 'off'};
+}
+
 sub active_policies {
     my ($self) = @_;
     return map { _clone($_) }

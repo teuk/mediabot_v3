@@ -61,7 +61,7 @@ sub run_checks {
     $group->('absent state stays absent; default interval never fabricates a scheduled attempt',sub {
         my ($b)=MB938ChannelDiagnosticFixture::setup();my($dir,$p,$q)=populate($b,empty=>1);
         my $before=files($dir);my $r=MB938ChannelDiagnosticFixture::collect($b);my $a=$r->{activity};
-        check($r->{version}==2 && $a->{rss}{state} eq 'absent' && $a->{rss}{gap}==0,'RSS default observation');
+        check($r->{version}==3 && $a->{rss}{state} eq 'absent' && $a->{rss}{gap}==0,'RSS default observation');
         check($a->{randomquote}{state} eq 'absent' && $a->{randomquote}{interval}==3600
             && !$a->{randomquote}{scheduled} && !exists($a->{randomquote}{next_at}) && !exists($a->{randomquote}{wait}),'fabricated deadline');
         check(files($dir) eq $before,'absent status created files');
@@ -146,7 +146,7 @@ sub run_checks {
             check($text=~/RandomQuote: runtime=present; state=fresh/ && $text=~/RSS: runtime=present; state=fresh/ && $text=~/reserved_24h=1/,'activity not rendered on native wire');
             check($text=~/Channel diagnosis #café/ && $text=~/Task\(instance\) rss_poll_dispatch: state=absent/,'UTF-8 or task renderer');
             check($other!~/diagnos|RandomQuote|reserved_24h|café/ && $text!~/PRIVATE_|\.json/,'private output leaked');
-            check(length($raw)<4000,'wire byte bound');
+            check(length($raw)<6000,'wire byte bound');
         }
     });
     $group->('authorization precedes component access and malformed observations remain bounded unknowns',sub {
@@ -158,7 +158,7 @@ sub run_checks {
         $b->{scheduler}=bless{result=>{name=>'PRIVATE_',mode=>'periodic',started=>1}},'MB939::BadScheduler';
         $r=MB938ChannelDiagnosticFixture::collect($b);check($r->{activity}{rss}{state} eq 'unavailable' && $r->{activity}{tasks}{rss_poll_dispatch}{state} eq 'unavailable','invalid observation accepted');
         my$lines=Mediabot::Diagnostics::Channel->new(bot=>$b)->lines($r);
-        check(@$lines<=17 && !grep({length($_)>400 || /[\r\n\x1b]/}@$lines),'unbounded extended report');
+        check(@$lines<=24 && !grep({length($_)>400 || /[\r\n\x1b]/}@$lines),'unbounded extended report');
         check($json->encode($r)!~/PRIVATE_|INJECT|\/private/,'unapproved component field leaked');
     });
     return \@out;

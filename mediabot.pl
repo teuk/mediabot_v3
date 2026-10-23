@@ -58,6 +58,7 @@ use Time::HiRes ();
 use Mediabot::Scheduler;
 use Mediabot::RSS::Runtime;
 use Mediabot::RandomQuote::Runtime;
+use Mediabot::Diagnostics::Publisher;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
 use utf8;
@@ -2416,6 +2417,7 @@ my $scheduler = Mediabot::Scheduler->new(
     logger => $mediabot->{logger},
 );
 $mediabot->{scheduler} = $scheduler;
+Mediabot::Diagnostics::Publisher->install($mediabot,$scheduler);
 # mb556-B1 / mb557-B1: Metrics already exists at this point. Attach it now,
 # after Scheduler construction, so task histograms are actually populated.
 $scheduler->set_metrics($mediabot->{metrics})

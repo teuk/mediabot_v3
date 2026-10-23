@@ -421,7 +421,7 @@ the password is hidden
 .dccstat shows the public IP, port mode, pending offers and active sessions
 ```
 
-## Private channel diagnosis (MB938 / MB939)
+## Private channel diagnosis (MB938–MB940)
 
 Authenticated Master/Owner sessions can use `.diagnose #channel` and
 `.help diagnose` for a read-only, bounded view of persisted chansets and
@@ -431,3 +431,10 @@ observations from stopped or absent tasks. Only the requester receives the repor
 is not announced to other sessions. `on`, `off`, `missing` and `unknown` are
 separate observations, with no provider probe or setting change. See
 [Channel diagnostics](CHANNEL_DIAGNOSTICS.md) for scope and interpretation.
+
+MB940 adds retained RSS errors, scheduler callback exceptions and loaded API v3
+policy/failure/quarantine summaries filtered to the channel. Missing retained
+evidence does not prove a clean history. The private report is bounded to 24
+lines. Existing .plugins doctor/why/failures remain dedicated operator views.
+The diagnostic does not write publications. See CHANNEL_DIAGNOSTICS.md for the
+optional publication and prepared per-channel web presentation.

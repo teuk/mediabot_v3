@@ -371,3 +371,72 @@ test('actual home route refreshes before data/metrics and remains quiet for gues
   assert.match(publicRes.payload, /Log in/);
   assert.doesNotMatch(publicRes.payload, /internal_db|Entries in USER|Prometheus endpoint/);
 });
+
+function channelDiagnosisRoutes({ level = 3, allowed = () => true, profileRead, channelRead } = {}) {
+  const stub = routerFake(); const calls = [];
+  const auth = sessionModule(profileRead || (async () => { calls.push('refresh'); return profile(level); }));
+  load('../routes/channels.js', {
+    express: stub.adapter,
+    '../lib/config': { config: {}, safeBase: p => '/console' + p },
+    '../lib/render': { escapeHtml, renderPage: (title, body) => body },
+    '../lib/sessionUser': auth,
+    '../lib/securityLog': { logError() {} },
+    '../lib/mediabotRepository': {
+      userHasChannelAccess: async (user, id) => { calls.push('access'); assert.equal(user, 7); assert.equal(id, 7); return allowed(); },
+      getChannelById: channelRead || (async id => { calls.push('channel'); return { id_channel: id, name: '#café' }; })
+    },
+    '../lib/channelDiagnostics': {
+      readChannelDiagnostics: async args => { calls.push('publication'); assert.deepEqual(args, { id: 7, name: '#café' }); return { state: 'unavailable' }; },
+      renderChannelDiagnostics: result => `<p>Observation ${result.state}</p>`
+    }
+  });
+  return { routes: stub.routes, calls };
+}
+
+test('both channel diagnosis routes refresh identity and check membership before reading the publication', async () => {
+  for (const level of [0, 1, 2, 3]) {
+    for (const route of ['/channels/:id/diagnostics', '/api/channels/:id/diagnostics']) {
+      let allowed = true;
+      const { routes, calls } = channelDiagnosisRoutes({ level, allowed: () => allowed });
+      const req = request(level, route.startsWith('/api/') ? '/api/channels/7/diagnostics' : '/channels/7/diagnostics');
+      req.params = { id: '7' };
+      const res = response(); await invoke(routes.get(route), req, res);
+      assert.equal(res.code, 200); assert.equal(res.headers['Cache-Control'], 'no-store');
+      assert.deepEqual(calls, ['refresh', 'access', 'channel', 'publication']);
+      if (route.startsWith('/api/')) assert.deepEqual(res.payload, { ok: true, diagnostic: { state: 'unavailable' } });
+      else { assert.match(res.payload, /#café/); assert.match(res.payload, /\/console\/api\/channels\/7\/diagnostics/); }
+      allowed = false; calls.length = 0;
+      const denied = response(); await invoke(routes.get(route), req, denied);
+      assert.equal(denied.code, 403); assert.deepEqual(calls, ['refresh', 'access']);
+      assert.doesNotMatch(JSON.stringify(denied.payload), /café|publication/);
+    }
+  }
+});
+
+test('revoked identity and failed authorization never read channel diagnostic data or trust cached roles', async () => {
+  for (const profileRead of [async () => null, async () => ({ id_user: 7, global_level: null }),
+    async () => { throw new Error('PRIVATE_DATABASE_MARKER'); }]) {
+    const { routes, calls } = channelDiagnosisRoutes({ profileRead });
+    const req = request(0, '/api/channels/7/diagnostics'); req.params = { id: '7' };
+    const res = response(); await invoke(routes.get('/api/channels/:id/diagnostics'), req, res);
+    assert.ok([401, 503].includes(res.code)); assert.deepEqual(calls, []);
+    assert.doesNotMatch(JSON.stringify(res.payload), /PRIVATE_|café/);
+  }
+  const { routes, calls } = channelDiagnosisRoutes({ allowed: () => { throw new Error('PRIVATE_ACCESS_MARKER'); } });
+  const req = request(3, '/api/channels/7/diagnostics'); req.params = { id: '7' };
+  const res = response(); await invoke(routes.get('/api/channels/:id/diagnostics'), req, res);
+  assert.equal(res.code, 503); assert.deepEqual(calls, ['refresh', 'access']);
+});
+
+test('invalid channel identifiers and missing channels cannot reach the diagnostic publication reader', async () => {
+  for (const id of ['', '7junk', '../7', ['7'], '0', '-1']) {
+    const { routes, calls } = channelDiagnosisRoutes();
+    const req = request(3, '/api/channels/7/diagnostics'); req.params = { id };
+    const res = response(); await invoke(routes.get('/api/channels/:id/diagnostics'), req, res);
+    assert.equal(res.code, 400); assert.deepEqual(calls, ['refresh']);
+  }
+  const { routes, calls } = channelDiagnosisRoutes({ channelRead: async () => null });
+  const req = request(3, '/api/channels/7/diagnostics'); req.params = { id: '7' };
+  const res = response(); await invoke(routes.get('/api/channels/:id/diagnostics'), req, res);
+  assert.equal(res.code, 404); assert.deepEqual(calls, ['refresh', 'access']);
+});

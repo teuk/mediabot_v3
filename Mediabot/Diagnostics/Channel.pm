@@ -6,6 +6,7 @@ use Encode qw(decode FB_CROAK LEAVE_SRC);
 use POSIX qw(strftime);
 use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
 use Mediabot::Diagnostics::Activity;
+use Mediabot::Diagnostics::Plugins;
 
 # Configuration observations only: never substitute this inventory for the
 # feature's own authorization, caching, provider or delivery policy.
@@ -55,7 +56,7 @@ sub collect {
     $channel=channel_text($channel);
     die "invalid channel\n" unless defined $channel;
     my $bot=$self->{bot};
-    my $report={version=>2,channel=>"$channel",observed_at=>time(),database=>'unknown',
+    my $report={version=>3,channel=>"$channel",observed_at=>time(),database=>'unknown',
         transport_connected=>'unknown',runtime_active=>'unknown',runtime_connected=>'unknown',
         channel_joined=>'unknown',flags=>{map {$_=>'unknown'} @FLAGS},notes=>[]};
     my $dbh=eval {$bot->{db} ? $bot->{db}->ensure_connected : $bot->{dbh}};
@@ -68,6 +69,7 @@ sub collect {
                 die "invalid channel row\n" unless valid_channel($row->{name})
                     && defined($row->{id_channel}) && "$row->{id_channel}" =~ /\A[1-9][0-9]*\z/;
                 $report->{channel}=channel_text($row->{name});
+                $report->{channel_id}=0+$row->{id_channel};
                 my $marks=join(',',map {'?'} @FLAGS);
                 my $rows=_rows($dbh,"SELECT cl.chanset, CASE WHEN cs.id_channel_set IS NULL THEN 0 ELSE 1 END AS enabled
                     FROM CHANSET_LIST cl LEFT JOIN CHANNEL_SET cs
@@ -85,6 +87,21 @@ sub collect {
             1;
         };
         $report->{database}='error' unless $ok;
+    }
+    $report->{rss_failures}={state=>'unknown'};
+    if ($dbh && $report->{channel_id}) {
+        my $ok=eval {
+            my $rows=_rows($dbh,q{SELECT COUNT(*) AS retained_feeds, MAX(last_error_at) AS latest_db_time
+                FROM RSS_FEED WHERE id_channel=? AND last_error_at IS NOT NULL},$report->{channel_id});
+            my $r=$rows->[0];
+            die "invalid RSS failure observation\n" unless @$rows==1 && defined($r->{retained_feeds})
+                && "$r->{retained_feeds}" =~ /\A[0-9]{1,10}\z/
+                && (!defined($r->{latest_db_time}) || (!ref($r->{latest_db_time})
+                    && $r->{latest_db_time} =~ /\A[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\z/));
+            $report->{rss_failures}={state=>'observed',retained_feeds=>0+$r->{retained_feeds},
+                latest_db_time=>$r->{latest_db_time}};1;
+        };
+        $report->{rss_failures}={state=>'unavailable'} unless $ok;
     }
     my $connected;
     my $transport_ok=eval {$connected=$bot->{irc}->is_connected;1};
@@ -106,7 +123,8 @@ sub collect {
     push @{$report->{notes}},'Reddit and Youtube use their own flags; UrlTitle covers generic links, Spotify, Instagram, Facebook and X.';
     push @{$report->{notes}},'on/off describe persisted flags; runtime caches may lag. Missing is not an effective default.';
     $report->{activity}=Mediabot::Diagnostics::Activity->new(bot=>$bot)->collect($report->{channel},$report->{observed_at});
-    push @{$report->{notes}},'RSS counters are reservations; task ticks are callback starts. No provider, delivery or last-error probe was performed.';
+    $report->{plugins}=eval {$bot->{plugin_manager}->channel_diagnostic_snapshot($report->{channel})};
+    push @{$report->{notes}},'RSS counters are reservations; task ticks are callback starts. Failures are retained observations, not a complete history or a delivery test.';
     return $report;
 }
 sub lines {
@@ -121,6 +139,10 @@ sub lines {
         push @lines,($group->[0] eq 'ai' ? 'AI':ucfirst($group->[0])).': '.join(' ',map {$_.'='.$report->{flags}{$_}} @$group[1..$#$group]);
     }
     push @lines,@{Mediabot::Diagnostics::Activity->new(bot=>$self->{bot})->lines($report->{activity})};
+    my $rss=$report->{rss_failures};
+    push @lines,'RSS failures: state='.$rss->{state}.($rss->{state} eq 'observed'
+        ? "; retained_feeds=$rss->{retained_feeds}; last_db_time=".($rss->{latest_db_time}//'none_retained').'; timezone=database' : '');
+    push @lines,@{Mediabot::Diagnostics::Plugins->lines($report->{plugins})};
     push @lines,map {'Note: '.$_} @{$report->{notes}};
     return \@lines;
 }

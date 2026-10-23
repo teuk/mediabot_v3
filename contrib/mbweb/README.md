@@ -15,6 +15,7 @@ Current features include:
 - login with an existing Mediabot user;
 - user profile page;
 - channel list and channel detail pages;
+- channel diagnosis from optional recent local bot publications;
 - visibility based on global Mediabot rights and channel-level rights;
 - Icecast radio status page;
 - commands and quotes browsing;
@@ -616,3 +617,26 @@ session boundaries as every other state-changing request.
 The live app can evolve under `/opt/mbweb/app`; when ready, copy the cleaned source back into `contrib/mbweb`, excluding local runtime files and secrets.
 
 Do not publish local synchronization scripts unless they are generic and safe for other users.
+
+## Channel diagnosis — MB940
+
+The channel detail page links to `/channels/:id/diagnostics`, with a matching
+`/api/channels/:id/diagnostics` JSON view. Both refresh the current account and
+check the existing per-channel access before any publication is read. No-store
+responses omit instance scheduler details, global plugin inventory, raw errors
+and other channels. Values are escaped. Unavailable or expired observations
+remain explicit, and a valid report must match the current database id/name.
+
+The bot publisher is disabled by default. An operator may configure an existing
+bot-owned directory and an explicit allowlist of up to eight channels using
+main.CHANNEL_DIAGNOSTICS_DIR and main.CHANNEL_DIAGNOSTICS_CHANNELS. Separately,
+MBWEB_CHANNEL_DIAGNOSTICS_DIR can point to the same instance-specific directory.
+Do not put these publications in a public/static directory. The reader has no
+fallback path and no network, bot-command or shell action. It accepts at most
+65,536 bytes and observations up to 120 seconds old, based on observed_at.
+
+Canonical source changes do not deploy /opt/mbweb/app or change private config.
+Use the established install/mbweb_deploy.sh and development pilot procedure.
+Do not sync an older live tree back over the new canonical source. Full contract,
+opt-in keys and evidence are in ../../docs/CHANNEL_DIAGNOSTICS.md. There is no
+new database schema, dependency or general bot-control API.

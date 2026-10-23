@@ -17,8 +17,34 @@ const {
   getKnownChannelRelatedTables
 } = require('../lib/mediabotRepository');
 const { logError } = require('../lib/securityLog');
+const { readChannelDiagnostics, renderChannelDiagnostics } = require('../lib/channelDiagnostics');
 
 const router = express.Router();
+
+function channelDiagnosis(api) {
+  return async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const id = typeof req.params.id === 'string' ? parseRouteId(req.params.id) : null;
+    const error = (code, text) => api ? res.status(code).json({ ok: false, error: text })
+      : res.status(code).send(renderPage('Channel diagnosis', `<section class="mbw-card"><p>${escapeHtml(text)}</p></section>`, req));
+    if (!Number.isInteger(id) || id <= 0) return error(400, 'Invalid channel id');
+    try {
+      if (!await userHasChannelAccess(req.session.user.id_user, id)) return error(403, 'Forbidden');
+      const channel = await getChannelById(id);
+      if (!channel) return error(404, 'Channel not found');
+      const diagnostic = await readChannelDiagnostics({ id, name: channel.name });
+      if (api) return res.json({ ok: true, diagnostic });
+      const body = `<section class="mbw-hero"><div><p class="mbw-kicker">Read-only channel diagnosis</p>
+        <h1>${escapeHtml(channel.name)}</h1><div class="mbw-actions">
+        <a class="mbw-secondary" href="${safeBase('/channels/' + id)}">Back to channel</a>
+        <a class="mbw-secondary" href="${safeBase('/api/channels/' + id + '/diagnostics')}">Diagnosis JSON</a>
+        </div></div></section>${renderChannelDiagnostics(diagnostic)}`;
+      return res.send(renderPage('Channel diagnosis', body, req));
+    } catch (err) { logError(console, 'channel.diagnosis', err); return error(503, 'Channel diagnosis unavailable'); }
+  };
+}
+router.get('/channels/:id/diagnostics', requireFreshLogin, channelDiagnosis(false));
+router.get('/api/channels/:id/diagnostics', requireFreshLogin, channelDiagnosis(true));
 
 router.get('/api/channels', requireFreshLogin, async (req, res) => {
   try {
@@ -360,6 +386,7 @@ router.get('/channels/:id', requireFreshLogin, async (req, res) => {
     <div class="mbw-actions">
       <a class="mbw-primary" href="${safeBase('/channels')}">← Back to channels</a>
       <a class="mbw-secondary" href="${safeBase('/api/channels/' + idChannel)}">API JSON</a>
+      <a class="mbw-secondary" href="${safeBase('/channels/' + idChannel + '/diagnostics')}">Channel diagnosis</a>
     </div>
   </div>
 </section>

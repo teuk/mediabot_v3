@@ -1,7 +1,7 @@
 # Mediabot 3.6dev — roadmap actualisée
 
-Date : 23 octobre 2026. Base confirmée : MB938, commit `05d171b`,
-`3.6dev-20261023_214729`. Cette feuille de route traduit les orientations
+Date : 24 octobre 2026. Base confirmée : MB939, commit `932e749`,
+`3.6dev-20261023_221453`. Cette feuille de route traduit les orientations
 retenues avec Christophe ; elle ne programme aucune mise à jour de production.
 La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
 
@@ -15,7 +15,7 @@ Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
 les budgets de texte, les sorties différées, les timers, les reconnexions,
 l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
 Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
-MB938 est validé sur le serveur : 30 695 assertions, sécurité GO/37 et intégrité
+MB939 est validé sur le serveur : 30 707 assertions, sécurité GO/37 et intégrité
 de démarrage OK. Cette validation ne constitue pas une certification exhaustive.
 
 ## Les cinq directions
@@ -63,7 +63,7 @@ existants : cadence RSS, état RandomQuote, tâches attendues et présentes,
 fraîcheur des observations, motifs d'échec bornés et état des plugins.
 Chaque indicateur doit avoir une source identifiable et une valeur inconnue.
 
-**MB939 : premier enrichissement implémenté, à installer et valider sur le serveur.**
+**MB939 : installé, validé sur le serveur et poussé dans `932e749`.**
 Le même `.diagnose` observe les politiques RSS et RandomQuote via les objets
 du runtime, sans créer, réparer ou réécrire leurs fichiers d'état. Il distingue
 un fichier absent, occupé, invalide ou illisible, montre la date du fichier et
@@ -71,12 +71,31 @@ sépare un intervalle par défaut d'une tentative réellement planifiée.
 Les tâches d'instance `rss_poll_dispatch` et `randomquote_dispatch` indiquent
 présence, démarrage, nombre de ticks et prochaines échéances observées.
 Les réservations RSS, tickets RandomQuote et ticks ne prouvent aucune livraison.
-Les derniers échecs, diagnostics de plugins et versions chargées restent à traiter.
+
+**MB940 : deuxième enrichissement et présentation web préparés dans le code,
+à installer et valider sur le serveur.** Le diagnostic ajoute les erreurs RSS
+encore retenues, les exceptions des deux callbacks de scheduler et les
+politiques, capacités manquantes, quarantaines et échecs API v3 du seul salon.
+La lecture ne crée pas de registre ; la rétention et les limites restent visibles.
+Les plugins v1/v2, les erreurs non enregistrées et les versions chargées restent
+inconnus lorsqu'aucune source fiable ne les observe.
 
 Présenter ensuite ces informations dans mbweb avec les droits par salon déjà
 en place. Distinguer configuration souhaitée, source sur disque et runtime
 chargé. Un état non observé ne doit jamais apparaître comme confirmé.
-Les lots MB938 et MB939 ne créent pas encore cette interface web.
+Le source mbweb de MB940 propose des vues HTML/JSON de diagnostic par salon,
+avec identité et droits relus avant tout accès à la publication. Il ne montre
+pas l'inventaire global des plugins ni les tâches d'instance. Une publication
+locale du bot est facultative, bornée à huit salons explicitement choisis et
+désactivée par défaut. Les observations trop anciennes, invalides ou d'identité
+différente ne sont pas affichées comme courantes.
+
+**Prochain point de validation :** installation et chargement du code, puis
+qualification d'un pilote web sur développement avec la procédure canonique,
+droits de deux comptes distincts, accès refusé à un autre salon et observation
+absente/périmée. Ce paquet ne déploie pas `/opt/mbweb/app`, ne modifie aucune
+configuration privée et n'active aucune publication. La convergence entre
+source sur disque et code chargé reste à observer dans un lot ultérieur.
 
 Les écritures web viendront dans un lot séparé : actions nommées exécutées par
 le bot, droits revérifiés, protection CSRF, résultat explicite et audit.

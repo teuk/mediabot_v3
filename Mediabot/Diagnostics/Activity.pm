@@ -57,7 +57,7 @@ sub _task {
     return $bad unless ref($raw) eq 'HASH' && defined($raw->{name}) && !ref($raw->{name}) && $raw->{name} eq $name
         && defined($raw->{mode}) && !ref($raw->{mode}) && $raw->{mode} =~ /\A(?:periodic|calendar)\z/;
     my $out={state=>'present',mode=>"$raw->{mode}"};
-    for my $key (qw(started interval ticks last_tick next_run)) {
+    for my $key (qw(started interval ticks last_tick next_run callback_exceptions last_exception_at)) {
         return $bad unless _number($raw->{$key},$key eq 'started' ? 1 : 9999999999);
         $out->{$key}=0+$raw->{$key};
     }
@@ -100,6 +100,7 @@ sub lines {
             $text.='; last_tick='.($o->{last_tick} ? _when($o->{last_tick}) : 'never');
             $text.='; next_wakeup='.($o->{started} && $o->{next_run} ? _when($o->{next_run}) : 'none');
             $text.="; overdue=$o->{overdue_seconds}s";
+            $text.="; callback_exceptions=$o->{callback_exceptions}; last_exception=".($o->{last_exception_at} ? _when($o->{last_exception_at}) : 'none_observed');
         } else {$text.="; reason=$o->{reason}" if exists $o->{reason}}
         push @lines,$text;
     }

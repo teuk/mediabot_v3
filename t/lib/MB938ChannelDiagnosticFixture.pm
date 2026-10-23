@@ -18,7 +18,7 @@ use Mediabot::AI::ConversationRuntimeState;
     package MB938::DBI::db;our @ISA=('DBI::db');
     sub prepare {
         my ($db,$sql,@rest)=@_;my $p=$db->{private_mb938};
-        my $kind=$sql=~/FROM CHANNEL WHERE/?'channel':$sql=~/FROM CHANSET_LIST/?'flags':'';
+        my $kind=$sql=~/FROM CHANNEL WHERE/?'channel':$sql=~/FROM CHANSET_LIST/?'flags':$sql=~/FROM RSS_FEED/?'rss':'';
         push @{$p->{sql}},$sql if $p;
         $sql='SELECT * FROM mb938_missing_table' if $p && $kind && ($p->{fault}//'') eq "$kind.prepare";
         my $sth=$db->SUPER::prepare($sql,@rest);
@@ -64,6 +64,7 @@ sub setup {
     $db->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT COLLATE NOCASE,secret TEXT)');
     $db->do('CREATE TABLE CHANSET_LIST(id_chanset_list INTEGER PRIMARY KEY,chanset TEXT)');
     $db->do('CREATE TABLE CHANNEL_SET(id_channel_set INTEGER PRIMARY KEY,id_channel INTEGER,id_chanset_list INTEGER)');
+    $db->do('CREATE TABLE RSS_FEED(id_rss_feed INTEGER PRIMARY KEY,id_channel INTEGER,last_error_at TEXT,last_error TEXT)');
     $db->do('INSERT INTO CHANNEL VALUES(7,?,?),(8,?,?)',undef,$a{channel}//'#test','PRIVATE_KEY_MARKER','#other','PRIVATE_KEY_MARKER');
     $db->do(q{INSERT INTO CHANSET_LIST VALUES(1,'AppleMusic'),(2,'AppleMusicFallback'),(3,'Reddit'),(4,'UrlTitle'),(5,'Youtube'),(6,'Games'),(7,'PrivateUnrelatedFlag')});
     $db->do('INSERT INTO CHANNEL_SET VALUES(11,7,2),(12,7,3),(13,8,1),(14,7,7)');
@@ -76,7 +77,7 @@ sub setup {
     return($bot,$db,$p);
 }
 sub collect {return Mediabot::Diagnostics::Channel->new(bot=>$_[0])->collect($_[1]//'#test')}
-sub dumpdb {return $json->encode({map {$_=>$_[0]->selectall_arrayref('SELECT * FROM '.$_.' ORDER BY 1')} qw(CHANNEL CHANSET_LIST CHANNEL_SET)})}
+sub dumpdb {return $json->encode({map {$_=>$_[0]->selectall_arrayref('SELECT * FROM '.$_.' ORDER BY 1')} qw(CHANNEL CHANSET_LIST CHANNEL_SET RSS_FEED)})}
 sub command {
     my($b,%a)=@_;my$s=bless {out=>''},'MB938::Buffer';
     my$pl=bless {bot=>$b,users=>{1=>{authenticated=>exists($a{auth})?$a{auth}:1,level=>exists($a{level})?$a{level}:1}},streams=>{}},'Mediabot::Partyline';
@@ -111,7 +112,7 @@ sub run_checks {
         my($b,$db,$p)=setup();my$r=collect($b);
         check($r->{database} eq 'fresh' && $r->{flags}{AppleMusicFallback} eq 'on' && $r->{flags}{AppleMusic} eq 'off','activation scope incorrect');
         check($r->{flags}{Reddit} eq 'on' && $r->{flags}{UrlTitle} eq 'off' && $r->{flags}{Gemini} eq 'missing','on/off/missing conflated');
-        check(@{$p->{sql}}==2 && $p->{binds}[0][1] eq '#test' && $p->{binds}[1][1]==7 && $p->{finished}==2,'query scope or cleanup');
+        check(@{$p->{sql}}==3 && $p->{binds}[0][1] eq '#test' && $p->{binds}[1][1]==7 && $p->{binds}[2][1]==7 && $p->{finished}==3,'query scope or cleanup');
         check(join(' ',@{$r->{notes}})=~/prerequisite is off/,'dependency explanation missing');
         my$serialized=$json->encode($r);check($serialized!~/PRIVATE_|PrivateUnrelatedFlag|secret/,'unapproved data leaked');
         $r->{flags}{Reddit}='changed';check(collect($b)->{flags}{Reddit} eq 'on','report retained shared mutable state');
@@ -165,8 +166,8 @@ sub run_checks {
             my$text=decode('UTF-8',$bytes,FB_CROAK);
             check($text=~/Channel diagnosis #café/ && $text=~/Database: fresh/ && $text=~/joined=yes/,'native transport diagnosis failed');
             check($other!~/diagnose|diagnosis|café/,'diagnostic broadcast to another session');
-            check(@{$p->{sql}}==2,'wire command not dispatched exactly once');
-            my@lines=split/\r\n/,$text;check(@lines<24 && length($bytes)<4000,'unbounded wire report');
+            check(@{$p->{sql}}==3,'wire command not dispatched exactly once');
+            my@lines=split/\r\n/,$text;check(@lines<31 && length($bytes)<6000,'unbounded wire report');
         }
     });
     $group->('help is discoverable and a failed runtime remains unknown with a bounded detached report',sub {
@@ -174,7 +175,7 @@ sub run_checks {
         $pl->_cmd_help($s,1,'diagnose');check($s->{out}=~/\.diagnose <#chan>/,'focused help missing');
         $b->{irc}{fail}=1;my$r=collect($b);check($r->{transport_connected} eq 'unknown','transport exception converted to connected');
         my$lines=Mediabot::Diagnostics::Channel->new(bot=>$b)->lines($r);
-        check(@$lines<=17 && !grep({length($_)>400 || /[\r\n\x1b]/}@$lines),'report not line-bounded');
+        check(@$lines<=24 && !grep({length($_)>400 || /[\r\n\x1b]/}@$lines),'report not line-bounded');
         check($json->encode($r)!~/PRIVATE_|DBI|MB938/,'report contains object or error details');
     });
     return\@out;

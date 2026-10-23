@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB940 — Channel-scoped failure observations and web diagnosis (2026-10-24)
+
+- Extend `.diagnose` with retained RSS error counts, callback exceptions and
+  bounded loaded API v3 policy/failure/quarantine observations. Read existing
+  ledgers without creating them and observe policy without cloning config.
+- Attribute scheduler exceptions only to the completing registration and
+  generation. Retain no message and never invoke work while observing it.
+- Prepare HTML/JSON diagnosis in canonical mbweb source. Refresh identity and
+  check channel access before reading; omit global inventories, escape output
+  and hide expired, invalid or mismatched publications.
+- Add optional atomic local publication for at most eight explicit channels,
+  disabled by default. No private config, schema, deployment or provider probe
+  changes. Keep 1,158 Perl cases; extend existing native and Node test files.
+
 ### MB939 — Observe RSS, RandomQuote and scheduler without changing state (2026-10-23)
 
 - Extend private `.diagnose #channel` with the loaded runtimes' RSS pacing and

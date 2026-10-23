@@ -1172,6 +1172,12 @@ sub v3_permissions_report {
     return Mediabot::Plugin::DiagnosticsV3->permissions(entry => $entry);
 }
 
+sub channel_diagnostic_snapshot {
+    my ($self,$channel)=@_;
+    require Mediabot::Diagnostics::Plugins;
+    return Mediabot::Diagnostics::Plugins->collect($self,$channel);
+}
+
 sub v3_diagnostic_report {
     my ($self, $name) = @_;
     my $entry = $self->_v3_diagnostic_entry($name);

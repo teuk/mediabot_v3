@@ -32,9 +32,17 @@ sub _run_task_callback {
     my ($self, $name, $cb) = @_;
 
     my $t0 = [ Time::HiRes::gettimeofday() ];
+    my $observed_task=$self->{_tasks}{$name};
+    my $observed_generation=$observed_task ? $observed_task->{generation}:undef;
     eval { $cb->() };
     my $err = $@;
     my $elapsed = Time::HiRes::tv_interval($t0);
+    my $current=$self->{_tasks}{$name};
+    if ($err && $observed_task && $current && refaddr($observed_task)==refaddr($current)
+        && $current->{generation}==$observed_generation) {
+        $current->{callback_exceptions}++;
+        $current->{last_exception_at}=time();
+    }
 
     if ($self->{metrics} && eval { $self->{metrics}->can('observe') }) {
         eval { $self->{metrics}->observe('mediabot_scheduler_tick_seconds',
@@ -115,6 +123,8 @@ sub add {
         next_run       => 0,
         timer          => undef,
         generation     => 0,   # mb356-B1: invalidate stale lifecycle callbacks
+        callback_exceptions => 0,
+        last_exception_at => 0,
     };
 
     $self->{_tasks}{$name} = $task;
@@ -461,6 +471,8 @@ sub task_info {
         start_time     => $task->{start_time} // 0,
         next_run       => $task->{next_run} // 0,
         generation     => $task->{generation} // 0,
+        callback_exceptions => $task->{callback_exceptions} // 0,
+        last_exception_at => $task->{last_exception_at} // 0,
     };
 }
 
