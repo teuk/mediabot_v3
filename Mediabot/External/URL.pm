@@ -64,6 +64,9 @@ use Mediabot::External::XTwitter qw(
     _handle_x_twitter
 );
 
+# MB930: dedicated opt-in Reddit previews, independent of generic UrlTitle.
+use Mediabot::External::Reddit ();
+
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use HTML::Entities qw(decode_entities);
 use HTML::Entities '%entity2char';
@@ -397,6 +400,12 @@ sub displayUrlTitle {
     
         $self->{logger}->log(4, "displayUrlTitle() URL: $url");
     
+        if (Mediabot::External::Reddit::is_reddit_url($url)) {
+            return undef unless Mediabot::External::Reddit::enabled($self, $sChannel);
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'reddit' }) if $self->{metrics}; };
+            return Mediabot::External::Reddit::handle($self, $message, $sNick, $sChannel, $url);
+        }
+
         # ── 1. YouTube ─────────────────────────────────────────────────────────
         # All YouTube URL variants (watch, shorts, live, youtu.be, nocookie, m., music.)
         my $yt_id = Mediabot::External::_is_youtube_url($url);

@@ -267,6 +267,10 @@ Feature switches are stored per channel as **chansets**. A capability registered
 `+AppleMusicFallback` optionally adds verified Spotify and YouTube track links
 to Apple Music announcements. See [setup and matching limits](docs/APPLE_MUSIC_FALLBACK.md).
 
+`+Reddit` enables compact Reddit previews with a black-on-orange badge,
+UTF-8-safe titles and public attribution. It is off by default and independent
+of `+UrlTitle`. See [supported links, activation and availability](docs/REDDIT_PREVIEWS.md).
+
 Useful discovery commands include:
 
 ```text

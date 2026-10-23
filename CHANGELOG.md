@@ -10,6 +10,23 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB930 — Opt-in Reddit previews (2026-10-23)
+
+- Add a dedicated Reddit provider and +Reddit channel policy, off by default.
+  Authorized activation registers the missing catalogue data in existing
+  tables; no schema, migration, private configuration or API key change.
+- Render one compact line with a black-on-orange reddit badge, bold title,
+  theme-neutral attribution and a 400-byte UTF-8 budget. Recognize posts,
+  comments, aliases, short/share links, communities, profiles and media URLs.
+  Clearly label parent-title context when a comment embed omits its body;
+  unavailable public metadata never becomes an invented title.
+- Use public oEmbed/HTML and HEAD-only media lookups in bounded AsyncWorker
+  children. Check source identity, validate redirect hosts, respect 429 backoff,
+  coalesce/cache lookups and revalidate policy epoch and IRC delivery context.
+- Add a read-only offline/live checker and one isolated case with 32 grouped
+  scenarios, including native async completion and timeout/reaping. Retain
+  every existing case and the mandatory complete installer validation.
+
 ### MB929 — Opt-in Apple Music links on Spotify and YouTube (2026-10-23)
 
 - Add +AppleMusicFallback, off by default even without a catalogue entry.
