@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB928 — Check every step of user deletion (2026-10-23)
+
+- Check begin_work, all four existing DELETE operations and commit in deluser.
+  DBI failures with RaiseError disabled now stop the command and attempt
+  rollback instead of committing partial deletion and reporting success.
+- Roll back only a transaction started by this command; a failed begin must
+  neither commit nor discard another caller's pending work. Preserve the
+  original failure before rollback for the internal diagnostic.
+- Keep SQL and binds, permissions, two-step confirmation, the inclusive
+  30-second boundary and DBI 0E0 success unchanged. No schema change.
+- Extend existing case 163 by four grouped native assertions: 24 actual DBI
+  failures, 48 unchanged nominal traces and eight detected mutations.
+  Retain its eight criteria and all 1,156 catalogue files.
+
+
 ### MB927 — Preserve ballots after poll expiry (2026-10-23)
 
 - Apply the existing lazy-expiry rule to unvote before it removes a ballot.

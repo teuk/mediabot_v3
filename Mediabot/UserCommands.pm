@@ -2421,18 +2421,27 @@ sub delUser_ctx {
 
     # B2/B3/A2: atomic transaction + cascade + eval safety
     my $dbh = $self->{dbh};
+    # MB928: DBI normally returns failure with RaiseError disabled. Check
+    # every step, and roll back only a transaction started by this command.
+    my $transaction_started = 0;
     my $ok = eval {
-        $dbh->begin_work;
-        $dbh->do("DELETE FROM USER_CHANNEL  WHERE id_user=?", undef, $id_user);
-        $dbh->do("DELETE FROM USER_HOSTMASK WHERE id_user=?", undef, $id_user);
-        $dbh->do("DELETE FROM USER_SEEN     WHERE nick = ?",  undef, lc($target));
-        $dbh->do("DELETE FROM USER          WHERE id_user=?", undef, $id_user);
-        $dbh->commit;
+        $dbh->begin_work or die "begin_work failed: " . $dbh->errstr . "\n";
+        $transaction_started = 1;
+        $dbh->do("DELETE FROM USER_CHANNEL  WHERE id_user=?", undef, $id_user)
+            or die "delete USER_CHANNEL failed: " . $dbh->errstr . "\n";
+        $dbh->do("DELETE FROM USER_HOSTMASK WHERE id_user=?", undef, $id_user)
+            or die "delete USER_HOSTMASK failed: " . $dbh->errstr . "\n";
+        $dbh->do("DELETE FROM USER_SEEN     WHERE nick = ?",  undef, lc($target))
+            or die "delete USER_SEEN failed: " . $dbh->errstr . "\n";
+        $dbh->do("DELETE FROM USER          WHERE id_user=?", undef, $id_user)
+            or die "delete USER failed: " . $dbh->errstr . "\n";
+        $dbh->commit or die "commit failed: " . $dbh->errstr . "\n";
         1;
     };
-    if (!$ok || $@) {
-        eval { $dbh->rollback };
-        $self->{logger}->log(0, "delUser_ctx: transaction failed for $target: $@");
+    if (!$ok) {
+        my $error = $@;
+        eval { $dbh->rollback } if $transaction_started;
+        $self->{logger}->log(0, "delUser_ctx: transaction failed for $target: $error");
  botNotice($self, $nick, "Database error -- user not deleted.");
         return;
     }
