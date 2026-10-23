@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB925 — Restore safe DB timer callbacks and clean partial startup (2026-10-23)
+
+- Export the existing secure timer writer into Mediabot so both reloaded timers
+  and authenticated addtimer callbacks resolve their method. Keep connection
+  and CR/LF/NUL guards, stored commands, intervals and authorization unchanged.
+- Track each fresh timer before loop add/start. On a partial setup exception,
+  stop/detach the current attempt as well as earlier attempts, preserving the
+  old live registry until every fresh timer has successfully started.
+- Add five grouped native assertions to existing case 403, retaining its eleven
+  checks and all 1,156 cases. Exercise 24 fault placements, four cleanup faults,
+  two subsequent recoveries, 14 unchanged nominal traces and four actual
+  Mediabot callback paths. Detect eight mutations. No schema or SQL change.
+
+
 
 ### MB924 — Exclude the previous author quote from the retry draw (2026-10-23)
 

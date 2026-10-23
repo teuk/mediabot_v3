@@ -59,6 +59,7 @@ our @EXPORT = qw(
     msgCmd_ctx
     onStartTimers
     _stop_all_runtime_db_timers
+    _timer_irc_write
     setLastCommandTs
     setLastRandomQuote
     setLastReponderTs
@@ -213,6 +214,9 @@ sub onStartTimers {
     for my $timer_name (sort keys %hTimers) {
         my $timer = $hTimers{$timer_name} or next;
 
+        # MB925: add/start can throw after attaching or arming this timer.
+        # Include the current attempt in rollback before either operation.
+        push @started_fresh, $timer;
         my $ok = eval {
             $self->{loop}->add($timer) if $self->{loop};
             $timer->start;
@@ -232,8 +236,6 @@ sub onStartTimers {
 
             return 0;
         }
-
-        push @started_fresh, $timer;
     }
 
     # All fresh timers are alive. Now stop/remove the old registered timers and
