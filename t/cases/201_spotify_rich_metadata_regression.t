@@ -113,14 +113,15 @@ return sub {
 
     $assert->like(
         $body // '',
-        qr/my\s+\$badge\s*=\s*String::IRC->new\("\["\)->white\('black'\);/,
-        'Spotify builds a badge object first'
+        qr/my\s+\$badge\s*=\s*_spotify_badge\(\);/,
+        'Spotify uses its shared badge before the display'
     );
 
-    $assert->like(
-        $body // '',
-        qr/String::IRC->new\("Spotify"\)->black\('green'\)/,
-        'Spotify keeps its historical badge style'
+    require Mediabot::External::Spotify;
+    $assert->is(
+        "" . Mediabot::External::Spotify::_spotify_badge(),
+        "\x0300,01[\x0f\x0301,03Spotify\x0f\x0300,01]\x0f",
+        'Spotify keeps its historical badge bytes'
     );
 
     $assert->like(

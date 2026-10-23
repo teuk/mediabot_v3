@@ -625,8 +625,14 @@ sub channelSet_ctx {
     }
     elsif ($args[0] =~ /^([+-])(\w+)$/) {
         my ($op, $chanset) = ($1, $2);
+        $chanset = 'AppleMusicFallback' if lc($chanset) eq 'applemusicfallback';
 
         my $id_chanset_list = getIdChansetList($self, $chanset);
+        if (!$id_chanset_list && $op eq '+' && $chanset eq 'AppleMusicFallback') {
+            require Mediabot::External::AppleMusicFallback;
+            Mediabot::External::AppleMusicFallback::register_chanset($self);
+            $id_chanset_list = getIdChansetList($self, $chanset);
+        }
         unless ($id_chanset_list) {
             botNotice($self, $nick, "Undefined chanset $chanset");
             return;
@@ -710,6 +716,15 @@ sub channelSet_ctx {
         return;
     }
 
+    if ($args[0] =~ /^[+-]AppleMusicFallback$/i) {
+        require Mediabot::External::AppleMusicFallback;
+        Mediabot::External::AppleMusicFallback::note_policy_change($self,$target_channel);
+        if ($args[0] =~ /^\+/) {
+            my $ready = Mediabot::External::AppleMusicFallback::prerequisites($self);
+            botNotice($self,$nick,'AppleMusicFallback needs tavily.API_KEY for searches; main.YOUTUBE_APIKEY also enables YouTube verification.')
+                unless $ready->{tavily} && $ready->{youtube};
+        }
+    }
     if ($args[0] =~ /^[+-]MetaAI$/i) {
         require Mediabot::AI::MetaActivation;
         Mediabot::AI::MetaActivation::note_policy_change($self,$target_channel);

@@ -340,6 +340,13 @@ sub _spotify_fetch_sync {
     return \%info;
 }
 
+sub _spotify_badge {
+    my $badge = String::IRC->new("[")->white('black');
+    $badge   .= String::IRC->new("Spotify")->black('green');
+    $badge   .= String::IRC->new("]")->white('black');
+    return $badge;
+}
+
 sub _handle_spotify {
     my ($self, $message, $nick, $channel, $url) = @_;
 
@@ -410,9 +417,7 @@ sub _handle_spotify {
         $self->{logger}->log(4, "_handle_spotify() final display='$display'");
 
         # Historical Spotify badge contract — intentionally unchanged.
-        my $badge = String::IRC->new("[")->white('black');
-        $badge   .= String::IRC->new("Spotify")->black('green');
-        $badge   .= String::IRC->new("]")->white('black');
+        my $badge = _spotify_badge();
         my $msg = "$badge\x0f $display";
 
         Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");

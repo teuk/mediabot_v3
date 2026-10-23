@@ -348,16 +348,35 @@ sub _handle_applemusic {
         ? join(':', 'track', $info->{storefront}, $info->{track_id})
         : lc($url // '');
 
+    require Mediabot::External::AppleMusicFallback;
+    my $fallback = Mediabot::External::AppleMusicFallback::enabled($self, $channel);
+    my ($binding, $epoch);
+    if ($fallback) {
+        $binding = Mediabot::IRC::DeliveryContext::capture_delivery_context($self, $channel);
+        $epoch = Mediabot::External::AppleMusicFallback::epoch($self, $channel);
+    }
+    # Legacy de-duplication is preserved when off. Opted-in channels each get
+    # their own admission context, even if another channel is already pending.
+    my $pending_key = $fallback ? $cache_key . "\0" . lc($channel) : $cache_key;
+    my $start_fallback = sub {
+        my ($record) = @_;
+        return unless $fallback && $record;
+        eval { Mediabot::External::AppleMusicFallback::start(
+            $self, $nick, $channel, $record, $binding, $epoch); };
+    };
+
     my $cached = $self->{_applemusic_cache}{$cache_key};
-    if ($cached && (time() - ($cached->{ts} // 0)) < 600) {
+    if ($cached && (time() - ($cached->{ts} // 0)) < 600
+        && (!$fallback || $cached->{record})) {
         $self->{logger}->log(4, "_handle_applemusic() cache hit for $url");
         Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $cached->{msg}");
+        $start_fallback->($cached->{record});
         return 1;
     }
 
     my $finish = sub {
         my ($fetch, $worker_status) = @_;
-        delete $self->{_applemusic_pending}{$cache_key};
+        delete $self->{_applemusic_pending}{$pending_key};
 
         $fetch = {} unless ref($fetch) eq 'HASH';
         my $title = $fetch->{title};
@@ -411,8 +430,11 @@ sub _handle_applemusic {
         utf8::upgrade($badge);
         my $msg = "$badge\x0f $display";
 
-        $self->{_applemusic_cache}{$cache_key} = { ts => time(), msg => $msg };
+        my $record = $fallback ? Mediabot::External::AppleMusicFallback::record($fetch, $info) : undef;
+        $self->{_applemusic_cache}{$cache_key} = { ts => time(), msg => $msg,
+            ($record ? (record => $record) : ()) };
         Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");
+        $start_fallback->($record);
         return 1;
     };
 
@@ -424,12 +446,12 @@ sub _handle_applemusic {
         && eval { $loop->can('remove') }
         && eval { $loop->can('watch_process') }) {
 
-        if ($self->{_applemusic_pending}{$cache_key}) {
+        if ($self->{_applemusic_pending}{$pending_key}) {
             $self->{logger}->log(4,
                 "_handle_applemusic() request already pending for $url");
             return 1;
         }
-        $self->{_applemusic_pending}{$cache_key} = time();
+        $self->{_applemusic_pending}{$pending_key} = time();
 
         my $adapter_done = 0;
         my $done = sub {
@@ -449,7 +471,7 @@ sub _handle_applemusic {
             eval { $finish->($fetch, $worker_status); 1 } or do {
                 my $error = $@ || 'unknown Apple Music completion error';
                 $error =~ s/\s+/ /g;
-                delete $self->{_applemusic_pending}{$cache_key};
+                delete $self->{_applemusic_pending}{$pending_key};
                 $self->{logger}->log(1,
                     "_handle_applemusic() completion failed: $error");
             };

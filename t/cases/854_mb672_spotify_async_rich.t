@@ -192,10 +192,10 @@ return sub {
             'mb672-854: runtime Spotify handler uses shared AsyncWorker');
         $assert->unlike($handler, qr/_fetch_url_chromium_dumpdom/,
             'mb672-854: Chromium is absent from Spotify runtime handler');
-        $assert->like(
-            $handler,
-            qr/String::IRC->new\("Spotify"\)->black\('green'\)/,
-            'mb672-854: Spotify badge colors remain unchanged'
+        $assert->is(
+            "" . Mediabot::External::Spotify::_spotify_badge(),
+            "\x0300,01[\x0f\x0301,03Spotify\x0f\x0300,01]\x0f",
+            'mb672-854: Spotify badge bytes remain unchanged'
         );
         $assert->like(
             $handler,

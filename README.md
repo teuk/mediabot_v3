@@ -264,6 +264,9 @@ Mediabot combines two authorization models:
 
 Feature switches are stored per channel as **chansets**. A capability registered in `CHANSET_LIST` is not automatically enabled everywhere.
 
+`+AppleMusicFallback` optionally adds verified Spotify and YouTube track links
+to Apple Music announcements. See [setup and matching limits](docs/APPLE_MUSIC_FALLBACK.md).
+
 Useful discovery commands include:
 
 ```text

@@ -10,6 +10,25 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB929 — Opt-in Apple Music links on Spotify and YouTube (2026-10-23)
+
+- Add +AppleMusicFallback, off by default even without a catalogue entry.
+  Only an authorized explicit chanset command registers the existing-table
+  catalogue data and enables the requested channel. No schema change.
+- Preserve the AppleMusic announcement; add up to two direct counterpart links
+  with the exact existing Spotify/YouTube badges and theme-neutral body text.
+  Match exact-track lookup metadata, artist/title/version and duration; omit
+  unconfirmed results rather than publish a generic search link.
+- Run bounded, independently cached Tavily searches and provider verification
+  in AsyncWorker children. Reuse existing Tavily/YouTube configuration and the
+  Spotify collector. Revalidate channel policy, activation epoch and IRC
+  delivery context; disabling/re-enabling cannot revive old output.
+- Add a read-only offline/live acceptance tool and operator documentation.
+  Add one isolated case with 27 grouped scenarios, including the native
+  three-worker pipeline; retain all 1,156 earlier case files. Adapt two badge
+  location checks to assert the exact shared badge bytes.
+
+
 ### MB928 — Check every step of user deletion (2026-10-23)
 
 - Check begin_work, all four existing DELETE operations and commit in deluser.
