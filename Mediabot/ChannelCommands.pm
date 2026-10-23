@@ -130,6 +130,7 @@ sub get_channel_by_name {
     if ($ref) {
         require Mediabot::Channel;
         return Mediabot::Channel->new({
+            db     => $self->{db},
             dbh    => $self->{dbh},
             logger => $self->{logger},
             id     => $ref->{id_channel},
@@ -383,6 +384,7 @@ sub addChannel_ctx {
     # Build channel object
     my $channel = Mediabot::Channel->new({
         name   => $sChannel,
+        db     => $self->{db},
         dbh    => $self->{dbh},
         irc    => $self->{irc},
         logger => $self->{logger},

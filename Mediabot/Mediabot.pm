@@ -1341,6 +1341,7 @@ sub populateChannels {
             tmdb_lang   => $ref->{tmdb_lang},
             timezone    => $ref->{timezone},
             key         => $ref->{key},
+            db          => $self->{db},
             dbh         => $self->{dbh},
             irc         => $self->{irc},
             logger      => $self->{logger},

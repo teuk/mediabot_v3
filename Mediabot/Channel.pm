@@ -16,6 +16,7 @@ sub new {
         chanmode    => $args->{chanmode},
         auto_join   => $args->{auto_join},
         key         => $args->{key},
+        db          => $args->{db},      # optional reconnect owner
         dbh         => $args->{dbh},     # needed for SQL updates
         irc         => $args->{irc},     # needed for IRC operations
         logger      => $args->{logger},  # optional logger
@@ -30,13 +31,22 @@ sub _log {
     $self->{logger}->log($level, $msg) if $self->{logger};
 }
 
+# Cached channels must follow the same connection owner as the bot. Without
+# an owner, retain the historical dbh-only API. A failed reconnect clears the
+# cached handle instead of falling back to a connection already known dead.
+sub _current_dbh {
+    my ($self) = @_;
+    if ($self->{db} && $self->{db}->can('ensure_connected')) {
+        $self->{dbh} = $self->{db}->ensure_connected();
+    }
+    return $self->{dbh};
+}
+
 sub _execute_update {
     my ($self, $sql, $binds, $label) = @_;
 
     # A5: prefer ensure_connected() to handle stale dbh after reconnect
-    my $dbh = ($self->{db} && $self->{db}->can('ensure_connected'))
-        ? $self->{db}->ensure_connected()
-        : $self->{dbh};
+    my $dbh = $self->_current_dbh;
     return 0 unless $dbh;
 
     my $sth = $dbh->prepare($sql);
@@ -94,7 +104,7 @@ sub get_chanmode        { return shift->{chanmode}; }
 sub get_user_level {
     my ($self, $nickname) = @_;
 
-    return 0 unless $self->{dbh};
+    return 0 unless $self->_current_dbh;
     return 0 unless defined($self->{id}) && defined($nickname) && $nickname ne '';
 
     my $sql = q{
@@ -139,7 +149,7 @@ sub get_user_info {
         greet    => 'None',
     };
 
-    return $info unless $self->{dbh};
+    return $info unless $self->_current_dbh;
     return $info unless defined($self->{id}) && defined($nickname) && $nickname ne '';
 
     my $sql = q{
@@ -320,7 +330,7 @@ sub set_auto_join {
 sub exists_in_db {
     my ($self) = @_;
 
-    return undef unless $self->{dbh};
+    return undef unless $self->_current_dbh;
     return undef unless defined($self->{name}) && $self->{name} ne '';
 
     my $sql = "SELECT id_channel FROM CHANNEL WHERE name = ?";
@@ -347,7 +357,7 @@ sub exists_in_db {
 sub create_in_db {
     my ($self) = @_;
 
-    return undef unless $self->{dbh};
+    return undef unless $self->_current_dbh;
     return undef unless defined($self->{name}) && $self->{name} ne '';
 
     my $sql = "INSERT INTO CHANNEL (name, description, auto_join) VALUES (?, ?, ?)";

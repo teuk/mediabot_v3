@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB918 — Keep cached channel objects on the live database connection (2026-10-23)
+
+- Retain an optional connection owner in Channel and pass it from the three
+  existing object factories. Refresh the cached handle through ensure_connected
+  before updates, user reads, identity lookup and channel creation. Clear it
+  after a failed reconnect instead of retaining a known stale connection.
+- Preserve dbh-only callers, SQL/binds, setter validation, row-count returns and
+  failure defaults. Reuse the existing reconnect policy; add no timer or query
+  retry. Keep the bot keepalive and DB implementation unchanged.
+- Add nine native DBI/SQLite assertions to existing case 65, retaining its 36
+  earlier checks. Exercise all three factory paths and compare 81 nominal or
+  rejected-write vectors. Add no fixture or numbered case. No database schema,
+  migration, private configuration, plugin, Partyline, radio or runner change.
+
+
 ### MB917 — Bind delayed Gemini replies to their delivery context (2026-10-22)
 
 - Reuse CommandAsync's exact transport/channel-generation checks in the shared
