@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB934 — Validate reminder snoozes and acknowledge only confirmed updates (2026-10-23)
+
+- Parse the complete remindsnooze delay, preserving documented integer units,
+  optional leading plus and existing unit order. Reject negative, fractional,
+  partial, duplicate, zero or unrepresentable delays before database access.
+- Check reminder lookup/update errors and affected rows. Re-read successful
+  zero-row updates to distinguish an identical snooze from a reminder delivered,
+  cancelled, deleted or reassigned since lookup; never revive a claimed reminder.
+- Preserve Unicode text, recurrence markers, historical facades and success
+  wording. Extend the existing case with grouped native DBI regressions;
+  retain the schema and the 1,158-case catalogue.
+
 ### MB933 — Make user creation and channel purges atomic (2026-10-23)
 
 - Commit a new USER and its initial USER_HOSTMASK together. Check SQL results,

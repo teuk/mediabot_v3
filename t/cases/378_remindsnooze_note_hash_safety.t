@@ -60,4 +60,19 @@ return sub {
     # the export branch) instead of $_ in a grep.
     $assert->like($note // '', qr/ref\(\$n\) eq 'HASH'.*?\$n->\{text\}/s,
         'note search handles hash-backed notes');
+
+    # MB934: native DBI and the real module/imported/dispatcher facades run
+    # in a child so the deterministic clock cannot affect this shared runner.
+    require JSON::PP;
+    open my $probe, '-|', $^X, '-I.', '-It/lib',
+        't/lib/MB934SnoozeFixture.pm' or die "snooze probe: $!";
+    my $raw = do { local $/; <$probe> };
+    my $closed = close $probe;
+    my $results = eval { JSON::PP->new->utf8->decode($raw // '') };
+    $assert->ok($closed && ref($results) eq 'ARRAY' && @$results == 8,
+        'MB934: native reminder snooze probe completed');
+    for my $result (@{ref($results) eq 'ARRAY' ? $results : []}) {
+        $assert->ok($result->{ok}, 'MB934: ' . $result->{name}
+            . ($result->{detail} ? ': ' . $result->{detail} : ''));
+    }
 };

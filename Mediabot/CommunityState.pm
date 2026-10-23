@@ -663,35 +663,54 @@ sub mbRemindSnooze_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my ($id, $delay_str) = (shift @args, shift @args);
-    unless (defined $id && $id =~ /^\d+$/ && defined $delay_str) {
+    unless (defined($id) && !ref($id) && $id =~ /\A[0-9]+\z/
+        && defined($delay_str) && !ref($delay_str) && !@args) {
         botNotice($self, $nick, 'Syntax: remindsnooze <id> <delay>  (e.g. 10 30m or 3 2h)');
         return;
     }
-    # Parse delay: 1h30m, 45m, 2d, etc.
+    # MB934: parse the whole token. Partial matches turned -1h into +1h,
+    # 1.5h into 5h and silently ignored repeated units or trailing text.
+    my $valid_delay = $delay_str =~ /\A\+?(?:[0-9]+[dhms])+\z/;
+    my %unit_seconds = (d => 86400, h => 3600, m => 60, s => 1);
+    my %seen_unit;
     my $secs = 0;
-    $secs += $1 * 86400 if $delay_str =~ /(\d+)d/;
-    $secs += $1 * 3600  if $delay_str =~ /(\d+)h/;
-    $secs += $1 * 60    if $delay_str =~ /(\d+)m/;
-    $secs += $1         if $delay_str =~ /(\d+)s/;
-    unless ($secs > 0) {
+    if ($valid_delay) {
+        while ($delay_str =~ /([0-9]+)([dhms])/g) {
+            my ($amount, $unit) = ($1, $2);
+            if ($seen_unit{$unit}++) { $valid_delay = 0; last; }
+            $secs += $amount * $unit_seconds{$unit};
+        }
+    }
+    my $new_ts = $valid_delay ? time() + $secs : undef;
+    # A huge delay can overflow to Inf/scientific notation, which the delivery
+    # parser would not recognize as an [at:digits] tag and could deliver now.
+    unless ($valid_delay && $secs > 0 && "$new_ts" =~ /\A[0-9]+\z/) {
         botNotice($self, $nick, "Invalid delay '$delay_str'. Use 1h, 30m, 2h30m, 1d...");
         return;
     }
-    my $new_ts = time() + $secs;
-
     # Keep snooze SQL simple and portable: fetch current message, rewrite the
     # [at:TS] prefix in Perl, then update the message with a normal placeholder.
-    my $sth2 = $self->{dbh}->prepare(
-        'UPDATE REMINDERS SET message = ? WHERE id_reminder = ? AND from_nick = ? AND delivered = 0'
-    );
-    # Fetch current message first
-    my $sth_get = $self->{dbh}->prepare(
-        'SELECT message FROM REMINDERS WHERE id_reminder = ? AND from_nick = ? AND delivered = 0'
-    );
-    unless ($sth_get && $sth_get->execute($id, lc($nick))) {
+    my $read_pending = sub {
+        my $sth_get = $self->{dbh}->prepare(
+            'SELECT message FROM REMINDERS WHERE id_reminder = ? AND from_nick = ? AND delivered = 0'
+        ) or die 'reminder lookup prepare failed';
+        my $row;
+        my $ok = eval {
+            $sth_get->execute($id, lc($nick)) or die 'reminder lookup execute failed';
+            $row = $sth_get->fetchrow_hashref;
+            die 'reminder lookup fetch failed' if $sth_get->err;
+            1;
+        };
+        my $error = $@;
+        eval { $sth_get->finish };
+        die $error unless $ok;
+        return $row;
+    };
+    my $row;
+    my $read_ok = eval { $row = $read_pending->(); 1 };
+    unless ($read_ok) {
         botNotice($self, $nick, 'DB error.'); return;
     }
-    my $row = $sth_get->fetchrow_hashref; $sth_get->finish;
     unless ($row) {
         botNotice($self, $nick, "Reminder #$id not found or already delivered."); return;
     }
@@ -702,10 +721,32 @@ sub mbRemindSnooze_ctx {
     $msg =~ s/\s*\[at:\d+\]\s*/ /g;   # strip partout ailleurs (cas daily + snooze)
     $msg =~ s/^\s+|\s+$//g;           # trim
     my $new_msg = "[at:$new_ts] $msg";
-    unless ($sth2 && $sth2->execute($new_msg, $id, lc($nick))) {
+    my ($sth2, $rows);
+    my $update_ok = eval {
+        $sth2 = $self->{dbh}->prepare(
+            'UPDATE REMINDERS SET message = ? WHERE id_reminder = ? AND from_nick = ? AND delivered = 0'
+        ) or die 'reminder update prepare failed';
+        $sth2->execute($new_msg, $id, lc($nick)) or die 'reminder update execute failed';
+        $rows = $sth2->rows;
+        1;
+    };
+    eval { $sth2->finish } if $sth2;
+    unless ($update_ok) {
         botNotice($self, $nick, 'DB error updating reminder.'); return;
     }
-    $sth2->finish;
+    if (!defined($rows) || $rows <= 0) {
+        # Delivery/cancellation may win after the initial SELECT. A DBI 0E0
+        # is also valid for an identical snooze: acknowledge that only after
+        # verifying the same pending message, without reviving a claimed row.
+        my $current;
+        my $confirmed = eval { $current = $read_pending->(); 1 };
+        unless ($confirmed) {
+            botNotice($self, $nick, 'DB error updating reminder.'); return;
+        }
+        unless ($current && defined($current->{message}) && $current->{message} eq $new_msg) {
+            botNotice($self, $nick, "Reminder #$id changed or is no longer pending."); return;
+        }
+    }
     my $hm = sprintf('%dh%02dm', int($secs/3600), int(($secs%3600)/60));
     botNotice($self, $nick, "Reminder #$id snoozed for $hm.");
     return 1;
