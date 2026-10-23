@@ -11,6 +11,23 @@ release. The current development line is `3.6dev`.
 ## [Unreleased] — 3.6dev
 
 
+### MB920 — Keep decoded Unicode words whole in games (2026-10-23)
+
+- Extend the existing trivia and quotegame boundaries with Unicode letter,
+  number and combining-mark properties. Reject answers embedded in decoded
+  words and avoid masking an author's name inside such a word in quotegame.
+  Keep the historical ASCII/high-byte ranges and IRC nickname characters.
+- Preserve the byte-input path, punctuation rules, case handling, messages,
+  timers, scores, SQL/binds and achievement hooks outside the corrected matches.
+  Do not add decoding or canonical normalization to the game handlers.
+- Add five grouped native criteria to existing case 658 (14/14), retaining the
+  32 historical criteria across cases 559/658/660 with three wiring scans
+  adapted to the extended classes. Exercise 162 native game/mask runs, compare
+  90 unaffected runs and detect six deliberate mutations. No new module,
+  shared fixture, numbered case or database schema change.
+
+
+
 ### MB919 — Honour karma write outcomes and brigade blocks (2026-10-23)
 
 - Send karmawatch notifications after a successful KARMA write and statement

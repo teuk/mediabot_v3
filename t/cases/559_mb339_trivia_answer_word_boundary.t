@@ -29,7 +29,7 @@ BEGIN {
 
 use File::Spec;
 
-# Reproduction EXACTE du prédicat mb339 (doit rester synchrone avec checkTrivia).
+# Historical byte predicate. Decoded Unicode is exercised natively in case 658 (MB920).
 sub _matched {
     my ($text, $answer) = @_;
     $answer = lc $answer;
@@ -76,7 +76,7 @@ return sub {
 
     $assert->like(
         $src,
-        qr/\(\?<!\[A-Za-z0-9\\x80-\\xFF\]\)\\Q\$answer\\E\(\?!\[A-Za-z0-9\\x80-\\xFF\]\)/,
+        qr/\(\?<!\[A-Za-z0-9\\x80-\\xFF(?:\\p\{[LNM]\})*\]\)\\Q\$answer\\E\(\?!\[A-Za-z0-9\\x80-\\xFF(?:\\p\{[LNM]\})*\]\)/,
         'checkTrivia borne la réponse par des frontières byte-safe (mb443)'
     );
     $assert->unlike(

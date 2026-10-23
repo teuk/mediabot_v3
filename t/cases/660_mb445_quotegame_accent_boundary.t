@@ -6,7 +6,8 @@
 # Le quotegame borne le nick de l'auteur avec le jeu de caractères de nick IRC
 # ($nick_char). Le nick lui-même est ASCII, MAIS le texte environnant (la
 # citation affichée et le message du joueur) est du TEXTE LIBRE accentué, en
-# OCTETS UTF-8. Avec un $nick_char ASCII seul, un octet d'accent (>= 0x80)
+# OCTETS UTF-8 legacy ; le cœur IRC fournit aussi du texte décodé.
+# Avec un $nick_char ASCII seul, un octet d'accent (>= 0x80)
 # passait pour une frontière, provoquant :
 #   1. sur-masquage : l'auteur "art" masqué dans le mot "béart" -> "bé???" ;
 #   2. faux positif : un joueur tapant "béart" validait l'auteur "art".
@@ -50,7 +51,7 @@ return sub {
 
     # --- Câblage réel ------------------------------------------------------
     my $src = _slurp_660(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
-    my $n = () = $src =~ /my \$nick_char = qr\/\[A-Za-z0-9\\\[\\\]\\\\\^_`\{\}\|\\-\\x80-\\xFF\]\//g;
+    my $n = () = $src =~ /my \$nick_char = qr\/\[A-Za-z0-9\\\[\\\]\\\\\^_`\{\}\|\\-\\x80-\\xFF(?:\\p\{[LNM]\})*\]\//g;
     $assert->ok($n >= 2, 'les 2 définitions de $nick_char sont byte-safe');
     $assert->unlike($src, qr/my \$nick_char = qr\/\[A-Za-z0-9\\\[\\\]\\\\\^_`\{\}\|\\-\]\//,
         'plus de $nick_char ASCII seul');

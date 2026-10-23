@@ -5673,15 +5673,13 @@ sub checkTriviaAnswer {
     # l'auteur (mb121-B2) : "the answer is paris" / "paris!" gagnent toujours,
     # mais "warsaw" ne valide plus "war".
     my $answer = $trivia->{answer};
-    # mb443-B1: frontières byte-safe. publictext/réponses sont en OCTETS UTF-8 ;
-    # avec des frontières ASCII seules [A-Za-z0-9], un octet d'accent (>= 0x80)
-    # passait pour une frontière -> faux positifs : la réponse "on" était
-    # validée par "garçon" (l'octet 0xA7 de ç compte comme séparateur). On
-    # inclut \x80-\xFF (octets des séquences UTF-8) dans les classes de
-    # frontière : "garçon" ne valide plus "on", mais "... is on" / "on!" oui.
+    # mb443-B1: keep legacy high bytes inside words. MB920 also treats decoded
+    # Unicode letters, numbers and combining marks as word material. Public
+    # IRC text is decoded at the application boundary; a wider letter must not
+    # turn an embedded answer into a complete word. Existing punctuation rules remain.
     my $matched = eval {
         lc($text) eq $answer
-        || lc($text) =~ /(?<![A-Za-z0-9\x80-\xFF])\Q$answer\E(?![A-Za-z0-9\x80-\xFF])/
+        || lc($text) =~ /(?<![A-Za-z0-9\x80-\xFF\p{L}\p{N}\p{M}])\Q$answer\E(?![A-Za-z0-9\x80-\xFF\p{L}\p{N}\p{M}])/
     };
     return unless $matched;
     $trivia->{active} = 0;
@@ -7478,7 +7476,7 @@ sub mbQuotegame_ctx {
     my $author_lc = lc($row->{author});
     # nick chars IRC: lettres, chiffres, et certains specials. Les borders sont
     # "tout ce qui n'est PAS un nick char" (ou debut/fin de string).
-    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-\x80-\xFF]/;  # mb445-B1: octets UTF-8 (>=0x80) font partie du mot
+    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-\x80-\xFF\p{L}\p{N}\p{M}]/;  # mb445-B1 / MB920: legacy bytes and decoded Unicode word material
     $masked =~ s/(?<!$nick_char)\Q$row->{author}\E(?!$nick_char)/???/gi;
     # 2e passe sur la version lowercase au cas ou \Q...\E ne matche pas
     # case-insensitively pour des caracteres non-ASCII (defensif).
@@ -7519,7 +7517,7 @@ sub checkQuotegameAnswer {
 
     # mb121-B2: meme correction qu'a la creation de la quote -- les nicks IRC
     # contenant [ ] _ \ ^ { } | ne sont pas bornes correctement par \b.
-    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-\x80-\xFF]/;  # mb445-B1: octets UTF-8 (>=0x80) font partie du mot
+    my $nick_char = qr/[A-Za-z0-9\[\]\\^_`{}|\-\x80-\xFF\p{L}\p{N}\p{M}]/;  # mb445-B1 / MB920: legacy bytes and decoded Unicode word material
     my $msg_lc = lc($sMsg);
     if ($msg_lc =~ /(?<!$nick_char)\Q$qg->{author_lc}\E(?!$nick_char)/) {
         _quotegame_cancel_timer($self, $sChannel);
