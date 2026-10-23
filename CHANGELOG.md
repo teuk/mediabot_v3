@@ -11,6 +11,21 @@ release. The current development line is `3.6dev`.
 ## [Unreleased] — 3.6dev
 
 
+### MB923 — Count failed logins once per normalized identity (2026-10-23)
+
+- Deduplicate the live IRC nickname and requested account after their existing
+  lowercase normalization. Reuse that list for throttle checks and both failure
+  branches so equal names no longer turn three failed attempts into a count of six.
+- Preserve the five-failure/60-second limit, both distinct identity counters,
+  account and nick rotation protection, successful-login resets and cleanup.
+  Credentials still go through the real Auth verifier; SQL and session APIs stay.
+- Add five grouped native DBI/SQLite assertions to existing case 165, retaining
+  its six previous checks and all 1,156 case files. Compare 30 unaffected native
+  observations, exercise exact window boundaries and real successful login,
+  and detect eight mutations. No new module, shared fixture or schema change.
+
+
+
 ### MB922 — Follow the current connection owner for persistent bans (2026-10-23)
 
 - Resolve ChannelBan's database handle through the bot's existing connection

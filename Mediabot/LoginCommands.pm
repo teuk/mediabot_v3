@@ -162,6 +162,13 @@ sub userLogin_ctx {
         return;
     }
 
+    # MB923: a failed attempt counts once per normalized identity. The live
+    # nick and requested account often coincide; sharing their key must not
+    # turn the five-failure limit into a three-attempt limit.
+    my %failure_key_seen;
+    my @failure_keys = grep { length($_) && !$failure_key_seen{$_}++ }
+        map { lc($_ // '') } ($sNick, $tArgs[0]);
+
     # B2/A2: brute-force throttle — tracked by IRC nick AND DB username
     # Protects the account even if the attacker changes nick between attempts.
     {
@@ -181,7 +188,7 @@ sub userLogin_ctx {
         }
 
         # Check both IRC nick and DB username
-        for my $fail_key (lc($sNick // ''), lc($tArgs[0] // '')) {
+        for my $fail_key (@failure_keys) {
             next unless $fail_key ne '';
             my $rec = $self->{_login_failures}{$fail_key} //= { ts => $now, count => 0 };
             if ($now - $rec->{ts} >= $window) {
@@ -276,7 +283,7 @@ sub userLogin_ctx {
     }
 
     unless ($row) {
-        for my $k (lc($sNick // ''), lc($typed_user // '')) {
+        for my $k (@failure_keys) {
             next unless defined($k) && $k ne '';
             my $r = ($self->{_login_failures}{$k} //= { ts => time(), count => 0 });
             $r->{count}++;
@@ -415,7 +422,7 @@ sub userLogin_ctx {
         logBot($self, $ctx->message, undef, "login", $typed_user, "Success");
     }
     else {
-        for my $k (lc($sNick // ''), lc($typed_user // '')) {
+        for my $k (@failure_keys) {
             next unless $k ne '';
             my $r = ($self->{_login_failures}{$k} //= { ts => time(), count => 0 });
             $r->{count}++;
