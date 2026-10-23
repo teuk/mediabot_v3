@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB926 — Claim pending reminders before delivery (2026-10-23)
+
+- Guard the pre-send UPDATE with delivered=0 and require positive affected rows.
+  DBI's true 0E0 result no longer authorizes sending a stale reminder. Finish
+  the statement before skipping a lost claim; retain mark-before-send behavior.
+- Preserve cancellations/deletions or delivery by another reader between SELECT
+  and UPDATE. Skip the stale send and its daily/weekly recurrence. Keep existing
+  selection limits, due filtering, output text, aliases and recurrence timing.
+- Add four grouped native assertions to existing case 397, retaining all
+  seventeen prior checks and 1,156 files. Exercise two real SQLite connections:
+  18 stale snapshots, four cancelled recurrences, two competing-reader scenarios
+  and 20 nominal controls. Detect eight mutations. No schema change.
+
+
 ### MB925 — Restore safe DB timer callbacks and clean partial startup (2026-10-23)
 
 - Export the existing secure timer writer into Mediabot so both reloaded timers

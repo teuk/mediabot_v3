@@ -474,7 +474,7 @@ sub deliverReminders {
         }
         # H/fix: mark delivered BEFORE sending — prevents double delivery on crash
         my $sth_up = $dbh->prepare(q{
-            UPDATE REMINDERS SET delivered = 1 WHERE id_reminder = ?
+            UPDATE REMINDERS SET delivered = 1 WHERE id_reminder = ? AND delivered = 0
         });
         # C2/fix: test execute return
         if ($sth_up) {
@@ -483,7 +483,11 @@ sub deliverReminders {
                 $sth_up->finish;
                 next;  # skip send if we can't mark delivered
             }
+            # MB926: execute can succeed with zero affected rows (DBI 0E0).
+            # Only this reader's pending-to-delivered transition owns the send.
+            my $claimed = $sth_up->rows;
             $sth_up->finish;
+            next unless defined($claimed) && $claimed > 0;
         } else { next; }  # can't prepare → skip
         # IMP15: show how long ago the reminder was set
         my $ago_str = '';
