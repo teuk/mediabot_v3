@@ -10,6 +10,22 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB939 — Observe RSS, RandomQuote and scheduler without changing state (2026-10-23)
+
+- Extend private `.diagnose #channel` with the loaded runtimes' RSS pacing and
+  RandomQuote attempt state, plus the two expected instance scheduler tasks.
+  Distinguish absent, busy, invalid and unavailable observations; show file
+  timestamps, configured/default intervals and persisted attempt deadlines.
+- Share a bounded JSON reader using existing nonblocking shared locks and
+  read-only file handles. Create or repair no files, alter no lock modes, and
+  reuse each component's validation and status rules without claiming work.
+- Label RSS reservations, RandomQuote pending tickets and scheduler callback
+  starts accurately. A wakeup or an enabled flag is not evidence of delivery.
+  Keep independent observations, privacy, authorization and feature gates.
+- Add six native regression groups to the existing Partyline case, retaining
+  1,158 case files; six existing structure checks cover the two new modules.
+  Record MB938 server acceptance and the first enrichment in the roadmap.
+
 ### MB938 — Start the new roadmap with private channel diagnostics (2026-10-23)
 
 - Add a reusable, read-only channel observation report and the Master/Owner

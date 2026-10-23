@@ -1,7 +1,7 @@
 # Mediabot 3.6dev — roadmap actualisée
 
-Date : 23 octobre 2026. Base : snapshot après MB937,
-`3.6dev-20261023_211143`. Cette feuille de route traduit les orientations
+Date : 23 octobre 2026. Base confirmée : MB938, commit `05d171b`,
+`3.6dev-20261023_214729`. Cette feuille de route traduit les orientations
 retenues avec Christophe ; elle ne programme aucune mise à jour de production.
 La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
 
@@ -15,7 +15,7 @@ Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
 les budgets de texte, les sorties différées, les timers, les reconnexions,
 l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
 Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
-MB937 est validé sur le serveur : 30 681 assertions, sécurité GO/37 et intégrité
+MB938 est validé sur le serveur : 30 695 assertions, sécurité GO/37 et intégrité
 de démarrage OK. Cette validation ne constitue pas une certification exhaustive.
 
 ## Les cinq directions
@@ -30,7 +30,7 @@ de démarrage OK. Cette validation ne constitue pas une certification exhaustive
 
 ## Étape 1 — Comprendre un salon
 
-**MB938 : premier lot préparé, à installer et valider sur le serveur.**
+**MB938 : installé, validé sur le serveur et poussé dans `05d171b`.**
 
 Ajouter `.diagnose #salon` dans la partyline, réservée aux sessions Master/Owner.
 Un module commun retourne un rapport structuré, indépendant de sa présentation,
@@ -63,10 +63,20 @@ existants : cadence RSS, état RandomQuote, tâches attendues et présentes,
 fraîcheur des observations, motifs d'échec bornés et état des plugins.
 Chaque indicateur doit avoir une source identifiable et une valeur inconnue.
 
+**MB939 : premier enrichissement implémenté, à installer et valider sur le serveur.**
+Le même `.diagnose` observe les politiques RSS et RandomQuote via les objets
+du runtime, sans créer, réparer ou réécrire leurs fichiers d'état. Il distingue
+un fichier absent, occupé, invalide ou illisible, montre la date du fichier et
+sépare un intervalle par défaut d'une tentative réellement planifiée.
+Les tâches d'instance `rss_poll_dispatch` et `randomquote_dispatch` indiquent
+présence, démarrage, nombre de ticks et prochaines échéances observées.
+Les réservations RSS, tickets RandomQuote et ticks ne prouvent aucune livraison.
+Les derniers échecs, diagnostics de plugins et versions chargées restent à traiter.
+
 Présenter ensuite ces informations dans mbweb avec les droits par salon déjà
 en place. Distinguer configuration souhaitée, source sur disque et runtime
 chargé. Un état non observé ne doit jamais apparaître comme confirmé.
-Le premier lot MB938 ne crée pas encore cette interface web.
+Les lots MB938 et MB939 ne créent pas encore cette interface web.
 
 Les écritures web viendront dans un lot séparé : actions nommées exécutées par
 le bot, droits revérifiés, protection CSRF, résultat explicite et audit.

@@ -7,6 +7,7 @@ use File::Spec;
 use File::Temp qw(tempfile);
 use IO::Handle;
 use JSON::PP;
+use Mediabot::State::ReadOnly qw(read_json_snapshot);
 
 # Core-owned instance state in the directory preserved by deploy_update.
 # Every decision rereads state under one lock; workers never cache it.
@@ -121,6 +122,17 @@ sub _status {
 sub status {
     my ($self, $channel) = @_; my $key = _channel($channel);
     return $self->_locked(0, sub {return $self->_status($_[0]{channels}{lc $key})});
+}
+sub observe {
+    my ($self, $channel) = @_; my $key = _channel($channel);
+    my $snapshot = read_json_snapshot($self->{path});
+    return $snapshot unless $snapshot->{state} eq 'fresh' || $snapshot->{state} eq 'absent';
+    my $document = $snapshot->{document} || {schema => 1, channels => {}};
+    return {state => 'invalid', reason => 'invalid_schema'} unless eval {_validate($document); 1};
+    my $row = $document->{channels}{lc($key)};
+    return {state => $snapshot->{state}, source => $row ? 'channel' : 'default',
+        %{$self->_status($row)},
+        (exists($snapshot->{file_modified_at}) ? (file_modified_at => $snapshot->{file_modified_at}) : ())};
 }
 sub configure {
     my ($self, $channel, %args) = @_; my $key = _channel($channel);

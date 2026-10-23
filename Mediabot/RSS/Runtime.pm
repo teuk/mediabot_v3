@@ -71,6 +71,8 @@ sub _parent_repo {
 sub inflight_count { scalar keys %{ $_[0]->{inflight} || {} } }
 sub queued_count   { scalar keys %{ $_[0]->{queued} || {} } }
 
+sub diagnostic_status { return $_[0]->{pacing}->observe($_[1]) }
+
 sub tick {
     my ($self) = @_;
     my $bot = $self->{bot};

@@ -7,6 +7,7 @@ use File::Spec;
 use File::Temp qw(tempfile);
 use IO::Handle;
 use JSON::PP;
+use Mediabot::State::ReadOnly qw(read_json_snapshot);
 
 # Core-owned instance state in the directory preserved by deploy_update.
 # Every decision rereads state under one lock; workers never cache it.
@@ -113,6 +114,21 @@ sub _status {
 sub status {
     my ($self, $channel, $default) = @_; my $key = _channel($channel);
     return $self->_locked(0, sub {return $self->_status($_[0]{channels}{lc($key)}, $default)});
+}
+sub observe {
+    my ($self, $channel, $default) = @_; my $key = _channel($channel);
+    my $snapshot = read_json_snapshot($self->{path});
+    return $snapshot unless $snapshot->{state} eq 'fresh' || $snapshot->{state} eq 'absent';
+    my $document = $snapshot->{document} || {schema => 1, channels => {}};
+    return {state => 'invalid', reason => 'invalid_schema'} unless eval {_validate($document); 1};
+    my $row = $document->{channels}{lc($key)};
+    my $status = $self->_status($row, $default);
+    # With no row the first eligible tick will schedule an attempt. The default
+    # interval is known, but there is no observed deadline or pending ticket.
+    return {state => $snapshot->{state}, source => $row ? 'channel' : 'default',
+        interval => $status->{interval}, custom => $status->{custom}, scheduled => $row ? 1 : 0,
+        ($row ? (next_at => $status->{next_at}, wait => $status->{wait}, pending => $row->{pending}) : ()),
+        (exists($snapshot->{file_modified_at}) ? (file_modified_at => $snapshot->{file_modified_at}) : ())};
 }
 sub configure {
     my ($self, $channel, $interval, $default) = @_; my $key = _channel($channel);

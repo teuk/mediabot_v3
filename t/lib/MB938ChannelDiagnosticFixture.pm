@@ -83,7 +83,8 @@ sub command {
     $pl->_cmd_diagnose($s,1,$a{arg}//'#test');return $s->{out};
 }
 sub wire {
-    my($transport,$channel)=@_;my($b,$db,$p)=setup(channel=>$channel);
+    my($transport,$channel,$prepare)=@_;my($b,$db,$p)=setup(channel=>$channel);
+    $prepare->($b) if $prepare;
     my$loop=IO::Async::Loop->new;
     socketpair(my$server,my$peer,AF_UNIX,SOCK_STREAM,PF_UNSPEC) or die "socketpair: $!";
     my$stream=IO::Async::Stream->new(handle=>$server);my$id=fileno($server);
@@ -165,7 +166,7 @@ sub run_checks {
             check($text=~/Channel diagnosis #café/ && $text=~/Database: fresh/ && $text=~/joined=yes/,'native transport diagnosis failed');
             check($other!~/diagnose|diagnosis|café/,'diagnostic broadcast to another session');
             check(@{$p->{sql}}==2,'wire command not dispatched exactly once');
-            my@lines=split/\r\n/,$text;check(@lines<20 && length($bytes)<2500,'unbounded wire report');
+            my@lines=split/\r\n/,$text;check(@lines<24 && length($bytes)<4000,'unbounded wire report');
         }
     });
     $group->('help is discoverable and a failed runtime remains unknown with a bounded detached report',sub {
@@ -173,7 +174,7 @@ sub run_checks {
         $pl->_cmd_help($s,1,'diagnose');check($s->{out}=~/\.diagnose <#chan>/,'focused help missing');
         $b->{irc}{fail}=1;my$r=collect($b);check($r->{transport_connected} eq 'unknown','transport exception converted to connected');
         my$lines=Mediabot::Diagnostics::Channel->new(bot=>$b)->lines($r);
-        check(@$lines<=13 && !grep({length($_)>400 || /[\r\n\x1b]/}@$lines),'report not line-bounded');
+        check(@$lines<=17 && !grep({length($_)>400 || /[\r\n\x1b]/}@$lines),'report not line-bounded');
         check($json->encode($r)!~/PRIVATE_|DBI|MB938/,'report contains object or error details');
     });
     return\@out;

@@ -233,14 +233,14 @@ return sub {
             . ($result->{ok} ? '' : ' ' . JSON::PP::encode_json($result)));
     }
 
-    # MB938: native DBI and real Telnet/DCC transports in an isolated child.
+    # MB938/MB939: native DBI, state files, scheduler and Telnet/DCC transports.
     open my $diagnose, '-|', $^X, '-I.', '-It/lib',
-        't/lib/MB938ChannelDiagnosticFixture.pm' or die "channel diagnosis probe: $!";
+        't/lib/MB939ActivityDiagnosticFixture.pm' or die "channel diagnosis probe: $!";
     my $diagnose_raw = do { local $/; <$diagnose> };
     my $diagnose_closed = close $diagnose;
     my $diagnose_results = eval { JSON::PP->new->utf8->decode($diagnose_raw // '') };
-    $assert->ok($diagnose_closed && ref($diagnose_results) eq 'ARRAY' && @$diagnose_results == 7,
-        'MB938: native channel diagnosis probe completed');
+    $assert->ok($diagnose_closed && ref($diagnose_results) eq 'ARRAY' && @$diagnose_results == 13,
+        'MB938/MB939: native channel diagnosis probe completed');
     for my $result (@{ref($diagnose_results) eq 'ARRAY' ? $diagnose_results : []}) {
         $assert->ok($result->{ok}, 'MB938: ' . $result->{name}
             . ($result->{detail} ? ': ' . $result->{detail} : ''));

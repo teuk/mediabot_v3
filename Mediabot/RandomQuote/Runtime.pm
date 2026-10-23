@@ -22,6 +22,7 @@ sub default_interval {
     return defined($value) && !ref($value) && "$value" =~ /\A[0-9]{1,6}\z/
         && $value>=900 && $value<=604800 ? 0+$value : 10800;
 }
+sub diagnostic_status { return $_[0]->{state}->observe($_[1], $_[0]->default_interval) }
 sub _log {
     my ($self,$text)=@_;$text =~ s/[\r\n\0]+/ /g;
     eval {$self->{bot}{logger}->log(1,'RandomQuote: '.substr($text,0,240))};

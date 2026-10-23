@@ -5,6 +5,7 @@ use utf8;
 use Encode qw(decode FB_CROAK LEAVE_SRC);
 use POSIX qw(strftime);
 use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
+use Mediabot::Diagnostics::Activity;
 
 # Configuration observations only: never substitute this inventory for the
 # feature's own authorization, caching, provider or delivery policy.
@@ -54,7 +55,7 @@ sub collect {
     $channel=channel_text($channel);
     die "invalid channel\n" unless defined $channel;
     my $bot=$self->{bot};
-    my $report={version=>1,channel=>"$channel",observed_at=>time(),database=>'unknown',
+    my $report={version=>2,channel=>"$channel",observed_at=>time(),database=>'unknown',
         transport_connected=>'unknown',runtime_active=>'unknown',runtime_connected=>'unknown',
         channel_joined=>'unknown',flags=>{map {$_=>'unknown'} @FLAGS},notes=>[]};
     my $dbh=eval {$bot->{db} ? $bot->{db}->ensure_connected : $bot->{dbh}};
@@ -104,7 +105,8 @@ sub collect {
     }
     push @{$report->{notes}},'Reddit and Youtube use their own flags; UrlTitle covers generic links, Spotify, Instagram, Facebook and X.';
     push @{$report->{notes}},'on/off describe persisted flags; runtime caches may lag. Missing is not an effective default.';
-    push @{$report->{notes}},'No provider, quota, fetch, delivery or last-error probe was performed.';
+    $report->{activity}=Mediabot::Diagnostics::Activity->new(bot=>$bot)->collect($report->{channel},$report->{observed_at});
+    push @{$report->{notes}},'RSS counters are reservations; task ticks are callback starts. No provider, delivery or last-error probe was performed.';
     return $report;
 }
 sub lines {
@@ -118,6 +120,7 @@ sub lines {
     for my $group (@GROUPS) {
         push @lines,($group->[0] eq 'ai' ? 'AI':ucfirst($group->[0])).': '.join(' ',map {$_.'='.$report->{flags}{$_}} @$group[1..$#$group]);
     }
+    push @lines,@{Mediabot::Diagnostics::Activity->new(bot=>$self->{bot})->lines($report->{activity})};
     push @lines,map {'Note: '.$_} @{$report->{notes}};
     return \@lines;
 }

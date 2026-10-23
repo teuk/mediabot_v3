@@ -421,11 +421,13 @@ the password is hidden
 .dccstat shows the public IP, port mode, pending offers and active sessions
 ```
 
-## Private channel diagnosis (MB938)
+## Private channel diagnosis (MB938 / MB939)
 
 Authenticated Master/Owner sessions can use `.diagnose #channel` and
 `.help diagnose` for a read-only, bounded view of persisted chansets and
-observed IRC/JOIN state. Only the requester receives the report; the request
+observed IRC/JOIN state. MB939 also shows RSS reservations, RandomQuote attempt
+state and the two expected instance scheduler tasks, distinguishing unavailable
+observations from stopped or absent tasks. Only the requester receives the report; the request
 is not announced to other sessions. `on`, `off`, `missing` and `unknown` are
 separate observations, with no provider probe or setting change. See
 [Channel diagnostics](CHANNEL_DIAGNOSTICS.md) for scope and interpretation.
