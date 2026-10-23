@@ -7,13 +7,15 @@ use URI ();
 use URI::Escape qw(uri_escape_utf8);
 use HTML::Entities qw(decode_entities);
 use Scalar::Util qw(refaddr);
+use POSIX qw(strftime);
+use Time::HiRes ();
 use Mediabot::JSON qw(decode_json_payload);
 use Mediabot::AsyncWorker ();
 use Mediabot::IRC::Text qw(decode_irc_text);
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes _irc_prefix_for_budget);
 use Mediabot::IRC::DeliveryContext qw(capture_delivery_context delivery_context_current);
 
-sub badge { return "\x0301,07 reddit \x0f" }
+sub badge { return "\x0301,07[reddit]\x0f" }
 
 # Public hosts only. Parse the authority rather than matching a nested URL.
 sub is_reddit_url {
@@ -200,19 +202,113 @@ sub _number {
     my ($s)=@_;return unless defined($s) && !ref($s) && $s =~ /\A-?[0-9]{1,10}\z/;
     return 0+$s;
 }
+sub _timestamp {
+    my ($s)=@_;return unless defined($s) && !ref($s) && $s =~ /\A(?:[0-9]{10}|[0-9]{13})\z/;
+    my $seconds=length($s)==13 ? int($s/1000) : 0+$s;
+    return $seconds>=1104537600 && $seconds<=time+86400 ? $seconds : undef;
+}
+sub _content_type {
+    my ($s)=@_;return unless defined($s) && !ref($s);
+    return $s =~ /\A(?:text|image|video|link|gallery|poll|crosspost)\z/ ? $s : undef;
+}
+sub _embed_entity {
+    my ($data,$info)=@_;return unless ref($data) eq 'HASH';
+    if ($info->{kind} eq 'comment') {
+        my $c=$data->{comment};return unless ref($c) eq 'HASH';
+        return unless defined($c->{id}) && !ref($c->{id}) && $c->{id} eq 't1_'.$info->{comment}
+            && defined($c->{post_id}) && !ref($c->{post_id}) && $c->{post_id} eq 't3_'.$info->{post};
+        return $c;
+    }
+    my $p=$data->{post};return unless ref($p) eq 'HASH';
+    return unless defined($p->{id}) && !ref($p->{id}) && $p->{id} eq 't3_'.$info->{post};
+    my $link=url_info($p->{url});
+    return $link && $link->{key} eq $info->{key} ? $p : undef;
+}
+
+# Public iframe rendered by Reddit's own widgets.js. Read its static, exact-ID
+# wrapper and explicitly bound counters; never execute scripts or read a feed's
+# first count. Optional detail failure must leave the valid oEmbed intact.
+sub parse_embed {
+    my ($html,$info)=@_;
+    return unless ref($info) eq 'HASH' && ($info->{kind}//'') =~ /\A(?:post|comment)\z/;
+    my $tree=_tree($html);return unless $tree;
+    my $thing=$info->{kind} eq 'comment' ? 't1_'.$info->{comment} : 't3_'.$info->{post};
+    my @wrappers=$tree->look_down(id=>$thing.'-embed-wrapper');
+    my ($wrapper,$entity);
+    if (@wrappers==1) {
+        for my $tag ($tree->look_down(_tag=>'shreddit-screenview-data')) {
+            my $raw=$tag->attr('data');next unless defined($raw) && !ref($raw) && length($raw)<=16384;
+            my $data=eval {decode_json_payload($raw)};
+            $entity=_embed_entity($data,$info);last if $entity;
+        }
+        $wrapper=$wrappers[0] if $entity;
+    }
+    unless ($wrapper) {$tree->delete;return}
+    my @links=$wrapper->look_down(_tag=>'embed-event-handler');
+    my $bound=grep {
+        my $u=url_info($_->attr('link'));
+        ($_->attr('id')//'') eq $thing && $u && $u->{key} eq $info->{key}
+    } @links;
+    unless ($bound) {$tree->delete;return}
+    my $out={};
+    $out->{created}=_timestamp($entity->{created_timestamp});
+    $out->{content_type}=_content_type($entity->{type}) if $info->{kind} eq 'post';
+    $out->{score}=_number($entity->{score});
+    for my $flag (qw(nsfw spoiler)) {
+        my $v=$entity->{$flag};
+        $out->{$flag}=1 if defined($v) && (JSON::MaybeXS::is_bool($v) ? $v : !ref($v) && "$v" eq '1');
+    }
+    for my $tracker ($wrapper->look_down(_tag=>'faceplate-tracker')) {
+        my $raw=$tracker->attr('data-faceplate-tracking-context');
+        next unless defined($raw) && !ref($raw) && length($raw)<=16384;
+        my $context=eval {decode_json_payload($raw)};
+        next unless _embed_entity($context,$info) && ref($context->{action_info}) eq 'HASH';
+        my $type=$context->{action_info}{type};next unless defined($type) && !ref($type);
+        my $field=$type eq 'upvote' ? 'score'
+            : $type eq 'comments' && $info->{kind} eq 'post' ? 'comments'
+            : $type eq 'replies' && $info->{kind} eq 'comment' ? 'replies' : undef;
+        next unless $field;
+        my @values=grep {
+            my ($owner)=grep {$_->tag eq 'faceplate-tracker'} $_->lineage;
+            $owner && refaddr($owner)==refaddr($tracker);
+        } $tracker->look_down(_tag=>'faceplate-number');next unless @values==1;
+        my $number=_number($values[0]->attr('number'));
+        $out->{$field}=$number if defined($number) && ($field eq 'score' || $number>=0);
+    }
+    if ($info->{kind} eq 'comment') {
+        my @bodies=$wrapper->look_down(id=>$thing.'-post-rtjson-content');
+        if (@bodies==1) {
+            # Paragraphs preserve prose. Do not flatten ASCII art/code-only
+            # comments or promote a quoted block into the author's response.
+            my @paragraphs=grep {
+                my $quoted=0;
+                for my $parent ($_->lineage) {$quoted=1 if $parent->tag =~ /\A(?:blockquote|pre|code|script|style)\z/}
+                !$quoted;
+            } $bodies[0]->look_down(_tag=>'p');
+            my $body=_plain(join(' ',map {$_->as_text} @paragraphs),1024);
+            if (defined($body)) {
+                if ($body =~ /\A\[(?:deleted|removed)\]\z/i) {$out->{removed}=1}
+                else {$out->{comment_text}=$body}
+            }
+        }
+    }
+    $tree->delete;
+    delete $out->{$_} for grep {!defined($out->{$_})} keys %$out;
+    return $out;
+}
 sub parse_oembed {
     my ($payload,$info)=@_;
     my $data=eval {decode_json_payload($payload)};
     return unless ref($data) eq 'HASH' && ref($info) eq 'HASH';
     return unless defined($data->{provider_name}) && !ref($data->{provider_name}) && lc($data->{provider_name}) eq 'reddit';
     my $tree=_tree($data->{html});return unless $tree;
-    my ($matched,$sub,$author,$comment_text,$parent_title,$has_parent,$context_only);
+    my ($matched,$sub,$author,$comment_text,$parent_title,$has_parent,$context_only,$permalink);
     for my $a ($tree->look_down(_tag=>'a')) {
         my $href=$a->attr('href');
         my $absolute=defined($href) && !ref($href) ? eval {URI->new_abs($href,'https://www.reddit.com/')->as_string} : undef;
         my $target=url_info($absolute);
         next unless $target;
-        if ($target->{key} eq $info->{key}) {$matched=$a;$sub=$target->{subreddit}}
+        if ($target->{key} eq $info->{key}) {$matched=$a;$sub=$target->{subreddit};$permalink=$target->{url}}
         if ($info->{kind} eq 'comment' && $target->{kind} eq 'post' && $target->{post} eq $info->{post}) {
             $has_parent=1;$parent_title=_title($a->as_text);
         }
@@ -235,7 +331,7 @@ sub parse_oembed {
     $tree->delete;
     return unless $matched && defined($title);
     return {state=>'missing'} if $title =~ /\A\[(?:deleted|removed)\]\z/i;
-    return {state=>'ok',kind=>$info->{kind},title=>$title,
+    return {state=>'ok',kind=>$info->{kind},title=>$title,permalink=>$permalink,
         ($context_only ? (context_only=>1) : ()),
         (defined($sub)?(subreddit=>$sub):()),(defined($author)?(author=>$author):())};
 }
@@ -301,13 +397,13 @@ sub _http {
         agent=>'Mediabot-RedditPreview/1.0 (+https://github.com/teuk/mediabot_v3)');
 }
 sub _request {
-    my ($http,$method,$url)=@_;
-    for my $hop (0..2) {
+    my ($http,$method,$url,$max_redirects)=@_;$max_redirects//=2;
+    for my $hop (0..$max_redirects) {
         my $safe=_network_url($url);return {success=>0,status=>0} unless $safe;
         my $r=eval {$http->request($method,$safe,{headers=>{Accept=>'application/json, text/html;q=0.9'}})};
         return {success=>0,status=>0} unless ref($r) eq 'HASH';
         if (($r->{status}//0) =~ /\A(?:301|302|303|307|308)\z/) {
-            return {success=>0,status=>0} if $hop==2 || ref($r->{headers}) ne 'HASH';
+            return {success=>0,status=>0} if $hop==$max_redirects || ref($r->{headers}) ne 'HASH';
             my $location=$r->{headers}{location};return {success=>0,status=>0} unless defined($location) && !ref($location);
             $url=eval {URI->new_abs($location,$safe)->as_string};
             next;
@@ -335,8 +431,42 @@ sub _unavailable {
     }
     return $out;
 }
+sub _enrich {
+    my ($http,$info,$out,$deadline)=@_;
+    return $out unless $out && $out->{state} eq 'ok';
+    my $permalink=url_info($out->{permalink}//$info->{url});
+    return $out unless $permalink && $permalink->{key} eq $info->{key};
+    my $budget=6;my $remaining=$deadline-Time::HiRes::time();
+    return $out if $remaining<=0.1;$budget=$remaining if $remaining<$budget;
+    # fetch normally runs in a fresh worker or the standalone checker. An
+    # external caller's existing alarm owns its deadline: skip optional work.
+    my $previous=Time::HiRes::alarm(0);
+    if ($previous>0) {Time::HiRes::alarm($previous);return $out}
+    my $u=URI->new($permalink->{url});$u->host('embed.reddit.com');
+    my ($extra,$details);
+    {
+        local $SIG{ALRM}=sub {die "Reddit detail deadline\n"};
+        Time::HiRes::alarm($budget);
+        eval {
+            # One optional iframe request, with no redirect retries and an
+            # absolute deadline. Keep usable basic metadata on every failure.
+            $extra=_request($http,'GET',$u->as_string,0);
+            $details=parse_embed($extra->{content},$info) if $extra->{success};
+            1;
+        };
+        Time::HiRes::alarm(0);
+    }
+    if ($details) {
+        return {state=>'missing'} if $details->{removed};
+        $out->{$_}=$details->{$_} for grep {exists($details->{$_})} qw(score comments replies created content_type nsfw spoiler);
+        if (defined($details->{comment_text})) {$out->{title}=$details->{comment_text};delete $out->{context_only}}
+    }
+    elsif ($extra && ($extra->{status}//0)==429) {$out->{backoff}=_unavailable($extra)->{backoff}}
+    return $out;
+}
 sub fetch {
     my ($url)=@_;
+    my $detail_deadline=Time::HiRes::time()+26;
     my $info=url_info($url);return {state=>'unavailable'} unless $info && !$info->{private};
     my $http=_http();
     if ($info->{kind} eq 'share' || $info->{kind} eq 'image' || $info->{kind} eq 'video') {
@@ -346,7 +476,7 @@ sub fetch {
         if ($r->{success} && $resolved && $resolved->{kind} =~ /\A(?:post|comment)\z/) {
             unless ($media) {
                 my $m=parse_html($r->{content},$resolved);
-                return $m if $m && defined($m->{title});
+                return _enrich($http,$resolved,$m,$detail_deadline) if $m && defined($m->{title});
             }
             $info=$resolved;
         }
@@ -379,7 +509,7 @@ sub fetch {
         my $r=_request($http,'GET',$endpoint);
         return _unavailable($r) unless $r->{success};
         my $out=parse_oembed($r->{content},$info);
-        return $out // {state=>'unavailable'};
+        return _enrich($http,$info,$out,$detail_deadline) // {state=>'unavailable'};
     }
     my $r=_request($http,'GET',$info->{url});
     return _unavailable($r) unless $r->{success};
@@ -394,11 +524,16 @@ sub _result {
         $out->{title}=_title($r->{title});return {state=>'unavailable'} unless defined($out->{title});
         $out->{author}=_user($r->{author});$out->{subreddit}=_subreddit($r->{subreddit});
         $out->{score}=_number($r->{score});$out->{comments}=_number($r->{comments});
+        $out->{replies}=_number($r->{replies});$out->{created}=_timestamp($r->{created});
+        $out->{content_type}=_content_type($r->{content_type});
         $out->{kind}=$r->{kind} if defined($r->{kind}) && !ref($r->{kind}) && $r->{kind} =~ /\A(?:post|comment|profile|community|image|video|share|link)\z/;
         $out->{$_}=1 for grep {defined($r->{$_}) && !ref($r->{$_}) && "$r->{$_}" eq '1'} qw(nsfw spoiler media context_only);
         $out->{format}=$r->{format} if defined($r->{format}) && !ref($r->{format}) && $r->{format} =~ /\A[A-Z0-9.+-]{1,30}\z/;
     }
     delete $out->{comments} if defined($out->{comments}) && $out->{comments}<0;
+    delete $out->{replies} if defined($out->{replies}) && $out->{replies}<0;
+    delete $out->{comments} if ($out->{kind}//'') eq 'comment';
+    delete $out->{replies} unless ($out->{kind}//'') eq 'comment';
     $out->{backoff}=0+$r->{backoff} if defined($r->{backoff}) && !ref($r->{backoff}) && $r->{backoff} =~ /\A[0-9]{1,5}\z/ && $r->{backoff}<=86400;
     delete $out->{$_} for grep {!defined($out->{$_})} keys %$out;
     return $out;
@@ -416,7 +551,11 @@ sub render {
         push @meta,'commentaire' if !$r->{context_only} && ($r->{kind}//$info->{kind}) eq 'comment';
         push @meta,'NSFW' if $r->{nsfw};push @meta,'spoiler' if $r->{spoiler};
         push @meta,$r->{score}.' pts' if defined($r->{score});
-        push @meta,$r->{comments}.' commentaires' if defined($r->{comments});
+        push @meta,$r->{comments}.($r->{comments}==1?' commentaire':' commentaires') if defined($r->{comments});
+        push @meta,$r->{replies}.($r->{replies}==1?' réponse':' réponses') if defined($r->{replies});
+        push @meta,strftime('%d/%m/%Y',gmtime($r->{created})) if $r->{created};
+        my %type=(text=>'texte',image=>'image',video=>'vidéo',link=>'lien',gallery=>'galerie',poll=>'sondage',crosspost=>'crosspost');
+        push @meta,$type{$r->{content_type}} if $r->{content_type} && ($r->{kind}//$info->{kind}) eq 'post';
         push @meta,$r->{format} if $r->{format};
     }
     else {

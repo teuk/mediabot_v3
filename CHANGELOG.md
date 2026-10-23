@@ -10,6 +10,21 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB931 — Richer Reddit preview details (2026-10-23)
+
+- Use [reddit] with the same black-on-orange IRC colours and immediate reset.
+  Preserve the bold title, theme-neutral metadata and 400-byte UTF-8 line.
+- Enrich valid basic previews from the official public embed iframe. Display
+  available score, comments/replies, UTC publication date, content type and
+  labels, bound to the exact post/comment rather than surrounding content.
+- Use a comment's own prose when available, retaining explicit parent-title
+  context for code/art or quoted-only bodies. Removed content invalidates stale
+  prose; detail failures preserve the usable base preview. Respect detail-source
+  429 backoff, use no redirect retries and bound optional collection time.
+- Add nine grouped scenarios to the existing isolated Reddit case and exercise
+  the enriched path in the native worker test. No new case file, schema change,
+  private configuration, activation or other provider change.
+
 ### MB930 — Opt-in Reddit previews (2026-10-23)
 
 - Add a dedicated Reddit provider and +Reddit channel policy, off by default.

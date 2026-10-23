@@ -5,6 +5,7 @@ use utf8;
 use JSON::PP ();
 use DBI;
 use Encode qw(encode decode);
+use HTML::Entities qw(encode_entities);
 use IO::Async::Loop;
 use Time::HiRes ();
 use Mediabot::External ();
@@ -59,6 +60,24 @@ sub embed {
 }
 sub post_html {
     return qq{<head><meta property="og:title" content="$title"><meta property="og:url" content="$url"></head><body><shreddit-post id="t3_abc123" post-title="$title" author="$author" subreddit-prefixed-name="r/test" score="42" comment-count="7" nsfw spoiler></shreddit-post></body>};
+}
+sub embed_card {
+    my (%a)=@_;my $comment=$a{comment};
+    my $thing=$comment?'t1_def456':'t3_abc123';my $target=$comment?$url.'def456/':$url;
+    my $entity={id=>$thing,score=>$comment?7:42,created_timestamp=>1700000000123,
+        type=>$comment?'comment':'text',nsfw=>JSON::PP::false,spoiler=>JSON::PP::false,
+        $comment?(post_id=>'t3_abc123'):(url=>$url)};
+    my $data=$a{data}//{$comment?'comment':'post'=>$entity};
+    $data->{post}={id=>'t3_abc123',url=>$url,score=>999,created_timestamp=>1430348589138} if $comment && !$a{data};
+    my $json=encode_entities(decode('UTF-8',json($data)),q{<>&"});
+    my $html=qq{<shreddit-screenview-data data="$json"></shreddit-screenview-data><div id="$thing-embed-wrapper"><embed-event-handler id="$thing" link="$target"></embed-event-handler>};
+    $html.=qq{<div id="$thing-post-rtjson-content">}.($a{body}//'<p>Une réponse étoilée 🌌</p>').'</div>' if $comment;
+    for my $spec (['upvote',$comment?7:42],[$comment?'replies':'comments',$comment?3:7]) {
+        my $context={%$data,action_info=>{type=>$spec->[0],page_type=>'embed'}};
+        my $attr=encode_entities(decode('UTF-8',json($context)),q{<>&"});
+        $html.=qq{<faceplate-tracker data-faceplate-tracking-context="$attr"><faceplate-number number="$spec->[1]"></faceplate-number></faceplate-tracker>};
+    }
+    return $html.'</div>';
 }
 sub fetch_with {
     my ($u,$cb)=@_;my (@calls,@opts);
@@ -154,15 +173,16 @@ sub run_contracts {
             for my $s ('Reddit - Dive into anything','Access Denied','You have been blocked by network security','Log in to Reddit') {return 0 if $pkg->can('parse_html')->("<title>$s</title>",info())}
             my $html=post_html();$html=~s/abc123/other/g;return !$pkg->can('parse_html')->($html,info());
         }],
-        ['one bounded public oEmbed request, truthful agent and no credentials/API scraping',sub {
+        ['bounded public oEmbed and optional iframe, truthful agent and no credentials/API scraping',sub {
             for my $u ('https://redd.it/abc123','https://reddit.com/gallery/abc123','https://reddit.com/comments/abc123/','https://reddit.com/user/Astro_Test/comments/abc123/slug') {
                 my ($v,$requests)=fetch_with($u,sub {{success=>1,status=>200,content=>embed()}});
-                return 0 unless $v->{state} eq 'ok' && $v->{subreddit} eq 'test' && @$requests==1;
+                return 0 unless $v->{state} eq 'ok' && $v->{subreddit} eq 'test' && @$requests==2;
                 my $request=URI->new($requests->[0][1]);my %q=$request->query_form;
                 return 0 unless $q{url} eq 'https://www.reddit.com/r/all/comments/abc123/';
             }
             my ($r,$calls,$opts)=fetch_with($url,sub {{success=>1,status=>200,content=>embed()}});
-            return $r->{state} eq 'ok' && @$calls==1 && $calls->[0][0] eq 'GET' && $calls->[0][1]=~m{\Ahttps://www.reddit.com/oembed\?}
+            return $r->{state} eq 'ok' && @$calls==2 && $calls->[0][0] eq 'GET' && $calls->[0][1]=~m{\Ahttps://www.reddit.com/oembed\?}
+                && $calls->[1][1] eq 'https://embed.reddit.com/r/test/comments/abc123/'
                 && $calls->[0][1]!~/\.json|oauth/ && !exists($calls->[0][2]{headers}{Authorization})
                 && $opts->[0]{verify_SSL} && $opts->[0]{max_redirect}==0 && $opts->[0]{max_size}==524288 && $opts->[0]{agent}=~/Mediabot-RedditPreview/;
         }],
@@ -171,7 +191,7 @@ sub run_contracts {
                 $step++;return {success=>0,status=>302,headers=>{location=>$url}} if $step==1;
                 return {success=>1,status=>200,content=>post_html()};
             });
-            return $r->{state} eq 'ok' && $r->{title} eq $title && $r->{score}==42 && @$calls==2;
+            return $r->{state} eq 'ok' && $r->{title} eq $title && $r->{score}==42 && @$calls==3;
         }],
         ['foreign/private/looping redirects and login pages are not bypassed',sub {
             for my $location ('https://evil.invalid/','http://127.0.0.1/','https://user:pass@reddit.com/r/test/','/r/test/s/Token') {
@@ -196,7 +216,7 @@ sub run_contracts {
             my ($r)=fetch_with($url,sub {{success=>0,status=>429,headers=>{'retry-after'=>'invalid'}}});return $r->{backoff}==60;
         }],
         ['classy badge, theme-neutral body, balanced formatting and <=400 UTF-8 bytes',sub {
-            return 0 unless $pkg->can('badge')->() eq "\x0301,07 reddit \x0f";
+            return 0 unless $pkg->can('badge')->() eq "\x0301,07[reddit]\x0f";
             my $r=good();$r->{title}='星🌌' x 500;$r->{score}=42;$r->{comments}=7;$r->{nsfw}=1;
             my $s=$pkg->can('render')->('É'x80,info(),$r);
             return length(encode('UTF-8',$s))<=400 && $s=~/\x0f\z/ && $s=~/…/ && $s=~/NSFW/
@@ -224,7 +244,7 @@ sub run_contracts {
             return @jobs==1 && $generic==1;
         }],
         ['normal handler is asynchronous and completes only once',sub {
-            queue(sub {my ($b,$jobs,$sent)=@_;handle($b);return 0 unless @$jobs==1 && !@$sent;complete($jobs);complete($jobs);return @$sent==1 && !keys(%{$b->{_reddit_preview}{pending}}) && strip($sent->[0][1]) eq "(Listener) reddit $title · r/test · u/$author"});
+            queue(sub {my ($b,$jobs,$sent)=@_;handle($b);return 0 unless @$jobs==1 && !@$sent;complete($jobs);complete($jobs);return @$sent==1 && !keys(%{$b->{_reddit_preview}{pending}}) && strip($sent->[0][1]) eq "(Listener) [reddit] $title · r/test · u/$author"});
         }],
         ['aliases deduplicate per channel; cache is shared across channels',sub {
             queue(sub {my ($b,$jobs,$sent)=@_;enable($b,'#other');handle($b);handle($b,'#test','https://redd.it/abc123');complete($jobs);handle($b,'#other');return @$jobs==1 && @$sent==2 && $sent->[1][0] eq '#other'});
@@ -279,14 +299,14 @@ sub run_contracts {
         }],
         ['native IO::Async worker: real parser path, no parent HTTP, completion and reaping',sub {
             my $b=fixture();enable($b);$b->{loop}=IO::Async::Loop->new;my (@sent,@workers);my $parent=$$;
-            my $http=bless({calls=>[],response=>sub {die 'parent HTTP' if $$==$parent;Time::HiRes::sleep(0.04);return {success=>1,status=>200,content=>embed()}}},'MB930::HTTP');
+            my $http=bless({calls=>[],response=>sub {my ($method,$u)=@_;die 'parent HTTP' if $$==$parent;Time::HiRes::sleep(0.04);return {success=>1,status=>200,content=>$u=~m{\Ahttps://embed\.reddit\.com/}?encode('UTF-8',embed_card()):embed()}}},'MB930::HTTP');
             no warnings qw(redefine once);
             local *Mediabot::Helpers::botPrivmsg=sub {push @sent,$_[2];1};local *HTTP::Tiny::new=sub {$http};
             my $real=Mediabot::AsyncWorker->can('start');local *Mediabot::AsyncWorker::start=sub {my $w=$real->(@_);push @workers,$w;return $w};
             my $begin=Time::HiRes::time();my $ok=handle($b);my $elapsed=Time::HiRes::time()-$begin;
             my $end=Time::HiRes::time()+4;while (keys(%{$b->{_reddit_preview}{pending}}) && Time::HiRes::time()<$end) {$b->{loop}->loop_once(0.01)}
             $b->{loop}->loop_once(0) for 1..4;
-            return $ok && $elapsed<0.5 && @sent==1 && strip($sent[0])=~/\Q$title\E/ && !@{$http->{calls}} && !keys(%{$b->{_reddit_preview}{pending}}) && $workers[0]{finalized};
+            return $ok && $elapsed<0.5 && @sent==1 && strip($sent[0])=~/\Q$title\E.*42 pts.*7 commentaires.*14\/11\/2023.*texte/ && !@{$http->{calls}} && !keys(%{$b->{_reddit_preview}{pending}}) && $workers[0]{finalized};
         }],
     );
     push @specs,['pending recipient list is bounded without losing admitted channels',sub {
@@ -308,6 +328,94 @@ sub run_contracts {
         my $w=$workers[0];
         return @sent==1 && strip($sent[0])=~/aperçu indisponible/ && !keys(%{$b->{_reddit_preview}{pending}})
             && $w->{finalized} && $w->{child_done} && !$w->{stream} && !$w->{timeout_timer} && !$w->{kill_timer};
+    }];
+    push @specs,
+    ['public iframe enriches only the exact post with date, type and bound counters',sub {
+        for my $html (embed_card(),encode('UTF-8',embed_card())) {
+            my $r=$pkg->can('parse_embed')->($html,info());
+            return 0 unless $r && $r->{score}==42 && $r->{comments}==7 && $r->{created}==1700000000 && $r->{content_type} eq 'text'
+                && !exists($r->{nsfw}) && !exists($r->{spoiler}) && !exists($r->{replies});
+        }
+        my $r=$pkg->can('parse_embed')->(embed_card(data=>{post=>{id=>'t3_abc123',url=>$url,nsfw=>JSON::PP::true,spoiler=>'false'}}),info());
+        return $r && $r->{nsfw} && !exists($r->{spoiler});
+    }],
+    ['comment iframe uses its own prose, score, replies and date rather than its parent',sub {
+        my $i=info($url.'def456/');my $r=$pkg->can('parse_embed')->(embed_card(comment=>1),$i);
+        return 0 unless $r && $r->{comment_text} eq 'Une réponse étoilée 🌌' && $r->{score}==7 && $r->{replies}==3
+            && $r->{created}==1700000000 && !exists($r->{comments}) && !exists($r->{content_type});
+        my ($out,$calls)=fetch_with($i->{url},sub {my ($method,$u)=@_;return {success=>1,status=>200,content=>$u=~/embed\.reddit\.com/?encode('UTF-8',embed_card(comment=>1)):embed(url=>$i->{url},html=>qq{<blockquote><a href="$i->{url}">Comment</a><a href="$url"></a></blockquote>})}});
+        return @$calls==2 && $out->{title} eq 'Une réponse étoilée 🌌' && !$out->{context_only} && $out->{author} eq $author;
+    }],
+    ['iframe identity, wrapper and event permalink must all agree',sub {
+        my $h=embed_card();my @bad;
+        my $x=$h;$x=~s/t3_abc123-embed-wrapper/t3_other-embed-wrapper/g;push @bad,$x;
+        $x=$h;$x=~s{link="[^"]+"}{link="https://reddit.com/comments/other/"};push @bad,$x;
+        push @bad,embed_card(data=>{post=>{id=>'t3_other',url=>$url,score=>999}});
+        push @bad,embed_card(data=>{post=>{id=>'t3_abc123',url=>'https://reddit.com/comments/other/',score=>999}});
+        push @bad,embed_card(data=>{post=>{id=>[],url=>$url}});
+        push @bad,'x'x524289;
+        for my $bad (@bad) {return 0 if $pkg->can('parse_embed')->($bad,info())}
+        my $c=embed_card(comment=>1,data=>{comment=>{id=>'t1_def456',post_id=>'t3_other',score=>999}});
+        return !$pkg->can('parse_embed')->($c,info($url.'def456/'));
+    }],
+    ['unrelated and quoted counters, generation dates and hidden scores are not invented',sub {
+        my $h=embed_card();my $foreign=encode_entities(decode('UTF-8',json({post=>{id=>'t3_other',url=>'https://reddit.com/comments/other/'},action_info=>{type=>'comments'}})),q{<>&"});
+        my $trap=qq{<faceplate-tracker data-faceplate-tracking-context="$foreign"><faceplate-number number="99999"></faceplate-number></faceplate-tracker>};
+        substr($h,-6,0,$trap);$h='<faceplate-number number="88888"></faceplate-number>'.$h;
+        my $r=$pkg->can('parse_embed')->($h,info());return 0 unless $r && $r->{comments}==7 && $r->{score}==42;
+        $h=embed_card(data=>{post=>{id=>'t3_abc123',url=>$url,type=>'text'}});
+        $h=~s/<faceplate-tracker\b.*?<\/faceplate-tracker>//sg;
+        $h=~s/<div id="t3_abc123-embed-wrapper"/<div data-embed-created="2026-10-23T12:00:00Z" id="t3_abc123-embed-wrapper"/;
+        $r=$pkg->can('parse_embed')->($h,info());return $r && !exists($r->{score}) && !exists($r->{comments}) && !exists($r->{created});
+    }],
+    ['comment code/art and quoted parent text retain context; removed prose invalidates stale content',sub {
+        my $i=info($url.'def456/');
+        for my $body ('<pre>._ o o \\_`-)|_</pre>','<blockquote><p>Quoted parent, not own prose</p></blockquote>') {
+            my $r=$pkg->can('parse_embed')->(embed_card(comment=>1,body=>$body),$i);return 0 unless $r && !exists($r->{comment_text});
+        }
+        my ($r,$calls)=fetch_with($i->{url},sub {my ($method,$u)=@_;return {success=>1,status=>200,content=>$u=~/embed\.reddit\.com/?encode('UTF-8',embed_card(comment=>1,body=>'<p>[deleted]</p>')):embed(url=>$i->{url},html=>qq{<blockquote><p>Old body</p><a href="$i->{url}">Comment</a></blockquote>})}});
+        return $r->{state} eq 'missing' && !exists($r->{title});
+    }],
+    ['optional iframe failures preserve usable oEmbed and respect 429 without redirect retries',sub {
+        for my $fault (qw(403 404 429 500 redirect malformed throw)) {
+            my ($r,$calls)=fetch_with($url,sub {my ($method,$u)=@_;return {success=>1,status=>200,content=>embed()} unless $u=~/embed\.reddit\.com/;
+                die "synthetic detail failure\n" if $fault eq 'throw';
+                return {status=>302,success=>0,headers=>{location=>'https://evil.invalid/'}} if $fault eq 'redirect';
+                return {status=>200,success=>1,content=>'<title>Login</title>'} if $fault eq 'malformed';
+                return {status=>0+$fault,success=>0,headers=>{'retry-after'=>'17'}};
+            });
+            return 0 unless $r->{state} eq 'ok' && $r->{title} eq $title && @$calls==2 && !grep($_->[1]=~/evil\.invalid/,@$calls);
+            return 0 if $fault eq '429' && $r->{backoff}!=17;
+        }
+        return 1;
+    }],
+    ['optional detail absolute deadline preserves the base and never consumes an external alarm',sub {
+        my $http=bless({calls=>[],response=>sub {Time::HiRes::sleep(1);return {success=>1,status=>200,content=>embed_card()}}},'MB930::HTTP');
+        my $begin=Time::HiRes::time();my $r=$pkg->can('_enrich')->($http,info(),good(),$begin+0.15);
+        return 0 unless $r->{state} eq 'ok' && $r->{title} eq $title && Time::HiRes::time()-$begin<0.5;
+        my ($out,$calls,$remaining);
+        {local $SIG{ALRM}=sub {die "external alarm consumed\n"};Time::HiRes::alarm(1);
+            ($out,$calls)=fetch_with($url,sub {{success=>1,status=>200,content=>embed()}});$remaining=Time::HiRes::alarm(0);
+        }
+        return $remaining>0 && $out->{state} eq 'ok' && @$calls==1;
+    }],
+    ['new detail fields reject reference leaves, invalid dates/types and parent counters',sub {
+        my $r={%{good()},created=>[],replies=>{},content_type=>[],comments=>-1,score=>[]};
+        my $v=$pkg->can('_result')->($r);
+        return 0 if grep {exists($v->{$_})} qw(created replies content_type comments score);
+        for my $stamp ('not-a-date',123,'9999999999999',0) {my $x=$pkg->can('_result')->({%{good()},created=>$stamp});return 0 if exists($x->{created})}
+        $v=$pkg->can('_result')->({%{good()},kind=>'comment',comments=>999,replies=>0});
+        return !exists($v->{comments}) && $v->{replies}==0;
+    }],
+    ['bracketed badge preserves colours and enriched lines stay compact with correct labels',sub {
+        my $r={%{good()},score=>42,comments=>1,created=>1700000000,content_type=>'video'};
+        my $s=$pkg->can('render')->('Listener',info(),$r);my $plain=strip($s);
+        return 0 unless $plain=~/\[reddit\].*42 pts.*1 commentaire · 14\/11\/2023 · vidéo/ && $s=~/\x0301,07\[reddit\]\x0f/;
+        my $i=info($url.'def456/');$r={%{good()},kind=>'comment',score=>7,replies=>1,created=>1700000000};
+        $plain=strip($pkg->can('render')->('Listener',$i,$r));return 0 unless $plain=~/1 réponse/ && $plain!~/commentaires/;
+        $r->{title}='星🌌'x500;$r->{author}='A'x32;$r->{subreddit}='S'x80;
+        $s=$pkg->can('render')->('É'x80,$i,$r);
+        return length(encode('UTF-8',$s))<=400 && $s=~/\x0f\z/ && $s!~/\r|\n/;
     }];
     my @out;
     for my $s (@specs) {

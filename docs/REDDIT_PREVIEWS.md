@@ -23,23 +23,30 @@ not activate a channel or write to the database.
 One compact line, for example (illustrative content):
 
 ```text
-(Alice) reddit Une aurore au-dessus des montagnes · r/space · u/Astro
+(Alice) [reddit] Une aurore au-dessus des montagnes · r/space · u/Astro · 42 pts · 7 commentaires · 23/10/2026 · image
 ```
 
-The `reddit` badge uses IRC black on orange, with an immediate formatting
+The `[reddit]` badge uses the same IRC black on orange, with an immediate formatting
 reset. The title is bold; separators and metadata use the client's normal
 foreground and background. The complete line is limited to 400 UTF-8 bytes,
 including IRC formatting. Long text is truncated without cutting a character;
 formatting is closed at the end. No background colour extends beyond the badge.
 The common output path still applies NoColors, badword filtering and antiflood.
 
-The preview displays the public title and available community/author. Public
-HTML can also supply score, comment count and NSFW/spoiler labels. Such fields
-are omitted when the source does not provide them; they are not guessed.
-Counts and labels are not guaranteed by oEmbed.
+The preview displays the public title and available community/author. A second,
+optional request reads the static public iframe rendered by Reddit's own embed
+widget. When provided, it adds the score, comment count, publication date (UTC),
+content type and NSFW/spoiler labels. For a comment, its own score, date and reply
+count are used; parent-post counters are not substituted. A hidden/absent count
+is omitted rather than displayed as zero. Singular/plural labels are adjusted.
+The date comes from the identified post/comment, never the embed generation date.
+Low-priority details are omitted when necessary to preserve the title and the
+400-byte total limit. Counts and labels are not guaranteed by oEmbed.
 
-For a comment, use its own body when the official embed provides it. Some
-current Reddit comment embeds provide only a link to that comment, its author
+For a comment, use its own prose when the official embed provides it. The
+optional iframe can supply prose even when the oEmbed envelope omits it. Code,
+ASCII art and quoted-only bodies are not flattened into a misleading single
+line. Some Reddit responses provide only a link to that comment, its author
 and the parent post's title. Those are displayed explicitly as
 `Commentaire sur « parent title »`, not as the comment's text. A response that
 only identifies the parent post cannot stand in for the requested comment.
@@ -69,10 +76,17 @@ produces one concise, correctly labelled unavailable preview. It does not
 execute embedded scripts, fetch a login session or use a proxy to bypass a
 restriction.
 
-Posts/comments use the public `www.reddit.com/oembed` endpoint. For an ID-only
+Posts/comments first use the public `www.reddit.com/oembed` endpoint. For an ID-only
 link, the public `/r/all/comments/ID/` lookup route is used; the returned
 permalink must still identify that exact post/comment, and supplies the real
-community. Public HTML is used for other pages. This provider does not call
+community. A usable preview can then be enriched from the corresponding
+`embed.reddit.com` iframe, the same source constructed by the official
+`widgets.js`. It requires an exact-ID wrapper, matching structured entity and
+matching event permalink. Bound counter elements are read without executing
+scripts. This optional request does not follow redirects. A rejected,
+unavailable, malformed or slow iframe leaves the basic preview usable; an
+explicitly removed comment suppresses its stale body. A 429 response still
+starts the instance cooldown. Public HTML is used for other pages. This provider does not call
 Reddit's authenticated Data API or unauthenticated `.json` listing routes.
 The User-Agent identifies Mediabot; TLS verification stays enabled. No Reddit
 cookies or credentials are sent.
@@ -89,7 +103,10 @@ All HTTP runs in `AsyncWorker` children, outside the IRC event loop. Per
 instance: at most four pending lookups and twelve launches per minute, sixteen
 recipients per lookup, 128 cached results and 512 recent-delivery identities.
 HTTP responses are capped at 512 KiB, worker output at 8 KiB, HTTP operations
-at six seconds per operation, and the whole worker at thirty seconds.
+at six seconds per operation, and the whole worker at thirty seconds. Optional
+enrichment has an additional absolute six-second maximum and stops by the
+twenty-sixth second of collection, leaving time to return the basic result.
+An existing caller-owned alarm is preserved and optional enrichment is skipped.
 
 Successful metadata is cached in memory for sixty seconds, unavailable results
 for thirty seconds. Canonical duplicates are suppressed for five minutes per
