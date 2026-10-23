@@ -10,11 +10,16 @@ use MockBot;
     sub new {bless {calls=>[]},shift}
     sub fetch {my ($self,%args)=@_;push @{$self->{calls}},\%args;1}
     sub complete {$_[0]{calls}[-1]{on_done}->($_[1])}
+    package MB808::ManualIRC;
+    our @ISA=('MockIRC');
+    sub is_connected {1}
 }
 return sub {
     my ($a)=@_;
     my (@sent,@notices);
     my $bot=MockBot->new;
+    # MB936: the registry fixture models a live transport as well as policy.
+    bless $bot->{irc},'MB808::ManualIRC';
     $bot->{enabled}=1;
     my $fetch=MB808::ManualFetcher->new;
     $bot->{_vdm_runtime}=Mediabot::VDM::Runtime->new(bot=>$bot,fetcher=>$fetch,

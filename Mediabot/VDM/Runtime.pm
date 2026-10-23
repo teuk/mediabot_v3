@@ -6,6 +6,7 @@ use utf8;
 
 use Mediabot::VDM qw(evaluate_vdm_gate format_vdm_line vdm_repeat_window_seconds);
 use Mediabot::VDM::AsyncFetcher;
+use Mediabot::IRC::DeliveryContext qw(capture_delivery_context delivery_context_current);
 
 sub new {
     my ($class, %args) = @_;
@@ -254,6 +255,7 @@ sub request_manual {
     my $request_id = ++$self->{request_seq};
     $state->{pending} = $request_id;
     $state->{touched} = $self->_now;
+    my $delivery_context = capture_delivery_context($self->{bot}, $channel);
 
     my $finished = 0;
     my $accepted = eval { $fetcher->fetch(
@@ -265,6 +267,13 @@ sub request_manual {
             return unless $current && defined($current->{pending}) && $current->{pending} == $request_id;
             delete $current->{pending};
             $current->{touched} = $self->_now;
+
+            # MB936: a recovered connection/JOIN must not inherit old work,
+            # including error notices. Release this request before rejecting it.
+            unless (delivery_context_current($self->{bot}, $delivery_context)) {
+                $self->_log(3, "[VDM] channel=$channel action=no_send reason=stale_delivery_context mode=manual request_id=$request_id");
+                return;
+            }
 
             my $late_gate = $self->_manual_gate($channel);
             unless ($late_gate->{action} && $late_gate->{action} eq 'allow') {
@@ -371,6 +380,7 @@ sub request_spark {
     my $request_id = ++$self->{request_seq};
     $state->{pending} = $request_id;
     $state->{touched} = $self->_now;
+    my $delivery_context = capture_delivery_context($self->{bot}, $channel);
 
     my $finished = 0;
     my $accepted = eval { $fetcher->fetch(
@@ -381,6 +391,11 @@ sub request_spark {
             return unless $current && defined($current->{pending}) && $current->{pending} == $request_id;
             delete $current->{pending};
             $current->{touched} = $self->_now;
+
+            unless (delivery_context_current($self->{bot}, $delivery_context)) {
+                $self->_log(3, "[VDM] channel=$channel action=no_send reason=stale_delivery_context mode=spark request_id=$request_id");
+                return;
+            }
 
             unless (eval { $activity_current_cb->() }) {
                 $self->_log(3, "[VDM] channel=$channel action=no_send reason=stale_activity mode=spark request_id=$request_id");

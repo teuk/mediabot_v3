@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB936 — Bind delayed VDM replies to their original IRC context (2026-10-23)
+
+- Reuse IRC::DeliveryContext for manual and Spark VDM fetches. Reject late
+  stories and errors after transport/runtime replacement, reconnect, a new JOIN
+  generation, CASEMAPPING changes or shutdown, even when current policy allows.
+- Release only the completing request's reservation before revalidation; stale
+  results do not consume repeat history or affect coalesced current waiters.
+- Preserve gates, requested IDs, formatting, Unicode and ordinary/offline caller
+  behavior. Replace the existing late-validation case with native fork/pipe and
+  lifecycle scenarios; keep 1,158 case files with four additional assertions.
+
 ### MB935 — Keep database timer additions atomic with native setup (2026-10-23)
 
 - Commit a new TIMERS row only after its Periodic timer has been constructed,
