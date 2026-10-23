@@ -10,6 +10,24 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+
+### MB919 — Honour karma write outcomes and brigade blocks (2026-10-23)
+
+- Send karmawatch notifications after a successful KARMA write and statement
+  release. Silence notifications on prepare/execute refusal and finish an
+  existing statement on execute failure. Keep the pre-write cooldown and
+  historical attempt metric placement; a later score-read failure does not
+  suppress the notification of an already stored vote.
+- Label the outer vote loop and target it from the anti-brigade branch. A sixth
+  distinct voter is now actually blocked; a different target in the same
+  message can still succeed. Preserve the five-voter/30-second threshold,
+  warning suppression and expiry rules.
+- Extend existing case 670 with nine grouped native assertions, retaining its
+  seven prior checks and all 1,156 case files. Compare 96 nominal native votes
+  and four unchanged guard scenarios; detect six deliberate mutations.
+  No new module, shared fixture, SQL query/bind or database schema change.
+
+
 ### MB918 — Keep cached channel objects on the live database connection (2026-10-23)
 
 - Retain an optional connection owner in Channel and pass it from the three

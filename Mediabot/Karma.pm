@@ -205,7 +205,7 @@ sub processKarma {
     # Use '!karma + <nick>' for reliable explicit votes.
     my $karma_hits = 0;  # C2/fix: cap at 3 karma changes per message
     my @chan_nicks_pk = eval { $self->gethChannelsNicksOnChan($channel) };
-    while ($text =~ /([^\s+\-]{2,32})(\+\+|--)(?![\w+\-])/g) {
+    KARMA_VOTE: while ($text =~ /([^\s+\-]{2,32})(\+\+|--)(?![\w+\-])/g) {
         last if ++$karma_hits > 3;
         my ($target, $op) = (lc($1), $2);
         # PRESENCE CHECK: target must be on the channel
@@ -258,7 +258,7 @@ sub processKarma {
                     "DD9: karma brigade on $target in $channel ($distinct_voters distinct voters)");
             }
             $self->{metrics}->inc('mediabot_karma_brigade_blocks') if $self->{metrics};
-            next;
+            next KARMA_VOTE;
         }
         $brigade->{warned} = 0 if $distinct_voters <= 2;
     }
@@ -273,6 +273,19 @@ sub processKarma {
         }
         $self->{_karma_cooldown}{$channel}{$cd_key} = time();
     $self->{metrics}->inc('mediabot_karma_votes_total') if $self->{metrics};  # AA6
+        my $delta = ($op eq '++') ? 1 : -1;
+        my $sth = $self->{dbh}->prepare(q{
+            INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE score = score + ?
+        });
+        unless ($sth && $sth->execute($id_channel, $target, $delta, $delta)) {
+            $sth->finish if $sth;
+            next;
+        }
+        $sth->finish;
+
+        # MB919: announce only a successfully stored vote. Keep cooldown and
+        # attempt accounting above the write, including when SQL is unavailable.
     # FF1: notify watchers of this karma change
     # B2/fix: use $op (captured at loop start) not $2 (regex global — stale)
     for my $watcher (keys %{ $self->{_karma_watch} // {} }) {
@@ -283,13 +296,6 @@ sub processKarma {
                 "[karmawatch] $target $verb karma from $nick on $channel");
         }
     }
-        my $delta = ($op eq '++') ? 1 : -1;
-        my $sth = $self->{dbh}->prepare(q{
-            INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE score = score + ?
-        });
-        next unless $sth && $sth->execute($id_channel, $target, $delta, $delta);
-        $sth->finish;
 
         # Fetch updated score
         my $sth2 = $self->{dbh}->prepare('SELECT score FROM KARMA WHERE id_channel = ? AND nick = ?');
