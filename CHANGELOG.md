@@ -11,6 +11,21 @@ release. The current development line is `3.6dev`.
 ## [Unreleased] — 3.6dev
 
 
+### MB924 — Exclude the previous author quote from the retry draw (2026-10-23)
+
+- Replace four full-range random retries in quote-by-author with one draw over
+  the other count-1 positions. Skip the original offset so repeated random values
+  cannot exhaust retries and repeat the previous quote when an alternative exists.
+- Preserve SQL text/bind order, prefix/contains matching and LIKE escaping,
+  cache keys, UTF-8 output, one-quote repeats and the original-row fallback when
+  the second read fails or the alternative disappears. Other quote paths stay.
+- Add four grouped native DBI/SQLite assertions to existing case 255, retaining
+  its six prior checks and all 1,156 cases. Exercise 56 alternative-rank cases,
+  compare 20 unchanged nominal calls and six fallback scenarios, cover random
+  extremes and detect eight mutations. No new module, fixture or schema change.
+
+
+
 ### MB923 — Count failed logins once per normalized identity (2026-10-23)
 
 - Deduplicate the live IRC nickname and requested account after their existing

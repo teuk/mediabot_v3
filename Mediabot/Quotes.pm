@@ -897,11 +897,11 @@ sub mbQuoteByNick {
     my $cache_key = "$sChannel:$targetNick";
     my $last_id   = $self->{_quote_bynick_last}{$cache_key};
     if (defined $last_id && $last_id == $row->{id_quotes} && $count > 1) {
-        # Retenter avec un offset différent
-        for (1..4) {
-            my $offset2 = int(rand($count));
-            next if $offset2 == $offset;
-            my $sth2 = $self->{dbh}->prepare(q{
+        # MB924: draw uniformly from the other count-1 positions. Repeated
+        # draws from the full range could exhaust every retry on the same quote.
+        my $offset2 = int(rand($count - 1));
+        $offset2++ if $offset2 >= $offset;
+        my $sth2 = $self->{dbh}->prepare(q{
                 SELECT q.id_quotes, q.quotetext, u.nickname AS author
                 FROM QUOTES q
                 JOIN CHANNEL c ON c.id_channel = q.id_channel
@@ -910,11 +910,9 @@ sub mbQuoteByNick {
                 ORDER BY q.id_quotes
                 LIMIT 1 OFFSET ?
             });
-            if ($sth2 && $sth2->execute($sChannel, $like, $offset2)) {
-                my $r2 = $sth2->fetchrow_hashref; $sth2->finish;
-                $row = $r2 if $r2;
-            }
-            last;
+        if ($sth2 && $sth2->execute($sChannel, $like, $offset2)) {
+            my $r2 = $sth2->fetchrow_hashref; $sth2->finish;
+            $row = $r2 if $r2;
         }
     }
     $self->{_quote_bynick_last}{$cache_key} = $row->{id_quotes};
