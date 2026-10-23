@@ -315,8 +315,8 @@ sub mbQuoteDel {
     }
 
     # mb342-B1: récupérer aussi l'auteur (id_user) pour le contrôle de permission.
-    my $sQuery = "SELECT QUOTES.id_quotes, QUOTES.id_user FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
-    my $sth_sel = $self->{dbh}->prepare($sQuery);
+    my $sQuery = "SELECT QUOTES.id_quotes, QUOTES.id_user, QUOTES.id_channel FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
+    my $sth_sel = eval { $self->{dbh}->prepare($sQuery) };
 
     unless ($sth_sel) {
         $self->{logger}->log(1, "mbQuoteDel() SQL prepare error: $DBI::errstr Query: $sQuery")
@@ -325,16 +325,27 @@ sub mbQuoteDel {
         return;
     }
 
-    unless ($sth_sel->execute($sChannel, $id_quotes)) {
+    unless (eval { $sth_sel->execute($sChannel, $id_quotes) }) {
         $self->{logger}->log(1, "mbQuoteDel() SQL execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
-        $sth_sel->finish;
+        eval { $sth_sel->finish };
         botNotice($self, $sNick, "Database error while checking quote.");
         return;
     }
 
-    my $exists = $sth_sel->fetchrow_hashref();
-    $sth_sel->finish;
+    my $exists;
+    my $read_ok = eval {
+        $exists = $sth_sel->fetchrow_hashref();
+        die "quote fetch failed\n" if $sth_sel->err;
+        1;
+    };
+    eval { $sth_sel->finish };
+    unless ($read_ok) {
+        $self->{logger}->log(1, "mbQuoteDel() SQL fetch error while checking quote")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while checking quote.");
+        return;
+    }
 
     unless ($exists) {
         botPrivmsg($self, $sChannel, "Quote (id : $id_quotes) does not exist for channel $sChannel");
@@ -381,8 +392,10 @@ sub mbQuoteDel {
         return;
     }
 
-    $sQuery = "DELETE FROM QUOTES WHERE id_quotes=?";
-    my $sth_del = $self->{dbh}->prepare($sQuery);
+    # MB937: bind the channel observed during authorization and check the
+    # actual DELETE result. A successful execute may be DBI's true zero (0E0).
+    $sQuery = "DELETE FROM QUOTES WHERE id_quotes=? AND id_channel=?";
+    my $sth_del = eval { $self->{dbh}->prepare($sQuery) };
 
     unless ($sth_del) {
         $self->{logger}->log(1, "mbQuoteDel() SQL delete prepare error: $DBI::errstr Query: $sQuery")
@@ -391,15 +404,26 @@ sub mbQuoteDel {
         return;
     }
 
-    unless ($sth_del->execute($id_quotes)) {
+    unless (eval { $sth_del->execute($id_quotes, $exists->{id_channel}) }) {
         $self->{logger}->log(1, "mbQuoteDel() SQL delete execute error: $DBI::errstr Query: $sQuery")
             if $self->{logger};
-        $sth_del->finish;
+        eval { $sth_del->finish };
         botNotice($self, $sNick, "Database error while deleting quote.");
         return;
     }
 
-    $sth_del->finish;
+    my $removed = eval { $sth_del->rows };
+    eval { $sth_del->finish };
+    unless (defined($removed) && $removed >= 0) {
+        $self->{logger}->log(1, "mbQuoteDel() SQL delete affected-row count unavailable")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while deleting quote.");
+        return;
+    }
+    unless ($removed > 0) {
+        botPrivmsg($self, $sChannel, "Quote (id : $id_quotes) does not exist for channel $sChannel");
+        return;
+    }
 
     my $id_removed = String::IRC->new($id_quotes)->bold;
     botPrivmsg($self, $sChannel, "($sMatchingUserHandle) deleted. (id: $id_removed)");

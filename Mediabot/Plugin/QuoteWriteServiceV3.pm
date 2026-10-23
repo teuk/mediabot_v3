@@ -98,8 +98,14 @@ sub _statement {
 sub _one {
     my ($self, $dbh, $sql, @bind) = @_;
     my $sth = $self->_statement($dbh, $sql, @bind);
-    my $row = eval { $sth->fetchrow_hashref };
+    my $row;
+    my $ok = eval {
+        $row = $sth->fetchrow_hashref;
+        die "quote fetch failed\n" if $sth->err;
+        1;
+    };
     eval { $sth->finish };
+    die "QuoteWriteServiceV3: data service unavailable\n" unless $ok;
     return ref($row) eq 'HASH' ? { %$row } : undef;
 }
 
@@ -191,8 +197,12 @@ sub delete {
         DELETE FROM QUOTES
          WHERE id_quotes = ? AND id_channel = ?},
         $id, 0 + $quote->{channel_id});
+    # MB937: execute returning true does not prove that a row was deleted.
+    my $removed = eval { $sth->rows };
     eval { $sth->finish };
-    return { ok => 1, status => 'deleted', id => $id };
+    die "QuoteWriteServiceV3: data service unavailable\n"
+        unless defined($removed) && $removed >= 0;
+    return { ok => 1, status => $removed > 0 ? 'deleted' : 'not_found', id => $id };
 }
 
 sub recall {

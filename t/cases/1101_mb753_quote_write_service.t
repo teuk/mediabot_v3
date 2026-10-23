@@ -41,6 +41,8 @@ BEGIN {
         my $row = $self->{plan}{rows}[ $self->{at}++ ];
         return defined($row) ? { %$row } : undef;
     }
+    sub err { undef }
+    sub rows { 1 }
     sub finish { 1 }
 }
 

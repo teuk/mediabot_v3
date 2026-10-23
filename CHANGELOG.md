@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB937 — Acknowledge quote deletions only after a confirmed DELETE (2026-10-23)
+
+- Check affected rows in historical and v3 quote deletion paths. A concurrent
+  deletion now returns the existing not-found outcome without a success audit.
+  Bind the historical DELETE to the channel checked during authorization.
+- Contain historical prepare/execute/fetch exceptions and distinguish lookup
+  failures from absence. The shared v3 single-row reader also prevents failed
+  duplicate checks from falling through to a fresh insert.
+- Preserve author/Administrator/channel-level policy, thresholds, formatting and
+  Unicode. Replace a duplicated policy test with grouped native DBI scenarios;
+  keep 1,158 case files and reduce the assertion count by seven.
+
 ### MB936 — Bind delayed VDM replies to their original IRC context (2026-10-23)
 
 - Reuse IRC::DeliveryContext for manual and Spark VDM fetches. Reject late
