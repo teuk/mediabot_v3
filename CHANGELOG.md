@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB932 — Preserve achievement merit and aliases across SQL failures (2026-10-23)
+
+- Transfer exact IRC aliases to the retained profile before deleting a merged
+  profile; preserve oldest unlocks, maximum progress and observation timestamps.
+- Give profile merges, legacy JSON imports and timezone hour-band resets one
+  checked transaction boundary. Refuse caller-owned transactions, check SQL and
+  commit results, restore the DBI error mode and roll back only owned work.
+- Keep live legacy JSON on failed imports and publish reset cache/queue changes
+  only after commit. Retain the JSON fallback and existing schema.
+- Extend the existing achievement identity case with grouped native DBI failure
+  regressions; no new case file in the catalogue.
+
 ### MB931 — Richer Reddit preview details (2026-10-23)
 
 - Use [reddit] with the same black-on-orange IRC colours and immediate reset.

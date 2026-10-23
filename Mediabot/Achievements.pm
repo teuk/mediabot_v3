@@ -545,11 +545,7 @@ sub reset_channel_hourbands {
         my $dbh = eval { $self->{bot}{dbh} };
         die 'achievement database is unavailable' unless $dbh;
 
-        my $started = 0;
-        my $ok = eval {
-            $dbh->begin_work;
-            $started = 1;
-
+        $self->_with_db_transaction(sub {
             my $sth_u = $dbh->prepare(q{
                 DELETE au
                 FROM ACHIEVEMENT_UNLOCK au
@@ -579,16 +575,7 @@ sub reset_channel_hourbands {
                 unless $sth_p->execute($id_channel);
             $progress_rows = 0 + ($sth_p->rows // 0);
             $sth_p->finish;
-
-            $dbh->commit;
-            $started = 0;
-            1;
-        };
-        if (!$ok) {
-            my $error = $@ || 'hour-band reconciliation failed';
-            eval { $dbh->rollback } if $started;
-            die $error;
-        }
+        });
 
         # Drop parent-side mirrors so a deleted DB row cannot survive in cache.
         my @channel_pids = grep {
@@ -1172,78 +1159,122 @@ sub _profile_for_registered_user {
     return (defined($pid) && "$pid" =~ /\A\d+\z/) ? 0 + $pid : undef;
 }
 
+# Own the complete transaction, including its failure path. In particular,
+# localizing AutoCommit would restore it (and could commit partial writes)
+# before an outer eval gets a chance to roll back. Never end a caller's work.
+sub _with_db_transaction {
+    my ($self, $work) = @_;
+    my $dbh = $self->{bot}{dbh};
+    die "achievement database is unavailable\n" unless $dbh;
+    die "achievement operation requires its own transaction\n"
+        unless $dbh->{AutoCommit};
+
+    my $started = 0;
+    my $ok = eval {
+        $dbh->begin_work or die "could not begin achievement transaction\n";
+        $started = 1;
+        {
+            # Nested profile/identity helpers must also abort on SQL errors.
+            # This attribute, unlike AutoCommit, is safe to restore on unwind.
+            local $dbh->{RaiseError} = 1;
+            $work->();
+        }
+        $dbh->commit or die "could not commit achievement transaction\n";
+        $started = 0;
+        1;
+    };
+    if (!$ok) {
+        my $error = $@ || "achievement transaction failed\n";
+        if ($started) {
+            my $rolled_back = eval {
+                $dbh->rollback or die "rollback returned failure\n";
+                1;
+            };
+            $error .= "achievement rollback failed: " . ($@ || 'unknown error')
+                unless $rolled_back;
+        }
+        die $error;
+    }
+    return 1;
+}
+
 sub _merge_profiles {
     my ($self, $keep, $drop) = @_;
     return $keep unless $keep && $drop && $keep != $drop;
     my $dbh = $self->{bot}{dbh};
 
+    my $writes_started = 0;
     my $ok = eval {
-        local $dbh->{AutoCommit} = 0;
+        $self->_with_db_transaction(sub {
+            $writes_started = 1;
 
-        # Merit is merged losslessly: oldest unlock time, highest progress.
-        my $u = $dbh->prepare(q{
-            INSERT INTO ACHIEVEMENT_UNLOCK
-                (id_achievement_profile, achievement_id, unlocked_at)
-            SELECT ?, achievement_id, unlocked_at
-            FROM ACHIEVEMENT_UNLOCK
-            WHERE id_achievement_profile = ?
-            ON DUPLICATE KEY UPDATE
-                unlocked_at = LEAST(unlocked_at, VALUES(unlocked_at))
+            # Merit is merged losslessly: oldest unlock time, highest progress.
+            my $u = $dbh->prepare(q{
+                INSERT INTO ACHIEVEMENT_UNLOCK
+                    (id_achievement_profile, achievement_id, unlocked_at)
+                SELECT ?, achievement_id, unlocked_at
+                FROM ACHIEVEMENT_UNLOCK
+                WHERE id_achievement_profile = ?
+                ON DUPLICATE KEY UPDATE
+                    unlocked_at = LEAST(unlocked_at, VALUES(unlocked_at))
+            });
+            die 'could not prepare achievement unlock merge' unless $u;
+            $u->execute($keep, $drop) or die 'could not merge achievement unlocks';
+
+            my $g = $dbh->prepare(q{
+                INSERT INTO ACHIEVEMENT_PROGRESS
+                    (id_achievement_profile, progress_kind, progress_value, updated_at)
+                SELECT ?, progress_kind, progress_value, updated_at
+                FROM ACHIEVEMENT_PROGRESS
+                WHERE id_achievement_profile = ?
+                ON DUPLICATE KEY UPDATE
+                    progress_value = GREATEST(progress_value, VALUES(progress_value)),
+                    updated_at = GREATEST(updated_at, VALUES(updated_at))
+            });
+            die 'could not prepare achievement progress merge' unless $g;
+            $g->execute($keep, $drop) or die 'could not merge achievement progress';
+
+            # Each exact triplet already exists on the dropped profile. The
+            # duplicate-key branch must transfer ownership before its old rows
+            # are deleted, while retaining the earliest/latest observation times.
+            my $i = $dbh->prepare(q{
+                INSERT INTO ACHIEVEMENT_IDENTITY
+                    (id_achievement_profile, id_channel, nick, userhost,
+                     first_seen_at, last_seen_at)
+                SELECT ?, id_channel, nick, userhost, first_seen_at, last_seen_at
+                FROM ACHIEVEMENT_IDENTITY
+                WHERE id_achievement_profile = ?
+                ON DUPLICATE KEY UPDATE
+                    id_achievement_profile = VALUES(id_achievement_profile),
+                    first_seen_at = LEAST(first_seen_at, VALUES(first_seen_at)),
+                    last_seen_at  = GREATEST(last_seen_at, VALUES(last_seen_at))
+            });
+            die 'could not prepare achievement alias merge' unless $i;
+            $i->execute($keep, $drop) or die 'could not merge achievement aliases';
+
+            $dbh->do(
+                'DELETE FROM ACHIEVEMENT_IDENTITY WHERE id_achievement_profile = ?',
+                undef, $drop
+            ) or die 'could not remove merged achievement aliases';
+            $dbh->do(
+                'DELETE FROM ACHIEVEMENT_UNLOCK WHERE id_achievement_profile = ?',
+                undef, $drop
+            ) or die 'could not remove merged achievement unlocks';
+            $dbh->do(
+                'DELETE FROM ACHIEVEMENT_PROGRESS WHERE id_achievement_profile = ?',
+                undef, $drop
+            ) or die 'could not remove merged achievement progress';
+            $dbh->do(
+                'DELETE FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile = ?',
+                undef, $drop
+            ) or die 'could not remove merged achievement profile';
         });
-        $u->execute($keep, $drop);
-
-        my $g = $dbh->prepare(q{
-            INSERT INTO ACHIEVEMENT_PROGRESS
-                (id_achievement_profile, progress_kind, progress_value, updated_at)
-            SELECT ?, progress_kind, progress_value, updated_at
-            FROM ACHIEVEMENT_PROGRESS
-            WHERE id_achievement_profile = ?
-            ON DUPLICATE KEY UPDATE
-                progress_value = GREATEST(progress_value, VALUES(progress_value)),
-                updated_at = GREATEST(updated_at, VALUES(updated_at))
-        });
-        $g->execute($keep, $drop);
-
-        # Copy aliases instead of UPDATEing them in place: an exact triplet may
-        # already exist on the kept profile and the unique key must never make a
-        # legitimate merge fail.
-        my $i = $dbh->prepare(q{
-            INSERT INTO ACHIEVEMENT_IDENTITY
-                (id_achievement_profile, id_channel, nick, userhost,
-                 first_seen_at, last_seen_at)
-            SELECT ?, id_channel, nick, userhost, first_seen_at, last_seen_at
-            FROM ACHIEVEMENT_IDENTITY
-            WHERE id_achievement_profile = ?
-            ON DUPLICATE KEY UPDATE
-                first_seen_at = LEAST(first_seen_at, VALUES(first_seen_at)),
-                last_seen_at  = GREATEST(last_seen_at, VALUES(last_seen_at))
-        });
-        $i->execute($keep, $drop);
-
-        $dbh->do(
-            'DELETE FROM ACHIEVEMENT_IDENTITY WHERE id_achievement_profile = ?',
-            undef, $drop
-        );
-        $dbh->do(
-            'DELETE FROM ACHIEVEMENT_UNLOCK WHERE id_achievement_profile = ?',
-            undef, $drop
-        );
-        $dbh->do(
-            'DELETE FROM ACHIEVEMENT_PROGRESS WHERE id_achievement_profile = ?',
-            undef, $drop
-        );
-        $dbh->do(
-            'DELETE FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile = ?',
-            undef, $drop
-        );
-        $dbh->commit;
         1;
     };
 
     if (!$ok) {
         my $error = $@;
-        eval { $dbh->rollback };
-        eval { $self->_load_db };
+        eval { $self->_load_db } if $writes_started;
         $self->_log(1,
             "Achievements: profile merge failed ($drop -> $keep): $error");
         return $drop;
@@ -1512,32 +1543,36 @@ sub _import_legacy_json_if_present {
 
     my $dbh = $self->{bot}{dbh};
     my ($profiles, $unlocks, $progress) = (0, 0, 0);
+    my $writes_started = 0;
     my $ok = eval {
-        local $dbh->{AutoCommit} = 0;
+        $self->_with_db_transaction(sub {
+            $writes_started = 1;
 
-        my %pid_for;
-        for my $key (sort keys %{ $legacy->{profiles} || {} }) {
-            my ($nick, $channel) = split /\x00/, $key, 2;
-            next unless defined($nick) && length($nick)
-                && defined($channel) && $channel =~ /^#/;
-            my $cid = $self->_channel_id($channel) or next;
+            my %pid_for;
+            for my $key (sort keys %{ $legacy->{profiles} || {} }) {
+                my ($nick, $channel) = split /\x00/, $key, 2;
+                next unless defined($nick) && length($nick)
+                    && defined($channel) && $channel =~ /^#/;
+                my $cid = $self->_channel_id($channel) or next;
 
-            my $pid = $self->_profile_id_for($nick, $channel);
-            $pid ||= $self->_create_profile($cid, $nick, '', undef);
-            next unless $pid;
-            $pid_for{$key} = $pid;
-            $profiles++;
+                my $pid = $self->_profile_id_for($nick, $channel);
+                $pid ||= $self->_create_profile($cid, $nick, '', undef);
+                die 'could not create legacy achievement profile' unless $pid;
+                $pid_for{$key} = $pid;
+                $profiles++;
 
-            for my $id (keys %{ $legacy->{profiles}{$key} || {} }) {
-                my $ts = $legacy->{profiles}{$key}{$id};
-                my $sth = $dbh->prepare(q{
-                    INSERT INTO ACHIEVEMENT_UNLOCK
-                        (id_achievement_profile, achievement_id, unlocked_at)
-                    VALUES (?, ?, FROM_UNIXTIME(?))
-                    ON DUPLICATE KEY UPDATE
-                        unlocked_at = LEAST(unlocked_at, VALUES(unlocked_at))
+                for my $id (keys %{ $legacy->{profiles}{$key} || {} }) {
+                    my $ts = $legacy->{profiles}{$key}{$id};
+                    my $sth = $dbh->prepare(q{
+                        INSERT INTO ACHIEVEMENT_UNLOCK
+                            (id_achievement_profile, achievement_id, unlocked_at)
+                        VALUES (?, ?, FROM_UNIXTIME(?))
+                        ON DUPLICATE KEY UPDATE
+                            unlocked_at = LEAST(unlocked_at, VALUES(unlocked_at))
                 });
-                $sth->execute($pid, $id, $ts);
+                die 'could not prepare legacy achievement unlock' unless $sth;
+                $sth->execute($pid, $id, $ts)
+                    or die 'could not import legacy achievement unlock';
                 $unlocks++;
             }
         }
@@ -1554,7 +1589,8 @@ sub _import_legacy_json_if_present {
                         || $self->_create_profile($cid, $nick, '', undef);
                     $pid_for{$key} = $pid if $pid;
                 }
-                next unless $pid;
+                die 'could not create legacy achievement progress profile'
+                    unless $pid;
                 my $sth = $dbh->prepare(q{
                     INSERT INTO ACHIEVEMENT_PROGRESS
                         (id_achievement_profile, progress_kind, progress_value, updated_at)
@@ -1563,22 +1599,23 @@ sub _import_legacy_json_if_present {
                         progress_value = GREATEST(progress_value, VALUES(progress_value)),
                         updated_at = NOW()
                 });
-                $sth->execute($pid, $kind, $value);
+                die 'could not prepare legacy achievement progress' unless $sth;
+                $sth->execute($pid, $kind, $value)
+                    or die 'could not import legacy achievement progress';
                 $progress++;
             }
         }
 
-        $dbh->commit;
+        });
         1;
     };
 
     if (!$ok) {
         my $error = $@;
-        eval { $dbh->rollback };
         # Transactional writes may already have touched the in-memory caches.
         # Reload from committed DB state so a failed import cannot leave ghost
         # profiles visible until the next restart.
-        eval { $self->_load_db };
+        eval { $self->_load_db } if $writes_started;
         $self->_log(1, "Achievements: legacy JSON DB import failed: $error");
         return 0;
     }

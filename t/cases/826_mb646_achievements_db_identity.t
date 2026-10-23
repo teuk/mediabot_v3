@@ -170,4 +170,18 @@ return sub {
             'mb646-826: child worker receives durable profile id');
     }
 
+    # MB932: native transactions run in a child so this shared runner's DBI
+    # error settings, caches and current directory remain untouched.
+    require JSON::PP;
+    open my $probe, '-|', $^X, '-I.', '-It/lib',
+        't/lib/MB932AchievementFixture.pm' or die "achievement probe: $!";
+    my $raw = do { local $/; <$probe> };
+    my $closed = close $probe;
+    my $results = eval { JSON::PP->new->utf8->decode($raw // '') };
+    $assert->ok($closed && ref($results) eq 'ARRAY' && @$results == 11,
+        'mb932: isolated native achievement transaction probe completed');
+    for my $result (@{ref($results) eq 'ARRAY' ? $results : []}) {
+        $assert->ok($result->{ok},
+            'mb932: ' . $result->{name} . ($result->{detail} ? ': ' . $result->{detail} : ''));
+    }
 };
