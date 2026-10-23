@@ -62,7 +62,8 @@ return sub {
     $assert->like($helper, qr/is_connected/,     'helper vérifie la connexion');
 
     # Les deux on_tick de timer passent par le helper (et plus par un write brut).
-    my $n_calls = () = $src =~ /\$self->_timer_irc_write\(/g;
+    # MB935 resolves the weak bot receiver inside addtimer's callback.
+    my $n_calls = () = $src =~ /\$(?:self|bot)->_timer_irc_write\(/g;
     $assert->ok($n_calls >= 2, 'les 2 timers (onStartTimers + mbAddTimer) utilisent le helper');
 
     # onStartTimers / mbAddTimer_ctx ne contiennent plus d'écriture brute de la

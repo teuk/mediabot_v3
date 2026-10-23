@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB935 — Keep database timer additions atomic with native setup (2026-10-23)
+
+- Commit a new TIMERS row only after its Periodic timer has been constructed,
+  attached and started; publish runtime ownership and allow callbacks only after
+  commit. Contain lookup/setup errors, clean partial notifiers and roll back only
+  the operation's transaction. Refuse caller-owned transactions without changes.
+- Guard delayed callbacks by timer identity and use weak references so removed
+  or failed attempts cannot emit commands or retain their bot through callbacks.
+- Preserve validation, Owner access, intervals, Unicode confirmations and IRC
+  guards. Replace the existing structural add/remove case with grouped native
+  DBI/IO::Async scenarios; keep 1,158 case files and reduce assertions by four.
+
 ### MB934 — Validate reminder snoozes and acknowledge only confirmed updates (2026-10-23)
 
 - Parse the complete remindsnooze delay, preserving documented integer units,

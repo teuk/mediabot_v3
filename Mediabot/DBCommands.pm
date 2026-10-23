@@ -14,6 +14,7 @@ use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
 
 use POSIX qw(strftime);
 use List::Util qw(min);
+use Scalar::Util qw(refaddr weaken);
 use Exporter 'import';
 use Mediabot::Helpers;
 use Mediabot::SafeCalc qw(evaluate_expression format_result);
@@ -365,69 +366,99 @@ sub mbAddTimer_ctx {
         return;
     }
 
-    # Check DB too, not only runtime memory.
-    my $sql_check = "SELECT 1 FROM TIMERS WHERE name = ? LIMIT 1";
-    my $sth = $self->{dbh}->prepare($sql_check);
+    # MB935: caller-owned transactions must not be committed by addtimer.
+    # Stage the DB row and the native timer together, then publish ownership
+    # only after commit. Failed setup must not reappear at the next reconnect.
+    my $dbh = $self->{dbh};
+    unless ($dbh && $dbh->{AutoCommit}) {
+        $self->botNotice($nick, "DB error while adding timer");
+        return;
+    }
 
-    unless ($sth) {
-        $self->{logger}->log(1, "mbAddTimer_ctx() SQL prepare error: $DBI::errstr Query: $sql_check")
+    my ($sth, $exists);
+    my $checked = eval {
+        $sth = $dbh->prepare("SELECT 1 FROM TIMERS WHERE name = ? LIMIT 1")
+            or die "timer lookup prepare failed";
+        $sth->execute($name) or die "timer lookup execute failed";
+        my @row = $sth->fetchrow_array;
+        die "timer lookup fetch failed" if $sth->err;
+        $exists = @row ? 1 : 0;
+        1;
+    };
+    my $check_error = $@;
+    eval { $sth->finish } if $sth;
+    unless ($checked) {
+        $check_error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1, "mbAddTimer_ctx() lookup failed: $check_error")
             if $self->{logger};
         $self->botNotice($nick, "DB error while checking timer");
         return;
     }
-
-    unless ($sth->execute($name)) {
-        $self->{logger}->log(1, "mbAddTimer_ctx() SQL execute error: $DBI::errstr Query: $sql_check")
-            if $self->{logger};
-        $sth->finish;
-        $self->botNotice($nick, "DB error while checking timer");
-        return;
-    }
-
-    if ($sth->fetchrow_array) {
-        $sth->finish;
+    if ($exists) {
         $self->botNotice($nick, "Timer $name already exists in database");
         return;
     }
 
-    $sth->finish;
-
-    # Insert into DB before starting the runtime timer. This avoids a memory-only
-    # timer if the database insert fails.
-    my $sql_insert = "INSERT INTO TIMERS (name, duration, command) VALUES (?,?,?)";
-    $sth = $self->{dbh}->prepare($sql_insert);
-
-    unless ($sth) {
-        $self->{logger}->log(1, "mbAddTimer_ctx() SQL insert prepare error: $DBI::errstr Query: $sql_insert")
-            if $self->{logger};
-        $self->botNotice($nick, "DB error while adding timer");
-        return;
-    }
-
-    unless ($sth->execute($name, $interval, $cmd)) {
-        $self->{logger}->log(1, "mbAddTimer_ctx() SQL insert execute error: $DBI::errstr Query: $sql_insert")
-            if $self->{logger};
+    my ($timer, $weak_timer, $begun, $active);
+    my $weak_self = $self;
+    weaken($weak_self);
+    my $phase = 'database';
+    my $ok = eval {
+        $dbh->begin_work or die "timer transaction begin failed";
+        $begun = 1;
+        $sth = $dbh->prepare("INSERT INTO TIMERS (name, duration, command) VALUES (?,?,?)")
+            or die "timer insert prepare failed";
+        $sth->execute($name, $interval, $cmd) or die "timer insert execute failed";
         $sth->finish;
-        $self->botNotice($nick, "DB error while adding timer");
+        $sth = undef;
+
+        $phase = 'runtime';
+        $timer = IO::Async::Timer::Periodic->new(
+            interval => $interval,
+            on_tick  => sub {
+                # A queued callback may outlive setup failure/removal. Weak
+                # references also avoid retaining the bot through this timer.
+                return unless $active;
+                my $bot = $weak_self or return;
+                my $owned = $weak_timer or return;
+                my $current = $bot->{hTimers}{$name} or return;
+                return unless refaddr($current) == refaddr($owned);
+                $bot->{logger}->log(4, "Timer [$name] tick: $cmd")
+                    if $bot->{logger};
+                # mb369-B1: refuse CR/LF/NUL at the actual IRC boundary.
+                $bot->_timer_irc_write($cmd, $name);
+            },
+        );
+        $weak_timer = $timer;
+        weaken($weak_timer);
+        $self->{loop}->add($timer);
+        $timer->start;
+        die "timer name changed during setup" if exists $self->{hTimers}{$name};
+        $phase = 'database';
+        $dbh->commit or die "timer transaction commit failed";
+        $begun = 0;
+        1;
+    };
+    my $error = $@;
+    unless ($ok) {
+        $active = 0; # Revoke before either cleanup operation can call back.
+        eval { $sth->finish } if $sth;
+        eval { $timer->stop } if $timer;
+        eval { $self->{loop}->remove($timer) } if $timer && $self->{loop};
+        if ($begun) {
+            my $rolled_back = eval { $dbh->rollback or die "timer rollback failed"; 1 };
+            $self->{logger}->log(1, "mbAddTimer_ctx() timer transaction rollback failed")
+                if !$rolled_back && $self->{logger};
+        }
+        $error =~ s/[\r\n\0]+/ /g;
+        $self->{logger}->log(1, "mbAddTimer_ctx() setup failed: $error")
+            if $self->{logger};
+        $self->botNotice($nick, $phase eq 'runtime'
+            ? "Timer $name could not be started" : "DB error while adding timer");
         return;
     }
-
-    $sth->finish;
-
-    my $timer = IO::Async::Timer::Periodic->new(
-        interval => $interval,
-        on_tick  => sub {
-            $self->{logger}->log(4, "Timer [$name] tick: $cmd")
-                if $self->{logger};
-
-            # mb369-B1: écriture via le helper qui refuse CR/LF/NUL.
-            $self->_timer_irc_write($cmd, $name);
-        },
-    );
-
-    $self->{loop}->add($timer);
-    $timer->start;
     $self->{hTimers}{$name} = $timer;
+    $active = 1;
 
     # LL4: human-readable duration in confirmation
     my $dur_h = $interval >= 3600 ? sprintf("%dh%02dm", int($interval/3600), int(($interval%3600)/60))
