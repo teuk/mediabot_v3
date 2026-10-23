@@ -1335,7 +1335,17 @@ sub mbNotes_ctx {
 
     # !notes del <index>
     if (@args && lc($args[0]) eq 'del') {
-        my $idx = ($args[1] // 1) - 1;
+        # MB921: an ordinal must be a complete decimal integer. Bound its
+        # significant digits before arithmetic; partial/fractional coercion
+        # must never choose a different note. Keep legacy +/zero/space forms.
+        my $ordinal = $args[1] // 1;
+        my $idx = -1;
+        if (!ref($ordinal) && $ordinal =~ /\A[ \t]*\+?([0-9]+)[ \t]*\z/) {
+            my $digits = $1;
+            $digits =~ s/\A0+//;
+            $idx = $digits - 1
+                if length($digits) && length($digits) <= length(scalar @$notes);
+        }
         if ($idx >= 0 && $idx < scalar @$notes) {
             my $del_id = $notes->[$idx]{id};
             splice @$notes, $idx, 1;

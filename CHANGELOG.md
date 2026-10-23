@@ -11,6 +11,21 @@ release. The current development line is `3.6dev`.
 ## [Unreleased] — 3.6dev
 
 
+### MB921 — Validate note deletion ordinals before numeric conversion (2026-10-23)
+
+- Reject partial, fractional, scientific, Unicode-digit and reference indexes
+  before selecting a personal note. Inputs such as `!notes del 2.5` and `2oops`
+  can no longer delete the second note through Perl's numeric coercion.
+- Preserve valid ASCII integers, leading zeros, plus signs, surrounding spaces
+  and tabs, the historical missing-index default, displayed search ordinals
+  and persistent note ids. Bound significant digits before arithmetic.
+- Add four grouped native DBI/SQLite assertions to existing case 673, retaining
+  its ten previous checks and all 1,156 case files. Compare 44 unchanged valid
+  calls and a search/delete workflow; verify 60 refusals and detect seven
+  deliberate mutations. No new module, shared fixture or database schema change.
+
+
+
 ### MB920 — Keep decoded Unicode words whole in games (2026-10-23)
 
 - Extend the existing trivia and quotegame boundaries with Unicode letter,
