@@ -847,12 +847,25 @@ sub mbPollStatus_ctx {
 # ---------------------------------------------------------------------------
 # mbUnvote_ctx --- !unvote  (Y6)
 # ---------------------------------------------------------------------------
+# MB927: both vote mutations use the same lazy-expiry boundary. Closing the
+# poll preserves its ballots; withdrawing one after the deadline must not
+# change the final tally. Keep the historical strict > deadline rule.
+sub _expire_poll_if_due {
+    my ($self, $channel, $poll) = @_;
+    return 0 unless $poll && $poll->{active}
+        && time() > ($poll->{deadline} // 0);
+    $poll->{active} = 0;
+    botPrivmsg($self, $channel, 'Poll expired. Use !pollresult to see results.');
+    return 1;
+}
+
 sub mbUnvote_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my $poll    = $self->{_polls}{$channel};
+    return if _expire_poll_if_due($self, $channel, $poll);
     unless ($poll && $poll->{active}) {
         botPrivmsg($self, $channel, 'No active poll.'); return 1;
     }
@@ -959,11 +972,7 @@ sub mbVote_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $poll = $self->{_polls}{$channel};
-    if ($poll && $poll->{active} && time() > ($poll->{deadline} // 0)) {
-        $poll->{active} = 0;
-        botPrivmsg($self, $channel, 'Poll expired. Use !pollresult to see results.');
-        return;
-    }
+    return if _expire_poll_if_due($self, $channel, $poll);
     unless ($poll && $poll->{active}) {
         botNotice($self, $nick, 'No active poll on this channel.'); return;
     }

@@ -10,6 +10,20 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB927 — Preserve ballots after poll expiry (2026-10-23)
+
+- Apply the existing lazy-expiry rule to unvote before it removes a ballot.
+  An expired but still-active poll can no longer change its final tally through
+  withdrawal. Close it with the existing expiry message and preserve all votes.
+- Share the original vote-expiry check in one private helper, retaining the
+  strict time>deadline boundary, exact-deadline operations, explicit extension,
+  scores, metrics and output-exception behavior. No public API or timer added.
+- Add four grouped native assertions to existing case 218, retaining its six
+  checks and all 1,156 files. Exercise 16 expired withdrawals and real closed
+  results, compare 40 unchanged nominal traces and detect eight mutations.
+  No SQL or schema change.
+
+
 ### MB926 — Claim pending reminders before delivery (2026-10-23)
 
 - Guard the pre-send UPDATE with delivered=0 and require positive affected rows.
