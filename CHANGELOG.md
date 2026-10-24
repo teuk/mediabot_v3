@@ -10,6 +10,16 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB941 — Update the HTTP parser after the deployment audit refused it (2026-10-24)
+
+- Lock body-parser 2.4.0 and its required qs 6.16.1 to address
+  CVE-2026-111181 / GHSA-27r3-jxmh-p828. Preserve all other dependency entries,
+  direct dependency ranges and the deployment audit threshold.
+- Qualify a clean production install, dependency loading, native HTTP parser
+  compatibility and the existing Node/Perl suites before resuming the web pilot.
+  Keep private configuration, database schema and running services unchanged.
+
+
 ### MB940 — Channel-scoped failure observations and web diagnosis (2026-10-24)
 
 - Extend `.diagnose` with retained RSS error counts, callback exceptions and
