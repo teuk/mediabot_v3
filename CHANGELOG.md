@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB945 — Reauthorize queued Hailo work at provider handoff (2026-10-24)
+
+- Recheck current channel gates and IRC generation when a queued reply obtains
+  its provider slot. Drop revoked work before submission and continue with the
+  next valid channel; keep final delivery and typing-delay checks authoritative.
+- Request immediate-only Hailo transport so antiflood cannot turn a stale queued
+  reply into a claimed delivery or retained context. Preserve ordinary output
+  queue behavior, local fallback, learned brains and existing pacing settings.
+- Add native queue/transport scenarios, make the historical late-rejoin fixture
+  revoke after handoff, and record MB944 server acceptance in the roadmap.
+
+
 ### MB944 — Recheck Spark cadence at the delivery boundary (2026-10-24)
 
 - Reuse current adaptive revival and momentum pauses when an asynchronous

@@ -460,7 +460,9 @@ sub hailo_submit_candidate {
         state_cb           => $state_cb,
         send_cb            => sub {
             my ($target, $line) = @_;
-            return Mediabot::Helpers::botPrivmsg($self, $target, $line) ? 1 : 0;
+            return Mediabot::Helpers::botPrivmsg(
+                $self, $target, $line, { no_defer => 1 }
+            ) ? 1 : 0;
         },
     );
     return ref($queued) eq 'HASH' && $queued->{accepted} ? 1 : 0;

@@ -366,6 +366,12 @@ sub _start_job {
     $self->{inflight}{$key} = $job;
     $self->{inflight_total}++;
 
+    # Queue admission is not authority to use the provider later. Keep the
+    # same mutable channel/generation checks at handoff and final emission.
+    my $state = eval { $job->{state_cb}->() };
+    my $blocked = _state_reason($state, $job);
+    return $self->_finish_job($job, 'dropped', $blocked) if defined $blocked;
+
     unless ($job->{post_edit_enabled}) {
         $self->_provider_done($job, {
             ok       => 1,
@@ -496,7 +502,8 @@ sub _finish_job {
         channel  => $job->{channel},
         mode     => $job->{mode},
         edited   => $provider->{edited} ? 1 : 0,
-        edit_reason => $provider->{reason} || 'provider_error',
+        edit_reason => $provider->{reason}
+            || ($job->{provider_result} ? 'provider_error' : 'not_requested'),
         language => ref($provider->{language}) eq 'HASH'
             ? ($provider->{language}{language} || 'en') : 'en',
         (_plain($provider->{provider}) ? (provider => $provider->{provider}) : ()),

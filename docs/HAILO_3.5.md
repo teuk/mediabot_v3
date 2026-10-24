@@ -110,6 +110,20 @@ never trusted to choose its own language without the explicit policy context.
 
 ## Provider boundary
 
+MB945 rechecks current channel authorization and IRC generation when a queued
+job actually obtains a post-editor slot. Revoked or stale work is completed as
+dropped before provider submission, allowing the next valid queued channel to
+proceed. The existing final authorization still runs at emission, including
+after the nonblocking typing delay. This does not cancel a request that has
+already been submitted to the provider.
+
+The Hailo transport requests immediate delivery with the existing `no_defer`
+option. An antiflood refusal is reported as `send_failed`; it cannot be
+acknowledged as delivered, inserted into Hailo context, or left in a generic
+output queue to reappear after a later disable/rejoin. Ordinary noncontextual
+callers retain their existing deferred-output behavior. Local Hailo fallback,
+learning, queue bounds, frequencies and provider selection keep their contracts.
+
 The post-editor uses `Mediabot::AI::Client`; it owns no HTTP implementation,
 credential lookup or provider-specific payload. Requests have a dedicated
 purpose, short deadline, low temperature and small output budget. Recent

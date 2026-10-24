@@ -342,16 +342,19 @@ return sub {
     $assert->is(scalar(@delayed_sent), 1,
         'scheduled callback performs the guarded delivery');
 
+    my $current_generation = 41;
     $delayed->submit(
         channel => '#stale', trigger => 'trigger words here',
         candidate => 'stale learned phrase', request_generation => 41,
-        state_cb => sub { _state_1025(42, 1) }, send_cb => sub { 1 },
+        state_cb => sub { _state_1025($current_generation, 1) }, send_cb => sub { 1 },
         on_done => sub { push @delayed_summary, { %{ $_[0] } } },
     );
     $delayed_editor->complete({
         line => 'stale learned phrase', reason => 'unchanged',
         language => { language => 'en' },
     });
+    # The request is valid at provider handoff; the rejoin happens afterwards.
+    $current_generation = 42;
     $scheduled[1][1]->();
     $assert->is($delayed_summary[-1]{reason}, 'stale_generation',
         'PART, reconnect or rejoin generation changes revoke a late reply');
