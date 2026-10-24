@@ -334,6 +334,12 @@ sub attempt_send {
     return _result('no_send', 'wit_pending', generation => $generation, kind => $kind)
         if $state->{wit_pending};
 
+    # A promised Portal/Mosaic conclusion belongs to the existing interaction.
+    # Fresh spontaneous output must yield to the current channel cadence.
+    return _result('no_send', 'bot_pressure', generation => $generation, kind => $kind)
+        if !$continuation && (spark_event_is_momentum($kind)
+            ? $state->{action_bot_pressure} : $state->{bot_pressure});
+
     my $current = _safe_generation($state->{current_generation});
     return _result('no_send', 'stale_generation', generation => $generation, kind => $kind)
         unless defined($current) && $current == $generation;

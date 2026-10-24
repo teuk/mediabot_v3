@@ -235,7 +235,9 @@ sub _spark_sender {
         send_cb => sub {
             my ($channel, $text) = @_;
             return 0 unless defined($channel) && defined($text) && length($text);
-            my $ok = eval { Mediabot::Helpers::botPrivmsg($bot, $channel, $text); };
+            my $ok = eval {
+                Mediabot::Helpers::botPrivmsg($bot, $channel, $text, { no_defer => 1 });
+            };
             return $ok ? 1 : 0;
         },
     );
@@ -363,6 +365,10 @@ sub _spark_delivery_state {
         $flood_suppressed = 1 if $@;
     }
 
+    my $pressure = eval { $bot->{spark_orchestrator}->delivery_pressure($channel) };
+    $pressure = { bot_pressure => 1, action_bot_pressure => 1 }
+        unless ref($pressure) eq 'HASH';
+
     return {
         enabled            => $enabled,
         action_enabled     => $action_enabled,
@@ -374,6 +380,8 @@ sub _spark_delivery_state {
         game_active        => _spark_game_active($bot, $channel) ? 1 : 0,
         wit_pending        => $wit_pending,
         current_generation => $current_generation,
+        bot_pressure       => $pressure->{bot_pressure} ? 1 : 0,
+        action_bot_pressure => $pressure->{action_bot_pressure} ? 1 : 0,
     };
 }
 
@@ -462,6 +470,8 @@ sub _spark_handle_candidate {
                 : $pre->{flood_suppressed} ? 'flood_suppressed'
                 : $pre->{game_active}     ? 'game_active'
                 : $pre->{wit_pending}     ? 'wit_pending'
+                : ($momentum_kind ? $pre->{action_bot_pressure} : $pre->{bot_pressure})
+                    ? 'bot_pressure'
                 : undef;
     if (defined $blocked) {
         my $line = Mediabot::Spark::Sender::format_sender_log($channel, {

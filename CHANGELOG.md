@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB944 — Recheck Spark cadence at the delivery boundary (2026-10-24)
+
+- Reuse current adaptive revival and momentum pauses when an asynchronous
+  candidate returns and in the final sender state check. Missing observations
+  cannot authorize fresh spontaneous output; record a bounded refusal reason.
+- Request immediate-only Spark transport so antiflood cannot acknowledge a
+  queued contextual reply as delivered. Preserve each permitted story batch
+  and the single promised Portal/Mosaic continuation under its existing gates.
+- Add native late-output scenarios and confirm MB943 server acceptance in the
+  roadmap. Keep explicit commands, Hailo delivery, schema and opt-ins unchanged.
+
+
 ### MB943 — Let Spark notice the bot has just spoken (2026-10-24)
 
 - Record automation pressure after accepted public PRIVMSG/ACTION output, so

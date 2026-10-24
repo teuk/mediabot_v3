@@ -90,6 +90,21 @@ of Spark observation failures. This closes an observation gap for subsequent
 policy evaluations; it is not a new cancellation rule for requests already
 submitted or for output paths that bypass this facade.
 
+MB944 rechecks this observed pressure when a generated candidate returns and
+again through the final sender state callback. Revival and momentum use their
+existing activity windows and adaptive pauses; delivery does not run a second
+candidate selection or consume a probe. Missing activity observations refuse
+spontaneous output. Refusals use the metadata-only `bot_pressure` reason and
+do not open a human participation window.
+
+Spark transport requests immediate delivery (`no_defer`): an antiflood refusal
+cannot become a queued conversational response that appears without rechecking
+its context. An allowed multi-line story is checked as one batch. The one
+authorized Portal/Mosaic continuation remains available under its existing
+generation, rate, arm and channel gates, despite pressure from its own opening.
+Explicit user commands and Hailo delivery keep their existing paths. This is
+a late Spark cadence check, not a global reservation or provider cancellation.
+
 The stronger per-channel exclusions in `conversation.CHANNEL_BOTS` and
 `conversation.CHANNEL_COMMANDS` run before this observer. Those lines create
 neither human activity nor bot pressure and cannot start, advance, postpone or

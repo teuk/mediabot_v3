@@ -1,7 +1,7 @@
 # Mediabot 3.6dev — roadmap actualisée
 
-Date : 24 octobre 2026. Base confirmée : MB942, commit `ea1d467`,
-`3.6dev-20261024_095231`. Cette feuille de route traduit les orientations
+Date : 24 octobre 2026. Base confirmée : MB943, commit `fc5ed6d`,
+`3.6dev-20261024_110350`. Cette feuille de route traduit les orientations
 retenues avec Christophe ; elle ne programme aucune mise à jour de production.
 La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
 
@@ -15,7 +15,7 @@ Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
 les budgets de texte, les sorties différées, les timers, les reconnexions,
 l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
 Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
-MB942 est validé sur le serveur : 30 736 assertions Perl, sécurité GO/37
+MB943 est validé sur le serveur : 30 771 assertions Perl, sécurité GO/37
 et intégrité de démarrage OK. Le déploiement mbweb MB941 et ses 77 tests Node
 ont été vérifiés dans le lot précédent.
 Cette validation ne constitue pas une certification exhaustive.
@@ -130,15 +130,26 @@ le salon calme, le changement de sujet et l'attente du fournisseur.
 Ce contexte volatil est distinct du cerveau appris : aucun apprentissage,
 quota, chanset, profil de fréquence ou schéma de base n'est modifié.
 
-**MB943 : prise en compte des sorties du bot préparée.** Les messages publics
+**MB943 : installé, validé et poussé dans `fc5ed6d`.** Les messages publics
 et ACTIONs acceptés par la façade IRC signalent leur activité à l'observateur
 Spark déjà présent. Spark réutilise alors ses pauses existantes lors de ses
 prochaines évaluations, sans attendre un écho du serveur. Seuls le salon et
 l'instant sont transmis : aucun texte, identité humaine ou participant fictif.
 Une sortie refusée ou simplement mise en file n'est pas comptée comme envoyée.
 Les salons non observés ne créent aucun runtime ou contexte Spark.
-Ce lot corrige l'observation du rythme ; l'arbitrage des réponses déjà en vol
-reste une étape distincte.
+Ce lot corrige l'observation du rythme avant les prochaines candidatures.
+
+**MB944 : revalidation de la cadence à la livraison préparée.** Une sortie
+spontanée Spark en cours de génération revérifie les pauses actuelles avant
+de créer un événement, puis à la frontière finale d'envoi. Les deux familles
+réutilisent leur propre politique adaptative : pause courte de momentum ou
+silence plus long de relance. Une observation indisponible bloque la sortie.
+La réponse contextuelle ne peut pas être acceptée dans une file antiflood et
+revenir sans ces contrôles. Une conclusion Portal/Mosaic déjà promise conserve
+son chemin de continuation unique et ses autres garde-fous ; un lot !vdm/!dtc
+autorisé reste un lot, sans se bloquer lui-même après sa première ligne.
+Les commandes explicites et la livraison Hailo ne sont pas arbitrées par ce
+contrôle Spark. Il ne constitue pas une réservation universelle des fournisseurs.
 
 Mesurer la pertinence, les répétitions, les chevauchements et le rythme, puis
 faire une observation sur développement avant toute activation en production.

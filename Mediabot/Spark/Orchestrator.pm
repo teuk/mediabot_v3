@@ -187,6 +187,33 @@ sub _shared_budget_wait {
     };
 }
 
+# Recheck only cadence at delivery; evaluating a new candidate here would
+# mutate probes, consume selection state or reject our own provisional event.
+sub delivery_pressure {
+    my ($self, $channel) = @_;
+    my $key = _channel_key($channel);
+    my $revival_window = $self->{min_silence_seconds};
+    $revival_window = 3_600 if $revival_window < 3_600;
+    $revival_window = 7_200 if $revival_window > 7_200;
+    my %out;
+    for my $lane (
+        [bot_pressure => $revival_window, 'revival_silence_seconds'],
+        [action_bot_pressure => $self->{action_activity_window_seconds}, 'action_min_pause_seconds'],
+    ) {
+        my $activity = $self->{observer}->activity_summary($key, window_seconds => $lane->[1]);
+        croak 'Spark activity observation is unavailable'
+            unless ref($activity) eq 'HASH'
+                && _plain_scalar($activity->{bot_pressure_lines})
+                && "$activity->{bot_pressure_lines}" =~ /^\d+\z/
+                && _plain_scalar($activity->{bot_pressure_quiet_seconds})
+                && "$activity->{bot_pressure_quiet_seconds}" =~ /^\d+\z/;
+        my $policy = $self->_adaptive_policy($activity);
+        $out{$lane->[0]} = $activity->{bot_pressure_lines} > 0
+            && $activity->{bot_pressure_quiet_seconds} < $policy->{$lane->[2]} ? 1 : 0;
+    }
+    return \%out;
+}
+
 sub evaluate_action_channel {
     my ($self, %args) = @_;
     croak 'Spark orchestrator object is required' unless ref($self);
