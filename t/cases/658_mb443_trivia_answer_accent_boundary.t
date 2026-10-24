@@ -44,7 +44,7 @@ return sub {
     $assert->is($matched->("${cafe}s", $cafe),       0, '"cafés" -> rejet (s après)');
 
     # --- Câblage réel ------------------------------------------------------
-    my $src = _slurp_658(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_658(File::Spec->catfile('.', 'Mediabot', 'Games', 'Trivia.pm'));
     $assert->like($src,
         qr/\(\?<!\[A-Za-z0-9\\x80-\\xFF(?:\\p\{[LNM]\})*\]\)\\Q\$answer\\E\(\?!\[A-Za-z0-9\\x80-\\xFF(?:\\p\{[LNM]\})*\]\)/,
         'checkTrivia utilise des frontières byte-safe');

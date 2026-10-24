@@ -1,6 +1,6 @@
 # Mediabot v3
 
-> Developed with substantial help from large language models (LLMs). Apparently, that makes me a “lamer”. To be clear, I don’t consider anyone a “lamer” for building their projects the same way I do.
+> An IRC companion for community memory, channel administration and opt-in conversation. Written in Perl, with per-channel controls and an offline test suite.
 
 <p align="center">
   <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5">
@@ -32,6 +32,25 @@ Mediabot helps IRC communities **run, remember and understand their channels**. 
 Network history and public dashboards: [NETWORK_STATS.md](docs/NETWORK_STATS.md).
 
 Undernet X authentication and recovery: [XAUTH_UNDERNET.md](docs/XAUTH_UNDERNET.md).
+
+## Clone and contribute
+
+Explore the development branch in your own checkout:
+
+```bash
+git clone https://github.com/teuk/mediabot_v3.git
+cd mediabot_v3
+```
+
+The [developer guide](docs/DEVELOPING.md) walks through local Perl dependencies,
+one offline test slice and the source owners to follow. You can work on games,
+parsers and plugins without starting IRC or creating a Mediabot database.
+Start with [Trivia](Mediabot/Games/Trivia.pm),
+[quote guessing](Mediabot/Games/QuoteGame.pm), or the
+[plugin workshop](docs/PLUGIN_WORKSHOP.md), then follow
+[CONTRIBUTING.md](CONTRIBUTING.md) to prepare a focused change.
+
+`master` is 3.6dev. Use the verified stable 3.5 release for production.
 
 ## Development walkthroughs
 
@@ -381,7 +400,7 @@ Further references:
 - [Achievement accuracy and channel timezones](docs/ACHIEVEMENTS.md);
 - [3.5 release notes](docs/RELEASE_NOTES_3.5.md);
 - [3.6dev development line](https://github.com/teuk/mediabot_v3/wiki/Development-line-3.6dev);
-- [3.6dev working roadmap](docs/ROADMAP_3.6DEV.md);
+- [Closed 3.6dev roadmap](docs/ROADMAP_3.6DEV.md);
 - [Collective AI conversations and web research](docs/META_AI.md): concurrent OpenAI/Claude/Gemini, shared scoped memory and verified source links (dev pilot, disabled by default).
 - [Hailo brain operations](docs/HAILO_BRAIN_MAINTENANCE.md);
 - [Partyline architecture](docs/PARTYLINE_ARCHITECTURE.md).
@@ -427,3 +446,8 @@ Live IRC support is available on EpiKnet (`irc.epiknet.org`, TLS port `6697`) in
 ## License
 
 Mediabot v3 is free software licensed under the **GNU General Public License version 3 or later** (`GPL-3.0-or-later`). See [LICENSE.md](LICENSE.md).
+
+## Development approach
+
+Mediabot uses LLM-assisted development. Contributions are expected to include
+reviewable changes and the checks described in [CONTRIBUTING.md](CONTRIBUTING.md).

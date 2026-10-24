@@ -1,5 +1,17 @@
 # Changelog — Mediabot v3
 
+## MB951 — Give game code and new contributors a clear home (2026-10-24)
+
+- Extract Trivia and Quotegame into dedicated Games modules, preserving legacy
+  command/helper imports, runtime hooks, scores, SQL and async/timer behaviour.
+- Move existing source-location checks to the implementation owners and verify
+  game/facade load-order compatibility without changing the command catalogue.
+- Add a developer path from clone to offline tests and a source ownership map;
+  align CONTRIBUTING with the native runner and ignore local Perl dependencies.
+- Give README a direct contribution entry and neutral LLM attribution.
+  No schema, private settings, activation, dependency or service changes.
+
+
 ## MB950 — Close the delivered 3.6dev roadmap (2026-10-24)
 
 - Record all five delivered directions and confirmed MB949 installation,

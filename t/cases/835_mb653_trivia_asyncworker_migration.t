@@ -114,14 +114,14 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_835(
-        File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Games', 'Trivia.pm')
     );
     my $async = _extract_sub_835($src, '_trivia_fetch_async');
 
     $assert->ok(defined($async),
         'mb653-835: trivia async adapter found');
     $assert->like($src, qr/use\s+Mediabot::AsyncWorker;/,
-        'mb653-835: UserCommands loads the shared AsyncWorker');
+        'mb653-835: Trivia loads the shared AsyncWorker');
     $assert->like($async // '', qr/Mediabot::AsyncWorker->start\(/,
         'mb653-835: trivia delegates worker launch');
     $assert->like($async // '', qr/on_progress\s*=>\s*\$progress/,

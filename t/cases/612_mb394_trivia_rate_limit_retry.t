@@ -106,7 +106,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_mb394(
-        File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Games', 'Trivia.pm')
     );
     my $source = _slurp_mb394(
         File::Spec->catfile('.', 'Mediabot', 'External', 'OpenTriviaDB.pm')

@@ -72,7 +72,7 @@ return sub {
     }
 
     # --- 2. Scan de source --------------------------------------------------
-    my $src = _slurp_559(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_559(File::Spec->catfile('.', 'Mediabot', 'Games', 'Trivia.pm'));
 
     $assert->like(
         $src,

@@ -37,7 +37,7 @@ sub _extract_sub_219 {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_219(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src  = _slurp_219(File::Spec->catfile('.', 'Mediabot', 'Games', 'Trivia.pm'));
     my $body = _extract_sub_219($src, 'checkTriviaAnswer');
 
     $assert->ok(defined $body && $body ne '', 'checkTriviaAnswer sub found');

@@ -65,9 +65,15 @@ Keep each branch focused on one bug, feature or documentation topic.
 
 ## Setting up Mediabot
 
-Follow the installation instructions in the README and Wiki.
+Start with [Clone, understand and contribute](docs/DEVELOPING.md): local Perl
+dependencies, an offline test slice and a map from command registration to its
+implementation. This path does not require an IRC connection, Mediabot database
+or provider keys. Tests can create private temporary files, SQLite databases
+and child processes.
 
-Use a development or test installation. Do not test unreviewed changes directly on an important production bot or production database.
+For a running development instance, follow the installation instructions in the
+README and Wiki. Keep it separate from production. Do not run the configuration
+wizard merely to execute offline tests.
 
 Never commit:
 
@@ -143,13 +149,26 @@ perl -I. -c mediabot.pl
 perl -I. -c path/to/modified/module.pm
 ```
 
-Run the tests related to the modified feature.
-
-When practical, run the complete test suite:
+Use the native test runner; some historical cases return closures rather
+than standalone TAP scripts, so `prove -lr t` is not the project-wide entry point.
+For a game change, for example:
 
 ```bash
-prove -lr t
+perl t/test_commands.pl --filter 'trivia|quotegame|mb326|mb610' --progress
+perl t/test_commands.pl --fast --progress
 ```
+
+Before the final candidate, run the complete suite and both audits:
+
+```bash
+perl t/test_commands.pl --progress
+perl tools/security_audit.pl --quiet
+perl tools/startup_integrity_check.pl --quiet
+git diff --check
+```
+
+Do not edit `docs/generated/COMMAND_INVENTORY.md` by hand; its generator and the
+source ownership map are documented in [the developer guide](docs/DEVELOPING.md).
 
 If a test cannot be run in your environment, explain that clearly in the Pull Request.
 

@@ -86,6 +86,7 @@ return sub {
     my $runtime = slurp1051('Mediabot/Mediabot.pm');
     my $db = slurp1051('Mediabot/DB.pm');
     my $user = slurp1051('Mediabot/UserCommands.pm');
+    my $trivia = slurp1051('Mediabot/Games/Trivia.pm');
     my $karma = slurp1051('Mediabot/Karma.pm');
     my $source = slurp1051('Mediabot/Achievements.pm');
     my $docs = slurp1051('docs/ACHIEVEMENTS.md');
@@ -119,7 +120,7 @@ return sub {
     $assert->like($user,
         qr/sub mbStreak_ctx\b.*?my \$channel_timezone = eval.*?my \$sql_timezone = .*?DATE\(CONVERT_TZ\(cl\.ts, \@\@session\.time_zone, \?\)\) AS day/s,
         'mb738-1051: activity streak declares and uses its channel-local calendar');
-    $assert->like($user,
+    $assert->like($trivia,
         qr/started\s*=>\s*Time::HiRes::time\(\).*?my \$response_time = Time::HiRes::time\(\)/s,
         'mb738-1051: Trivia Sniper uses high-resolution elapsed time end to end');
     $assert->like($karma,

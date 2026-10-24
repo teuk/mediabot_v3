@@ -113,6 +113,49 @@ return sub {
         $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
             'mb888: OpenTriviaDB imports quietly with canonical legacy aliases: ' . join('/', @$order));
     }
+    # MB951: load either domain before the facade, or the facade first. The
+    # legacy symbols must still be the same executable commands, including
+    # the public methods imported by the real Mediabot class.
+    for my $order (
+        [qw(Games::Trivia Games::QuoteGame UserCommands)],
+        [qw(Games::QuoteGame Games::Trivia UserCommands)],
+        [qw(UserCommands Games::Trivia Games::QuoteGame)],
+    ) {
+        my $code = "require Mediabot::$order->[0];\n";
+        $code .= q{die 'domain eagerly loaded commands' if $INC{'Mediabot/UserCommands.pm'};}
+            if $order->[0] ne 'UserCommands';
+        $code .= join('', map {"require Mediabot::$_;\n"} @$order[1..$#$order]);
+        $code .= q{
+            require Scalar::Util;
+            require Mediabot::Mediabot;
+            my %owners = (
+                Trivia => [qw(_trivia_fetch_async mbTrivia_ctx checkTriviaAnswer
+                    mbTriviaTop_ctx mbTriviaReset_ctx mbTriviaStop_ctx mbTriviaScore_ctx)],
+                QuoteGame => [qw(_quotegame_cancel_timer _quotegame_start_timer
+                    mbQuotegame_ctx checkQuotegameAnswer)],
+            );
+            for my $owner (keys %owners) {
+                for my $name (@{$owners{$owner}}) {
+                    my $native = "Mediabot::Games::$owner"->can($name);
+                    my $legacy = Mediabot::UserCommands->can($name);
+                    die "missing compatibility: $name" unless $native && $legacy
+                        && Scalar::Util::refaddr($native) == Scalar::Util::refaddr($legacy);
+                    next if $name =~ /^_/;
+                    my $method = Mediabot->can($name);
+                    die "missing bot method: $name" unless $method
+                        && Scalar::Util::refaddr($native) == Scalar::Util::refaddr($method);
+                }
+            }
+            print 'loaded';
+        };
+        my $err = Symbol::gensym();
+        my $pid = IPC::Open3::open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-e', $code);
+        my $stdout = do { local $/; <$out> } // '';
+        my $stderr = do { local $/; <$err> } // '';
+        waitpid($pid, 0);
+        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+            'mb951: domain load order preserves all game entry points: ' . join('/', @$order));
+    }
     {
         no warnings 'redefine';
         my (@done, $calls);
@@ -124,7 +167,7 @@ return sub {
     }
 
     my $src = _slurp_mb319(
-        File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Games', 'Trivia.pm')
     );
     my $source = _slurp_mb319(
         File::Spec->catfile('.', 'Mediabot', 'External', 'OpenTriviaDB.pm')
@@ -232,7 +275,7 @@ return sub {
 
     $assert->like(
         $command // '',
-        qr/return\s+_trivia_fetch_async\s*\(/,
+        qr/return\s+Mediabot::UserCommands::_trivia_fetch_async\s*\(/,
         'runtime trivia command schedules asynchronous fetch'
     );
 

@@ -50,7 +50,7 @@ return sub {
     $assert->is($m2, 1, 'nick IRC avec crochets toujours borné correctement');
 
     # --- Câblage réel ------------------------------------------------------
-    my $src = _slurp_660(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_660(File::Spec->catfile('.', 'Mediabot', 'Games', 'QuoteGame.pm'));
     my $n = () = $src =~ /my \$nick_char = qr\/\[A-Za-z0-9\\\[\\\]\\\\\^_`\{\}\|\\-\\x80-\\xFF(?:\\p\{[LNM]\})*\]\//g;
     $assert->ok($n >= 2, 'les 2 définitions de $nick_char sont byte-safe');
     $assert->unlike($src, qr/my \$nick_char = qr\/\[A-Za-z0-9\\\[\\\]\\\\\^_`\{\}\|\\-\]\//,
