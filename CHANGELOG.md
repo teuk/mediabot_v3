@@ -1,5 +1,15 @@
 # Changelog — Mediabot v3
 
+## MB950 — Close the delivered 3.6dev roadmap (2026-10-24)
+
+- Record all five delivered directions and confirmed MB949 installation,
+  31,105 passing server assertions and pushed commit b010abe.
+- Close the MB938–MB949 development cycle and retain the three unperformed
+  field checks in a separate deployment/release acceptance checklist.
+- Update the README links. Documentation only; no runtime, schema, settings,
+  dependency or service changes, and no new stable release.
+
+
 ## MB949 — Replay the configured conversation cadence (2026-10-24)
 
 - Fix Spark offline replay ignoring the nine configured pacing options;

@@ -1,113 +1,82 @@
-# Mediabot 3.6dev — bilan de livraison et clôture du cycle
+# Mediabot 3.6dev — roadmap clôturée
 
-Mise à jour : 24 octobre 2026. Base serveur confirmée : MB948, commit 8ec1d43,
-3.6dev-20261024_160402, 31 065/31 065 assertions, sécurité GO/37 et intégrité
-OK. MB948 est installé, validé et poussé : les livrables de développement
-de ce cycle sont en place. La stable publiée reste 3.5, sans date de 3.7.
+**Statut : cycle de développement terminé le 24 octobre 2026, de MB938 à
+MB949.** Dernier lot fonctionnel installé, validé et poussé : MB949,
+commit `b010abe`, VERSION `3.6dev-20261024_164906`.
 
-## Cap et règle de fin
+La suite exécutée sur teuk réussit **31 105/31 105 assertions dans 1 166
+fichiers**, avec inventaire conforme, sécurité GO/37 et intégrité de démarrage
+OK. MB950 consigne cette clôture dans la documentation ; il n'ajoute aucune
+fonction et ne revendique aucune nouvelle recette terrain.
 
-Un compagnon de salon utile et discret, une mémoire facile à retrouver et une
-administration compréhensible. On termine les parcours annoncés, sans ouvrir
-une nouvelle série de micro-refactorisations. MB948 regroupe profils,
-contribution et adoption dans une même livraison réversible.
+La stable publiée reste **3.5**. Cette clôture ne publie pas une stable et ne
+fixe aucune date pour 3.7.
 
-La fin du développement de ce cycle signifie : les cinq directions ont un
-parcours documenté, un résultat observable et des contrôles locaux, puis le
-lot final passe la suite complète sur teuk. La clôture opérationnelle demande
-les quelques vérifications terrain listées plus bas. Une simulation ne valide
-ni une installation Debian réelle, ni les droits HTTP de vrais comptes, ni
-la pertinence d'une conversation sur #i/o.
+## Les cinq axes livrés
 
-## Les cinq directions et leur résultat
+| Axe | Résultat livré | Références |
+| --- | --- | --- |
+| Administration lisible | Diagnostic privé par salon, réglages et observations, cadence, derniers échecs retenus, état des plugins ; publication et vues mbweb avec droits par salon | MB938–MB941 ; [diagnostics](CHANNEL_DIAGNOSTICS.md) |
+| Personnalité du salon | Contexte Hailo frais, autorisation tardive, prise en compte des sorties du bot, profils quiet/balanced/animated avec retour contrôlé ; replay fidèle aux neuf seuils configurés | MB942–MB945, MB948–MB949 ; [profils](CONVERSATION_PROFILES.md), [replay](SPARK_OFFLINE_REPLAY.md) |
+| Mémoire reliée | Journée explicite et navigation memory/onthisday/yearbook ; recherche privée de citations et factoids du salon | MB946–MB947 ; [parcours mémoire](MEMORY_JOURNEYS.md) |
+| Contribution accessible | Générateur de plugin API v3 minimal, désactivé par défaut ; atelier natif de chargement, observation, activation et retrait | MB948 ; [atelier](PLUGIN_WORKSHOP.md) |
+| Adoption facilitée | Parcours documenté de l'installation au premier salon, à la découverte, au diagnostic, à la mémoire et à la contribution | MB948 ; [premier salon](FIRST_CHANNEL_3.6DEV.md) |
 
-| Direction | Livraison | Résultat concret | État |
-| --- | --- | --- | --- |
-| Administration lisible | MB938–MB941 | `.diagnose #salon`, cadence et erreurs retenues, plugins du salon, publication et vues mbweb avec droits | code installé et mbweb déployé ; recette complète de comptes encore ouverte |
-| Personnalité du salon | MB942–MB945 puis MB948 | contexte frais, refus tardif, pression de sortie ; profils quiet/balanced/animated et retour contrôlé | garanties et profils installés ; mesure d'usage terrain à faire |
-| Mémoire reliée | MB946–MB947 | journée explicite, navigation memory/onthisday/yearbook, recherche privée de quotes et factoids | installé, suite serveur validée et poussé |
-| Contribution accessible | API v3 existante et MB948 | générateur minimal et atelier natif load/observe/on/off/disable/unload | installé et validé, aucune activation automatique |
-| Adoption facilitée | installation/CI existantes et MB948 | parcours unique installation → premier salon → diagnostic → mémoire → contribution | guide installé ; installation réelle à enregistrer |
+Les livrables sont présents dans le dépôt installé et les lots ont passé leurs
+contrôles sur teuk. Une fonction installée n'implique pas son activation ou son
+déploiement dans chaque instance.
 
-## Livrables de finalisation MB948
+## Ce que ce cycle laisse au projet
 
-### Profils utilisables
+- L'administration expose des observations bornées et explique les états
+  inconnus ; un réglage activé ne devient pas une preuve de livraison.
+- Les réponses différées revérifient leur contexte et leurs droits. Les profils
+  conservent les portes maîtresses, exclusions, quotas et arming global.
+- La mémoire donne des références réutilisables en privé, avec un périmètre
+  limité au salon et une distinction entre absence de résultat et panne.
+- L'atelier permet de contribuer hors ligne avant toute activation explicite.
+- Les procédures existantes sont reliées dans un parcours d'adoption unique.
 
-La commande existante chanset reçoit `profile show`, quiet, balanced, animated
-et restore, réservés aux Master/Owner identifiés. Ils changent seulement
-HailoChatter, Spark, SparkAction et, pour animated, un ratio Hailo de base de 3 %.
-Hailo maître, réponses explicites, apprentissage, arming global, exclusions,
-quotas et vérifications de livraison gardent leurs portes.
-L'application est transactionnelle. Restore vérifie l'état attendu et retrouve
-les réglages précédents ; une édition concurrente ou une connexion différente
-refuse la restauration. Le point de retour est volatil et à un seul niveau.
-Voir [CONVERSATION_PROFILES.md](CONVERSATION_PROFILES.md) pour les limites et
-les scénarios calme, solo, animé et technique.
+## Vérifications d'exploitation conservées à part
 
-### Contribution et retrait prouvés
+Trois observations réelles restent non validées : une installation neuve de
+développement, la recette mbweb avec comptes autorisé/refusé sur #i/o Epiknet,
+et l'observation des profils en situation. Leur état et leurs critères figurent
+dans [RELEASE_ACCEPTANCE_3.6DEV.md](RELEASE_ACCEPTANCE_3.6DEV.md).
 
-`perl tools/plugin_v3_workshop.pl --check` génère un paquet dans un répertoire
-temporaire et le fait passer par le véritable runtime API v3. Il ne crée aucune
-connexion IRC/DB ni activation réelle. `--create` génère un paquet default-off
-avec irc.reply seulement, une configuration typée et un exemple de commande.
-Les collisions et parents symlinks sont refusés. Le retrait et le refus d'un
-ancien callback sont vérifiés. Les paquets acceptés et leur ledger ne sont pas
-modifiés. Voir [PLUGIN_WORKSHOP.md](PLUGIN_WORKSHOP.md).
+Elles restent à vérifier avant les décisions de déploiement ou de publication
+qui en dépendent. Elles ne sont pas comptées comme réussies et ne prolongent
+pas ce cycle de développement. Aucun nouvel outil de recette n'est prévu pour
+remplacer ces observations.
 
-### Parcours d'adoption et démonstration
+## Preuves de livraison
 
-[FIRST_CHANNEL_3.6DEV.md](FIRST_CHANNEL_3.6DEV.md) relie la procédure Debian du
-README aux contrôles existants, au premier Owner, à help/features, au diagnostic,
-à une mémoire privée et à l'atelier. Il distingue une base fraîche vide d'une
-panne et conserve la séparation développement/production. Le résultat d'une
-nouvelle installation réelle doit être enregistré ; aucun run CI distant n'est
-revendiqué par le seul changement des fichiers.
+| Lot | Commit poussé | Résultat serveur lorsqu'il est rappelé ici |
+| --- | --- | --- |
+| MB938 | `05d171b` | diagnostic du salon |
+| MB939 | `932e749` | activité et cadence observables |
+| MB940 | `7f025e7` | échecs, plugins et projection mbweb |
+| MB941 | `18f9fc5` | dépendances mbweb corrigées, déploiement vérifié |
+| MB942 | `ea1d467` | fraîcheur du contexte Hailo |
+| MB943 | `fc5ed6d` | pression des sorties du bot |
+| MB944 | `81755ac` | cadence revérifiée avant livraison Spark |
+| MB945 | `7ddc6f7` | autorisation Hailo à la prise en charge |
+| MB946 | `f308ddb` | 30 927/30 927 assertions |
+| MB947 | `73972f2` | 31 006/31 006 assertions |
+| MB948 | `8ec1d43` | 31 065/31 065 assertions |
+| MB949 | `b010abe` | 31 105/31 105 assertions |
 
-## Trois recettes terrain pour clôturer l'exploitation
+Ces résultats proviennent des retours d'exécution et de commit fournis par
+l'opérateur. Le snapshot `snap_mediabot_v3_teuk_20261024_185553.zip` confirme
+VERSION et les dix fichiers du lot MB949. Il ne prouve pas l'état actuel des
+processus. Les tests ne constituent pas une certification exhaustive.
 
-1. **Installation neuve de développement.** Suivre FIRST_CHANNEL_3.6DEV et
-   enregistrer connexion, JOIN, premier Owner, découverte et retrait du plugin.
-   La CI Debian 13 est une preuve complémentaire à vérifier sur le commit visé.
-2. **Diagnostic mbweb avec droits.** Lors du prochain essai autorisé sur #i/o
-   Epiknet, vérifier un accès permis et un accès refusé avec des comptes réels,
-   puis publication absente/périmée. Les anciennes recettes de création de User
-   et le probe Epiknet non validé restent retirés ; ne pas les relancer.
-3. **Rythme en situation.** Observer les profils sur développement avant tout
-   choix explicite en production : pertinence, répétitions, chevauchements.
-   Le replay Spark garde le vrai préfixe et une configuration autorisée.
-   MB949 corrige un défaut démontré : les neuf seuils configurés de cadence
-   sont maintenant partagés avec le runtime, et une sortie locale acceptée
-   peut être représentée sans texte pour tester sa pression. Ce correctif du
-   replay existant reste une preuve hors ligne, pas une recette terrain réussie.
+## Hors de ce chapitre
 
-Le pilote de diagnostic R3 demeure sur #test. Ce lot ne change ni sa
-configuration ni les services. La production Epiknet est nbot.soyou.rocks ;
-toute commande Ansible part directement du compte ansible. Ces recettes
-n'impliquent aucune nouvelle modification de code tant qu'aucun défaut réel
-n'est observé. Ne pas leur substituer une série de nouveaux outils de recette.
+Les écritures mbweb RSS/RandomQuote, l'effacement Hailo sélectif avec corpus
+autorisé et reconstruction isolée, la promotion MetaAI, les nouveaux déploiements
+de plugins et la prochaine stable sont des chantiers distincts. Aucun n'est
+engagé par la clôture de cette roadmap.
 
-## Chantiers ultérieurs, séparés de cette livraison
-
-- Les écritures mbweb RSS/RandomQuote restent un chantier distinct : actions
-  nommées exécutées par le bot, droits revérifiés, CSRF et résultat audité.
-  Le diagnostic actuel reste en lecture seule ; aucun éditeur SQL arbitraire.
-- L'effacement Hailo sélectif forget/forgetword demande un corpus fidèle et
-  autorisé, une reconstruction isolée et un retour prouvé. Un cerveau ancien
-  sans ce corpus ne reçoit aucune promesse d'effacement sélectif.
-- La promotion MetaAI, les nouveaux déploiements de plugins et une publication
-  stable sont des décisions séparées. Les postures existantes sont conservées.
-
-## Preuves et discipline
-
-MB938 : 05d171b ; MB939 : 932e749 ; MB940 : 7f025e7 ; MB941 : 18f9fc5.
-MB942 : ea1d467 ; MB943 : fc5ed6d ; MB944 : 81755ac ; MB945 : 7ddc6f7.
-MB946 : f308ddb, 30 927 assertions sur teuk ; MB947 : 73972f2, 31 006.
-MB948 : 8ec1d43, 31 065 assertions sur teuk. MB949 reste candidat.
-Ces résultats ne constituent pas une certification exhaustive.
-
-Le paquet MB948 garde hashes, sauvegarde et retour des fichiers. Il exige
-syntaxes, inventaire, atelier, contrôles ciblés et suite complète
-`perl t/test_commands.pl --progress`, puis sécurité et intégrité. Les limites
-locales restent documentées et ne deviennent pas des exclusions serveur.
-Aucun schéma, réglage privé, activation, fréquence ou service n'est changé par
-l'installation. Les profils n'agissent qu'après une commande explicite.
+**Décision : le périmètre MB938–MB949 est livré et fermé.** La suite du projet
+se définit dans un autre chapitre, sans ajouter de nouveaux objectifs à celui-ci.

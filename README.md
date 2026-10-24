@@ -41,8 +41,10 @@ Undernet X authentication and recovery: [XAUTH_UNDERNET.md](docs/XAUTH_UNDERNET.
   quiet/balanced/animated settings and guarded restoration.
 - [Plugin workshop](docs/PLUGIN_WORKSHOP.md): generate a minimal default-off
   package, test its native lifecycle offline, then supervise one dev channel.
-- [Roadmap delivery status](docs/ROADMAP_3.6DEV.md): completed source work and
-  remaining operational acceptance, without claiming a new stable release.
+- [Closed 3.6dev roadmap](docs/ROADMAP_3.6DEV.md): the five delivered directions
+  and confirmed MB938–MB949 results.
+- [Deployment and release acceptance](docs/RELEASE_ACCEPTANCE_3.6DEV.md): the
+  remaining field checks, tracked separately from the closed development cycle.
 
 ## What Mediabot provides
 
