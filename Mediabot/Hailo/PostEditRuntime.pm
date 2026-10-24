@@ -99,6 +99,7 @@ sub new {
         log_cb              => $args{log_cb},
         max_context_lines   => _bounded_int($args{max_context_lines}, 4, 1, 8),
         max_context_chars   => _bounded_int($args{max_context_chars}, 500, 80, 800),
+        max_context_age_seconds => _bounded_int($args{max_context_age_seconds}, 300, 1, 3600),
         max_context_channels => _bounded_int($args{max_context_channels}, 256, 1, 4096),
         max_stat_channels   => _bounded_int($args{max_stat_channels}, 256, 1, 4096),
         max_inflight        => _bounded_int($args{max_inflight}, 4, 1, 32),
@@ -153,8 +154,10 @@ sub observe_public_line {
     return 0 unless defined $line;
 
     my $context = $self->_touch_context($key);
-    $context->{touched} = $self->_now;
-    push @{ $context->{lines} }, $line;
+    my $now = $self->_now;
+    $context->{touched} = $now;
+    $context->{lines} = $self->_fresh_context_records($context->{lines}, $now);
+    push @{ $context->{lines} }, { text => $line, at => $now };
     splice @{ $context->{lines} }, 0,
         @{ $context->{lines} } - $self->{max_context_lines}
         if @{ $context->{lines} } > $self->{max_context_lines};
@@ -162,20 +165,37 @@ sub observe_public_line {
     return 1;
 }
 
-sub recent_context {
+sub _fresh_context_records {
+    my ($self, $records, $now) = @_;
+    $now = $self->_now unless defined $now;
+    return [map { +{ text => $_->{text}, at => $_->{at} } }
+        grep { ref($_) eq 'HASH' && _plain($_->{text}) && _plain($_->{at})
+            && $now >= $_->{at}
+            && $now - $_->{at} < $self->{max_context_age_seconds} }
+        @{ $records || [] }];
+}
+
+sub _recent_context_records {
     my ($self, %args) = @_;
     croak 'runtime object is required' unless ref($self);
     my $key = _channel_key($args{channel});
     return [] unless defined($key) && exists($self->{contexts}{$key});
 
-    my @lines = @{ $self->{contexts}{$key}{lines} || [] };
+    my $context = $self->{contexts}{$key};
+    $context->{lines} = $self->_fresh_context_records($context->{lines});
+    my @lines = map { +{ %$_ } } @{ $context->{lines} };
     my $trigger = _clean_context_line(
         $args{trigger}, $self->{max_context_chars}
     );
-    pop @lines if defined($trigger) && @lines && $lines[-1] eq $trigger;
+    pop @lines if defined($trigger) && @lines && $lines[-1]{text} eq $trigger;
     splice @lines, 0, @lines - $self->{max_context_lines}
         if @lines > $self->{max_context_lines};
     return \@lines;
+}
+
+sub recent_context {
+    my ($self, %args) = @_;
+    return [map { $_->{text} } @{ $self->_recent_context_records(%args) }];
 }
 
 sub _outcomes_for {
@@ -274,7 +294,7 @@ sub submit {
             ? ($args{post_edit_enabled} ? 1 : 0) : 1,
         command_prefixes  => ref($args{command_prefixes}) eq 'ARRAY'
             ? [ @{ $args{command_prefixes} } ] : ['!'],
-        context           => $self->recent_context(
+        context           => $self->_recent_context_records(
             channel => $args{channel}, trigger => $trigger,
         ),
         send_cb           => $args{send_cb},
@@ -363,7 +383,10 @@ sub _start_job {
         $started = $self->{post_editor}->submit(
             provider         => $job->{provider},
             channel_language => $job->{channel_language},
-            context          => $job->{context},
+            # Recheck ages when the queued job actually reaches the editor.
+            # Keep its original snapshot; newer turns must not replace it.
+            context          => [map { $_->{text} }
+                @{ $self->_fresh_context_records($job->{context}) }],
             trigger          => $job->{trigger},
             candidate        => $job->{candidate},
             mode             => $job->{mode},

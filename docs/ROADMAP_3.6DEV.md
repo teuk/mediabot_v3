@@ -1,7 +1,7 @@
 # Mediabot 3.6dev — roadmap actualisée
 
-Date : 24 octobre 2026. Base confirmée : MB939, commit `932e749`,
-`3.6dev-20261023_221453`. Cette feuille de route traduit les orientations
+Date : 24 octobre 2026. Base confirmée : MB941, commit `18f9fc5`,
+`3.6dev-20261024_000359`. Cette feuille de route traduit les orientations
 retenues avec Christophe ; elle ne programme aucune mise à jour de production.
 La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
 
@@ -15,8 +15,9 @@ Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
 les budgets de texte, les sorties différées, les timers, les reconnexions,
 l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
 Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
-MB939 est validé sur le serveur : 30 707 assertions, sécurité GO/37 et intégrité
-de démarrage OK. Cette validation ne constitue pas une certification exhaustive.
+MB941 est validé sur le serveur : 30 719 assertions Perl, 77 tests Node,
+sécurité GO/37 et intégrité de démarrage OK. Le déploiement mbweb est vérifié.
+Cette validation ne constitue pas une certification exhaustive.
 
 ## Les cinq directions
 
@@ -72,8 +73,7 @@ Les tâches d'instance `rss_poll_dispatch` et `randomquote_dispatch` indiquent
 présence, démarrage, nombre de ticks et prochaines échéances observées.
 Les réservations RSS, tickets RandomQuote et ticks ne prouvent aucune livraison.
 
-**MB940 : deuxième enrichissement et présentation web préparés dans le code,
-à installer et valider sur le serveur.** Le diagnostic ajoute les erreurs RSS
+**MB940 : installé, validé et poussé dans `7f025e7`.** Le diagnostic ajoute les erreurs RSS
 encore retenues, les exceptions des deux callbacks de scheduler et les
 politiques, capacités manquantes, quarantaines et échecs API v3 du seul salon.
 La lecture ne crée pas de registre ; la rétention et les limites restent visibles.
@@ -90,12 +90,23 @@ locale du bot est facultative, bornée à huit salons explicitement choisis et
 désactivée par défaut. Les observations trop anciennes, invalides ou d'identité
 différente ne sont pas affichées comme courantes.
 
-**Prochain point de validation :** installation et chargement du code, puis
-qualification d'un pilote web sur développement avec la procédure canonique,
-droits de deux comptes distincts, accès refusé à un autre salon et observation
-absente/périmée. Ce paquet ne déploie pas `/opt/mbweb/app`, ne modifie aucune
-configuration privée et n'active aucune publication. La convergence entre
-source sur disque et code chargé reste à observer dans un lot ultérieur.
+**Bilan du pilote au 24 octobre :** MB941 a corrigé le verrou de dépendances
+qui bloquait le déploiement. Le runtime mbweb est déployé et vérifié ; sans
+session, l'API refuse l'accès en 401. Le pilote R3 de publication est actif sur
+#test : deux publications successives ont été relues par le lecteur natif et
+l'environnement initial du processus web est confirmé.
+
+**Recette complémentaire reportée, sans bloquer l'étape 3.** Les parcours HTTP
+avec droits de salon et les états absent/périmé n'ont pas tous été qualifiés
+sur une instance réelle. La création du User de recette a été refusée avant
+écriture ; le précontrôle Epiknet n'a pas produit de résultat validé. Ces deux
+outils de recette ne sont pas à relancer. La présence de clés étrangères avec
+cascade n'est pas une preuve de défaut applicatif.
+
+Le prochain essai fonctionnel des diagnostics visera #i/o sur Epiknet, après
+confirmation du code et du runtime de cette instance. Toute commande Ansible
+partira directement du compte `ansible`. Le pilote de développement reste en
+place ; ce lot ne le déploie, ne l'étend et ne le restaure pas.
 
 Les écritures web viendront dans un lot séparé : actions nommées exécutées par
 le bot, droits revérifiés, protection CSRF, résultat explicite et audit.
@@ -108,6 +119,15 @@ Construire des scénarios de salon calme, solo, animé et technique. Observer
 comment Hailo, Spark et l'IA sollicitée se répartissent les occasions de réponse.
 Réutiliser exclusions, budgets et mécanismes de temporisation existants.
 Définir des profils compréhensibles, avec retour simple au comportement courant.
+
+**MB942 : premier correctif préparé pour cette étape.** Le contexte récent du
+postéditeur Hailo expire après cinq minutes, comme la fenêtre conversationnelle
+partagée. Une phrase ancienne ne redevient pas récente parce qu'une nouvelle
+phrase arrive. L'âge est revérifié au départ effectif d'une requête en attente,
+sans y injecter des messages postérieurs au déclencheur. Les scénarios couvrent
+le salon calme, le changement de sujet et l'attente du fournisseur.
+Ce contexte volatil est distinct du cerveau appris : aucun apprentissage,
+quota, chanset, profil de fréquence ou schéma de base n'est modifié.
 
 Mesurer la pertinence, les répétitions, les chevauchements et le rythme, puis
 faire une observation sur développement avant toute activation en production.

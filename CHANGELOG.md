@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB942 — Keep Hailo corrections tied to the recent conversation (2026-10-24)
+
+- Expire each volatile post-edit context line after five minutes. New traffic
+  cannot revive an older subject, and future-dated turns are discarded.
+- Recheck the original context snapshot before a queued provider request starts,
+  without importing later human turns. Preserve local fallback, queue bounds,
+  command/bot exclusions and late delivery checks.
+- Record the diagnostic pilot's confirmed and pending evidence in the roadmap;
+  retire the blocked account/Ansible recipes and resume conversation work.
+  Keep schema, private settings, learned brains and running services unchanged.
+
+
 ### MB941 — Update the HTTP parser after the deployment audit refused it (2026-10-24)
 
 - Lock body-parser 2.4.0 and its required qs 6.16.1 to address

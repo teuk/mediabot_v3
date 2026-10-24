@@ -194,3 +194,16 @@ Focused and fast validation covered the delivery stages, followed by the
 single full suite attached to the accepted commit. Cross-instance rollout and
 observation are tracked by MB722 in the 3.5 roadmap; they do not reopen the
 completed MB720 engineering work unless a new defect is observed.
+
+
+## Recent post-edit context (MB942)
+
+The post-editor keeps at most its configured number of context lines and uses
+only lines younger than five minutes. A new line does not renew older lines.
+The age is checked again when a queued request reaches the editor; messages
+arriving after that request was queued do not enter its original snapshot.
+A clock rollback discards future-dated context instead of extending its life.
+
+This bounds the volatile text supplied for local Hailo reply correction. It
+does not erase or rebuild the learned Hailo brain, change learning exclusions,
+alter spontaneous reply frequency, or enable a remote provider.
