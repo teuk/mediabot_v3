@@ -8,6 +8,7 @@ use Mediabot::AI::ConversationFloodGuard;
 use Mediabot::Spark::Observer;
 use Mediabot::Spark::Orchestrator;
 use Mediabot::Spark::State;
+use Mediabot::Spark::Config qw(orchestrator_options);
 
 our @EXPORT_OK = qw(replay_events);
 
@@ -41,6 +42,7 @@ sub replay_events {
     my $clock = sub { $time };
     my $observer = Mediabot::Spark::Observer->new(clock => $clock);
     my $runtime = Mediabot::Spark::Orchestrator->new(
+        %{orchestrator_options($args{conf})},
         state => Mediabot::Spark::State->new(clock => $clock),
         observer => $observer,
         flood_guard => Mediabot::AI::ConversationFloodGuard->new(clock => $clock),
@@ -58,9 +60,19 @@ sub replay_events {
             && "$event->{at}" =~ /\A\d{1,6}\z/
             && $event->{at} <= 604_800 && $event->{at} >= $previous
             && defined($event->{type}) && !ref($event->{type})
-            && ($event->{type} eq 'line' || $event->{type} eq 'probe');
+            && ($event->{type} eq 'line' || $event->{type} eq 'probe' || $event->{type} eq 'output');
         $previous = int($event->{at});
         $time = 10_000 + $previous;
+
+        # Model the Sender facade's accepted-output notification, not a
+        # received self echo. This event carries no text or identity.
+        if ($event->{type} eq 'output') {
+            die "invalid replay output\n" if grep {$_ ne 'at' && $_ ne 'type' && $_ ne 'accepted'} keys %$event;
+            die "invalid replay output\n" unless defined($event->{accepted})
+                && !ref($event->{accepted}) && "$event->{accepted}" =~ /\A[01]\z/;
+            $observer->note_bot_pressure($channel) if $event->{accepted};
+            next;
+        }
 
         if ($event->{type} eq 'line') {
             my ($nick, $message) = @{$event}{qw(nick message)};

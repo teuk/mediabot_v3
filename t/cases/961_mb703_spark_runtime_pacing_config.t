@@ -45,25 +45,17 @@ return sub {
         <$fh>;
     };
 
+    # MB949: per-option behavior is exercised against the native live factory
+    # in 1323; keep this wiring contract without duplicating its value tests.
     $assert->like(
         $main,
-        qr/\$bot->\{conf\}->get\('main\.SPARK_MIN_SILENCE_SECONDS'\)/,
-        'mb703-961: runtime reads the configured Spark silence threshold',
+        qr/Mediabot::Spark::Config::orchestrator_options\(\$bot->\{conf\}\)/,
+        'mb703-961: live runtime reads the shared cadence mapping',
     );
     $assert->like(
         $main,
-        qr/\$bot->\{conf\}->get\('main\.SPARK_CANDIDATE_PROBE_SECONDS'\)/,
-        'mb703-961: runtime reads the configured Spark candidate probe interval',
-    );
-    $assert->like(
-        $main,
-        qr/min_silence_seconds\s*=>\s*\$min_silence_seconds/,
-        'mb703-961: runtime delegates silence validation to the Orchestrator',
-    );
-    $assert->like(
-        $main,
-        qr/candidate_probe_seconds\s*=>\s*\$candidate_probe_seconds/,
-        'mb703-961: runtime delegates probe validation to the Orchestrator',
+        qr/Orchestrator->new\(.*?%\$options/s,
+        'mb703-961: native Orchestrator retains cadence validation',
     );
     $assert->like(
         $main,

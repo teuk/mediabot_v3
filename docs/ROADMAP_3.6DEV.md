@@ -1,9 +1,9 @@
 # Mediabot 3.6dev — bilan de livraison et clôture du cycle
 
-Mise à jour : 24 octobre 2026. Base serveur confirmée : MB947, commit 73972f2,
-3.6dev-20261024_152222, 31 006/31 006 assertions, sécurité GO/37 et intégrité
-OK. MB948 rassemble les livrables de finalisation ; il reste candidat jusqu'aux
-contrôles et au commit sur teuk. La stable publiée reste 3.5, sans date de 3.7.
+Mise à jour : 24 octobre 2026. Base serveur confirmée : MB948, commit 8ec1d43,
+3.6dev-20261024_160402, 31 065/31 065 assertions, sécurité GO/37 et intégrité
+OK. MB948 est installé, validé et poussé : les livrables de développement
+de ce cycle sont en place. La stable publiée reste 3.5, sans date de 3.7.
 
 ## Cap et règle de fin
 
@@ -24,10 +24,10 @@ la pertinence d'une conversation sur #i/o.
 | Direction | Livraison | Résultat concret | État |
 | --- | --- | --- | --- |
 | Administration lisible | MB938–MB941 | `.diagnose #salon`, cadence et erreurs retenues, plugins du salon, publication et vues mbweb avec droits | code installé et mbweb déployé ; recette complète de comptes encore ouverte |
-| Personnalité du salon | MB942–MB945 puis MB948 | contexte frais, refus tardif, pression de sortie ; profils quiet/balanced/animated et retour contrôlé | garanties installées ; profils candidats ; mesure d'usage terrain à faire |
+| Personnalité du salon | MB942–MB945 puis MB948 | contexte frais, refus tardif, pression de sortie ; profils quiet/balanced/animated et retour contrôlé | garanties et profils installés ; mesure d'usage terrain à faire |
 | Mémoire reliée | MB946–MB947 | journée explicite, navigation memory/onthisday/yearbook, recherche privée de quotes et factoids | installé, suite serveur validée et poussé |
-| Contribution accessible | API v3 existante et MB948 | générateur minimal et atelier natif load/observe/on/off/disable/unload | candidat, aucune activation automatique |
-| Adoption facilitée | installation/CI existantes et MB948 | parcours unique installation → premier salon → diagnostic → mémoire → contribution | guide candidat ; installation réelle à enregistrer |
+| Contribution accessible | API v3 existante et MB948 | générateur minimal et atelier natif load/observe/on/off/disable/unload | installé et validé, aucune activation automatique |
+| Adoption facilitée | installation/CI existantes et MB948 | parcours unique installation → premier salon → diagnostic → mémoire → contribution | guide installé ; installation réelle à enregistrer |
 
 ## Livrables de finalisation MB948
 
@@ -75,6 +75,10 @@ revendiqué par le seul changement des fichiers.
 3. **Rythme en situation.** Observer les profils sur développement avant tout
    choix explicite en production : pertinence, répétitions, chevauchements.
    Le replay Spark garde le vrai préfixe et une configuration autorisée.
+   MB949 corrige un défaut démontré : les neuf seuils configurés de cadence
+   sont maintenant partagés avec le runtime, et une sortie locale acceptée
+   peut être représentée sans texte pour tester sa pression. Ce correctif du
+   replay existant reste une preuve hors ligne, pas une recette terrain réussie.
 
 Le pilote de diagnostic R3 demeure sur #test. Ce lot ne change ni sa
 configuration ni les services. La production Epiknet est nbot.soyou.rocks ;
@@ -98,6 +102,7 @@ n'est observé. Ne pas leur substituer une série de nouveaux outils de recette.
 MB938 : 05d171b ; MB939 : 932e749 ; MB940 : 7f025e7 ; MB941 : 18f9fc5.
 MB942 : ea1d467 ; MB943 : fc5ed6d ; MB944 : 81755ac ; MB945 : 7ddc6f7.
 MB946 : f308ddb, 30 927 assertions sur teuk ; MB947 : 73972f2, 31 006.
+MB948 : 8ec1d43, 31 065 assertions sur teuk. MB949 reste candidat.
 Ces résultats ne constituent pas une certification exhaustive.
 
 Le paquet MB948 garde hashes, sauvegarde et retour des fichiers. Il exige

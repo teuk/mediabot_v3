@@ -22,6 +22,7 @@ return sub {
     my $conf = $read->('mediabot.sample.conf');
     my $doc = $read->('docs/SPARK_ACTION.md');
     my $orch = $read->('Mediabot/Spark/Orchestrator.pm');
+    my $mapping = $read->('Mediabot/Spark/Config.pm');
     my $policy = $read->('Mediabot/Spark/ActionPolicy.pm');
 
     $assert->like(
@@ -76,7 +77,7 @@ return sub {
             1,
             "mb709-998: tracked action guide documents $key=$default once",
         );
-        $assert->like($main, qr/\Q$key\E/,
-            "mb709-998: runtime consumes $key");
+        $assert->like($key eq 'SPARK_ACTION_SEND_ARMED' ? $main : $mapping, qr/\Q$key\E/,
+            "mb709-998: native runtime boundary consumes $key");
     }
 };

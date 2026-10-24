@@ -1,5 +1,17 @@
 # Changelog — Mediabot v3
 
+## MB949 — Replay the configured conversation cadence (2026-10-24)
+
+- Fix Spark offline replay ignoring the nine configured pacing options;
+  share the existing live configuration mapping without changing runtime defaults.
+- Model accepted local bot output using a metadata-only output event, so the
+  replay exercises the current pressure pause without relying on a self echo.
+- Keep refused outputs pressure-free, reject content-bearing output metadata
+  and preserve the bounded decision-only report.
+- Validate against the native live factory and configured/default scenarios.
+  No schema, automatic activation, provider work or service changes.
+
+
 ## MB948 — Consolidate conversation, contribution and adoption (2026-10-24)
 
 - Add Master/Owner conversation profiles to the existing chanset command:

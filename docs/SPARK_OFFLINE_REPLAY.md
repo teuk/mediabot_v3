@@ -51,3 +51,42 @@ nonexcluded bot line still delays momentum through bot pressure. No generated
 text is assessed here: this tool cannot demonstrate live delivery, provider
 quality or actual runtime reloads. A change to nbot requires separate evidence
 and authorization.
+
+## Configuration de cadence et sorties du bot (MB949)
+
+Le replay et le runtime lisent désormais les mêmes neuf clés dans une frontière
+partagée ; Orchestrator garde les mêmes bornes et valeurs de repli :
+SPARK_MIN_SILENCE_SECONDS, SPARK_CANDIDATE_PROBE_SECONDS,
+SPARK_ACTION_ACTIVITY_WINDOW_SECONDS, SPARK_ACTION_MIN_HUMANS,
+SPARK_ACTION_MIN_LINES, SPARK_ACTION_MIN_PAUSE_SECONDS,
+SPARK_ACTION_MAX_PAUSE_SECONDS, SPARK_ACTION_PROBE_SECONDS et
+SPARK_ACTION_COOLDOWN_SECONDS, toutes dans [main]. Avant MB949, le replay lisait
+les exclusions et le préfixe mais utilisait les défauts de cadence, même avec
+une autre valeur dans le fichier fourni. Un essai pouvait donc annoncer une
+candidature trop tôt ou trop tard par rapport au runtime visé.
+
+Un événement facultatif décrit maintenant une sortie locale acceptée par la
+façade IRC, comme le signal utilisé depuis MB943 :
+
+```json
+{"at":40,"type":"output","accepted":1}
+```
+
+Il ne contient ni texte, ni nick, ni autre champ. accepted doit être exactement
+0 ou 1. Une sortie refusée ou seulement différée est décrite avec 0 et n'ajoute
+aucune pression ; 1 appelle le véritable note_bot_pressure de l'observateur.
+Cela retarde les deux familles de candidatures sans créer de participant ni
+un salon observé si aucune conversation n'y a été vue. Une acceptation de la
+façade n'est pas un accusé de réception du serveur IRC.
+
+Cet événement est distinct d'une ligne reçue d'un autre bot, qui garde son
+chemin from_bot et ses exclusions. Ne pas représenter une même sortie à la
+fois comme output et comme ligne entrante : on compterait deux événements.
+Le rapport conserve sa forme et ne restitue aucun texte ou identité de l'entrée.
+
+Le test natif MB949 compare les neuf options au véritable constructeur appelé
+par _spark_runtime dans mediabot.pl, puis vérifie les scénarios calme, actif,
+pression du bot et commandes. Le replay reste une simulation de candidatures,
+avec portes de salon supposées ouvertes : il ne lit pas CHANNEL_SET, ne choisit
+pas un profil en base et ne mesure ni pertinence ni répétitions de texte généré.
+Les profils MB948 s'évaluent ensuite en situation, sur l'instance concernée.

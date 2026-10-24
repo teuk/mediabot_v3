@@ -182,28 +182,12 @@ sub _spark_runtime {
     $bot->{spark_state} ||= Mediabot::Spark::State->new();
     $bot->{spark_observer} ||= Mediabot::Spark::Observer->new();
 
-    my $min_silence_seconds = $bot->{conf}->get('main.SPARK_MIN_SILENCE_SECONDS');
-    my $candidate_probe_seconds = $bot->{conf}->get('main.SPARK_CANDIDATE_PROBE_SECONDS');
-    my $action_activity_window_seconds = $bot->{conf}->get('main.SPARK_ACTION_ACTIVITY_WINDOW_SECONDS');
-    my $action_min_humans = $bot->{conf}->get('main.SPARK_ACTION_MIN_HUMANS');
-    my $action_min_lines = $bot->{conf}->get('main.SPARK_ACTION_MIN_LINES');
-    my $action_min_pause_seconds = $bot->{conf}->get('main.SPARK_ACTION_MIN_PAUSE_SECONDS');
-    my $action_max_pause_seconds = $bot->{conf}->get('main.SPARK_ACTION_MAX_PAUSE_SECONDS');
-    my $action_probe_seconds = $bot->{conf}->get('main.SPARK_ACTION_PROBE_SECONDS');
-    my $action_cooldown_seconds = $bot->{conf}->get('main.SPARK_ACTION_COOLDOWN_SECONDS');
-
+    require Mediabot::Spark::Config;
+    my $options = Mediabot::Spark::Config::orchestrator_options($bot->{conf});
     $bot->{spark_orchestrator} ||= Mediabot::Spark::Orchestrator->new(
-        state                   => $bot->{spark_state},
-        observer                => $bot->{spark_observer},
-        min_silence_seconds     => $min_silence_seconds,
-        candidate_probe_seconds => $candidate_probe_seconds,
-        action_activity_window_seconds => $action_activity_window_seconds,
-        action_min_humans       => $action_min_humans,
-        action_min_lines        => $action_min_lines,
-        action_min_pause_seconds => $action_min_pause_seconds,
-        action_max_pause_seconds => $action_max_pause_seconds,
-        action_probe_seconds    => $action_probe_seconds,
-        action_cooldown_seconds => $action_cooldown_seconds,
+        state    => $bot->{spark_state},
+        observer => $bot->{spark_observer},
+        %$options,
     );
 
     return $bot->{spark_orchestrator};
