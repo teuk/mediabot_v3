@@ -76,6 +76,20 @@ human context or participant counts. They instead create bot pressure, which
 postpones unsolicited Spark work. The bot's own live nick is always classified
 as automation even when `BOT_NICKS` is empty.
 
+MB943 also observes the bot's own public `botPrivmsg` and `botAction` outputs
+at the accepted transport boundary, without relying on IRC server echo.
+The notification carries only the channel, and the observer records a timestamp
+as automation pressure; it stores no output text or nickname and creates no
+human participant. Rejected and merely deferred messages add no such event.
+A multi-chunk logical message adds one event after its output path succeeds.
+
+Only an already observed Spark room receives this notification. Sending to
+another room cannot allocate or evict Spark context, and sending never creates
+or enables a Spark runtime. Existing Wit/Quip notifications remain independent
+of Spark observation failures. This closes an observation gap for subsequent
+policy evaluations; it is not a new cancellation rule for requests already
+submitted or for output paths that bypass this facade.
+
 The stronger per-channel exclusions in `conversation.CHANNEL_BOTS` and
 `conversation.CHANNEL_COMMANDS` run before this observer. Those lines create
 neither human activity nor bot pressure and cannot start, advance, postpone or

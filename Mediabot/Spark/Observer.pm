@@ -201,6 +201,19 @@ sub _command_reason {
     return undef;
 }
 
+sub note_bot_pressure {
+    my ($self, $channel) = @_;
+    croak 'Spark observer object is required' unless ref($self);
+    my $key = _channel_key($channel);
+    # Output must not create an audience or displace an observed room just
+    # because another channel emits RSS or command replies.
+    return 0 unless ref($self->{channels}{lc($key)}) eq 'HASH';
+    my $now = $self->_now();
+    my $state = $self->_state($key, $now);
+    _record_activity($self, $state, at => $now, kind => 'bot_pressure');
+    return 1;
+}
+
 sub observe_public_line {
     my ($self, %args) = @_;
     croak 'Spark observer object is required' unless ref($self);

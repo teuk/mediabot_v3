@@ -10,6 +10,18 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB943 — Let Spark notice the bot has just spoken (2026-10-24)
+
+- Record automation pressure after accepted public PRIVMSG/ACTION output, so
+  Spark's existing breathing pauses also see Hailo, AI and ordinary bot replies
+  without server echo. Retain only channel-local timing metadata.
+- Preserve human context/counts, independent Wit/Quip observation and transport
+  acknowledgement. Rejected, private and only deferred output adds no pressure;
+  unobserved channels cannot allocate or evict Spark context.
+- Add native output/orchestrator scenarios and update roadmap acceptance for
+  MB942. Keep schema, opt-ins, pacing defaults, providers and services unchanged.
+
+
 ### MB942 — Keep Hailo corrections tied to the recent conversation (2026-10-24)
 
 - Expire each volatile post-edit context line after five minutes. New traffic

@@ -163,6 +163,9 @@ sub botPrivmsg {
     if (_is_irc_channel_target($sTo) && $self->{wit_dryrun}) {
         eval { $self->{wit_dryrun}->note_bot_pressure($sTo); };
     }
+    if (_is_irc_channel_target($sTo) && $self->{spark_observer}) {
+        eval { $self->{spark_observer}->note_bot_pressure($sTo); };
+    }
     return 1;
 }
 
@@ -272,6 +275,9 @@ sub botAction {
 				next unless defined($chunk) && $chunk ne "";
 				my $payload = utf8::is_utf8($chunk) ? encode("UTF-8", $chunk) : $chunk;
 				$self->{irc}->do_PRIVMSG( target => $sTo, text => "\1ACTION $payload\1" );
+			}
+			if (_is_irc_channel_target($sTo) && $self->{spark_observer}) {
+				eval { $self->{spark_observer}->note_bot_pressure($sTo); };
 			}
 			if (_is_irc_channel_target($sTo) && $self->{wit_dryrun}) {
 				eval { $self->{wit_dryrun}->note_bot_pressure($sTo); };

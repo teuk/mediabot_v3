@@ -1,7 +1,7 @@
 # Mediabot 3.6dev — roadmap actualisée
 
-Date : 24 octobre 2026. Base confirmée : MB941, commit `18f9fc5`,
-`3.6dev-20261024_000359`. Cette feuille de route traduit les orientations
+Date : 24 octobre 2026. Base confirmée : MB942, commit `ea1d467`,
+`3.6dev-20261024_095231`. Cette feuille de route traduit les orientations
 retenues avec Christophe ; elle ne programme aucune mise à jour de production.
 La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
 
@@ -15,8 +15,9 @@ Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
 les budgets de texte, les sorties différées, les timers, les reconnexions,
 l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
 Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
-MB941 est validé sur le serveur : 30 719 assertions Perl, 77 tests Node,
-sécurité GO/37 et intégrité de démarrage OK. Le déploiement mbweb est vérifié.
+MB942 est validé sur le serveur : 30 736 assertions Perl, sécurité GO/37
+et intégrité de démarrage OK. Le déploiement mbweb MB941 et ses 77 tests Node
+ont été vérifiés dans le lot précédent.
 Cette validation ne constitue pas une certification exhaustive.
 
 ## Les cinq directions
@@ -120,7 +121,7 @@ comment Hailo, Spark et l'IA sollicitée se répartissent les occasions de répo
 Réutiliser exclusions, budgets et mécanismes de temporisation existants.
 Définir des profils compréhensibles, avec retour simple au comportement courant.
 
-**MB942 : premier correctif préparé pour cette étape.** Le contexte récent du
+**MB942 : installé, validé et poussé dans `ea1d467`.** Le contexte récent du
 postéditeur Hailo expire après cinq minutes, comme la fenêtre conversationnelle
 partagée. Une phrase ancienne ne redevient pas récente parce qu'une nouvelle
 phrase arrive. L'âge est revérifié au départ effectif d'une requête en attente,
@@ -128,6 +129,16 @@ sans y injecter des messages postérieurs au déclencheur. Les scénarios couvre
 le salon calme, le changement de sujet et l'attente du fournisseur.
 Ce contexte volatil est distinct du cerveau appris : aucun apprentissage,
 quota, chanset, profil de fréquence ou schéma de base n'est modifié.
+
+**MB943 : prise en compte des sorties du bot préparée.** Les messages publics
+et ACTIONs acceptés par la façade IRC signalent leur activité à l'observateur
+Spark déjà présent. Spark réutilise alors ses pauses existantes lors de ses
+prochaines évaluations, sans attendre un écho du serveur. Seuls le salon et
+l'instant sont transmis : aucun texte, identité humaine ou participant fictif.
+Une sortie refusée ou simplement mise en file n'est pas comptée comme envoyée.
+Les salons non observés ne créent aucun runtime ou contexte Spark.
+Ce lot corrige l'observation du rythme ; l'arbitrage des réponses déjà en vol
+reste une étape distincte.
 
 Mesurer la pertinence, les répétitions, les chevauchements et le rythme, puis
 faire une observation sur développement avant toute activation en production.
