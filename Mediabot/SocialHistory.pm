@@ -512,11 +512,16 @@ sub mbMemory_ctx {
         return;
     }
 
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $finding = @args && defined($args[0]) && !ref($args[0]) && lc($args[0]) eq 'find';
     return unless eval {
         Mediabot::Helpers::chanset_enabled($self, $channel, 'OnThisDay', default => 1)
-    } // 1;
+    } // ($finding ? 0 : 1);
 
-    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    if ($finding) {
+        shift @args;
+        return _memory_find($self, $nick, $channel, \@args);
+    }
     my $day = @args == 1 ? _memory_date($args[0]) : undef;
     if (@args && !defined $day) {
         botNotice($self, $nick, "Syntax: memory [YYYY-MM-DD]  (valid calendar date required)");
@@ -556,6 +561,36 @@ sub mbMemory_ctx {
     # them safely from the parent. queueBotNotices() must NOT be used here:
     # its timers would belong to the disposable child loop and never fire.
     botNotice($self, $nick, $_) for @lines;
+    return 1;
+}
+
+sub _memory_find {
+    my ($self, $nick, $channel, $args) = @_;
+    require Mediabot::Memory::Search;
+    my $query = Mediabot::Memory::Search::query($args);
+    unless (defined $query) {
+        botNotice($self, $nick, 'Syntax: memory find <text>  (2+ characters, at most 6 words / 160 UTF-8 bytes)');
+        return;
+    }
+    my $obj = $self->{channels}{lc $channel};
+    my $cid = $obj ? eval { $obj->get_id } : undef;
+    unless (defined($cid) && !ref($cid) && $cid =~ /\A[1-9][0-9]{0,9}\z/) {
+        botNotice($self, $nick, 'memory find: channel not known to the bot.');
+        return;
+    }
+    my $dbh = $self->{db} ? eval { $self->{db}->ensure_connected } : $self->{dbh};
+    unless ($dbh) {
+        botNotice($self, $nick, 'memory find: database unavailable.');
+        return;
+    }
+    my $factoids = eval {
+        Mediabot::Helpers::chanset_enabled($self, $channel, 'Factoids', default => 1)
+    } // 0;
+    my $result = Mediabot::Memory::Search::search($dbh, $cid, $query, factoids => $factoids);
+    my $prefix = eval { $self->{conf}->get('main.MAIN_PROG_CMD_CHAR') };
+    # Direct NOTICE intents are replayed by CommandAsync in the parent. Do
+    # not call recall handlers here: they may broadcast or increment hits.
+    botNotice($self, $nick, $_) for Mediabot::Memory::Search::lines($result, $prefix);
     return 1;
 }
 

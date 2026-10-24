@@ -1,7 +1,7 @@
 # Mediabot 3.6dev — roadmap actualisée
 
-Date : 24 octobre 2026. Base confirmée : MB945, commit `7ddc6f7`,
-`3.6dev-20261024_142740`. Cette feuille de route traduit les orientations
+Date : 24 octobre 2026. Base confirmée : MB946, commit `f308ddb`,
+`3.6dev-20261024_150306`. Cette feuille de route traduit les orientations
 retenues avec Christophe ; elle ne programme aucune mise à jour de production.
 La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
 
@@ -15,7 +15,7 @@ Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
 les budgets de texte, les sorties différées, les timers, les reconnexions,
 l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
 Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
-MB945 est validé sur le serveur : 30 873 assertions Perl, sécurité GO/37
+MB946 est validé sur le serveur : 30 927 assertions Perl, sécurité GO/37
 et intégrité de démarrage OK. Le déploiement mbweb MB941 et ses 77 tests Node
 ont été vérifiés dans le lot précédent.
 Cette validation ne constitue pas une certification exhaustive.
@@ -184,7 +184,7 @@ de syntaxes indépendantes. Respecter visibilité du salon, attribution, limites
 et possibilités d'effacement déjà définies. Toute annonce automatique demande
 un choix explicite du salon et une cadence maîtrisée.
 
-**MB946 : premier parcours de journée préparé.** `!memory YYYY-MM-DD` permet de
+**MB946 : installé, validé et poussé dans `f308ddb`.** `!memory YYYY-MM-DD` permet de
 retrouver une journée connue du salon ; sans argument, le tirage historique
 reste disponible. Une troisième ligne privée propose de revisiter la date,
 de consulter son anniversaire avec `!onthisday MM-DD`, puis son contexte annuel
@@ -197,6 +197,17 @@ et les archives passent toujours par leur politique de contenu existante.
 Une lecture d'historique en échec est distinguée d'une journée sans résultat.
 Les résultats memory restent en NOTICE ; les commandes proposées conservent
 leurs propres destinations et droits. Voir `docs/MEMORY_JOURNEYS.md`.
+
+**MB947 : recherche de références préparée.** `!memory find <texte>` relie
+l'entrée mémoire aux citations et aux factoids enregistrés du salon courant.
+Les résultats privés proposent des commandes de rappel stables, avec auteur,
+date et extrait court. Les mots sont littéraux, les résultats limités à trois
+par collection avec une indication de dépassement. La lecture des factoids
+respecte sa propre porte, en plus de +OnThisDay. Une collection en panne ne
+masque pas l'autre et n'est pas présentée comme vide. Les compteurs de rappel
+ne changent pas pendant la recherche. Ce parcours ne fouille pas les conversations
+brutes et ne mélange pas les droits ou destinations des commandes proposées.
+La recherche native existante et les journées memory restent disponibles.
 
 ## Étape 5 — Faciliter contribution et adoption
 

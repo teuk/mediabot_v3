@@ -58,8 +58,8 @@ return sub {
     );
     $assert->like(
         $mb,
-        qr/^memory\|memory \[YYYY-MM-DD\]\|public\|Revisit a channel day or take a bounded random trip; replies arrive privately/m,
-        'mb664-846: memory documents optional date, random fallback and private replies'
+        qr/^memory\|memory \[YYYY-MM-DD\] \/ memory find <text>\|public\|Privately revisit an old channel day, or find saved quotes and factoids/m,
+        'mb664-846: memory documents private day journeys and saved-reference search'
     );
     $assert->like(
         $mb,

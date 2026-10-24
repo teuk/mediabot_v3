@@ -1,5 +1,17 @@
 # Changelog — Mediabot v3
 
+## MB947 — Linked saved-reference search (2026-10-24)
+
+- Add `memory find <text>`: privately find saved quotes and factoid keys/values
+  in the current channel, with dated, attributed excerpts and recall commands.
+- Match up to six literal words using parameterized, channel-bound reads;
+  return at most three references per collection with an overflow hint.
+- Reuse OnThisDay and Factoids gates and the existing async memory delivery.
+  Distinguish disabled, unavailable and empty collections; preserve recall hits.
+- Keep random/date memory journeys and specialized recall commands unchanged.
+  No schema, private configuration or service changes.
+
+
 All notable changes to Mediabot v3 are documented here.
 
 Versioning follows the project rule: odd minor versions are stable releases
