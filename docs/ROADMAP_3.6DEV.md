@@ -1,241 +1,108 @@
-# Mediabot 3.6dev — roadmap actualisée
+# Mediabot 3.6dev — bilan de livraison et clôture du cycle
 
-Date : 24 octobre 2026. Base confirmée : MB946, commit `f308ddb`,
-`3.6dev-20261024_150306`. Cette feuille de route traduit les orientations
-retenues avec Christophe ; elle ne programme aucune mise à jour de production.
-La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
+Mise à jour : 24 octobre 2026. Base serveur confirmée : MB947, commit 73972f2,
+3.6dev-20261024_152222, 31 006/31 006 assertions, sécurité GO/37 et intégrité
+OK. MB948 rassemble les livrables de finalisation ; il reste candidat jusqu'aux
+contrôles et au commit sur teuk. La stable publiée reste 3.5, sans date de 3.7.
 
-## Le cap
+## Cap et règle de fin
 
-Faire de Mediabot un compagnon de salon utile, discret, doté d'une mémoire
-communautaire facile à retrouver et dont l'opérateur comprend les décisions.
-Les améliorations techniques servent désormais des objectifs d'usage précis.
+Un compagnon de salon utile et discret, une mémoire facile à retrouver et une
+administration compréhensible. On termine les parcours annoncés, sans ouvrir
+une nouvelle série de micro-refactorisations. MB948 regroupe profils,
+contribution et adoption dans une même livraison réversible.
 
-Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
-les budgets de texte, les sorties différées, les timers, les reconnexions,
-l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
-Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
-MB946 est validé sur le serveur : 30 927 assertions Perl, sécurité GO/37
-et intégrité de démarrage OK. Le déploiement mbweb MB941 et ses 77 tests Node
-ont été vérifiés dans le lot précédent.
-Cette validation ne constitue pas une certification exhaustive.
+La fin du développement de ce cycle signifie : les cinq directions ont un
+parcours documenté, un résultat observable et des contrôles locaux, puis le
+lot final passe la suite complète sur teuk. La clôture opérationnelle demande
+les quelques vérifications terrain listées plus bas. Une simulation ne valide
+ni une installation Debian réelle, ni les droits HTTP de vrais comptes, ni
+la pertinence d'une conversation sur #i/o.
 
-## Les cinq directions
+## Les cinq directions et leur résultat
 
-| Priorité | Direction | Bénéfice recherché | Premier résultat observable |
+| Direction | Livraison | Résultat concret | État |
 | --- | --- | --- | --- |
-| 1 | Administration lisible | Comprendre la configuration et l'état réellement observé de chaque salon | Un diagnostic privé explique les réglages, observations et inconnues sans modifier le bot |
-| 2 | Personnalité du salon | Accorder Hailo, Spark et les conversations IA au rythme du salon | Des scénarios montrent des interventions mieux choisies, avec moins de chevauchements |
-| 3 | Mémoire communautaire reliée | Retrouver les références et souvenirs déjà conservés | Des parcours relient citations, factoids, mémoire et portraits du salon |
-| 4 | Plugins accessibles | Faciliter une contribution indépendante et maintenable | Un exemple complet accompagne création, validation, activation et retrait d'une extension |
-| 5 | Adoption facilitée | Rendre installation, découverte et exploitation plus simples | Un parcours vérifié mène une nouvelle installation à son premier salon fonctionnel |
+| Administration lisible | MB938–MB941 | `.diagnose #salon`, cadence et erreurs retenues, plugins du salon, publication et vues mbweb avec droits | code installé et mbweb déployé ; recette complète de comptes encore ouverte |
+| Personnalité du salon | MB942–MB945 puis MB948 | contexte frais, refus tardif, pression de sortie ; profils quiet/balanced/animated et retour contrôlé | garanties installées ; profils candidats ; mesure d'usage terrain à faire |
+| Mémoire reliée | MB946–MB947 | journée explicite, navigation memory/onthisday/yearbook, recherche privée de quotes et factoids | installé, suite serveur validée et poussé |
+| Contribution accessible | API v3 existante et MB948 | générateur minimal et atelier natif load/observe/on/off/disable/unload | candidat, aucune activation automatique |
+| Adoption facilitée | installation/CI existantes et MB948 | parcours unique installation → premier salon → diagnostic → mémoire → contribution | guide candidat ; installation réelle à enregistrer |
 
-## Étape 1 — Comprendre un salon
+## Livrables de finalisation MB948
 
-**MB938 : installé, validé sur le serveur et poussé dans `05d171b`.**
+### Profils utilisables
 
-Ajouter `.diagnose #salon` dans la partyline, réservée aux sessions Master/Owner.
-Un module commun retourne un rapport structuré, indépendant de sa présentation,
-qui pourra ensuite alimenter mbweb.
+La commande existante chanset reçoit `profile show`, quiet, balanced, animated
+et restore, réservés aux Master/Owner identifiés. Ils changent seulement
+HailoChatter, Spark, SparkAction et, pour animated, un ratio Hailo de base de 3 %.
+Hailo maître, réponses explicites, apprentissage, arming global, exclusions,
+quotas et vérifications de livraison gardent leurs portes.
+L'application est transactionnelle. Restore vérifie l'état attendu et retrouve
+les réglages précédents ; une édition concurrente ou une connexion différente
+refuse la restauration. Le point de retour est volatil et à un seul niveau.
+Voir [CONVERSATION_PROFILES.md](CONVERSATION_PROFILES.md) pour les limites et
+les scénarios calme, solo, animé et technique.
 
-Ce premier lot distingue :
+### Contribution et retrait prouvés
 
-- les chansets persistés, relus au moment de la demande : on, off, absent du
-  catalogue ou inconnu après une erreur ;
-- la connexion IRC et le JOIN connus du runtime ; un objet Channel en mémoire
-  ne suffit pas à prouver un JOIN ;
-- quelques relations utiles entre previews : AppleMusicFallback dépend de
-  l'entrée AppleMusic ; Reddit et Youtube ont leurs propres portes d'activation ;
-- les limites : un réglage on ne prouve ni l'accès à un fournisseur distant,
-  ni l'absence de quota, ni une sortie effectivement livrée.
+`perl tools/plugin_v3_workshop.pl --check` génère un paquet dans un répertoire
+temporaire et le fait passer par le véritable runtime API v3. Il ne crée aucune
+connexion IRC/DB ni activation réelle. `--create` génère un paquet default-off
+avec irc.reply seulement, une configuration typée et un exemple de commande.
+Les collisions et parents symlinks sont refusés. Le retrait et le refus d'un
+ancien callback sont vérifiés. Les paquets acceptés et leur ledger ne sont pas
+modifiés. Voir [PLUGIN_WORKSHOP.md](PLUGIN_WORKSHOP.md).
 
-Le diagnostic ne recharge aucun cache, ne lance aucun fetch et n'active aucune
-fonction. Les commandes existantes `!features`, `.stat` et `.plugins why` gardent
-leur comportement. Les erreurs brutes, secrets et historiques de conversation
-ne font pas partie du rapport.
+### Parcours d'adoption et démonstration
 
-**Critères de réussite :** lecture seule démontrée ; droits contrôlés avant SQL ;
-sortie privée et bornée ; erreurs présentées comme inconnues ; distinction
-configuration/runtime testée ; configuration et schéma inchangés.
+[FIRST_CHANNEL_3.6DEV.md](FIRST_CHANNEL_3.6DEV.md) relie la procédure Debian du
+README aux contrôles existants, au premier Owner, à help/features, au diagnostic,
+à une mémoire privée et à l'atelier. Il distingue une base fraîche vide d'une
+panne et conserve la séparation développement/production. Le résultat d'une
+nouvelle installation réelle doit être enregistré ; aucun run CI distant n'est
+revendiqué par le seul changement des fichiers.
 
-## Étape 2 — Enrichir puis présenter le diagnostic
+## Trois recettes terrain pour clôturer l'exploitation
 
-Étendre progressivement le rapport avec les observations des composants
-existants : cadence RSS, état RandomQuote, tâches attendues et présentes,
-fraîcheur des observations, motifs d'échec bornés et état des plugins.
-Chaque indicateur doit avoir une source identifiable et une valeur inconnue.
+1. **Installation neuve de développement.** Suivre FIRST_CHANNEL_3.6DEV et
+   enregistrer connexion, JOIN, premier Owner, découverte et retrait du plugin.
+   La CI Debian 13 est une preuve complémentaire à vérifier sur le commit visé.
+2. **Diagnostic mbweb avec droits.** Lors du prochain essai autorisé sur #i/o
+   Epiknet, vérifier un accès permis et un accès refusé avec des comptes réels,
+   puis publication absente/périmée. Les anciennes recettes de création de User
+   et le probe Epiknet non validé restent retirés ; ne pas les relancer.
+3. **Rythme en situation.** Observer les profils sur développement avant tout
+   choix explicite en production : pertinence, répétitions, chevauchements.
+   Le replay Spark garde le vrai préfixe et une configuration autorisée.
 
-**MB939 : installé, validé sur le serveur et poussé dans `932e749`.**
-Le même `.diagnose` observe les politiques RSS et RandomQuote via les objets
-du runtime, sans créer, réparer ou réécrire leurs fichiers d'état. Il distingue
-un fichier absent, occupé, invalide ou illisible, montre la date du fichier et
-sépare un intervalle par défaut d'une tentative réellement planifiée.
-Les tâches d'instance `rss_poll_dispatch` et `randomquote_dispatch` indiquent
-présence, démarrage, nombre de ticks et prochaines échéances observées.
-Les réservations RSS, tickets RandomQuote et ticks ne prouvent aucune livraison.
+Le pilote de diagnostic R3 demeure sur #test. Ce lot ne change ni sa
+configuration ni les services. La production Epiknet est nbot.soyou.rocks ;
+toute commande Ansible part directement du compte ansible. Ces recettes
+n'impliquent aucune nouvelle modification de code tant qu'aucun défaut réel
+n'est observé. Ne pas leur substituer une série de nouveaux outils de recette.
 
-**MB940 : installé, validé et poussé dans `7f025e7`.** Le diagnostic ajoute les erreurs RSS
-encore retenues, les exceptions des deux callbacks de scheduler et les
-politiques, capacités manquantes, quarantaines et échecs API v3 du seul salon.
-La lecture ne crée pas de registre ; la rétention et les limites restent visibles.
-Les plugins v1/v2, les erreurs non enregistrées et les versions chargées restent
-inconnus lorsqu'aucune source fiable ne les observe.
+## Chantiers ultérieurs, séparés de cette livraison
 
-Présenter ensuite ces informations dans mbweb avec les droits par salon déjà
-en place. Distinguer configuration souhaitée, source sur disque et runtime
-chargé. Un état non observé ne doit jamais apparaître comme confirmé.
-Le source mbweb de MB940 propose des vues HTML/JSON de diagnostic par salon,
-avec identité et droits relus avant tout accès à la publication. Il ne montre
-pas l'inventaire global des plugins ni les tâches d'instance. Une publication
-locale du bot est facultative, bornée à huit salons explicitement choisis et
-désactivée par défaut. Les observations trop anciennes, invalides ou d'identité
-différente ne sont pas affichées comme courantes.
+- Les écritures mbweb RSS/RandomQuote restent un chantier distinct : actions
+  nommées exécutées par le bot, droits revérifiés, CSRF et résultat audité.
+  Le diagnostic actuel reste en lecture seule ; aucun éditeur SQL arbitraire.
+- L'effacement Hailo sélectif forget/forgetword demande un corpus fidèle et
+  autorisé, une reconstruction isolée et un retour prouvé. Un cerveau ancien
+  sans ce corpus ne reçoit aucune promesse d'effacement sélectif.
+- La promotion MetaAI, les nouveaux déploiements de plugins et une publication
+  stable sont des décisions séparées. Les postures existantes sont conservées.
 
-**Bilan du pilote au 24 octobre :** MB941 a corrigé le verrou de dépendances
-qui bloquait le déploiement. Le runtime mbweb est déployé et vérifié ; sans
-session, l'API refuse l'accès en 401. Le pilote R3 de publication est actif sur
-#test : deux publications successives ont été relues par le lecteur natif et
-l'environnement initial du processus web est confirmé.
+## Preuves et discipline
 
-**Recette complémentaire reportée, sans bloquer l'étape 3.** Les parcours HTTP
-avec droits de salon et les états absent/périmé n'ont pas tous été qualifiés
-sur une instance réelle. La création du User de recette a été refusée avant
-écriture ; le précontrôle Epiknet n'a pas produit de résultat validé. Ces deux
-outils de recette ne sont pas à relancer. La présence de clés étrangères avec
-cascade n'est pas une preuve de défaut applicatif.
+MB938 : 05d171b ; MB939 : 932e749 ; MB940 : 7f025e7 ; MB941 : 18f9fc5.
+MB942 : ea1d467 ; MB943 : fc5ed6d ; MB944 : 81755ac ; MB945 : 7ddc6f7.
+MB946 : f308ddb, 30 927 assertions sur teuk ; MB947 : 73972f2, 31 006.
+Ces résultats ne constituent pas une certification exhaustive.
 
-Le prochain essai fonctionnel des diagnostics visera #i/o sur Epiknet, après
-confirmation du code et du runtime de cette instance. Toute commande Ansible
-partira directement du compte `ansible`. Le pilote de développement reste en
-place ; ce lot ne le déploie, ne l'étend et ne le restaure pas.
-
-Les écritures web viendront dans un lot séparé : actions nommées exécutées par
-le bot, droits revérifiés, protection CSRF, résultat explicite et audit.
-Commencer par les réglages RSS et RandomQuote. Conserver la séparation entre
-lecture et mutation ; aucun éditeur SQL ou exécuteur de commandes arbitraires.
-
-## Étape 3 — Accorder les interventions
-
-Construire des scénarios de salon calme, solo, animé et technique. Observer
-comment Hailo, Spark et l'IA sollicitée se répartissent les occasions de réponse.
-Réutiliser exclusions, budgets et mécanismes de temporisation existants.
-Définir des profils compréhensibles, avec retour simple au comportement courant.
-
-**MB942 : installé, validé et poussé dans `ea1d467`.** Le contexte récent du
-postéditeur Hailo expire après cinq minutes, comme la fenêtre conversationnelle
-partagée. Une phrase ancienne ne redevient pas récente parce qu'une nouvelle
-phrase arrive. L'âge est revérifié au départ effectif d'une requête en attente,
-sans y injecter des messages postérieurs au déclencheur. Les scénarios couvrent
-le salon calme, le changement de sujet et l'attente du fournisseur.
-Ce contexte volatil est distinct du cerveau appris : aucun apprentissage,
-quota, chanset, profil de fréquence ou schéma de base n'est modifié.
-
-**MB943 : installé, validé et poussé dans `fc5ed6d`.** Les messages publics
-et ACTIONs acceptés par la façade IRC signalent leur activité à l'observateur
-Spark déjà présent. Spark réutilise alors ses pauses existantes lors de ses
-prochaines évaluations, sans attendre un écho du serveur. Seuls le salon et
-l'instant sont transmis : aucun texte, identité humaine ou participant fictif.
-Une sortie refusée ou simplement mise en file n'est pas comptée comme envoyée.
-Les salons non observés ne créent aucun runtime ou contexte Spark.
-Ce lot corrige l'observation du rythme avant les prochaines candidatures.
-
-**MB944 : installé, validé et poussé dans `81755ac`.** Une sortie
-spontanée Spark en cours de génération revérifie les pauses actuelles avant
-de créer un événement, puis à la frontière finale d'envoi. Les deux familles
-réutilisent leur propre politique adaptative : pause courte de momentum ou
-silence plus long de relance. Une observation indisponible bloque la sortie.
-La réponse contextuelle ne peut pas être acceptée dans une file antiflood et
-revenir sans ces contrôles. Une conclusion Portal/Mosaic déjà promise conserve
-son chemin de continuation unique et ses autres garde-fous ; un lot !vdm/!dtc
-autorisé reste un lot, sans se bloquer lui-même après sa première ligne.
-Les commandes explicites et la livraison Hailo ne sont pas arbitrées par ce
-contrôle Spark. Il ne constitue pas une réservation universelle des fournisseurs.
-
-**MB945 : installé, validé et poussé dans `7ddc6f7`.**
-Une demande restée dans la file interne relit les droits actuels et la génération
-IRC avant le départ vers le postéditeur. Une désactivation ou un PART/rejoin
-pendant l'attente peut donc supprimer le travail devenu inutile, sans bloquer
-le prochain salon valide. Le même contrôle final reste actif après la génération
-et le délai de frappe. Une réponse Hailo refusée par l'antiflood ne quitte plus
-ce parcours pour une file de sortie qui pourrait la publier plus tard ; elle
-n'est comptée ni comme envoyée ni comme nouveau contexte.
-Les scénarios couvrent mentions, chatter spontané, révocation pendant l'attente
-et le délai de frappe, reconnexion de salon, progression de la file et refus
-de transport. Ces garanties ne changent ni le cerveau appris ni les fréquences.
-
-Mesurer la pertinence, les répétitions, les chevauchements et le rythme, puis
-faire une observation sur développement avant toute activation en production.
-Les replays Spark emploient le véritable préfixe et la configuration visée.
-Le pilote collectif MetaAI garde son activation explicite et ses contrôles de
-langue, quotas, mémoire, annulation de génération, redémarrage et `/forget`.
-
-La maintenance sélective Hailo reste un chantier spécifique : `forget` et
-`forgetword` exigent un corpus fidèle et autorisé, une reconstruction isolée,
-une bascule contrôlée et une restauration prouvée. La répétition synthétique
-MB805 reste un outil de qualification ; un ancien cerveau sans corpus fidèle
-ne reçoit pas de promesse d'effacement sélectif.
-
-## Étape 4 — Relier la mémoire existante
-
-Partir des fonctions déjà présentes : quotes, factoids, recap, memory,
-onthisday, awards, yearbook et chronologie. Définir quelques parcours utiles,
-avec des renvois clairs entre résultats et commandes plutôt qu'une multiplication
-de syntaxes indépendantes. Respecter visibilité du salon, attribution, limites
-et possibilités d'effacement déjà définies. Toute annonce automatique demande
-un choix explicite du salon et une cadence maîtrisée.
-
-**MB946 : installé, validé et poussé dans `f308ddb`.** `!memory YYYY-MM-DD` permet de
-retrouver une journée connue du salon ; sans argument, le tirage historique
-reste disponible. Une troisième ligne privée propose de revisiter la date,
-de consulter son anniversaire avec `!onthisday MM-DD`, puis son contexte annuel
-avec `!yearbook YYYY` lorsque l'année est prise en charge. Les renvois utilisent
-le préfixe réel de l'instance et n'exécutent aucune commande automatiquement.
-Le bilan annuel existant relie notamment l'activité aux citations et factoids
-ajoutés cette année. Ce lot n'ajoute pas encore de recherche commune dans leurs
-textes. Le jour courant et les 30 derniers jours restent exclus de memory,
-et les archives passent toujours par leur politique de contenu existante.
-Une lecture d'historique en échec est distinguée d'une journée sans résultat.
-Les résultats memory restent en NOTICE ; les commandes proposées conservent
-leurs propres destinations et droits. Voir `docs/MEMORY_JOURNEYS.md`.
-
-**MB947 : recherche de références préparée.** `!memory find <texte>` relie
-l'entrée mémoire aux citations et aux factoids enregistrés du salon courant.
-Les résultats privés proposent des commandes de rappel stables, avec auteur,
-date et extrait court. Les mots sont littéraux, les résultats limités à trois
-par collection avec une indication de dépassement. La lecture des factoids
-respecte sa propre porte, en plus de +OnThisDay. Une collection en panne ne
-masque pas l'autre et n'est pas présentée comme vide. Les compteurs de rappel
-ne changent pas pendant la recherche. Ce parcours ne fouille pas les conversations
-brutes et ne mélange pas les droits ou destinations des commandes proposées.
-La recherche native existante et les journées memory restent disponibles.
-
-## Étape 5 — Faciliter contribution et adoption
-
-Préparer un petit nombre d'exemples de plugins aboutis : capacités minimales,
-permissions expliquées, tests de cycle de vie, gestion des erreurs et retrait
-sans ressources résiduelles. Préserver les cinq packages API v3 acceptés,
-leurs politiques, capacités, données et ledger de démarrage lors des mises à jour.
-
-Vérifier ensuite le parcours d'installation Debian, la documentation, l'aide
-et une démonstration sobre. Une future version stable fera l'objet d'une décision
-séparée, avec les contrôles de préservation MB784/MB786 et une répétition de
-restauration. Une modification de source ne déploie pas mbweb et ne redémarre
-aucune instance IRC.
-
-## Discipline commune à tous les lots
-
-- Garder le schéma actuel de la base ; réutiliser les interfaces existantes.
-- Livrer des périmètres courts avec un bénéfice observable et une restauration.
-- Choisir des tests de comportement et de frontières ; remplacer les doublons
-  et les contrôles de structure devenus peu utiles ; conserver les protections
-  importantes plutôt qu'un objectif de nombre d'assertions.
-- Exécuter les contrôles ciblés et la suite complète
-  `perl t/test_commands.pl --progress`, puis sécurité et intégrité de démarrage.
-  Documenter les limites locales ; ne pas les transformer en dérogations serveur.
-- Mesurer les coûts et les lenteurs avant optimisation. Poursuivre les
-  refactorisations lorsqu'elles débloquent ces objectifs ou corrigent un défaut
-  démontré, en conservant les comportements spécialisés nécessaires.
-
-Références dans le dépôt : `docs/CHANNEL_DIAGNOSTICS.md`, `docs/META_AI.md`,
-`docs/HAILO_BRAIN_MAINTENANCE.md`, `docs/PLUGIN_API_V3.md`,
-`docs/PLUGIN_V3_UPDATE_ACCEPTANCE.md`, `contrib/mbweb/README.md`.
+Le paquet MB948 garde hashes, sauvegarde et retour des fichiers. Il exige
+syntaxes, inventaire, atelier, contrôles ciblés et suite complète
+`perl t/test_commands.pl --progress`, puis sécurité et intégrité. Les limites
+locales restent documentées et ne deviennent pas des exclusions serveur.
+Aucun schéma, réglage privé, activation, fréquence ou service n'est changé par
+l'installation. Les profils n'agissent qu'après une commande explicite.

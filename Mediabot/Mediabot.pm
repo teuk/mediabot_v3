@@ -2729,7 +2729,7 @@ chaninfo|chaninfo #channel|public|Show information about a bot channel.
 chanlist|chanlist|public|List channels known by the bot.
 channels|channels|public|Alias for chanlist.
 channellist|channellist|public|Alias for chanlist.
-chanset|chanset #channel <setting> <value>|channel admin|Change a channel setting.
+chanset|chanset #channel <setting> <value>|channel admin|Change a channel setting; profile show/quiet/balanced/animated/restore requires Master+.
 chanstatlines|chanstatlines #channel|public|Show channel line/statistics information.
 chcatcmd|chcatcmd <new_category> <command>|admin|Move a dynamic command to another category.
 checkhost|checkhost <hostmask>|admin|Search users matching a hostmask.

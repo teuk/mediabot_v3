@@ -8,6 +8,9 @@ first single-channel development promotion. It adds no automatic remediation
 and exposes no exception text, configuration value, mutable user object,
 database handle or arbitrary SQL.
 
+For a generated minimal package and a checked end-to-end lifecycle, start with
+[PLUGIN_WORKSHOP.md](PLUGIN_WORKSHOP.md).
+
 ## Package layout
 
 ```text

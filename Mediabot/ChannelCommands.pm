@@ -449,6 +449,7 @@ sub channelSetSyntax_ctx {
     botNotice($self, $nick, "Syntax: chanset [#channel] auto_join <on|off>");
     botNotice($self, $nick, "Syntax: chanset [#channel] timezone <Area/City>");
     botNotice($self, $nick, "Syntax: chanset [#channel] <+value|-value>");
+    botNotice($self, $nick, "Syntax: chanset #channel profile <show|quiet|balanced|animated|restore> (Master+)");
 }
 
 # Context-based chanset command (Administrator OR channel-level >= 450)
@@ -512,6 +513,31 @@ sub channelSet_ctx {
     unless ($id_channel) {
         botNotice($self, $nick, "Internal error: channel id unavailable for $target_channel");
         return;
+    }
+
+    # Profiles include Hailo ratio changes: retain its stricter Master gate.
+    if ($args[0] eq 'profile') {
+        unless (eval { $user->has_level('Master') }) {
+            botNotice($self, $nick, 'Conversation profiles require Master or Owner.');
+            return;
+        }
+        unless (@args == 2 && defined($args[1]) && !ref($args[1])
+            && $args[1] =~ /\A(?:show|quiet|balanced|animated|restore)\z/) {
+            channelSetSyntax_ctx($ctx);return;
+        }
+        require Mediabot::Conversation::Profiles;
+        my $r=Mediabot::Conversation::Profiles::operate($self,$id_channel,$target_channel,$args[1]);
+        unless ($r->{ok}) {
+            botNotice($self,$nick,'Conversation profile refused: '.$r->{code}.'.');return;
+        }
+        my $state=$r->{state};
+        botNotice($self,$nick,'Conversation profile '.$target_channel.': '
+            .join(' ',map {$_.'='.($state->{$_} ? 'on':'off')} qw(HailoChatter Spark SparkAction))
+            .'; chatter='. (defined($state->{ratio}) ? $state->{ratio}.'%' : 'unset')
+            .'; changed='.$r->{changed}.'; undo='.($r->{undo_available} ? 'available':'none').'.');
+        botNotice($self,$nick,'Hailo master/respond/learn, global Spark arming and existing delivery guards still apply.');
+        logBot($self,$ctx->message,$target_channel,'chanset','profile',$args[1]);
+        return 1;
     }
 
     # --- command handling ---

@@ -1,5 +1,18 @@
 # Changelog — Mediabot v3
 
+## MB948 — Consolidate conversation, contribution and adoption (2026-10-24)
+
+- Add Master/Owner conversation profiles to the existing chanset command:
+  quiet, balanced, animated, show and guarded one-step restore.
+- Change only three existing spontaneous-output gates and optional Hailo ratio
+  in one transaction; retain all other channel settings and delivery guards.
+- Add a minimal API v3 package generator and native offline lifecycle workshop,
+  with one requested capability, default-off behavior and safe namespace refusal.
+- Link the first-channel walkthrough, conversation scenarios and plugin workshop
+  from README and consolidate the roadmap delivery/operational acceptance status.
+- No schema, automatic activation, production deployment or service changes.
+
+
 ## MB947 — Linked saved-reference search (2026-10-24)
 
 - Add `memory find <text>`: privately find saved quotes and factoid keys/values

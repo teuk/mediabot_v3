@@ -33,6 +33,17 @@ Network history and public dashboards: [NETWORK_STATS.md](docs/NETWORK_STATS.md)
 
 Undernet X authentication and recovery: [XAUTH_UNDERNET.md](docs/XAUTH_UNDERNET.md).
 
+## Development walkthroughs
+
+- [First channel in 3.6dev](docs/FIRST_CHANNEL_3.6DEV.md): installation gates,
+  first identity, discovery, diagnostics and a quiet memory demonstration.
+- [Conversation profiles](docs/CONVERSATION_PROFILES.md): explicit per-channel
+  quiet/balanced/animated settings and guarded restoration.
+- [Plugin workshop](docs/PLUGIN_WORKSHOP.md): generate a minimal default-off
+  package, test its native lifecycle offline, then supervise one dev channel.
+- [Roadmap delivery status](docs/ROADMAP_3.6DEV.md): completed source work and
+  remaining operational acceptance, without claiming a new stable release.
+
 ## What Mediabot provides
 
 | Area | Capabilities |

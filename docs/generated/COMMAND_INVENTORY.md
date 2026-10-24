@@ -64,7 +64,7 @@ Source version line: `3.6dev`
 | `chanlist` | public | registry-public, registry-private | `chanlist` | List channels known by the bot. |  |
 | `channellist` | public | registry-public, registry-private | `channellist` | Alias for chanlist. |  |
 | `channels` | public | registry-public, registry-private | `channels` | Alias for chanlist. |  |
-| `chanset` | channel admin | registry-public, registry-private | `chanset #channel <setting> <value>` | Change a channel setting. |  |
+| `chanset` | channel admin | registry-public, registry-private | `chanset #channel <setting> <value>` | Change a channel setting; profile show/quiet/balanced/animated/restore requires Master+. |  |
 | `chanstatlines` | public | registry-public, registry-private | `chanstatlines #channel` | Show channel line/statistics information. |  |
 | `chanstats` | public | registry-public | `chanstats` | Alias for dashboard. |  |
 | `chatgpt` | public | registry-public | `chatgpt <prompt>` | Alias for tellme. |  |
