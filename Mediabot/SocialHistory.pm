@@ -508,7 +508,7 @@ sub mbMemory_ctx {
     my $channel = $ctx->channel;
 
     unless (isIrcChannelTarget($channel)) {
-        botNotice($self, $nick, "Syntax: memory  (use it in a channel)");
+        botNotice($self, $nick, "Syntax: memory [YYYY-MM-DD]  (use it in a channel)");
         return;
     }
 
@@ -517,8 +517,9 @@ sub mbMemory_ctx {
     } // 1;
 
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    if (grep { defined($_) && /\S/ } @args) {
-        botNotice($self, $nick, "Syntax: memory  (no argument)");
+    my $day = @args == 1 ? _memory_date($args[0]) : undef;
+    if (@args && !defined $day) {
+        botNotice($self, $nick, "Syntax: memory [YYYY-MM-DD]  (valid calendar date required)");
         return;
     }
 
@@ -535,14 +536,18 @@ sub mbMemory_ctx {
         return;
     }
 
+    my $lookup_failed = 0;
     my @lines = Mediabot::UserCommands::_memory_lines(
-        $self, $id_channel, $channel
+        $self, $id_channel, $channel, (defined($day) ? (day => $day) : ()),
+        on_error => sub { $lookup_failed = 1 },
     );
     unless (@lines) {
         botNotice(
             $self,
             $nick,
-            "No suitable channel memory older than 30 days was found."
+            $lookup_failed ? 'memory: history lookup unavailable.'
+                : "No suitable channel memory older than 30 days was found"
+                    . (defined($day) ? " on $day." : '.')
         );
         return;
     }
@@ -566,10 +571,30 @@ sub _memory_rand_bounded {
     return $v;
 }
 
+sub _memory_date {
+    my ($value) = @_;
+    return undef unless defined($value) && !ref($value)
+        && "$value" =~ /\A([1-9]\d{3})-(\d{2})-(\d{2})\z/;
+    my ($year, $month, $day) = ($1 + 0, $2 + 0, $3 + 0);
+    return undef unless $month >= 1 && $month <= 12;
+    my $leap = $year % 4 == 0 && ($year % 100 != 0 || $year % 400 == 0);
+    my @days = (31, $leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31);
+    return undef unless $day >= 1 && $day <= $days[$month - 1];
+    return "$value";
+}
+
 sub _memory_lines {
     my ($self, $id_channel, $channel_label, %opts) = @_;
     my $dbh = $self->{dbh};
     return () unless $dbh && defined $id_channel;
+    my $requested_day = exists($opts{day}) ? _memory_date($opts{day}) : undef;
+    return () if exists($opts{day}) && !defined($requested_day);
+    my $read_ok = sub {
+        my ($result) = @_;
+        return 1 if ref($result) eq 'HASH' && $result->{live_ok};
+        eval { $opts{on_error}->() } if ref($opts{on_error}) eq 'CODE';
+        return 0;
+    };
 
     my $attempts = int($opts{attempts} // 4);
     $attempts = 1 if $attempts < 1;
@@ -579,64 +604,69 @@ sub _memory_lines {
         : sub { rand($_[0]) };
 
     my ($first_uts, $last_uts);
-    my $first_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
-        SELECT ts, UNIX_TIMESTAMP(ts) AS uts
-        FROM __CLSRC__
-        WHERE id_channel = ?
-          AND event_type IN ('public','action')
-          AND ts < CURDATE() - INTERVAL 30 DAY
-        ORDER BY ts ASC
-        LIMIT 1
-    }, [ $id_channel ], sub {
-        my ($r) = @_;
-        return unless defined $r->{uts};
-        $first_uts = 0 + $r->{uts}
-            if !defined($first_uts) || $r->{uts} < $first_uts;
-    }, 'content');
-    return () unless $first_g->{live_ok} && defined $first_uts;
-
-    my $last_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
-        SELECT ts, UNIX_TIMESTAMP(ts) AS uts
-        FROM __CLSRC__
-        WHERE id_channel = ?
-          AND event_type IN ('public','action')
-          AND ts < CURDATE() - INTERVAL 30 DAY
-        ORDER BY ts DESC
-        LIMIT 1
-    }, [ $id_channel ], sub {
-        my ($r) = @_;
-        return unless defined $r->{uts};
-        $last_uts = 0 + $r->{uts}
-            if !defined($last_uts) || $r->{uts} > $last_uts;
-    }, 'content');
-    return () unless $last_g->{live_ok} && defined $last_uts && $last_uts >= $first_uts;
-
-    my $span = $last_uts - $first_uts + 1;
-    my ($best, %seen_day);
-
-    ATTEMPT:
-    for (1 .. $attempts) {
-        my $anchor = $first_uts + _memory_rand_bounded($rand_cb, $span);
-        my $hit;
-        my $seek_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+    unless (defined $requested_day) {
+        my $first_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
             SELECT ts, UNIX_TIMESTAMP(ts) AS uts
             FROM __CLSRC__
             WHERE id_channel = ?
               AND event_type IN ('public','action')
-              AND ts >= FROM_UNIXTIME(?)
               AND ts < CURDATE() - INTERVAL 30 DAY
             ORDER BY ts ASC
             LIMIT 1
-        }, [ $id_channel, $anchor ], sub {
+        }, [ $id_channel ], sub {
             my ($r) = @_;
             return unless defined $r->{uts};
-            $hit = $r if !$hit || $r->{uts} < $hit->{uts};
+            $first_uts = 0 + $r->{uts}
+                if !defined($first_uts) || $r->{uts} < $first_uts;
         }, 'content');
-        return () unless $seek_g->{live_ok};
-        next ATTEMPT unless $hit && defined $hit->{ts};
+        return () unless $read_ok->($first_g) && defined $first_uts;
 
-        my ($day) = $hit->{ts} =~ /\A(\d{4}-\d{2}-\d{2})/;
-        next ATTEMPT unless defined $day && !$seen_day{$day}++;
+        my $last_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+            SELECT ts, UNIX_TIMESTAMP(ts) AS uts
+            FROM __CLSRC__
+            WHERE id_channel = ?
+              AND event_type IN ('public','action')
+              AND ts < CURDATE() - INTERVAL 30 DAY
+            ORDER BY ts DESC
+            LIMIT 1
+        }, [ $id_channel ], sub {
+            my ($r) = @_;
+            return unless defined $r->{uts};
+            $last_uts = 0 + $r->{uts}
+                if !defined($last_uts) || $r->{uts} > $last_uts;
+        }, 'content');
+        return () unless $read_ok->($last_g) && defined $last_uts && $last_uts >= $first_uts;
+    }
+
+    my $span = defined($requested_day) ? 0 : $last_uts - $first_uts + 1;
+    my ($best, %seen_day);
+
+    ATTEMPT:
+    for (1 .. (defined($requested_day) ? 1 : $attempts)) {
+        my $day = $requested_day;
+        unless (defined $day) {
+            my $anchor = $first_uts + _memory_rand_bounded($rand_cb, $span);
+            my $hit;
+            my $seek_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
+                SELECT ts, UNIX_TIMESTAMP(ts) AS uts
+                FROM __CLSRC__
+                WHERE id_channel = ?
+                  AND event_type IN ('public','action')
+                  AND ts >= FROM_UNIXTIME(?)
+                  AND ts < CURDATE() - INTERVAL 30 DAY
+                ORDER BY ts ASC
+                LIMIT 1
+            }, [ $id_channel, $anchor ], sub {
+                my ($r) = @_;
+                return unless defined $r->{uts};
+                $hit = $r if !$hit || $r->{uts} < $hit->{uts};
+            }, 'content');
+            return () unless $read_ok->($seek_g);
+            next ATTEMPT unless $hit && defined $hit->{ts};
+
+            ($day) = $hit->{ts} =~ /\A(\d{4}-\d{2}-\d{2})/;
+            next ATTEMPT unless defined $day && !$seen_day{$day}++;
+        }
 
         my ($msgs, $people) = (0, 0);
         my $day_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
@@ -646,13 +676,14 @@ sub _memory_lines {
               AND event_type IN ('public','action')
               AND ts >= ?
               AND ts < DATE_ADD(?, INTERVAL 1 DAY)
+              AND ts < CURDATE() - INTERVAL 30 DAY
         }, [ $id_channel, $day, $day ], sub {
             my ($r) = @_;
             $msgs += $r->{msgs} // 0;
             my $p = $r->{people} // 0;
             $people = $p if $p > $people;  # same boundary approximation as !onthisday
         }, 'content');
-        return () unless $day_g->{live_ok};
+        return () unless $read_ok->($day_g);
         next ATTEMPT if $msgs <= 0;
 
         my $cand = {
@@ -681,7 +712,7 @@ sub _memory_lines {
         $nick_counts{ $r->{nick} } += $r->{c} // 0
             if defined($r->{nick}) && length($r->{nick});
     }, 'content');
-    return () unless $top_g->{live_ok};
+    return () unless $read_ok->($top_g);
 
     my $topnick = '?';
     if (%nick_counts) {
@@ -725,7 +756,7 @@ sub _memory_lines {
         my $quote_g = Mediabot::Helpers::channel_log_gather(
             $self, $dbh, $sql, $bind, sub { push @quotes, $_[0] }, 'content'
         );
-        return () unless $quote_g->{live_ok};
+        return () unless $read_ok->($quote_g);
         last if @quotes;
     }
 
@@ -741,6 +772,14 @@ sub _memory_lines {
         push @lines, "\x{1F4AC} $quote";
     }
 
+    my $prefix = eval { $self->{conf}->get('main.MAIN_PROG_CMD_CHAR') };
+    $prefix = '!' unless defined($prefix) && !ref($prefix)
+        && length($prefix) == 1 && $prefix !~ /[\s\x00-\x1f\x7f]/;
+    my ($year, $month_day) = $day =~ /\A(\d{4})-(\d{2}-\d{2})\z/;
+    my $links = "Explore: ${prefix}memory $day | ${prefix}onthisday $month_day";
+    $links .= " | ${prefix}yearbook $year"
+        if $year >= 2000 && $year <= (localtime())[5] + 1900;
+    push @lines, $links;
     return @lines;
 }
 

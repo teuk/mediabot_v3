@@ -2944,7 +2944,7 @@ obs|obs|public|Alias for observatory.
 recap|recap [30m\|2h] [ai] [en\|fr\|es]|public|Summarize what you missed on this channel (stats, or AI summary with 'ai'; the AI summary follows the channel language unless forced).
 onthisday|onthisday [MM-DD]|public|Resurface what happened on this channel on a calendar day (today, or a given MM-DD) in past years. Alias: otd
 otd|otd|public|Alias for onthisday.
-memory|memory|public|Take a bounded random trip into this channel's history (older than 30 days).
+memory|memory [YYYY-MM-DD]|public|Revisit a channel day or take a bounded random trip; replies arrive privately (older than 30 days).
 learn|learn <keyword> = <value>|public|Store a shared channel fact. Recall with whatis.
 whatis|whatis <keyword>|public|Recall a shared channel fact stored with learn. Shortcut: ?keyword
 forget|forget <keyword>|public|Delete a channel fact (author or channel op only).

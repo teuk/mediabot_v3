@@ -1,7 +1,7 @@
 # Mediabot 3.6dev — roadmap actualisée
 
-Date : 24 octobre 2026. Base confirmée : MB944, commit `81755ac`,
-`3.6dev-20261024_112633`. Cette feuille de route traduit les orientations
+Date : 24 octobre 2026. Base confirmée : MB945, commit `7ddc6f7`,
+`3.6dev-20261024_142740`. Cette feuille de route traduit les orientations
 retenues avec Christophe ; elle ne programme aucune mise à jour de production.
 La version stable publiée reste 3.5. Aucune date de publication 3.7 n'est fixée.
 
@@ -15,7 +15,7 @@ Les rounds MB877 à MB937 ont notamment renforcé les modules IRC partagés,
 les budgets de texte, les sorties différées, les timers, les reconnexions,
 l'Unicode, les transactions, la partyline et le cycle de vie des plugins.
 Apple Music et Reddit ont également reçu de nouvelles fonctions visibles.
-MB944 est validé sur le serveur : 30 819 assertions Perl, sécurité GO/37
+MB945 est validé sur le serveur : 30 873 assertions Perl, sécurité GO/37
 et intégrité de démarrage OK. Le déploiement mbweb MB941 et ses 77 tests Node
 ont été vérifiés dans le lot précédent.
 Cette validation ne constitue pas une certification exhaustive.
@@ -151,7 +151,7 @@ autorisé reste un lot, sans se bloquer lui-même après sa première ligne.
 Les commandes explicites et la livraison Hailo ne sont pas arbitrées par ce
 contrôle Spark. Il ne constitue pas une réservation universelle des fournisseurs.
 
-**MB945 : autorisation Hailo au départ réel et livraison immédiate préparées.**
+**MB945 : installé, validé et poussé dans `7ddc6f7`.**
 Une demande restée dans la file interne relit les droits actuels et la génération
 IRC avant le départ vers le postéditeur. Une désactivation ou un PART/rejoin
 pendant l'attente peut donc supprimer le travail devenu inutile, sans bloquer
@@ -183,6 +183,20 @@ avec des renvois clairs entre résultats et commandes plutôt qu'une multiplicat
 de syntaxes indépendantes. Respecter visibilité du salon, attribution, limites
 et possibilités d'effacement déjà définies. Toute annonce automatique demande
 un choix explicite du salon et une cadence maîtrisée.
+
+**MB946 : premier parcours de journée préparé.** `!memory YYYY-MM-DD` permet de
+retrouver une journée connue du salon ; sans argument, le tirage historique
+reste disponible. Une troisième ligne privée propose de revisiter la date,
+de consulter son anniversaire avec `!onthisday MM-DD`, puis son contexte annuel
+avec `!yearbook YYYY` lorsque l'année est prise en charge. Les renvois utilisent
+le préfixe réel de l'instance et n'exécutent aucune commande automatiquement.
+Le bilan annuel existant relie notamment l'activité aux citations et factoids
+ajoutés cette année. Ce lot n'ajoute pas encore de recherche commune dans leurs
+textes. Le jour courant et les 30 derniers jours restent exclus de memory,
+et les archives passent toujours par leur politique de contenu existante.
+Une lecture d'historique en échec est distinguée d'une journée sans résultat.
+Les résultats memory restent en NOTICE ; les commandes proposées conservent
+leurs propres destinations et droits. Voir `docs/MEMORY_JOURNEYS.md`.
 
 ## Étape 5 — Faciliter contribution et adoption
 

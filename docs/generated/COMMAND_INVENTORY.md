@@ -146,7 +146,7 @@ Source version line: `3.6dev`
 | `listeners` | public | registry-public | `listeners` | Show Icecast listener counts. |  |
 | `login` | private | registry-private | `login <user> <password>` | Authenticate with the bot. |  |
 | `logout` | private | registry-private | `logout` | Logout from the bot. |  |
-| `memory` | public | registry-public | `memory` | Take a bounded random trip into this channel's history (older than 30 days). |  |
+| `memory` | public | registry-public | `memory [YYYY-MM-DD]` | Revisit a channel day or take a bounded random trip; replies arrive privately (older than 30 days). |  |
 | `meteo` | public | registry-public | `meteo [city]` | Alias for weather. |  |
 | `milestone` | public | registry-public | `milestone` | Show channel milestones: total messages, next round milestone, progress and ETA. Alias: milestones |  |
 | `milestones` | public | registry-public | `milestones` | Alias for milestone. |  |

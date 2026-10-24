@@ -10,6 +10,17 @@ release. The current development line is `3.6dev`.
 
 ## [Unreleased] — 3.6dev
 
+### MB946 — Revisit a channel day and follow its history (2026-10-24)
+
+- Accept an optional strict calendar date in memory while preserving bounded
+  random journeys. Use the current channel and archive content policy, retain
+  the thirty-day exclusion and bypass random selection for a requested date.
+- Add a compact private navigation line to repeat the day, inspect its calendar
+  anniversary or open its supported yearbook, using the instance command prefix.
+- Distinguish failed history reads from a genuinely empty selection. Keep the
+  OnThisDay gate and NOTICE delivery, and record MB945 server acceptance.
+
+
 ### MB945 — Reauthorize queued Hailo work at provider handoff (2026-10-24)
 
 - Recheck current channel gates and IRC generation when a queued reply obtains

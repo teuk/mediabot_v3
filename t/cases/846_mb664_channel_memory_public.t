@@ -58,8 +58,8 @@ return sub {
     );
     $assert->like(
         $mb,
-        qr/^memory\|memory\|public\|Take a bounded random trip into this channel's history/m,
-        'mb664-846: memory is documented in public help'
+        qr/^memory\|memory \[YYYY-MM-DD\]\|public\|Revisit a channel day or take a bounded random trip; replies arrive privately/m,
+        'mb664-846: memory documents optional date, random fallback and private replies'
     );
     $assert->like(
         $mb,
