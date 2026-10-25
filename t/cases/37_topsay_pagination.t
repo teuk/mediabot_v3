@@ -102,7 +102,7 @@ sub _extract_sub_topsay_pagination {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_topsay_pagination(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src  = _slurp_topsay_pagination(File::Spec->catfile('.', 'Mediabot', 'Stats', 'History.pm'));
     my $func = _extract_sub_topsay_pagination($src, 'userTopSay_ctx');
 
     $assert->ok(

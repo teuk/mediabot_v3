@@ -11,6 +11,7 @@ our @EXPORT_OK = qw(
     mbWordCount_ctx
     mbStreak_ctx
     mbLast_ctx
+    userTopSay_ctx
 );
 
 # Keep call-time compatibility with the existing command facade. Registry,
@@ -18,6 +19,8 @@ our @EXPORT_OK = qw(
 sub botPrivmsg { goto &Mediabot::UserCommands::botPrivmsg }
 sub botNotice  { goto &Mediabot::UserCommands::botNotice }
 sub logBot     { goto &Mediabot::UserCommands::logBot }
+sub noticeConsoleChan { goto &Mediabot::UserCommands::noticeConsoleChan }
+sub truncate_utf8 { goto &Mediabot::UserCommands::truncate_utf8 }
 
 # ---------------------------------------------------------------------------
 # mbWordCount_ctx --- !wordcount [nick]
@@ -409,6 +412,174 @@ sub mbLast_ctx {
             botPrivmsg($self, $channel, "  ($ago_str$time_exact) $row->{publictext}");
         }
     }
+    return 1;
+}
+
+# Ranked sayings, including their established private detail pagination.
+sub userTopSay_ctx {
+    my ($ctx) = @_;
+
+    my $self = $ctx->bot;
+    my $nick = $ctx->nick;
+
+    my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+
+    # Destination (private notice vs channel privmsg)
+    my $ctx_chan  = $ctx->channel // undef;
+    my $is_private = !defined($ctx_chan) || $ctx_chan eq '';
+    my $dest_chan  = $ctx_chan; # may be undef
+
+    my $user = $ctx->user;
+    unless ($user) {
+        botNotice($self, $nick, "User not found.");
+        return;
+    }
+
+    # Require authentication
+    unless ($user->is_authenticated) {
+        my $pfx = ($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // $nick) : $nick;
+        noticeConsoleChan($self, "$pfx topsay attempt (unauthenticated user " . ($user->nickname // '?') . ")");
+        botNotice(
+            $self, $nick,
+            "You must be logged in to use this command: /msg "
+            . $self->{irc}->nick_folded
+            . " login username password"
+        );
+        return;
+    }
+
+    # Require Administrator+
+    unless (eval { $user->has_level('Administrator') }) {
+        my $pfx = ($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // $nick) : $nick;
+        my $lvl = eval { $user->level_description } || eval { $user->level } || '?';
+        noticeConsoleChan($self, "$pfx topsay attempt (Administrator required for " . ($user->nickname // '?') . " [$lvl])");
+        botNotice($self, $nick, "This command is not available for your level. Contact a bot master.");
+        return;
+    }
+
+    # Channel and nick extraction:
+    # - If first arg is a #channel => use it, and output there (unless ctx is private and you prefer notice; we keep original behavior)
+    # - Else use ctx->channel
+    my $chan = undef;
+    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+        $chan = shift @args;
+    } else {
+        $chan = $ctx_chan;
+    }
+
+    unless (defined $chan && $chan =~ /^#/) {
+        botNotice($self, $nick, "Syntax: topsay [#channel] <nick>");
+        return;
+    }
+
+    # If command was issued in-channel, reply in that channel by default.
+    # If issued in private, keep replying in notice unless a channel was explicitly provided.
+    if (!$is_private) {
+        $dest_chan = $chan;
+    } else {
+        # private: if user provided a channel explicitly, send to that channel (keeps old behavior: isPrivate is based on original sChannel)
+        $dest_chan = $chan if defined $chan;
+    }
+
+    my $target_nick = (defined $args[0] && $args[0] ne '') ? $args[0] : $nick;
+
+    my $sql = <<'SQL';
+SELECT event_type, publictext, COUNT(publictext) as hit
+FROM CHANNEL JOIN CHANNEL_LOG ON CHANNEL_LOG.id_channel = CHANNEL.id_channel
+WHERE (CHANNEL_LOG.event_type = 'public' OR CHANNEL_LOG.event_type = 'action')
+  AND CHANNEL.name = ?
+  AND CHANNEL_LOG.nick LIKE ? ESCAPE '!'
+GROUP BY publictext
+ORDER BY hit DESC
+LIMIT 30
+SQL
+
+    my $target_nick_like = $target_nick;
+    $target_nick_like =~ s/!/!!/g;
+    $target_nick_like =~ s/%/!%/g;
+    $target_nick_like =~ s/_/!_/g;
+
+    my $sth = $self->{dbh}->prepare($sql);
+    unless ($sth && $sth->execute($chan, $target_nick_like)) {
+        $self->{logger}->log(1, "userTopSay_ctx() SQL Error: $DBI::errstr Query: $sql");
+        $sth->finish if $sth;
+        return;
+    }
+
+    my @items;
+
+    my @skip_patterns = (
+        qr/^\s*$/,
+        qr/^[:;=]?[pPdDoO)]$/,
+        qr/^[(;][:;=]?$/,
+        qr/^x?D$/i,
+        qr/^(heh|hah|huh|hih)$/i,
+        qr/^!/,
+        qr/^=.?$/,
+        qr/^;[p>]$/,
+        qr/^:>$/,
+        qr/^lol$/i,
+    );
+
+    while (my $ref = $sth->fetchrow_hashref()) {
+        my ($text, $event_type, $count) = @{$ref}{qw/publictext event_type hit/};
+
+        next unless defined $text;
+
+        # Clean control characters (old behavior)
+        $text =~ s/(.)/(ord($1) == 1) ? "" : $1/egs;
+
+        # Skip useless lines
+        next if grep { $text =~ $_ } @skip_patterns;
+
+        my $entry =
+            ($event_type && $event_type eq 'action')
+            ? String::IRC->new("$text ($count)")->bold
+            : "$text ($count)";
+
+        push @items, $entry;
+    }
+
+    if (!@items) {
+        my $msg = "No results.";
+        if ($is_private) {
+            botNotice($self, $nick, $msg);
+        }
+        else {
+            botPrivmsg($self, $dest_chan, $msg);
+        }
+    }
+    else {
+        my $count   = scalar(@items);
+        my $summary = "Top sayings for $target_nick on $chan: $count result(s), showing max 30";
+
+        if ($is_private) {
+            botNotice($self, $nick, $summary);
+        }
+        else {
+            botPrivmsg($self, $dest_chan, "$summary - details sent by notice to $nick");
+        }
+
+        my $per_line = 3;
+        my $page     = 1;
+
+        while (@items) {
+            my @chunk = splice(@items, 0, $per_line);
+            my $line  = sprintf("topsay[%02d]: %s", $page, join(' | ', @chunk));
+
+            if (length($line) > 360) {
+                $line = truncate_utf8($line, 357);
+            }
+
+            botNotice($self, $nick, $line);
+            $page++;
+        }
+    }
+
+    my $pfx = ($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // $nick) : $nick;
+    logBot($self, $ctx->message, $dest_chan, "topsay", "$pfx topsay on $target_nick");
+
+    $sth->finish;
     return 1;
 }
 

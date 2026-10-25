@@ -27,7 +27,8 @@ return sub {
 
     my $src = _slurp_764(File::Spec->catfile('Mediabot', 'UserCommands.pm'))
               . "\n" . _slurp_764(File::Spec->catfile('Mediabot', 'SocialHistory.pm'))
-              . "\n" . _slurp_764(File::Spec->catfile('Mediabot', 'Stats', 'History.pm'));
+              . "\n" . _slurp_764(File::Spec->catfile('Mediabot', 'Stats', 'History.pm'))
+              . "\n" . _slurp_764(File::Spec->catfile('Mediabot', 'Stats', 'Affinity.pm'));
 
     # [1] les trois lecteurs de texte
     for my $sub_name (qw(mbWordCount_ctx mbLast_ctx mbCompat_ctx)) {

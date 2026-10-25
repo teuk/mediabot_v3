@@ -187,7 +187,8 @@ return sub {
               . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'SocialHistory.pm'))
               . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Users', 'Seen.pm'))
               . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Stats', 'Activity.pm'))
-              . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Stats', 'History.pm'));
+              . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Stats', 'History.pm'))
+              . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Stats', 'Affinity.pm'));
     my @career = qw(
         mbStats_ctx mbTop_ctx mbStreak_ctx mbLeaderboard_ctx
         mbWordCount_ctx mbLast_ctx mbCompat_ctx

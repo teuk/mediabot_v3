@@ -130,7 +130,9 @@ return sub {
         or die $!; local $/; <$fh> };
     my $duel = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Games/Duel.pm'
         or die $!; local $/; <$fh> };
-    my $wired_src = join "\n", $users, $social, $trivia, $quotegame, $duel;
+    my $affinity = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Stats/Affinity.pm'
+        or die $!; local $/; <$fh> };
+    my $wired_src = join "\n", $users, $social, $trivia, $quotegame, $duel, $affinity;
     my $wired = 0;
     for my $kind (qw(horoscope compat mood duel_win trivia_correct quotegame_solved)) {
         $wired++ if $wired_src =~ /_ach_progress\(\$self, '\Q$kind\E'/;

@@ -154,7 +154,8 @@ The authentication object and policy still live in `User.pm` and `Context.pm`.
 | Duels, their karma changes and achievement hooks | `Mediabot/Games/Duel.pm` | `mb610`, `playful`, `mb411` |
 | Remote trivia parsing and HTTP | `Mediabot/External/OpenTriviaDB.pm` | `trivia`, `mb394`, `mb395` |
 | Channel statistics, rankings and activity charts | `Mediabot/Stats/Activity.pm` | `stats`, `mb574`, `mb578`, `mb627` |
-| Word counts, activity streaks and last messages | `Mediabot/Stats/History.pm` | `wordcount`, `streak`, `mb426`, `mb655`, `mb738` |
+| Word counts, activity streaks, last messages and ranked sayings | `Mediabot/Stats/History.pm` | `wordcount`, `streak`, `topsay`, `mb426`, `mb455`, `mb655`, `mb738` |
+| Channel affinity from hours, vocabulary, karma and adjacent messages | `Mediabot/Stats/Affinity.pm` | `compat`, `mb427`, `mb575`, `mb576`, `mb578`, `mb610` |
 | Exact account/channel level lookups | `Mediabot/Users/Levels.pm` | `user_id_level`, `usercommands_lookup`, `moduser` |
 | Account statistics, userinfo and channel greet views | `Mediabot/Users/Profiles.pm` | `userinfo`, `greet`, `mb455` |
 | Birthday command and local-calendar helpers | `Mediabot/Users/Birthdays.pm` | `birthday`, `mb399`, `mb434`, `horoscope` |
@@ -189,6 +190,27 @@ help. Verify or regenerate it with the existing tool when changing those:
 perl tools/mb_architecture_inventory.pl --check docs/generated/COMMAND_INVENTORY.md
 # Only when changing the catalogue/help:
 perl tools/mb_architecture_inventory.pl --write docs/generated/COMMAND_INVENTORY.md
+```
+
+### Trace sayings and affinity
+
+`userTopSay_ctx` is implemented in `Stats::History`; `mbCompat_ctx` is in
+`Stats::Affinity`. Both retain their historical `UserCommands` imports and
+`Mediabot` methods. The catalogue and asynchronous command dispatch still
+call the same entry points.
+
+`topsay` requires an authenticated Administrator or higher. It keeps its
+literal nickname escaping and SQL limit, sends at most a summary to the
+channel, and sends paginated details by notice. `compat` remains scoped to
+the requested channel and its `Games` setting. Its historical hours and word
+samples use the shared live/archive reader; its recent adjacent-message
+query stays on the live table. Achievement progress and IRC hooks resolve
+through the existing facade at call time.
+
+Use this offline slice when editing either command or its boundaries:
+
+```bash
+perl t/test_commands.pl --filter 'topsay|compat|usermodinfo|mb427|mb348|mb455|mb575|mb576|mb578|mb610|dispatch|module_structure' --progress
 ```
 
 ### Why the old game names still exist

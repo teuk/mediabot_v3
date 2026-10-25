@@ -27,7 +27,7 @@ sub _extract_sub_usermodinfo_safety {
     my $start = index($src, "sub $name");
     die "sub $name not found" if $start < 0;
 
-    my $next = index($src, "\n# Get user ID and level on a specific channel\nsub userTopSay_ctx", $start);
+    my $next = index($src, "\n# Get timezone for a user (nickname / handle)\nsub _get_user_tz", $start);
     die "next marker after $name not found" if $next < 0;
 
     return substr($src, $start, $next - $start);

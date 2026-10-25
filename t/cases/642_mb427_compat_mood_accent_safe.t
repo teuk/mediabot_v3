@@ -45,7 +45,8 @@ return sub {
 
     # --- 2. Câblage réel ---------------------------------------------------
     my $src = _slurp_642(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'))
-              . "\n" . _slurp_642(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
+              . "\n" . _slurp_642(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'))
+              . "\n" . _slurp_642(File::Spec->catfile('Mediabot', 'Stats', 'Affinity.pm'));
     (my $code = $src) =~ s/^\s*#.*$//mg;
 
     for my $sub (qw(mbCompat_ctx mbMood_ctx)) {

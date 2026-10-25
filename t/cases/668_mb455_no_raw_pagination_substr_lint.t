@@ -70,6 +70,9 @@ return sub {
             $src .= "\n" . _slurp_668(
                 File::Spec->catfile('.', 'Mediabot', 'Users', 'Profiles.pm')
             );
+            $src .= "\n" . _slurp_668(
+                File::Spec->catfile('.', 'Mediabot', 'Stats', 'History.pm')
+            );
         }
         if ($mod eq 'Partyline.pm') {
             $src .= "\n" . _slurp_668(

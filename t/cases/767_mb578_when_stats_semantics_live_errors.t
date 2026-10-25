@@ -169,7 +169,8 @@ return sub {
               . "\n" . _slurp_767(File::Spec->catfile('Mediabot', 'SocialHistory.pm'))
               . "\n" . _slurp_767(File::Spec->catfile('Mediabot', 'Users', 'Seen.pm'))
               . "\n" . _slurp_767(File::Spec->catfile('Mediabot', 'Stats', 'Activity.pm'))
-              . "\n" . _slurp_767(File::Spec->catfile('Mediabot', 'Stats', 'History.pm'));
+              . "\n" . _slurp_767(File::Spec->catfile('Mediabot', 'Stats', 'History.pm'))
+              . "\n" . _slurp_767(File::Spec->catfile('Mediabot', 'Stats', 'Affinity.pm'));
 
     # [1b] structure de when : gather all SANS filtre + gather content AVEC
     my $when = _sub_src_767($src, 'mbWhen_ctx');

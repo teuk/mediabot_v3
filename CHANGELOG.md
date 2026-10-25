@@ -1,5 +1,18 @@
 # Changelog — Mediabot v3
 
+## MB956 — Channel sayings and affinity modules (2026-10-25)
+
+- Move `userTopSay_ctx` into `Stats::History` and `mbCompat_ctx` into
+  `Stats::Affinity`, retaining both function bodies, legacy exports and bot
+  methods. `UserCommands.pm` shrinks from 3,730 to 3,332 lines.
+- Preserve Administrator/authentication gates, literal nick matching, private
+  detail pagination, Games policy, channel scope, live/archive gathering,
+  scoring, achievement progress, metrics and existing async dispatch.
+- Point ten existing source-regression cases at the actual owners; add three
+  cold-load integration checks for API identity, denied access, output routing
+  and late-bound progress hooks. Update the contributor navigation guide.
+
+
 ## MB955 — Give level lookups and profile views dedicated owners (2026-10-25)
 
 - Extract four exact account/channel level readers into `Users/Levels.pm`,

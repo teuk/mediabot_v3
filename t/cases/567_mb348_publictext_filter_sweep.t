@@ -64,7 +64,8 @@ return sub {
     my $uc = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
     my $sh = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
     my $stats = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Stats', 'Activity.pm'))
-              . "\n" . _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Stats', 'History.pm'));
+              . "\n" . _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Stats', 'History.pm'))
+              . "\n" . _slurp_567(File::Spec->catfile('Mediabot', 'Stats', 'Affinity.pm'));
     my $seen = _slurp_567(File::Spec->catfile('Mediabot', 'Users', 'Seen.pm'));
     my $stats_src = join("\n", $uc, $sh, $stats, $seen);
     $assert->is(_count_sql($seen, 'publictext IS NOT NULL'), 0,
