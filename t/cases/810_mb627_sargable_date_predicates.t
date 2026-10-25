@@ -40,7 +40,9 @@ return sub {
         or die $!; local $/; <$fh> };
     my $history = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Stats/History.pm'
         or die $!; local $/; <$fh> };
-    my $src = join("\n", $users, $social, $activity, $history);
+    my $seen = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Users/Seen.pm'
+        or die $!; local $/; <$fh> };
+    my $src = join("\n", $users, $social, $activity, $history, $seen);
 
     # [1] recensement de la classe
     my @bad;

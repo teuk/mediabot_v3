@@ -61,7 +61,7 @@ return sub {
     my ($assert) = @_;
 
     my $src = _slurp_190(
-        File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm')
+        File::Spec->catfile('.', 'Mediabot', 'Users', 'Seen.pm')
     );
 
     my $body = _extract_sub_body_190($src, 'mbSeen_ctx');

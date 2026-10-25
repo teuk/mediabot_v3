@@ -95,7 +95,8 @@ return sub {
     # --- [3] cohérence de l'arc : gardes DB partout ------------------------
     {
         my $src = _slurp_710(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'))
-             . "\n" . _slurp_710(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
+             . "\n" . _slurp_710(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'))
+              . "\n" . _slurp_710(File::Spec->catfile('Mediabot', 'Users', 'Seen.pm'));
 
         my ($mood) = $src =~ /(sub mbMood_ctx \{.*?\n\})/s; $mood //= '';
         $assert->like($mood, qr/unless \(\$dbh\) \{ botNotice.*database unavailable/s,

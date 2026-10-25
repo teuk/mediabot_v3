@@ -1,5 +1,18 @@
 # Changelog — Mediabot v3
 
+## MB954 — Give birthdays and last-seen lookups dedicated source owners (2026-10-25)
+
+- Extract the birthday command and six helpers into `Users/Birthdays.pm`,
+  and seen into `Users/Seen.pm`; preserve all eight function bodies.
+- Keep historical aliases, public bot methods, transports and identity lookup;
+  preserve authentication, calendar/DST rules, SQL, wildcard escaping, channel
+  scope and live/archive failure semantics.
+- Reduce `UserCommands.pm` from 4,841 to 4,104 lines and extend the developer
+  source map and offline test examples.
+- Follow the implementations in existing calendar, history and SQL checks;
+  exercise real calendar helpers, authorization guards and three import orders.
+
+
 ## MB953 — Give small games and duels dedicated source owners (2026-10-25)
 
 - Extract built-in 8ball, slap, roll, flip and choose into `Games/Chance.pm`,

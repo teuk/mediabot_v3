@@ -35,7 +35,7 @@ sub _extract_sub_707 {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_707(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src  = _slurp_707(File::Spec->catfile('.', 'Mediabot', 'Users', 'Seen.pm'));
     my $body = _extract_sub_707($src, 'mbSeen_ctx');
     $assert->ok(defined $body && $body ne '', 'mbSeen_ctx localisé');
 

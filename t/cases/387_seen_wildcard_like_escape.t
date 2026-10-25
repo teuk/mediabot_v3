@@ -42,9 +42,9 @@ my $case = sub {
 
     my $root = File::Spec->catdir($Bin, '..', '..');
 
-    my $uc_file = File::Spec->catfile($root, 'Mediabot', 'UserCommands.pm');
+    my $uc_file = File::Spec->catfile($root, 'Mediabot', 'Users', 'Seen.pm');
     open my $ufh, '<', $uc_file
-        or do { $assert->(0, "cannot open UserCommands.pm: $!"); return; };
+        or do { $assert->(0, "cannot open Users/Seen.pm: $!"); return; };
     my $uc = do { local $/; <$ufh> };
     close $ufh;
 

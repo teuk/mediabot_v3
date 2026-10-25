@@ -112,6 +112,20 @@ The history reader, archive retention rules and SQL scopes remain owned by
 `Helpers.pm` and `ChannelLog/Reader.pm`. Source-inspection tests must follow an
 extracted command to its new owner; keep their original assertions.
 
+For user-facing birthdays and last-seen lookups:
+
+```bash
+perl -I. -It/lib -c Mediabot/Users/Birthdays.pm
+perl -I. -It/lib -c Mediabot/Users/Seen.pm
+perl t/test_commands.pl --filter 'birthday|seen|horoscope|mb399|mb434|mb497|mb500|mb576|mb578' --progress
+```
+
+`Users/Birthdays.pm` owns the birthday command and its Gregorian/local-calendar
+helpers. The horoscope continues to call the existing helper name through the
+facade. `Users/Seen.pm` owns online, persisted and archived last-seen lookups;
+keep its requested-channel scope and wildcard escaping when changing it.
+`Mediabot/User.pm` remains the account/authentication object.
+
 ## 4. Find the owner of a change
 
 | Concern | Start here | Related test filenames |
@@ -126,6 +140,8 @@ extracted command to its new owner; keep their original assertions.
 | Remote trivia parsing and HTTP | `Mediabot/External/OpenTriviaDB.pm` | `trivia`, `mb394`, `mb395` |
 | Channel statistics, rankings and activity charts | `Mediabot/Stats/Activity.pm` | `stats`, `mb574`, `mb578`, `mb627` |
 | Word counts, activity streaks and last messages | `Mediabot/Stats/History.pm` | `wordcount`, `streak`, `mb426`, `mb655`, `mb738` |
+| Birthday command and local-calendar helpers | `Mediabot/Users/Birthdays.pm` | `birthday`, `mb399`, `mb434`, `horoscope` |
+| Online, persisted and archived last-seen lookups | `Mediabot/Users/Seen.pm` | `seen`, `mb497`, `mb500`, `mb576`, `mb578` |
 | Memories and annual/community history | `Mediabot/SocialHistory.pm`, `Mediabot/Memory/Search.pm` | `memory`, `yearbook`, `onthisday` |
 | Notes, reminders, polls and factoids | `Mediabot/CommunityState.pm` | `note`, `remind`, `poll`, `factoid` |
 | Conversation and spontaneous output | `Mediabot/Hailo/`, `Mediabot/Spark/`, `Mediabot/Conversation/` | `hailo`, `spark`, `conversation` |

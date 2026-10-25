@@ -62,7 +62,7 @@ return sub {
     $assert->is($ahead->(7,4,$t), 1, 'anniv normal (04/07) inchangé -> 1');
 
     # --- 2. Câblage réel ---------------------------------------------------
-    my $src = _slurp_649(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_649(File::Spec->catfile('.', 'Mediabot', 'Users', 'Birthdays.pm'));
     my ($body) = $src =~ /(sub _birthday_days_ahead \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
     $assert->like($code, qr/if \(\$month == 2 && \$day == 29\)/, 'cas 29 février traité');

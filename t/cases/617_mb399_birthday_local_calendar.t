@@ -32,7 +32,7 @@ return sub {
     local $ENV{TZ} = 'Europe/Paris';
     eval { POSIX::tzset() };   # applique le TZ au process si dispo
 
-    my $src = _slurp_617(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_617(File::Spec->catfile('.', 'Mediabot', 'Users', 'Birthdays.pm'));
 
     my $valid = _extract_sub_617($src, '_birthday_valid_date');
     my $ahead = _extract_sub_617($src, '_birthday_days_ahead');

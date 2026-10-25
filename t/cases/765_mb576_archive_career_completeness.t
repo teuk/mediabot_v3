@@ -185,6 +185,7 @@ return sub {
     # [2] la surface carriere complete passe par le gather
     my $src = _slurp_765(File::Spec->catfile('Mediabot', 'UserCommands.pm'))
               . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'SocialHistory.pm'))
+              . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Users', 'Seen.pm'))
               . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Stats', 'Activity.pm'))
               . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Stats', 'History.pm'));
     my @career = qw(
