@@ -34,7 +34,7 @@ sub _count_items_761 {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_761(File::Spec->catfile('Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_761(File::Spec->catfile('Mediabot', 'Users', 'Horoscope.pm'));
     my ($ctx) = $src =~ /(sub mbHoroscope_ctx \{.*?\n\})/s;
     $assert->ok(defined $ctx, 'source de mbHoroscope_ctx isolee');
 

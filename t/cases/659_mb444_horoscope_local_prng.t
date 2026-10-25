@@ -48,7 +48,7 @@ return sub {
         'le LCG local ne perturbe pas la séquence rand() globale');
 
     # --- 3. Câblage réel ---------------------------------------------------
-    my $src = _slurp_659(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_659(File::Spec->catfile('.', 'Mediabot', 'Users', 'Horoscope.pm'));
     my ($body) = $src =~ /(sub mbHoroscope_ctx \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
 

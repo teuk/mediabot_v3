@@ -141,6 +141,28 @@ Master checks. The greet query keeps its requested channel and original public
 or private reply. `userinfo` reads password presence, never the password value.
 The authentication object and policy still live in `User.pm` and `Context.pm`.
 
+For horoscope and achievement presentation:
+
+```bash
+perl -I. -It/lib -c Mediabot/Users/Horoscope.pm
+perl -I. -It/lib -c Mediabot/Users/AchievementView.pm
+perl t/test_commands.pl --filter 'horoscope|achievement|mb621|mb957' --progress
+```
+
+`Users/Horoscope.pm` owns the command and zodiac helpers; HTTP/parsing and compact
+forecast rendering stay in `External/Horoscope.pm`. Calendar validation still
+comes from Birthdays through the existing facade hook. The Games gate, local
+daily random sequence, language and persistent progress hooks retain their
+existing behavior. `Users/AchievementView.pm` owns the catalogue, rankings and
+progress views; durable storage, identity and unlock policy stay in
+`Achievements.pm`. Detailed progress and the catalogue retain their private
+reply routes, including the secret-achievement visibility rules.
+
+Both modules keep their historical `UserCommands` command/helper aliases.
+The existing SocialHistory goal formatter still resolves that facade at call
+time. When editing either owner, keep the transport and progress hooks late
+bound; do not add SQL persistence or provider logic to these views.
+
 ## 4. Find the owner of a change
 
 | Concern | Start here | Related test filenames |
@@ -158,6 +180,7 @@ The authentication object and policy still live in `User.pm` and `Context.pm`.
 | Channel affinity from hours, vocabulary, karma and adjacent messages | `Mediabot/Stats/Affinity.pm` | `compat`, `mb427`, `mb575`, `mb576`, `mb578`, `mb610` |
 | Exact account/channel level lookups | `Mediabot/Users/Levels.pm` | `user_id_level`, `usercommands_lookup`, `moduser` |
 | Account statistics, userinfo and channel greet views | `Mediabot/Users/Profiles.pm` | `userinfo`, `greet`, `mb455` |
+| Horoscope command, zodiac calendar and achievement views | `Mediabot/Users/Horoscope.pm`, `Mediabot/Users/AchievementView.pm` | `horoscope`, `achievement`, `mb621`, `mb957` |
 | Birthday command and local-calendar helpers | `Mediabot/Users/Birthdays.pm` | `birthday`, `mb399`, `mb434`, `horoscope` |
 | Online, persisted and archived last-seen lookups | `Mediabot/Users/Seen.pm` | `seen`, `mb497`, `mb500`, `mb576`, `mb578` |
 | Memories and annual/community history | `Mediabot/SocialHistory.pm`, `Mediabot/Memory/Search.pm` | `memory`, `yearbook`, `onthisday` |

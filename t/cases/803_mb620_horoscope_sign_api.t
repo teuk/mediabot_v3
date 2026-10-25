@@ -59,6 +59,11 @@ return sub {
     # [1] plus aucun litteral mixte
     my $src = do { open my $fh, '<:raw', 'Mediabot/UserCommands.pm' or die $!;
                    local $/; <$fh> };
+    # Keep the facade-wide guard and include the extracted speaking owners.
+    for my $path ('Mediabot/Users/Horoscope.pm', 'Mediabot/Users/AchievementView.pm') {
+        open my $fh, '<:raw', $path or die $!;
+        local $/; $src .= <$fh>;
+    }
     my $mixed = 0;
     while ($src =~ /"((?:[^"\\]|\\.)*)"/g) {
         my $lit = $1;

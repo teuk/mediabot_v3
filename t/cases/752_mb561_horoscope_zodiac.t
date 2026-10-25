@@ -104,7 +104,7 @@ return sub {
     # ------------------------------------------------------------------
     # [2] + [3] + [4] Gardes statiques sur mbHoroscope_ctx
     # ------------------------------------------------------------------
-    my $src = _slurp_752(File::Spec->catfile('Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_752(File::Spec->catfile('Mediabot', 'Users', 'Horoscope.pm'));
     my ($ctx) = $src =~ /(sub mbHoroscope_ctx \{.*?\n\})/s;
     $assert->ok(defined $ctx && length $ctx, 'source de mbHoroscope_ctx isolee');
 

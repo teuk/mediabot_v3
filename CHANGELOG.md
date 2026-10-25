@@ -1,5 +1,18 @@
 # Changelog — Mediabot v3
 
+## MB957 — Give horoscope and achievement views dedicated owners (2026-10-25)
+
+- Extract the horoscope command and four zodiac helpers into `Users/Horoscope.pm`,
+  and achievement presentation plus three formatters into `Users/AchievementView.pm`.
+- Preserve all nine function bodies, the shared zodiac table, historical helper
+  aliases and command exports. Keep Games policy, daily local random draws,
+  UTF-8 output, channel/private routing, secret visibility and progress hooks.
+- Reduce `UserCommands.pm` from 3,332 to 2,686 lines; extend the contributor map
+  and follow extracted implementations in existing regression checks.
+- Exercise three fresh load orders and real command paths, with transport,
+  calendar and achievement hooks replaced after loading. No schema changes.
+
+
 ## MB956 — Channel sayings and affinity modules (2026-10-25)
 
 - Move `userTopSay_ctx` into `Stats::History` and `mbCompat_ctx` into
