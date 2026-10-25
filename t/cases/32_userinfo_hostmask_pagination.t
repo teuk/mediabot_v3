@@ -102,7 +102,7 @@ sub _extract_sub_userinfo_hostmask {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_userinfo_hostmask(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src  = _slurp_userinfo_hostmask(File::Spec->catfile('.', 'Mediabot', 'Users', 'Profiles.pm'));
     my $func = _extract_sub_userinfo_hostmask($src, 'userInfo_ctx');
 
     $assert->ok(

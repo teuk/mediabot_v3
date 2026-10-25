@@ -1,5 +1,18 @@
 # Changelog — Mediabot v3
 
+## MB955 — Give level lookups and profile views dedicated owners (2026-10-25)
+
+- Extract four exact account/channel level readers into `Users/Levels.pm`,
+  and userstats, userinfo and greet into `Users/Profiles.pm`.
+- Preserve all seven function bodies, exports and public bot methods; retain
+  Context authorization, SQL/binds, failure return values, private views,
+  password-presence projection, hostmask limits and UTF-8 pagination.
+- Reduce `UserCommands.pm` from 4,104 to 3,730 lines and extend the contributor
+  source map and offline test examples.
+- Follow implementations in existing SQL/password/pagination checks, and
+  exercise three native load orders, empty-input and role-guard paths.
+
+
 ## MB954 — Give birthdays and last-seen lookups dedicated source owners (2026-10-25)
 
 - Extract the birthday command and six helpers into `Users/Birthdays.pm`,

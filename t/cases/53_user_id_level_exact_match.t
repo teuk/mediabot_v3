@@ -108,7 +108,83 @@ sub _extract_sub_user_id_level_exact {
 return sub {
     my ($assert) = @_;
 
-    my $src  = _slurp_user_id_level_exact(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    # MB955: verify the live API in independent interpreters, including
+    # domain-first imports, old bot methods and denied command boundaries.
+    require IPC::Open3;
+    require Symbol;
+    for my $order (
+        [qw(Users::Levels Users::Profiles UserCommands)],
+        [qw(Users::Profiles Users::Levels UserCommands)],
+        [qw(UserCommands Users::Levels Users::Profiles)],
+    ) {
+        my $code="require Mediabot::$order->[0];\n";
+        $code.=q{die 'domain eagerly loaded facade' if $INC{'Mediabot/UserCommands.pm'};}
+            if $order->[0] ne 'UserCommands';
+        $code.=join('',map {"require Mediabot::$_;\n"} @$order[1..$#$order]);
+        $code.=q{
+            require Scalar::Util;
+            require Mediabot::Mediabot;
+            require Mediabot::Context;
+            my %owners=(
+                Levels=>[qw(getIdUserLevel getLevelUser getUserLevelDesc getUserChannelLevel)],
+                Profiles=>[qw(userStats_ctx userInfo_ctx userGreet_ctx)],
+            );
+            for my $owner(keys %owners){for my $name(@{$owners{$owner}}){
+                my $native="Mediabot::Users::$owner"->can($name);
+                my $legacy=Mediabot::UserCommands->can($name);
+                my $method=Mediabot->can($name);
+                die "missing alias/method: $name" unless $native && $legacy && $method
+                    && Scalar::Util::refaddr($native)==Scalar::Util::refaddr($legacy)
+                    && Scalar::Util::refaddr($native)==Scalar::Util::refaddr($method);
+            }}
+            die 'empty level inputs' if defined Mediabot::UserCommands::getIdUserLevel({},'')
+                || defined Mediabot::UserCommands::getLevelUser({},'')
+                || defined Mediabot::UserCommands::getUserLevelDesc({},'');
+            die 'empty channel identity' unless defined Mediabot::UserCommands::getUserChannelLevel({},undef,'',42)
+                && Mediabot::UserCommands::getUserChannelLevel({},undef,'',42)==0;
+            my (@notices,@public);
+            {
+                no warnings 'redefine';
+                local *Mediabot::UserCommands::botNotice=sub {shift;push @notices,[@_]};
+                local *Mediabot::UserCommands::botPrivmsg=sub {shift;push @public,[@_]};
+                my $bot=bless {},'MB955Load::Bot';
+                my $call=sub {
+                    my($name,$args,$auth,$allow,$expected)=@_;
+                    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'alice',channel=>undef,args=>$args);
+                    $ctx->{_user_fetched}=1;
+                    $ctx->{user}=bless {auth=>$auth,allow=>$allow,expected=>$expected},'MB955Load::User';
+                    Mediabot::UserCommands->can($name)->($ctx);
+                };
+                $call->('userInfo_ctx',['bob'],0,1,'Administrator');
+                die 'userinfo auth guard' unless $bot->{notices}[-1][1] eq 'You must be logged in to use this command.';
+                $call->('userInfo_ctx',['bob'],1,0,'Administrator');
+                die 'userinfo level guard' unless $bot->{notices}[-1][1] eq 'Your level does not allow you to use this command.';
+                $call->('userStats_ctx',[],1,0,'Master');
+                die 'userstats level guard' unless $bot->{notices}[-1][1] eq 'Your level does not allow you to use this command.';
+                $call->('userInfo_ctx',[],1,1,'Administrator');
+                die 'userinfo late notice hook' unless $notices[-1][1] eq 'Syntax: userinfo <username>';
+                $call->('userGreet_ctx',[],0,0,'unused');
+                die 'private greet syntax' unless $notices[-1][1] eq 'Syntax (in private): greet #channel <nick>';
+                die 'private views leaked public output' if @public;
+            }
+            print 'checked';
+            package MB955Load::User;
+            sub is_authenticated {$_[0]{auth}}
+            sub has_level {die 'wrong requested level' unless $_[1] eq $_[0]{expected};$_[0]{allow}}
+            package MB955Load::Bot;
+            sub botNotice {my($s,@a)=@_;push @{$s->{notices}},\@a}
+        };
+        my $err=Symbol::gensym();
+        my $pid=IPC::Open3::open3(undef,my $out,$err,$^X,'-I.','-It/lib','-e',$code);
+        my $stdout=do{local $/;<$out>} // '';
+        my $stderr=do{local $/;<$err>} // '';
+        waitpid($pid,0);
+        $assert->ok($?==0 && $stdout eq 'checked' && $stderr eq '',
+            'mb955: aliases, load order, empty-input and role guards: '.join('/',@$order)
+                .($stderr ne '' ? " ($stderr)" : ''));
+    }
+
+    my $src  = _slurp_user_id_level_exact(File::Spec->catfile('.', 'Mediabot', 'Users', 'Levels.pm'));
     my $func = _extract_sub_user_id_level_exact($src, 'getIdUserLevel');
 
     $assert->ok(

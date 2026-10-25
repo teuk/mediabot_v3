@@ -126,6 +126,21 @@ facade. `Users/Seen.pm` owns online, persisted and archived last-seen lookups;
 keep its requested-channel scope and wildcard escaping when changing it.
 `Mediabot/User.pm` remains the account/authentication object.
 
+For account-level queries and profile views:
+
+```bash
+perl -I. -It/lib -c Mediabot/Users/Levels.pm
+perl -I. -It/lib -c Mediabot/Users/Profiles.pm
+perl t/test_commands.pl --filter 'user_id_level|usercommands_lookup|userinfo|moduser|greet|mb455' --progress
+```
+
+`Users/Levels.pm` owns the four existing exact level lookups and their original
+failure/empty-input return values. `Users/Profiles.pm` owns `userinfo`,
+`userstats` and `greet`: the first two keep their existing Administrator and
+Master checks. The greet query keeps its requested channel and original public
+or private reply. `userinfo` reads password presence, never the password value.
+The authentication object and policy still live in `User.pm` and `Context.pm`.
+
 ## 4. Find the owner of a change
 
 | Concern | Start here | Related test filenames |
@@ -140,6 +155,8 @@ keep its requested-channel scope and wildcard escaping when changing it.
 | Remote trivia parsing and HTTP | `Mediabot/External/OpenTriviaDB.pm` | `trivia`, `mb394`, `mb395` |
 | Channel statistics, rankings and activity charts | `Mediabot/Stats/Activity.pm` | `stats`, `mb574`, `mb578`, `mb627` |
 | Word counts, activity streaks and last messages | `Mediabot/Stats/History.pm` | `wordcount`, `streak`, `mb426`, `mb655`, `mb738` |
+| Exact account/channel level lookups | `Mediabot/Users/Levels.pm` | `user_id_level`, `usercommands_lookup`, `moduser` |
+| Account statistics, userinfo and channel greet views | `Mediabot/Users/Profiles.pm` | `userinfo`, `greet`, `mb455` |
 | Birthday command and local-calendar helpers | `Mediabot/Users/Birthdays.pm` | `birthday`, `mb399`, `mb434`, `horoscope` |
 | Online, persisted and archived last-seen lookups | `Mediabot/Users/Seen.pm` | `seen`, `mb497`, `mb500`, `mb576`, `mb578` |
 | Memories and annual/community history | `Mediabot/SocialHistory.pm`, `Mediabot/Memory/Search.pm` | `memory`, `yearbook`, `onthisday` |

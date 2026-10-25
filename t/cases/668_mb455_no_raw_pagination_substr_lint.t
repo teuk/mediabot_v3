@@ -66,6 +66,11 @@ return sub {
     );
     for my $mod (sort keys %expect) {
         my $src  = _slurp_668(File::Spec->catfile('.', 'Mediabot', $mod));
+        if ($mod eq 'UserCommands.pm') {
+            $src .= "\n" . _slurp_668(
+                File::Spec->catfile('.', 'Mediabot', 'Users', 'Profiles.pm')
+            );
+        }
         if ($mod eq 'Partyline.pm') {
             $src .= "\n" . _slurp_668(
                 File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm')

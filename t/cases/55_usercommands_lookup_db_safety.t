@@ -106,7 +106,7 @@ sub _extract_sub_usercommands_lookup_safety {
 return sub {
     my ($assert) = @_;
 
-    my $src = _slurp_usercommands_lookup_safety(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_usercommands_lookup_safety(File::Spec->catfile('.', 'Mediabot', 'Users', 'Levels.pm'));
 
     for my $subname (qw(getLevelUser getUserLevelDesc getUserChannelLevel)) {
         my $func = _extract_sub_usercommands_lookup_safety($src, $subname);
