@@ -93,6 +93,15 @@
           "year": "integer:1970..9999"
         }
       }
+    },
+    "irc.channel.word": {
+      "1": {
+        "fields": {
+          "channel": "scalar:128",
+          "nick": "scalar:64",
+          "word": "scalar:32"
+        }
+      }
     }
   }
 }

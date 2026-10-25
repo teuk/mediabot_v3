@@ -699,3 +699,33 @@ normally and cannot use it.
 API v1/v2 execution is unchanged. `v2_adapter_for()` provides a normalized,
 read-only descriptor for migration tooling; it does not run v2 code through the
 v3 facade and does not expand v2 permissions.
+
+
+### MB959: bounded external dictionary service
+
+`data.dictionary.read` grants `dictionary_solve($invocation, $letters, $callback)`
+and `dictionary_cancel($invocation)`. The core owns the connection to `DICT.DICT`,
+indexed parameterized reads, worker cancellation, output bounds and current-policy
+checks. The callback receives a detached complete rack result, never a handle,
+credential or SQL interface. Policy set/reset also invokes an optional
+`policy_changed(context => ..., channel => ..., mode => ...)` package hook.
+See [the operator and API details](LONGEST_WORD_PLUGIN.md) and the
+[longest-word package](../plugins/longest-word-v3/README.md).
+
+### Bare-word observations and channel collections (MB959 R3)
+
+`irc.channel.word` v1 publishes only single alphabetic public tokens after the
+core conversation exclusion barrier. Its handler receives `(context, event,
+invocation)`; the extra scoped invocation exposes the authenticated principal,
+`observed_at` monotonic receipt time, notices and revocable output authority.
+Other event handler signatures remain compatible. The event envelope never
+contains credentials, a database handle, raw message or hostmask.
+
+`channel_storage_snapshot(invocation)` / `channel_storage_commit(invocation,
+expected_revision => N, changes => {...}, delete => [...])` require `storage.kv`.
+The current policy selects the channel; the package selects no path. Collections
+are separate from legacy small KV: 1,024 entries, 2,048 bytes/value, 2 MiB/document,
+locked atomic compare-and-swap, detached snapshots, fail-closed corrupt reads.
+Observe can read but cannot write. Owner `clearv3data` clears both namespaces.
+The longest-word package demonstrates round receipts, all-time totals and weekly
+rankings with this surface. See [its guide](LONGEST_WORD_PLUGIN.md).

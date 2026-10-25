@@ -22,6 +22,7 @@ use IO::Async::Timer::Countdown;
 use Socket qw(unpack_sockaddr_in sockaddr_family inet_ntoa inet_aton AF_INET);
 use Scalar::Util qw(weaken);
 use Mediabot::DCC qw(validate_dcc_active_target);
+use Mediabot::Partyline::WireEncoding ();
 
 our @EXPORT_OK = qw(
     accept_dcc_chat
@@ -805,6 +806,7 @@ sub _init_dcc_session {
     $self->{users}{$id}{auth_timeout_timer} = $timeout_timer if $self->{users}{$id}; # mb147-B1
 
     $stream->configure(
+        encoding => 'Mediabot-Partyline-Wire',
         on_read => sub {
             my ($stream, $buffref, $eof) = @_;
 
@@ -955,6 +957,7 @@ sub _start_listener {
             my $telnet_state = {};
             my $input = '';
             $stream->configure(
+                encoding => 'Mediabot-Partyline-Wire',
                 on_read => sub {
                     my ($stream, $buffref, $eof) = @_;
 

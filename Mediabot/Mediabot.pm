@@ -536,6 +536,22 @@ sub observe_cron_event {
     return $self->emit_event_report('plugin_cron_observed', $ctx);
 }
 
+# Public word candidates are observed after the conversation exclusion barrier.
+# The original Context remains inside the core for authentication and notices.
+sub observe_public_word {
+    my ($self, $message, $channel, $nick, $text, $is_self) = @_;
+    return if $is_self || !defined($channel) || $channel !~ /\A[#&+!]/;
+    return unless defined($text) && !ref($text) && length($text) <= 40;
+    return unless $text =~ /\A\s*([\p{L}\p{M}]{2,32})\s*\z/;
+    my $word = $1;
+    my $bus = $self->event_bus;
+    return unless $bus && $bus->listener_count('public_word_observed');
+    my $ctx = Mediabot::Context->new(bot => $self, message => $message,
+        channel => $channel, nick => $nick, args => []);
+    $ctx->{word} = $word;
+    return $self->emit_event_report('public_word_observed', $ctx);
+}
+
 sub observe_channel_event {
     my ($self, $type, %data) = @_;
 

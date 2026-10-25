@@ -37,11 +37,15 @@ sub new {
         http_fetch_sink => $args{http_fetch_sink},
         storage_snapshot_sink => $args{storage_snapshot_sink},
         storage_commit_sink => $args{storage_commit_sink},
+        channel_storage_snapshot_sink => $args{channel_storage_snapshot_sink},
+        channel_storage_commit_sink => $args{channel_storage_commit_sink},
         quotes_read_sink => $args{quotes_read_sink},
         quotes_write_sink => $args{quotes_write_sink},
         factoids_read_sink => $args{factoids_read_sink},
         factoids_write_sink => $args{factoids_write_sink},
         channel_activity_read_sink => $args{channel_activity_read_sink},
+        dictionary_solve_sink => $args{dictionary_solve_sink},
+        dictionary_cancel_sink => $args{dictionary_cancel_sink},
     };
     return $self;
 }
@@ -156,6 +160,45 @@ sub storage_commit {
     die "PluginContext: storage service is unavailable\n"
         unless ref($sink) eq 'CODE';
     return $sink->($invocation, %args);
+}
+
+# Channel collections share storage.kv authority, with a distinct core-owned
+# per-channel document. Legacy snapshot/commit semantics are unchanged.
+sub channel_storage_snapshot {
+    my ($self, $invocation) = @_;
+    $self->require_capability('storage.kv');
+    _invocation($invocation);
+    my $sink = _state($self)->{channel_storage_snapshot_sink};
+    die "PluginContext: channel storage unavailable\n" unless ref($sink) eq 'CODE';
+    return $sink->($invocation);
+}
+sub channel_storage_commit {
+    my ($self, $invocation, %args) = @_;
+    $self->require_capability('storage.kv');
+    _invocation($invocation);
+    my $sink = _state($self)->{channel_storage_commit_sink};
+    die "PluginContext: channel storage unavailable\n" unless ref($sink) eq 'CODE';
+    return $sink->($invocation, %args);
+}
+
+# MB959: one bounded, asynchronous dictionary operation; no generic SQL.
+sub dictionary_cancel {
+    my ($self, $invocation) = @_;
+    $self->require_capability('data.dictionary.read');
+    _invocation($invocation);
+    my $sink = _state($self)->{dictionary_cancel_sink};
+    die "PluginContext: motlong service is unavailable\n" unless ref($sink) eq 'CODE';
+    return $sink->($invocation);
+}
+
+sub dictionary_solve {
+    my ($self, $invocation, $letters, $callback) = @_;
+    $self->require_capability('data.dictionary.read');
+    _invocation($invocation);
+    die "PluginContext: motlong callback must be CODE\n" unless ref($callback) eq 'CODE';
+    my $sink = _state($self)->{dictionary_solve_sink};
+    die "PluginContext: motlong service is unavailable\n" unless ref($sink) eq 'CODE';
+    return $sink->($invocation, $letters, $callback);
 }
 
 sub _quotes_read {

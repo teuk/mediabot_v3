@@ -1,0 +1,57 @@
+use strict;
+use warnings;
+use utf8;
+use Test::More;
+use DateTime;
+use JSON::PP;
+require './plugins/longest-word-v3/lib/Scores.pm';
+my $S = 'Mediabot::Plugin::LongestWord::Scores';
+my $epoch = sub { DateTime->new(year=>$_[0],month=>$_[1],day=>$_[2],hour=>$_[3]//0,minute=>$_[4]//0,second=>$_[5]//0,time_zone=>'Europe/Paris')->epoch };
+my $sunday = $epoch->(2026,10,25,23,59,59);
+my $monday = $sunday + 1;
+is($S->can('week')->($sunday, 'Europe/Paris'), '2026-W43', 'Sunday before midnight belongs to ending week');
+is($S->can('week')->($monday, 'Europe/Paris'), '2026-W44', 'Monday midnight starts the next week even on DST transition day');
+is($S->can('week')->($epoch->(2027,1,1), 'Europe/Paris'), '2026-W53', 'ISO week-year crosses calendar year correctly');
+ok($S->can('valid_week')->('2026-W53',$epoch->(2027,1,2),'Europe/Paris'), 'valid week 53 accepted');
+ok(!$S->can('valid_week')->('2025-W53',$epoch->(2026,1,2),'Europe/Paris'), 'nonexistent ISO week 53 rejected');
+ok(!$S->can('valid_week')->('2027-W01',$epoch->(2027,1,2),'Europe/Paris'), 'future week rejected');
+my $snap = {revision=>0, values=>{}};
+my $add = sub {
+    my (%args) = @_;
+    my $changes = $S->can('changes')->($snap, scope=>'rules', game=>'a' x 64, round=>1,
+        week=>'2026-W43', oldest=>'2025-W45', results=>[{id=>'u.7',nick=>'Alice',points=>13}], %args);
+    @{$snap->{values}}{keys %$changes} = values %$changes;
+    return $changes;
+};
+$add->();
+my $key = $S->can('player_key')->('rules','u.7');
+my $row = $S->can('decode_player')->($snap->{values}{$key});
+is($row->{total},13,'first completed round adds its points');
+is($row->{weeks}{'2026-W43'},13,'round points also enter their own week');
+is_deeply($add->(), {}, 'same round receipt prevents duplicate scoring after uncertain acknowledgement');
+$add->(round=>2,week=>'2026-W44',results=>[{id=>'u.7',nick=>'AliceNew',points=>8}]);
+$row = $S->can('decode_player')->($snap->{values}{$key});
+is($row->{total},21,'totals accumulate across weeks');
+is($row->{weeks}{'2026-W44'},8,'new week starts independently');
+is($row->{weeks}{'2026-W43'},13,'previous weekly score remains queryable');
+is($row->{nick},'AliceNew','authenticated identity follows nickname changes');
+is($row->{rounds},2,'one participant round counted exactly once');
+$add->(scope=>'other-rules',game=>'b' x 64);
+is($S->can('rows')->($snap,'rules',undef)->[0]{score},21,'different rules cannot alter this cumulative ranking');
+for my $i (1..15) {
+    $add->(game=>sprintf('%064x',100+$i),results=>[{id=>'n.player'.$i,nick=>'Player'.$i,points=>1}]);
+}
+is(scalar @{$S->can('rows')->($snap,'rules',undef)},16,'players below the displayed top ten are all retained');
+$add->(game=>'c' x 64,results=>[{id=>'n.player15',nick=>'Player15',points=>30}]);
+is($S->can('rows')->($snap,'rules',undef)->[0]{id},'n.player15','low-ranked participant can accumulate into first place');
+$add->(game=>'d' x 64,results=>[{id=>'n.player14',nick=>'Player14',points=>30}]);
+my $rank = $S->can('rows')->($snap,'rules',undef);
+is_deeply([map {$_->{rank}} @$rank[0..2]],[1,1,3],'ties share rank without deleting or awarding fewer points');
+is($S->can('rows')->($snap,'rules','2026-W44')->[0]{score},8,'weekly ranking uses weekly points rather than all-time total');
+$add->(game=>'e' x 64,week=>'2027-W43',oldest=>'2026-W45');
+$row=$S->can('decode_player')->($snap->{values}{$key});
+is($row->{total},34,'expiry of old weekly detail preserves lifetime total');
+ok(!exists($row->{weeks}{'2026-W43'}),'weekly history rolls within its documented retention window');
+my $corrupt=decode_json($snap->{values}{$key});$corrupt->{total}=-1;
+ok(!eval {$S->can('decode_player')->(encode_json($corrupt));1},'invalid score totals fail closed');
+done_testing;

@@ -159,11 +159,15 @@ sub load_package {
         http_fetch_sink => $service_sink->('_v3_http_fetch'),
         storage_snapshot_sink => $service_sink->('_v3_storage_snapshot'),
         storage_commit_sink => $service_sink->('_v3_storage_commit'),
+        channel_storage_snapshot_sink => $service_sink->('_v3_channel_storage_snapshot'),
+        channel_storage_commit_sink => $service_sink->('_v3_channel_storage_commit'),
         quotes_read_sink => $service_sink->('_v3_quotes_read'),
         quotes_write_sink => $service_sink->('_v3_quotes_write'),
         factoids_read_sink => $service_sink->('_v3_factoids_read'),
         factoids_write_sink => $service_sink->('_v3_factoids_write'),
         channel_activity_read_sink => $service_sink->('_v3_channel_activity_read'),
+        dictionary_solve_sink => $service_sink->('_v3_dictionary_solve'),
+        dictionary_cancel_sink => $service_sink->('_v3_dictionary_cancel'),
     );
     # The plugin receives a detached manifest snapshot. It cannot rewrite the
     # already validated core-owned contract between validation and mounting.

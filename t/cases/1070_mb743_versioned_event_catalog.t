@@ -30,8 +30,8 @@ return sub {
     $assert->is($api_contract->{milestone}, 'MB786',
         'API v3 machine contract records the current platform milestone');
     $assert->is(join(',', @{ $api_contract->{implemented_capabilities} }),
-        'data.channel_activity.read,data.factoids.read,data.factoids.write,data.quotes.read,data.quotes.write,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
-        'machine contract lists the twelve executable capabilities');
+        'data.channel_activity.read,data.dictionary.read,data.factoids.read,data.factoids.write,data.quotes.read,data.quotes.write,events.subscribe,http.fetch,irc.channel_message,irc.notice,irc.reply,scheduler.jobs,storage.kv',
+        'machine contract lists the thirteen executable capabilities');
     $assert->is($api_contract->{event_backpressure}{max_pending_per_plugin}, 32,
         'machine contract publishes the queue bound');
     $assert->is($api_contract->{event_backpressure}{dispatch_batch_size}, 8,

@@ -1,0 +1,88 @@
+{
+  "api": 3,
+  "name": "longest-word-v3",
+  "version": "1.3.0",
+  "description": "Le mot le plus long : mots directs, dictionnaire asynchrone, cumuls et classements hebdomadaires par salon.",
+  "runtime": {
+    "kind": "perl",
+    "entrypoint": "lib/LongestWord.pm",
+    "class": "Mediabot::Plugin::LongestWord"
+  },
+  "compatibility": {
+    "mediabot": ">=3.6dev"
+  },
+  "activation": {
+    "default": "off"
+  },
+  "capabilities": [
+    "data.dictionary.read",
+    "events.subscribe",
+    "irc.reply",
+    "irc.notice",
+    "irc.channel_message",
+    "scheduler.jobs",
+    "storage.kv"
+  ],
+  "commands": {
+    "motlong": {
+      "source": "public",
+      "help": "Jouer : start, mot seul, tirage, score, scores, top total/semaine, records, stop, aide.",
+      "level": 0,
+      "handler": "command_motlong",
+      "aliases": [
+        "longest"
+      ]
+    }
+  },
+  "events": [
+    {
+      "name": "irc.channel.word",
+      "version": 1,
+      "handler": "event_word"
+    }
+  ],
+  "jobs": {
+    "clock": {
+      "handler": "job_clock",
+      "interval_seconds": 5,
+      "first_delay_seconds": 5
+    }
+  },
+  "config_schema": {
+    "letters": {
+      "type": "integer",
+      "default": 10,
+      "minimum": 8,
+      "maximum": 12
+    },
+    "vowels": {
+      "type": "integer",
+      "default": 4,
+      "minimum": 3,
+      "maximum": 5
+    },
+    "round_seconds": {
+      "type": "integer",
+      "default": 50,
+      "minimum": 20,
+      "maximum": 120
+    },
+    "rounds": {
+      "type": "integer",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 20
+    },
+    "top_bonus": {
+      "type": "integer",
+      "default": 3,
+      "minimum": 0,
+      "maximum": 10
+    },
+    "score_timezone": {
+      "type": "string",
+      "default": "Europe/Paris",
+      "max_length": 64
+    }
+  }
+}

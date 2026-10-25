@@ -451,3 +451,19 @@ Mediabot v3 is free software licensed under the **GNU General Public License ver
 
 Mediabot uses LLM-assisted development. Contributions are expected to include
 reviewable changes and the checks described in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Try the longest-word plugin
+
+Play a finite multiplayer letter game with an asynchronous MariaDB dictionary,
+per-channel matches and persistent best-match records. Try its rules locally
+with Perl core modules only:
+
+```sh
+perl tools/word_game_demo.pl --check
+```
+
+The [Perl API v3 package](plugins/longest-word-v3/README.md) starts off by default.
+See the [operator guide](docs/LONGEST_WORD_PLUGIN.md) to connect `DICT.DICT`
+and enable `!motlong` on a chosen channel. During a round, type your word directly.
+`!motlong score`, `!motlong top total` and `!motlong top semaine` show persistent
+personal, cumulative and weekly standings; `!motlong records` keeps best matches.

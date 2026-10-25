@@ -68,6 +68,8 @@ sub new {
     my $opaque = 0;
     my $self = bless \$opaque, $class;
     $STATE{ refaddr($self) } = {
+        observed_at => defined($args{observed_at}) && !ref($args{observed_at})
+            && "$args{observed_at}" =~ /\A[0-9]+(?:\.[0-9]+)?\z/ ? 0 + $args{observed_at} : undef,
         nick        => _safe_scalar($args{nick}, 64),
         channel     => _safe_scalar($args{channel}, 128),
         command     => _safe_scalar($args{command}, 32),
@@ -86,6 +88,7 @@ sub new {
     return $self;
 }
 
+sub observed_at { _state($_[0])->{observed_at} }
 sub nick       { _state($_[0])->{nick} }
 sub channel    { _state($_[0])->{channel} }
 sub command    { _state($_[0])->{command} }

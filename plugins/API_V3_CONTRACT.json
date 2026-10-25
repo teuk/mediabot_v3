@@ -47,6 +47,7 @@
   ],
   "implemented_capabilities": [
     "data.channel_activity.read",
+    "data.dictionary.read",
     "data.factoids.read",
     "data.factoids.write",
     "data.quotes.read",
@@ -606,5 +607,42 @@
       "unquarantine",
       "quarantines"
     ]
+  },
+  "dictionary_limits": {
+    "database": "DICT",
+    "table": "DICT",
+    "maximum_letters": 12,
+    "maximum_words_per_rack": 4096,
+    "maximum_inflight_per_plugin": 2,
+    "maximum_inflight_total": 4,
+    "worker_timeout_seconds": 10,
+    "cache_racks": 32,
+    "cache_ttl_seconds": 300
+  },
+  "channel_storage_limits": {
+    "capability": "storage.kv",
+    "maximum_values": 1024,
+    "maximum_value_bytes": 2048,
+    "maximum_document_bytes": 2097152,
+    "channel_source": "invocation policy",
+    "write_mode": "locked atomic compare-and-swap",
+    "corrupt_read": "reject without reset",
+    "observe_writes": "suppressed",
+    "operator_cleanup": "Owner-only clearv3data includes legacy KV and channel collections",
+    "plugin_paths": "unavailable"
+  },
+  "word_event": {
+    "name": "irc.channel.word",
+    "version": 1,
+    "handler_arguments": [
+      "context",
+      "event",
+      "scoped invocation"
+    ],
+    "publisher": "after conversation exclusion barrier",
+    "tokens": "single alphabetic word, 2 to 32 characters",
+    "identity": "native principal",
+    "receipt_clock": "monotonic",
+    "policy_revocation": "epoch guarded"
   }
 }

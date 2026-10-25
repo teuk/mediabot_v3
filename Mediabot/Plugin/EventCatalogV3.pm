@@ -7,6 +7,16 @@ use utf8;
 use Scalar::Util qw(blessed reftype);
 
 my %CATALOG = (
+    'irc.channel.word' => {
+        1 => {
+            bus_event => 'public_word_observed',
+            fields => {
+                channel => [ 'scalar' => 128 ],
+                nick => [ 'scalar' => 64 ],
+                word => [ 'scalar' => 32 ],
+            },
+        },
+    },
     'command.public.observed' => {
         1 => {
             bus_event => 'public_command_observed',

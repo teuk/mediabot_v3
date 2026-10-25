@@ -30,6 +30,7 @@ return sub {
         'runtime evaluates and records the shared barrier');
 
     for my $later (
+        'observe_public_word(',
         'updateUserSeen(',
         'deliverReminders(',
         'checkTriviaAnswer(',

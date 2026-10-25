@@ -3891,6 +3891,9 @@ sub _on_message_PRIVMSG_body {
 
         # Track last seen on public message
         # mb85-B1 / mb86-port: bloc updateUserSeen fermé avant deliverReminders
+        eval { $mediabot->observe_public_word($message, $where, $who, $what,
+            ($who eq $self->nick ? 1 : 0)); };
+
         {
             my ($sn,$si,$sh) = $mediabot->getMessageNickIdentHost($message);
             my $userhost = "$si\@$sh";

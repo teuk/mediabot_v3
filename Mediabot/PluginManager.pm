@@ -52,6 +52,7 @@ sub new {
         plugins    => {}, # canonical name -> entry
         order      => [],
         v3_http_service => $args{v3_http_service},
+        v3_dictionary_service => $args{v3_dictionary_service},
         v3_repositories => {},
         v3_quote_service => $args{v3_quote_service},
         v3_quote_write_service => $args{v3_quote_write_service},
@@ -298,6 +299,90 @@ sub _v3_http_fetch {
     });
 }
 
+# MB959: dictionaries run on a fresh child-owned MariaDB connection.
+sub v3_dictionary_service {
+    my ($self) = @_;
+    return $self->{v3_dictionary_service} if $self->{v3_dictionary_service};
+    my $bot = $self->{bot};
+    my $loop = $bot && eval { $bot->can('getLoop') }
+        ? eval { $bot->getLoop } : eval { $bot->{loop} };
+    require Mediabot::Plugin::DictionaryServiceV3;
+    require Mediabot::Plugin::DictionaryV3;
+    return $self->{v3_dictionary_service} = Mediabot::Plugin::DictionaryServiceV3->new(
+        loop => $loop,
+        settings_provider => sub { Mediabot::Plugin::DictionaryV3->settings($bot->{conf}) },
+    );
+}
+
+sub _cancel_v3_dictionary {
+    my ($self, $name) = @_;
+    return unless $self->{v3_dictionary_service};
+    eval { $self->{v3_dictionary_service}->cancel_plugin($name) };
+    return;
+}
+
+sub _v3_notify_policy_change {
+    my ($self, $entry, $channel) = @_;
+    my $policy = $self->_v3_policy_for_entry($entry, $channel);
+    my $key = lc $policy->{channel}; $key =~ tr/[]\\^/{}|~/;
+    if ($policy->{configured}) {
+        $entry->{metadata}{dictionary_policy_epoch}{$key} = ++$entry->{metadata}{dictionary_epoch_serial};
+    }
+    else { delete $entry->{metadata}{dictionary_policy_epoch}{$key} }
+    eval { $self->{v3_dictionary_service}->cancel_scope($entry->{name}, $channel) }
+        if $self->{v3_dictionary_service};
+    my $object = $entry->{object};
+    if (ref($object) && eval { $object->can('policy_changed') }) {
+        my $ok = eval {
+            $object->policy_changed(context => $entry->{metadata}{plugin_context},
+                channel => $channel, mode => $policy->{mode});
+            1;
+        };
+        eval { $self->{bot}{logger}->log(1, "plugin policy change hook failed") } unless $ok;
+    }
+    return;
+}
+
+sub _v3_dictionary_cancel {
+    my ($self, $name, $invocation) = @_;
+    my $entry = $self->plugin($name) or return 0;
+    return 0 unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    return 0 if $policy->{mode} ne 'on';
+    return 1 unless $self->{v3_dictionary_service};
+    return $self->{v3_dictionary_service}->cancel_scope($name, $policy->{channel});
+}
+
+sub _v3_dictionary_solve {
+    my ($self, $name, $invocation, $letters, $callback) = @_;
+    my $entry = $self->plugin($name) or die "PluginManager: plugin is not registered\n";
+    return { accepted => 0, error => 'disabled' } unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $invocation);
+    return { accepted => 0, error => 'channel_off' } if $policy->{mode} eq 'off';
+    my $key = lc $policy->{channel}; $key =~ tr/[]\\^/{}|~/;
+    my $epoch = $entry->{metadata}{dictionary_policy_epoch}{$key}
+        //= ++$entry->{metadata}{dictionary_epoch_serial};
+    my $kind = $invocation->can('command') ? 'command' : 'job';
+    my $resource = $kind eq 'command' ? $invocation->command : $invocation->name;
+    return { accepted => 0, error => 'quarantined' }
+        if $self->_v3_resource_quarantined($name, kind => $kind,
+            resource => $resource, channel => $policy->{channel});
+    return $self->v3_dictionary_service->solve($name, $policy->{channel}, $letters, sub {
+        my ($result) = @_;
+        return unless $self->_v3_entry_is_current($name, $entry) && $entry->{enabled};
+        return unless ($entry->{metadata}{dictionary_policy_epoch}{$key} // 0) == $epoch;
+        my $current = $self->_v3_invocation_policy($entry, $invocation);
+        return if $current->{mode} eq 'off';
+        return if $self->_v3_resource_quarantined($name, kind => $kind,
+            resource => $resource, channel => $current->{channel});
+        my $ok = eval { $callback->($result); 1 };
+        unless ($ok) {
+            $self->_record_v3_failure($name, kind => $kind, resource => $resource,
+                channel => $current->{channel}, error => 'motlong callback failed');
+        }
+    });
+}
+
 sub _v3_storage_key {
     my ($name) = @_;
     my $key = "v3-$name";
@@ -364,6 +449,31 @@ sub _v3_storage_commit {
     _pm_metric($self->{bot}, 'mediabot_plugin_v3_storage_total',
         { plugin => $name, outcome => $outcome });
     return $result;
+}
+
+sub _v3_channel_repository {
+    my ($self, $name, $policy) = @_;
+    require Mediabot::Plugin::ChannelRepositoryV3;
+    my $directory = eval { $self->{bot}{conf}->get('plugins.DATA_DIR') };
+    $directory = 'plugin-data' unless defined($directory) && !ref($directory) && length($directory);
+    return Mediabot::Plugin::ChannelRepositoryV3->new(
+        directory => $directory, plugin => $name, channel => $policy->{channel});
+}
+sub _v3_channel_storage_snapshot {
+    my ($self, $name, $inv) = @_;
+    my $entry = $self->plugin($name) or die "channel_storage_unregistered\n";
+    return { error => 'disabled' } unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $inv);
+    return { error => 'channel_off' } if $policy->{mode} eq 'off';
+    return $self->_v3_channel_repository($name, $policy)->snapshot;
+}
+sub _v3_channel_storage_commit {
+    my ($self, $name, $inv, %args) = @_;
+    my $entry = $self->plugin($name) or die "channel_storage_unregistered\n";
+    return { ok => 0, error => 'disabled' } unless $entry->{enabled};
+    my $policy = $self->_v3_invocation_policy($entry, $inv);
+    return { ok => 0, error => $policy->{mode} } unless $policy->{mode} eq 'on' && $inv->output_allowed;
+    return $self->_v3_channel_repository($name, $policy)->commit(%args);
 }
 
 # MB747: approved quote reads cross a domain facade owned by the core. The
@@ -800,7 +910,9 @@ sub set_v3_channel_policy {
         or die "PluginManager: plugin '$name' is not registered\n";
     my $policy = $self->_v3_policy_object($entry)
         or die "PluginManager: plugin '$name' is not an API v3 package\n";
-    return $policy->set($channel, %args);
+    my $result = $policy->set($channel, %args);
+    $self->_v3_notify_policy_change($entry, $channel);
+    return $result;
 }
 
 sub reset_v3_channel_policy {
@@ -809,7 +921,9 @@ sub reset_v3_channel_policy {
         or die "PluginManager: plugin '$name' is not registered\n";
     my $policy = $self->_v3_policy_object($entry)
         or die "PluginManager: plugin '$name' is not an API v3 package\n";
-    return $policy->reset($channel);
+    my $result = $policy->reset($channel);
+    $self->_v3_notify_policy_change($entry, $channel);
+    return $result;
 }
 
 sub v3_channel_policy {
@@ -1510,6 +1624,7 @@ sub unregister_plugin {
         my $was_enabled = $entry->{enabled} ? 1 : 0;
         $entry->{enabled} = 0;
         $self->_cancel_v3_http($key);
+        $self->_cancel_v3_dictionary($key);
         $self->_clear_v3_event_queue($entry);
         my $jobs_ok = eval { $self->_stop_v3_jobs($entry); 1 };
         $entry->{metadata}{job_stop_error} = _plugin_error_text(
@@ -1622,6 +1737,7 @@ sub disable {
     $entry->{enabled} = 0;
     if ($api == 3) {
         $self->_cancel_v3_http($entry->{name});
+        $self->_cancel_v3_dictionary($entry->{name});
         $self->_clear_v3_event_queue($entry);
         my $job_error;
         eval { $self->_stop_v3_jobs($entry); 1 }
@@ -2287,7 +2403,14 @@ sub clear_v3_plugin_data {
     # The repository boundary deliberately hides its on-disk namespace from
     # plugins and operators. Derive the same bounded key used by RuntimeV3 so
     # short and hashed package names are cleared through one exact path.
-    return $self->clear_plugin_data(_v3_storage_key($name));
+    my $directory = eval { $self->{bot}{conf}->get('plugins.DATA_DIR') };
+    $directory = 'plugin-data' unless defined($directory) && !ref($directory) && length($directory);
+    require Mediabot::Plugin::ChannelRepositoryV3;
+    my $collections = eval { Mediabot::Plugin::ChannelRepositoryV3->clear_plugin(
+        directory => $directory, plugin => $name) };
+    return (0, 0, 'cannot clear channel collections') if $@;
+    my ($ok, $cleared, $error) = $self->clear_plugin_data(_v3_storage_key($name));
+    return ($ok, ($collections || $cleared) ? 1 : 0, $error);
 }
 
 # mb604-B1: un refus d'ecriture doit dire POURQUOI, en cardinalite bornee.
@@ -2628,6 +2751,11 @@ sub _mount_v3_commands {
 # versioned, copied envelope. Delivery is deferred through a bounded queue so
 # one plugin cannot recursively consume an unbounded event burst. The queue is
 # owned by the plugin entry and is cleared before disable/unload.
+sub _v3_monotonic_now {
+    require Time::HiRes;
+    return Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
+}
+
 sub _mount_v3_events {
     my ($self, $key, $entry) = @_;
 
@@ -2682,7 +2810,11 @@ sub _mount_v3_events {
             _pm_metric($bot, 'mediabot_plugin_v3_observe_total',
                 { plugin => $key, kind => 'event' })
                 if $policy->{mode} eq 'observe';
-            my $result = $object->$method($context, $scoped);
+            return if $policy->{mode} eq 'on' && $item->{word_invocation}
+                && !$item->{word_invocation}->output_allowed;
+            my $result = $item->{word_invocation}
+                ? $object->$method($context, $scoped, $item->{word_invocation})
+                : $object->$method($context, $scoped);
             $self->_record_v3_success($key,
                 kind => 'event', resource => $event_name,
                 channel => $policy->{channel});
@@ -2738,7 +2870,32 @@ sub _mount_v3_events {
 
                 my $accepted = 0;
                 for my $policy (@policies) {
+                    my $word_invocation;
+                    if ($name eq 'irc.channel.word') {
+                        # Only this event receives a scoped reply/principal facade.
+                        # Authentication comes from the native Context, never data fields.
+                        my $channel_key = lc $policy->{channel}; $channel_key =~ tr/[]\\^/{}|~/;
+                        my $serial = $entry->{metadata}{dictionary_policy_epoch}{$channel_key} // 0;
+                        $word_invocation = Mediabot::Plugin::InvocationV3->new(
+                            nick => $envelope->get('nick'), channel => $policy->{channel},
+                            command => $name, source => 'event', args => [],
+                            observed_at => _v3_monotonic_now(),
+                            principal => $self->_v3_principal_from_context($raw, $policy->{channel}),
+                            authority => $context, activation => $policy->{mode}, config => $policy->{config},
+                            origin_token => $self->{v3_invocation_authority},
+                            output_guard => sub {
+                                return 0 unless $self->_v3_entry_is_current($key, $entry) && $entry->{enabled};
+                                return 0 unless ($entry->{metadata}{dictionary_policy_epoch}{$channel_key} // 0) == $serial;
+                                return 0 if $self->_v3_resource_quarantined($key, kind => 'event',
+                                    resource => $name, channel => $policy->{channel});
+                                return $self->_v3_policy_for_entry($entry, $policy->{channel})->{mode} eq 'on';
+                            },
+                            reply_sink => sub { $self->_v3_channel_message($policy->{channel}, $_[0]) },
+                            notice_sink => sub { $raw->reply_private($_[0]) },
+                        );
+                    }
                     my $queued = $queue->enqueue({
+                        word_invocation => $word_invocation,
                         method   => $method,
                         envelope => $envelope,
                         channel  => $policy->{channel},

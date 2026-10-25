@@ -1,0 +1,58 @@
+use strict;
+use warnings;
+use utf8;
+use Test::More;
+require './plugins/longest-word-v3/lib/Engine.pm';
+
+my @words=qw(AI AIR ABRI CAFE CRAIE CRAIES FRAISE FARCIES CARAIBES BREAKAIS);
+my $engine=Mediabot::Plugin::LongestWord::Engine->new(rounds=>2,duration=>50,bonus=>3);
+is($engine->{round_best_length},0,'match constructor starts the accepted round record at zero');
+$engine->begin_round(words=>\@words,letters=>'ARSAIFEBKC',now=>100);
+is($engine->{round_best_length},0,'opening a draw keeps the accepted record at zero');
+is($engine->{longest},8,'dictionary maximum remains distinct from accepted-player record');
+my $submit=sub {my ($id,$word,$now)=@_;$engine->submit(id=>$id,nick=>$id,word=>$word,now=>$now)};
+ok($submit->('first','CRAIES',101)->{ok},'first valid six-letter word is accepted from zero');
+is($engine->{round_best_length},6,'the shared record becomes the accepted length');
+my $short=$submit->('new','ABRI',102);
+is($short->{error},'not_longer','another player cannot enter below the current record');
+is($short->{minimum},7,'six accepted letters require at least seven next');
+ok(!exists($engine->{players}{new}),'rejected shorter proposal does not create a scoring participant');
+for my $equal (qw(CRAIES FRAISE)) {
+    my $r=$submit->('equal',$equal,103);
+    is($r->{error},'not_longer','an equal-length word is rejected, including a different spelling');
+    is($r->{minimum},7,'an equality does not lower or increase the required threshold');
+}
+ok(!exists($engine->{players}{equal}),'equal proposals never acquire a word or future score');
+is($submit->('invalid','BIFFERAS',104)->{error},'invalid','a longer dictionary-invalid proposal is rejected before record changes');
+is($engine->{round_best_length},6,'invalid proposal cannot raise the shared record');
+ok($submit->('better','FARCIES',105)->{ok},'one extra letter is sufficient to improve the round');
+is($engine->{round_best_length},7,'accepted improvement advances the threshold');
+is($submit->('first','FRAISE',106)->{minimum},8,'an existing player is subject to the same shared threshold');
+is($engine->{players}{first}{word},'CRAIES','rejected proposal cannot overwrite a previously accepted word');
+ok($submit->('top','CARAIBES',107)->{ok},'a valid longer word can reach the dictionary maximum');
+is($engine->{round_best_length},8,'the accepted maximum is recorded');
+is($submit->('copy','BREAKAIS',108)->{error},'not_longer','a different optimal solution of equal length is also refused');
+ok(!exists($engine->{players}{copy}),'equal maximum earns no participation or bonus');
+my $closed=$engine->close_round(108);
+ok($closed && $closed->{top_found},'finding the maximum closes the round before its deadline');
+is($submit->('late','CARAIBES',150)->{error},'closed','deadline still precedes word eligibility checks');
+ok(!defined($engine->close_round(150)),'old deadline cannot close and score the won round again');
+is_deeply($closed->{solutions},[qw(BREAKAIS CARAIBES)],'solver solutions are still revealed unchanged');
+is_deeply([map {$_->{score}} @{$engine->ranking}],[11,7,6],'earlier accepted improvements retain their points, rejected words receive none');
+is(scalar @{$closed->{results}},3,'only successful record holders are scored');
+$engine->{phase}='preparing';
+$engine->begin_round(words=>\@words,letters=>'ARSAIFEBKC',now=>160);
+is($engine->{round_best_length},0,'next round resets the shared record instead of carrying eight forward');
+ok($submit->('new-round','AI',161)->{ok},'a short first valid word can start the next round');
+is($engine->{round_best_length},2,'short first proposal sets only its actual normalized length');
+ok($submit->('top','AIR',162)->{ok},'previous top finder can improve the new round with a shorter personal historical word');
+is($engine->{round_best_length},3,'new round advances independently');
+$engine->close_round(210);
+is($engine->{players}{top}{score},14,'new acceptance rule preserves cumulative arithmetic across rounds');
+
+my $accent=Mediabot::Plugin::LongestWord::Engine->new(rounds=>1,duration=>50,bonus=>3);
+$accent->begin_round(words=>[qw(ETE SERA)],letters=>'AEEINORSTT',now=>1);
+ok($accent->submit(id=>'a',nick=>'a',word=>'été',now=>2)->{ok},'normalized accented word can establish the record');
+is($accent->{round_best_length},3,'length comparison uses normalized dictionary letters, not UTF-8 bytes');
+is($accent->submit(id=>'b',nick=>'b',word=>'ETE',now=>3)->{minimum},4,'another spelling of the same three letters requires four');
+done_testing;

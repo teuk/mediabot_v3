@@ -1,3 +1,54 @@
+## MB959 — Le mot le plus long (2026-10-25)
+
+- R7: the first accepted dictionary-maximum word wins and closes the round
+  immediately. Announce length plus the configured top bonus (default +3),
+  save all round scores once, then start the next draw without a timer wait.
+  Keep timeout behavior and existing totals; pause on uncertain persistence,
+  preserve the actual win week and reject old-round queued guesses.
+
+- R6: announce accepted words publicly in their current channel, including the
+  player's nickname, normalized word, length and next minimum. Use one bounded
+  message for either bare words or command proposals; keep refusals private.
+  Show the dictionary's maximum word length in every opening draw, while keeping
+  solutions hidden until the round ends and the player record initially at zero.
+  Preserve strict round records, deadlines, dictionary results and saved scores.
+
+- R5: require each accepted proposal to beat the current round record strictly.
+  Start that record at zero for every draw; refuse shorter/equal words before
+  creating a player or changing their accepted word. Explain the next minimum
+  privately and in rack status. Keep earlier accepted points and saved totals.
+- Leave the dictionary solver and maximum reveal unchanged. Cover strict record
+  advancement, equal-word rejection, normalization and new-round initialization
+  through the Engine and both native proposal routes.
+
+- R4: fix a native partyline crash when a Unicode reply (including the unknown
+  plugin diagnostic) reaches a byte-only socket. Encode output before queueing
+  while preserving existing UTF-8 bytes, Telnet IAC negotiation and raw input.
+  Cover deferred partial writes, CODE/Future writes, real Telnet and DCC sessions,
+  unknown-package replies, continued commands and successful plugin disable.
+
+- R3: accept bare words during open rounds through a scoped native event;
+  preserve command forms, authentication, deadlines and exclusion policies.
+- Add all-time and ISO weekly cumulative rankings, personal totals, pagination
+  and tied ranks. Save completed rounds atomically with retry receipts; retain
+  old best-match records separately, without inventing historical totals.
+- Add private per-channel collections under storage.kv with strict validation,
+  locked atomic CAS writes and explicit capacity failure. No SQL schema change.
+
+- R2: fix the standalone dictionary preflight to use the native Mediabot::Conf
+  loader, resolve existing core dependencies before install, and report the
+  shipped guide path. Add real-configuration CLI regression coverage.
+
+- Add the default-off Perl API v3 package `longest-word-v3`: `!motlong` / `!longest`,
+  finite per-channel matches, weighted draws, common deadlines, personal bests,
+  equal optimal-word bonuses, bounded participants and saved best-match records.
+- Add the narrow `data.dictionary.read` facade for `DICT.DICT`, with indexed
+  batched reads on a child-owned read-only MariaDB connection, timeouts, cache,
+  cancellation and registration/policy-bound completions.
+- Keep game rules in the plugin, application SQL schema unchanged, and credentials
+  in private configuration. Ship a local rules demo, dictionary preflight and
+  native solver/worker/runtime tests. No SQL dump is committed.
+
 # Changelog — Mediabot v3
 
 ## MB958 — Give channel read views dedicated source owners (2026-10-25)
