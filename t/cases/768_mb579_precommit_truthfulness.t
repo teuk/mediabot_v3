@@ -123,7 +123,7 @@ return sub {
             'fixture: la ligne partielle avait bien atteint le callback');
     }
 
-    my $src = _slurp_768(File::Spec->catfile('Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_768(File::Spec->catfile('Mediabot', 'Stats', 'Activity.pm'));
     my $stats = _sub_src_768($src, 'mbStats_ctx');
     $assert->ok(defined $stats, 'mbStats_ctx isolee');
     $assert->like(

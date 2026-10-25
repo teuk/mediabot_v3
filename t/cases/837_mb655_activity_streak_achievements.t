@@ -85,7 +85,7 @@ return sub {
     # [3] !streak must reuse its existing $best result; no second history query
     # is added just to feed Achievements.  Third-party inspection remains
     # read-only by guarding the hook to the invoking nick.
-    my $uc = slurp837('Mediabot/UserCommands.pm');
+    my $uc = slurp837('Mediabot/Stats/History.pm');
     my ($streak_body) = $uc =~ /(sub mbStreak_ctx \{.*?\n\})\n\n# -+/s;
     $assert->ok(defined($streak_body),
         'mb655-837: mbStreak_ctx body is discoverable');

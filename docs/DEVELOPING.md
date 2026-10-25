@@ -85,6 +85,22 @@ The fast lane is not the complete acceptance suite. Use the project's runner;
 `--list-selected` lists the chosen cases; it still loads the runner's basic Perl
 dependencies.
 
+For channel statistics, use the two domain modules and their existing archive,
+calendar and failure-semantics tests:
+
+```bash
+perl -I. -It/lib -c Mediabot/Stats/Activity.pm
+perl -I. -It/lib -c Mediabot/Stats/History.pm
+perl t/test_commands.pl --filter 'stats|wordcount|streak|mb574|mb575|mb576|mb577|mb578|mb579|mb627|mb655|mb738' --progress
+```
+
+The registry still imports the historical command names through
+`UserCommands.pm`. Change the implementation in `Stats/Activity.pm` or
+`Stats/History.pm`; keep transport hooks in that facade available at call time.
+The history reader, archive retention rules and SQL scopes remain owned by
+`Helpers.pm` and `ChannelLog/Reader.pm`. Source-inspection tests must follow an
+extracted command to its new owner; keep their original assertions.
+
 ## 4. Find the owner of a change
 
 | Concern | Start here | Related test filenames |
@@ -95,6 +111,8 @@ dependencies.
 | Trivia game and worker adapter | `Mediabot/Games/Trivia.pm` | `trivia`, `mb319`, `mb653` |
 | Quote guessing and its timer | `Mediabot/Games/QuoteGame.pm` | `quotegame`, `mb326`, `mb445` |
 | Remote trivia parsing and HTTP | `Mediabot/External/OpenTriviaDB.pm` | `trivia`, `mb394`, `mb395` |
+| Channel statistics, rankings and activity charts | `Mediabot/Stats/Activity.pm` | `stats`, `mb574`, `mb578`, `mb627` |
+| Word counts, activity streaks and last messages | `Mediabot/Stats/History.pm` | `wordcount`, `streak`, `mb426`, `mb655`, `mb738` |
 | Memories and annual/community history | `Mediabot/SocialHistory.pm`, `Mediabot/Memory/Search.pm` | `memory`, `yearbook`, `onthisday` |
 | Notes, reminders, polls and factoids | `Mediabot/CommunityState.pm` | `note`, `remind`, `poll`, `factoid` |
 | Conversation and spontaneous output | `Mediabot/Hailo/`, `Mediabot/Spark/`, `Mediabot/Conversation/` | `hailo`, `spark`, `conversation` |

@@ -85,7 +85,7 @@ return sub {
     my $commands = slurp1051('Mediabot/ChannelCommands.pm');
     my $runtime = slurp1051('Mediabot/Mediabot.pm');
     my $db = slurp1051('Mediabot/DB.pm');
-    my $user = slurp1051('Mediabot/UserCommands.pm');
+    my $history = slurp1051('Mediabot/Stats/History.pm');
     my $trivia = slurp1051('Mediabot/Games/Trivia.pm');
     my $karma = slurp1051('Mediabot/Karma.pm');
     my $source = slurp1051('Mediabot/Achievements.pm');
@@ -117,7 +117,7 @@ return sub {
     $assert->like($source,
         qr/my \@hour_candidates.*?local_hour.*?night_owl.*?early_bird/s,
         'mb738-1051: only the triggering message local band is eligible');
-    $assert->like($user,
+    $assert->like($history,
         qr/sub mbStreak_ctx\b.*?my \$channel_timezone = eval.*?my \$sql_timezone = .*?DATE\(CONVERT_TZ\(cl\.ts, \@\@session\.time_zone, \?\)\) AS day/s,
         'mb738-1051: activity streak declares and uses its channel-local calendar');
     $assert->like($trivia,

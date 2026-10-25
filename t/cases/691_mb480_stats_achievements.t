@@ -45,7 +45,7 @@ return sub {
     # -------------------------------------------------------------------------
     # [A] Câblage dans le code source.
     # -------------------------------------------------------------------------
-    my $uc = _slurp_691(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $uc = _slurp_691(File::Spec->catfile('.', 'Mediabot', 'Stats', 'Activity.pm'));
 
     $assert->like($uc, qr/mb480/, 'ajout mb480 tracé dans le code');
     $assert->like($uc,

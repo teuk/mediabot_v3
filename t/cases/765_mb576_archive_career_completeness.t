@@ -184,7 +184,9 @@ return sub {
 
     # [2] la surface carriere complete passe par le gather
     my $src = _slurp_765(File::Spec->catfile('Mediabot', 'UserCommands.pm'))
-              . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'SocialHistory.pm'));
+              . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'SocialHistory.pm'))
+              . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Stats', 'Activity.pm'))
+              . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'Stats', 'History.pm'));
     my @career = qw(
         mbStats_ctx mbTop_ctx mbStreak_ctx mbLeaderboard_ctx
         mbWordCount_ctx mbLast_ctx mbCompat_ctx
@@ -201,7 +203,7 @@ return sub {
     # [3] aucun UNION ALL dans du SQL reel (les commentaires ne comptent pas)
     my @union_sql = grep { $_ !~ /^\s*#/ && /UNION ALL/ } split /\n/, $src;
     $assert->is(join('|', @union_sql), '',
-        'aucun UNION ALL hors commentaires dans UserCommands');
+        'aucun UNION ALL hors commentaires dans les commandes historiques');
     my $helpers_src = _slurp_765(File::Spec->catfile('Mediabot', 'Helpers.pm'))
                     . "\n" . _slurp_765(File::Spec->catfile('Mediabot', 'ChannelLog', 'Reader.pm'));
     my @union_help = grep { $_ !~ /^\s*#/ && /UNION ALL/ } split /\n/, $helpers_src;

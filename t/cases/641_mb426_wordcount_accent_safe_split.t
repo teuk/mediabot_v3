@@ -42,7 +42,7 @@ return sub {
         'moins de fragments qu\'avec \W+ (mots accentués regroupés)');
 
     # --- 2. Câblage réel ---------------------------------------------------
-    my $src = _slurp_641(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
+    my $src = _slurp_641(File::Spec->catfile('.', 'Mediabot', 'Stats', 'History.pm'));
     my ($body) = $src =~ /(sub mbWordCount_ctx \{.*?\n\}\n)/s; $body //= '';
     (my $code = $body) =~ s/^\s*#.*$//mg;
     $assert->like($code, qr/split \/\[\^0-9A-Za-z_\\x80-\\xFF\]\+\//,

@@ -1,5 +1,18 @@
 # Changelog — Mediabot v3
 
+## MB952 — Channel statistics in dedicated contributor modules (2026-10-24)
+
+- Extract ten existing commands from `UserCommands.pm` into
+  `Stats/Activity.pm` (stats, top, active, when, compare, heatmap, monthstats)
+  and `Stats/History.pm` (wordcount, streak, last).
+- Preserve the ten function bodies, SQL, archive scopes, output, achievements
+  and cache rules. Keep historical exports and call-time transport hooks.
+- Reduce `UserCommands.pm` from 6,594 to 5,408 lines and extend the developer
+  source map with the new owners and targeted test commands.
+- Move existing source checks with their implementations, preserve cross-domain
+  filter/migration checks, and exercise three import orders and public aliases.
+
+
 ## MB951 — Give game code and new contributors a clear home (2026-10-24)
 
 - Extract Trivia and Quotegame into dedicated Games modules, preserving legacy

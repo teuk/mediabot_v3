@@ -60,16 +60,20 @@ return sub {
     $assert->is($old, 9, 'témoin: ancien filtre compte tous les événements');
     $assert->is($new, 2, 'nouveau filtre: seuls public+action');
 
-    # --- UserCommands + SocialHistory : contrat préservé après MB670 ------
+    # --- UserCommands + SocialHistory + Stats : contrat préservé après MB670 ------
     my $uc = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'UserCommands.pm'));
     my $sh = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
-    my $stats_src = $uc . "\n" . $sh;
+    my $stats = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Stats', 'Activity.pm'))
+              . "\n" . _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Stats', 'History.pm'));
+    my $stats_src = join("\n", $uc, $sh, $stats);
+    $assert->is(_count_sql($stats, 'publictext IS NOT NULL'), 0,
+                'Stats: aucun publictext IS NOT NULL réintroduit');
     $assert->is(_count_sql($uc, 'publictext IS NOT NULL'), 0,
                 'UserCommands: plus aucun publictext IS NOT NULL en SQL');
     $assert->is(_count_sql($sh, 'publictext IS NOT NULL'), 0,
                 'SocialHistory: aucun publictext IS NOT NULL réintroduit');
     $assert->ok(_count_sql($stats_src, "event_type IN ('public','action')") >= 27,
-                'UserCommands + SocialHistory: >= 27 requêtes conservent le filtre public/action');
+                'UserCommands + SocialHistory + Stats: >= 27 requêtes conservent le filtre public/action');
     $assert->ok(_count_sql($sh, "event_type IN ('public','action')") > 0,
                 'SocialHistory: les requêtes extraites conservent le filtre public/action');
     $assert->like($uc, qr/mb348-B1/, 'UserCommands: tag mb348-B1');
