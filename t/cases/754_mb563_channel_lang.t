@@ -85,7 +85,7 @@ return sub {
     # [2] Le 8ball consomme le helper
     # ------------------------------------------------------------------
     {
-        my $src = _slurp_754(File::Spec->catfile('Mediabot', 'UserCommands.pm'));
+        my $src = _slurp_754(File::Spec->catfile('Mediabot', 'Games', 'Chance.pm'));
         my ($ball) = $src =~ /(sub mb8ball_ctx \{.*?\n\})/s;
         $assert->ok(defined $ball, 'source de mb8ball_ctx isolee');
         $assert->like($ball, qr/Mediabot::Helpers::channel_lang\(\$self, \$channel\)/,

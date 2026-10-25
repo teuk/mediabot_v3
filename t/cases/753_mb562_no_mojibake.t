@@ -44,7 +44,7 @@ return sub {
         'aucune sequence de double encodage UTF-8 dans les modules');
 
     # Le pool FR du 8ball est bien reparé et non vide
-    my $uc = _slurp_753(File::Spec->catfile('Mediabot', 'UserCommands.pm'));
+    my $uc = _slurp_753(File::Spec->catfile('Mediabot', 'Games', 'Chance.pm'));
     $assert->like($uc, qr/C\\'est absolument \x{00E7}a\./,
         '8ball FR: accents simples corrects');
     $assert->like($uc, qr/Definitivamente s\x{00ED}\./,

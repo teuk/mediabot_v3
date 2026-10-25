@@ -80,11 +80,12 @@ return sub {
     my $karma = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Karma.pm'));
     my $stats = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Stats', 'Activity.pm'))
               . "\n" . _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Stats', 'History.pm'));
-    my $uc_karma = join("\n", $uc, $karma, $stats);
+    my $duel = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Games', 'Duel.pm'));
+    my $uc_karma = join("\n", $uc, $karma, $stats, $duel);
     my $ncalls = () = $uc_karma =~ /Mediabot::Helpers::channel_id_cached\(/g;
-    $assert->ok($ncalls >= 3, 'handlers UserCommands/Stats/Karma convertis au helper');
+    $assert->ok($ncalls >= 3, 'handlers UserCommands/Stats/Games/Karma convertis au helper');
     my $nsel = () = $uc_karma =~ /SELECT id_channel FROM CHANNEL WHERE name/g;
-    $assert->is($nsel, 2, "migration UserCommands+Stats+Karma: seuls les 2 replis mb410 restent (actuel: $nsel, mb414)");
+    $assert->is($nsel, 2, "migration UserCommands+Stats+Games+Karma: seuls les 2 replis mb410 restent (actuel: $nsel, mb414)");
 
     # mb412: le lot Partyline est intégralement migré — verrouillé à zéro.
     my $pl = _slurp_629(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))

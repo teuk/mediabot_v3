@@ -85,6 +85,17 @@ The fast lane is not the complete acceptance suite. Use the project's runner;
 `--list-selected` lists the chosen cases; it still loads the runner's basic Perl
 dependencies.
 
+For the built-in small games, the source owners are `Games/Chance.pm` and
+`Games/Duel.pm`. Their historical command names remain imported through
+`UserCommands`; the independently activated `playful-v3` plugin keeps its own
+implementation and policy. A built-in refactor does not enable that plugin.
+
+```bash
+perl -I. -It/lib -c Mediabot/Games/Chance.pm
+perl -I. -It/lib -c Mediabot/Games/Duel.pm
+perl t/test_commands.pl --filter 'mb425|mb562|mb563|mb610|mb411|playful' --progress
+```
+
 For channel statistics, use the two domain modules and their existing archive,
 calendar and failure-semantics tests:
 
@@ -110,6 +121,8 @@ extracted command to its new owner; keep their original assertions.
 | Context and authorization boundaries | `Mediabot/Context.pm`, `Mediabot/Auth.pm` | `context`, `auth`, `login` |
 | Trivia game and worker adapter | `Mediabot/Games/Trivia.pm` | `trivia`, `mb319`, `mb653` |
 | Quote guessing and its timer | `Mediabot/Games/QuoteGame.pm` | `quotegame`, `mb326`, `mb445` |
+| Dice, coins, choices, 8ball and slap | `Mediabot/Games/Chance.pm` | `mb425`, `mb562`, `mb563`, `playful` |
+| Duels, their karma changes and achievement hooks | `Mediabot/Games/Duel.pm` | `mb610`, `playful`, `mb411` |
 | Remote trivia parsing and HTTP | `Mediabot/External/OpenTriviaDB.pm` | `trivia`, `mb394`, `mb395` |
 | Channel statistics, rankings and activity charts | `Mediabot/Stats/Activity.pm` | `stats`, `mb574`, `mb578`, `mb627` |
 | Word counts, activity streaks and last messages | `Mediabot/Stats/History.pm` | `wordcount`, `streak`, `mb426`, `mb655`, `mb738` |

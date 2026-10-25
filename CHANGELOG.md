@@ -1,5 +1,18 @@
 # Changelog — Mediabot v3
 
+## MB953 — Give small games and duels dedicated source owners (2026-10-25)
+
+- Extract built-in 8ball, slap, roll, flip and choose into `Games/Chance.pm`,
+  and duel into `Games/Duel.pm`, preserving all six function bodies.
+- Keep the facade exports, public bot methods, late transport hooks and duel
+  achievement-progress hook; preserve random draws, histories, karma SQL,
+  cooldowns and output.
+- Reduce `UserCommands.pm` from 5,408 to 4,841 lines and extend the contributor
+  source map and offline test examples.
+- Follow the implementations in existing source checks and exercise native
+  game paths, channel isolation and three fresh-interpreter load orders.
+
+
 ## MB952 — Channel statistics in dedicated contributor modules (2026-10-24)
 
 - Extract ten existing commands from `UserCommands.pm` into
