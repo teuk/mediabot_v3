@@ -84,7 +84,8 @@ return sub {
     # [6] Presentation code no longer depends on internal JSON hashes.
     my $uc     = slurp826('Mediabot/UserCommands.pm');
     my $social = slurp826('Mediabot/SocialHistory.pm');
-    my $views  = slurp826('Mediabot/Users/AchievementView.pm');
+    my $views  = slurp826('Mediabot/Users/AchievementView.pm')
+               . slurp826('Mediabot/Diagnostics/Commands.pm');
     $assert->ok(index($uc, '$self->{achievements}{data}') < 0
             && index($social, '$self->{achievements}{data}') < 0
             && index($views, '$self->{achievements}{data}') < 0,

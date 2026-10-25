@@ -57,7 +57,7 @@ return sub {
                       Quotes Convert LoginCommands AdminCommands CommandAsync
                       External/URL External/Chromium External/YouTube External/Claude
                       External/Weather External/Fortnite External/TMDB
-                      External/News External/Horoscope Users/Horoscope Users/AchievementView);
+                      External/News External/Horoscope Users/Horoscope Users/AchievementView Stats/Radar Diagnostics/Commands);
     my @missing;
     for my $mod (@speaking) {
         my $path = "Mediabot/$mod.pm";

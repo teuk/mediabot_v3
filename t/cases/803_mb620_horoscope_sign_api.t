@@ -60,7 +60,8 @@ return sub {
     my $src = do { open my $fh, '<:raw', 'Mediabot/UserCommands.pm' or die $!;
                    local $/; <$fh> };
     # Keep the facade-wide guard and include the extracted speaking owners.
-    for my $path ('Mediabot/Users/Horoscope.pm', 'Mediabot/Users/AchievementView.pm') {
+    for my $path ('Mediabot/Users/Horoscope.pm', 'Mediabot/Users/AchievementView.pm',
+                 'Mediabot/Stats/Radar.pm', 'Mediabot/Diagnostics/Commands.pm') {
         open my $fh, '<:raw', $path or die $!;
         local $/; $src .= <$fh>;
     }

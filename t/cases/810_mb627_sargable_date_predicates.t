@@ -42,7 +42,11 @@ return sub {
         or die $!; local $/; <$fh> };
     my $seen = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Users/Seen.pm'
         or die $!; local $/; <$fh> };
-    my $src = join("\n", $users, $social, $activity, $history, $seen);
+    my $radar = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Stats/Radar.pm'
+        or die $!; local $/; <$fh> };
+    my $views = do { open my $fh, '<:encoding(UTF-8)', 'Mediabot/Diagnostics/Commands.pm'
+        or die $!; local $/; <$fh> };
+    my $src = join("\n", $users, $social, $activity, $history, $seen, $radar, $views);
 
     # [1] recensement de la classe
     my @bad;

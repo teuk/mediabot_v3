@@ -1,5 +1,17 @@
 # Changelog — Mediabot v3
 
+## MB958 — Give channel read views dedicated source owners (2026-10-25)
+
+- Extract radar into `Stats/Radar.pm` and features/observatory with their three
+  state/uptime/energy helpers into `Diagnostics/Commands.pm`.
+- Preserve all six function bodies, historical command/helper aliases, public
+  bot methods, SQL/binds, chanset defaults, channel scopes, reply routes and metrics.
+- Reduce `UserCommands.pm` from 2,686 to 2,288 lines and extend contributor
+  navigation; keep the diagnostic publisher and mbweb readers unchanged.
+- Follow the moved read views in existing SQL, encoding and storage-neutrality
+  checks; exercise three fresh load orders and real command paths. No schema changes.
+
+
 ## MB957 — Give horoscope and achievement views dedicated owners (2026-10-25)
 
 - Extract the horoscope command and four zodiac helpers into `Users/Horoscope.pm`,

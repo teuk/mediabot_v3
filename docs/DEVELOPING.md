@@ -163,6 +163,27 @@ The existing SocialHistory goal formatter still resolves that facade at call
 time. When editing either owner, keep the transport and progress hooks late
 bound; do not add SQL persistence or provider logic to these views.
 
+For channel activity and public capability/state views:
+
+```bash
+perl -I. -It/lib -c Mediabot/Stats/Radar.pm
+perl -I. -It/lib -c Mediabot/Diagnostics/Commands.pm
+perl t/test_commands.pl --filter 'mb958|mb348|mb627|dispatch|module_structure' --progress
+```
+
+`Stats/Radar.pm` owns the live activity radar and its bounded 1–30 day history
+view. `Diagnostics/Commands.pm` owns `features`/`capabilities`/`caps` and
+`observatory`/`obs`, with their existing chanset/default and uptime/energy helpers.
+The capability summary remains private; the two observatory lines and radar
+remain on the requested channel. The historical `UserCommands` names and bot
+methods still point to those owners. Outputs and the shared number formatter
+are resolved through the facade at call time.
+
+These read views do not own diagnostic collection or publication. Keep the
+existing `Diagnostics/Channel.pm`, `Activity.pm`, `Plugins.pm`, `Publisher.pm`
+and mbweb readers as their own boundaries. Moving a public command does not
+enable or reconfigure diagnostics on any channel.
+
 ## 4. Find the owner of a change
 
 | Concern | Start here | Related test filenames |
@@ -177,6 +198,8 @@ bound; do not add SQL persistence or provider logic to these views.
 | Remote trivia parsing and HTTP | `Mediabot/External/OpenTriviaDB.pm` | `trivia`, `mb394`, `mb395` |
 | Channel statistics, rankings and activity charts | `Mediabot/Stats/Activity.pm` | `stats`, `mb574`, `mb578`, `mb627` |
 | Word counts, activity streaks, last messages and ranked sayings | `Mediabot/Stats/History.pm` | `wordcount`, `streak`, `topsay`, `mb426`, `mb455`, `mb655`, `mb738` |
+| Live activity radar and bounded daily history | `Mediabot/Stats/Radar.pm` | `mb958`, `mb348`, `mb627` |
+| Public capability/state commands and their private/public reply routes | `Mediabot/Diagnostics/Commands.pm` | `mb958`, `dispatch`, `mb621` |
 | Channel affinity from hours, vocabulary, karma and adjacent messages | `Mediabot/Stats/Affinity.pm` | `compat`, `mb427`, `mb575`, `mb576`, `mb578`, `mb610` |
 | Exact account/channel level lookups | `Mediabot/Users/Levels.pm` | `user_id_level`, `usercommands_lookup`, `moduser` |
 | Account statistics, userinfo and channel greet views | `Mediabot/Users/Profiles.pm` | `userinfo`, `greet`, `mb455` |

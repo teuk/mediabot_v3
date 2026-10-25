@@ -65,9 +65,13 @@ return sub {
     my $sh = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
     my $stats = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Stats', 'Activity.pm'))
               . "\n" . _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Stats', 'History.pm'))
-              . "\n" . _slurp_567(File::Spec->catfile('Mediabot', 'Stats', 'Affinity.pm'));
+              . "\n" . _slurp_567(File::Spec->catfile('Mediabot', 'Stats', 'Affinity.pm'))
+              . "\n" . _slurp_567(File::Spec->catfile('Mediabot', 'Stats', 'Radar.pm'));
     my $seen = _slurp_567(File::Spec->catfile('Mediabot', 'Users', 'Seen.pm'));
-    my $stats_src = join("\n", $uc, $sh, $stats, $seen);
+    my $views = _slurp_567(File::Spec->catfile('Mediabot', 'Diagnostics', 'Commands.pm'));
+    my $stats_src = join("\n", $uc, $sh, $stats, $seen, $views);
+    $assert->is(_count_sql($views, 'publictext IS NOT NULL'), 0,
+                'Diagnostic commands: no publictext IS NOT NULL reintroduced');
     $assert->is(_count_sql($seen, 'publictext IS NOT NULL'), 0,
                 'Seen: aucun publictext IS NOT NULL réintroduit');
     $assert->is(_count_sql($stats, 'publictext IS NOT NULL'), 0,
