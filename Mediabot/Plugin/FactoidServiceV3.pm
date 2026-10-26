@@ -106,6 +106,8 @@ sub _select {
             die "FactoidServiceV3: result bound exceeded\n"
                 if @rows > MAX_LIST_RESULTS;
         }
+        die "FactoidServiceV3: data service unavailable\n"
+            if $sth->can('err') && $sth->err;
         1;
     };
     eval { $sth->finish };
