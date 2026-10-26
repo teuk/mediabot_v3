@@ -1,3 +1,15 @@
+## MB972 — Contain native factoid store failures (2026-10-26)
+
+- Contain prepare/execute exceptions in native `learn` and finish every
+  allocated store cursor, including when execution fails without throwing.
+  Keep the existing fixed failure notice and withhold success bookkeeping
+  until the write acknowledgement is confirmed.
+- Do not retry an uncertain write automatically. Preserve normal confirmations
+  for successful UPSERTs, including unchanged rows and cleanup errors after
+  a confirmed execution, with contribution accounting exactly once.
+- Exercise all three native facades with actual SQLite writes, both DBI error
+  modes, lost acknowledgements after commit, cursor cleanup and explicit retry.
+
 ## MB971 — Confirm native factoid reads (2026-10-26)
 
 - Contain prepare, execute and fetch failures in native `whatis`, `factoid`

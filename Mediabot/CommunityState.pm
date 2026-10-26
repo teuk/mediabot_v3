@@ -1568,16 +1568,22 @@ sub mbLearn_ctx {
 
     # UPSERT on (id_channel, keyword). On update, keep original author but
     # refresh value/updated_at (ON DUPLICATE preserves created_by/created_at).
-    my $sth = $dbh->prepare(q{
-        INSERT INTO FACTOID (id_channel, keyword, value, created_by, created_by_nick)
-        VALUES (?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP
-    });
-    unless ($sth && $sth->execute($id_channel, $keyword, $value, $uid, $nick)) {
+    my $sth;
+    my $stored = eval {
+        $sth = $dbh->prepare(q{
+            INSERT INTO FACTOID (id_channel, keyword, value, created_by, created_by_nick)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP
+        }) or die 'factoid store prepare failed';
+        $sth->execute($id_channel, $keyword, $value, $uid, $nick)
+            or die 'factoid store execute failed';
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($stored) {
         botNotice($self, $nick, "learn: could not store the factoid.");
         return;
     }
-    $sth->finish;
 
     # mb668: derive community achievements from the persisted FACTOID/QUOTES
     # state. An update of an existing factoid therefore cannot inflate merit.
