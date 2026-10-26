@@ -55,10 +55,11 @@ sub _slurp_687 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
             _assign_id($store,$store->{$k});
             return 1;
         }
-        if ($sql =~ /SELECT value, created_by_nick FROM FACTOID/i) {
+        if ($sql =~ /SELECT id_factoid, value, created_by_nick FROM FACTOID/i) {
             my ($idc,$kw) = @bind; my $k="$idc\0$kw";
             $s->{rows} = exists $store->{$k}
-              ? [ { value=>$store->{$k}{value}, created_by_nick=>$store->{$k}{created_by_nick} } ] : [];
+              ? [ { id_factoid=>_assign_id($store,$store->{$k}),
+                    value=>$store->{$k}{value}, created_by_nick=>$store->{$k}{created_by_nick} } ] : [];
             return 1;
         }
         if ($sql =~ /SELECT id_factoid, created_by, created_by_nick FROM FACTOID/i) {
@@ -69,7 +70,13 @@ sub _slurp_687 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
             return 1;
         }
         if ($sql =~ /UPDATE FACTOID SET hits/i) {
-            my ($idc,$kw)=@bind; my $k="$idc\0$kw"; $store->{$k}{hits}++ if exists $store->{$k}; return 1;
+            my ($id,$idc)=@bind;
+            for my $key (keys %$store) {
+                my ($channel)=split /\0/,$key;
+                $store->{$key}{hits}++
+                    if $channel==$idc && ($store->{$key}{id_factoid}//0)==$id;
+            }
+            return 1;
         }
         if ($sql =~ /DELETE FROM FACTOID/i) {
             my ($id,$idc)=@bind;

@@ -26,9 +26,10 @@ sub _slurp_688 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     sub new { my ($c,%a)=@_; bless { %a, i=>0 }, $c }
     sub execute {
         my ($s,@b)=@_; my $store=$s->{store}; $s->{rows}=[]; $s->{i}=0;
-        if ($s->{sql} =~ /SELECT value, created_by_nick FROM FACTOID/i) {
+        if ($s->{sql} =~ /SELECT id_factoid, value, created_by_nick FROM FACTOID/i) {
             my ($idc,$kw)=@b; my $k="$idc\0$kw";
-            $s->{rows} = exists $store->{$k} ? [ { value=>$store->{$k}{value}, created_by_nick=>$store->{$k}{nick} } ] : [];
+            $s->{rows} = exists $store->{$k} ? [ { id_factoid=>$store->{$k}{id_factoid},
+                value=>$store->{$k}{value}, created_by_nick=>$store->{$k}{nick} } ] : [];
         }
         return 1;
     }
@@ -49,7 +50,7 @@ return sub {
     local *Mediabot::UserCommands::botPrivmsg = sub { push @sent, { to=>$_[1], text=>$_[2] } };
     use warnings 'redefine';
 
-    my %store = ( "42\0coffee" => { value => 'black gold', nick => 'alice' } );
+    my %store = ( "42\0coffee" => { id_factoid => 7, value => 'black gold', nick => 'alice' } );
     my $mkbot = sub {
         MockBot->new(dbh => FakeDBH688->new(\%store),
                      channels => { '#test' => FakeChan688->new(42) });

@@ -1660,7 +1660,7 @@ sub mbWhatis_ctx {
     unless ($id_channel) { botNotice($self, $nick, "whatis: channel not known to the bot.") unless $quiet; return; }
 
     my $rows = _factoid_read_rows($dbh, q{
-        SELECT value, created_by_nick FROM FACTOID
+        SELECT id_factoid, value, created_by_nick FROM FACTOID
         WHERE id_channel = ? AND keyword = ? LIMIT 1
     }, $id_channel, $keyword);
     unless ($rows) {
@@ -1674,12 +1674,17 @@ sub mbWhatis_ctx {
         return;
     }
 
-    # increment hit counter (best-effort, non-fatal)
+    # Count the row that was actually read. A replacement under the same
+    # keyword must not inherit this recall. Counter failures stay non-fatal.
+    my $up;
     eval {
-        my $up = $dbh->prepare('UPDATE FACTOID SET hits = hits + 1 WHERE id_channel = ? AND keyword = ?');
-        $up->execute($id_channel, $keyword) if $up;
-        $up->finish if $up;
+        my $id = $row->{id_factoid};
+        die 'factoid recall identity unavailable'
+            unless defined($id) && !ref($id) && "$id" =~ /\A[1-9][0-9]*\z/;
+        $up = $dbh->prepare('UPDATE FACTOID SET hits = hits + 1 WHERE id_factoid = ? AND id_channel = ?');
+        $up->execute($id, $id_channel) if $up;
     };
+    eval { $up->finish } if $up;
 
     botPrivmsg($self, $channel, "$keyword: $row->{value}");
     $self->{metrics}->inc('mediabot_factoid_total', { channel => $channel, op => 'whatis' })

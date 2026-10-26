@@ -1,3 +1,14 @@
+## MB973 — Keep native factoid recall accounting on the observed row (2026-10-26)
+
+- Read the factoid id with its value and increment hits by that id and channel,
+  rather than by keyword. A replacement created after the read no longer
+  inherits a recall for the deleted factoid's text.
+- Skip optional accounting if the observed id is unavailable, without falling
+  back to the keyword. Keep confirmed text display and its metric independent
+  of best-effort counter failures, and attempt cursor cleanup after execution errors.
+- Exercise all three native facades, both quiet modes and DBI error modes with
+  independent SQLite connections, replacement/removal/move races and counter faults.
+
 ## MB972 — Contain native factoid store failures (2026-10-26)
 
 - Contain prepare/execute exceptions in native `learn` and finish every

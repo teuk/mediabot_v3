@@ -70,12 +70,12 @@ sub setup_1347 {
         RootClass=>'MB971::DBI',RaiseError=>$raise,PrintError=>0});
     $db->sqlite_create_function('DATE_FORMAT',2,sub {substr($_[0],0,10)});
     $db->do('CREATE TABLE CHANSET_LIST(id_chanset_list INTEGER,chanset TEXT)');
-    $db->do(q{CREATE TABLE FACTOID(id_channel INTEGER,keyword TEXT,value TEXT,
+    $db->do(q{CREATE TABLE FACTOID(id_factoid INTEGER PRIMARY KEY,id_channel INTEGER,keyword TEXT,value TEXT,
         created_by_nick TEXT,created_at TEXT,updated_at TEXT,hits INTEGER)});
     $db->do(q{INSERT INTO FACTOID VALUES
-        (1,'word','Complete value','Author','2026-10-01','2026-10-02',3),
-        (1,'word2','Second value','Other','2026-10-03','2026-10-03',1),
-        (2,'word','Other channel','Other','2026-10-01','2026-10-01',99)});
+        (10,1,'word','Complete value','Author','2026-10-01','2026-10-02',3),
+        (11,1,'word2','Second value','Other','2026-10-03','2026-10-03',1),
+        (20,2,'word','Other channel','Other','2026-10-01','2026-10-01',99)});
     $db->{private_fault} = $fault;
     $db->{private_finished} = 0; $db->{private_updates} = 0;
     my $bot = bless {dbh=>$db,channels=>{'#test'=>bless({},'MB971::Channel')},
