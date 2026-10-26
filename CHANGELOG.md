@@ -1,3 +1,16 @@
+## MB966 — Preserve factoid deletion identity and authorization (2026-10-26)
+
+- Native `forget` authorizes recorded account authors by authenticated user id
+  instead of mutable IRC nickname text. Keep nickname ownership only for facts
+  with a NULL account author, and require authentication for channel-op rights.
+- Delete the exact factoid id that was read and authorized, within its channel.
+  A replacement under the same keyword is preserved; zero-row deletes no longer
+  produce success notices or deletion metrics.
+- Contain lookup/deletion failures, distinguishing SQL errors from confirmed
+  absence and reporting unconfirmed deletions without raw exception text.
+- Exercise all three native facades with actual users, SQLite authorization
+  lookups, two-connection replacement races and both DBI error modes.
+
 ## MB965 — Confirm personal note storage before changing the cache (2026-10-26)
 
 - Distinguish failed or partial NOTE reads from a confirmed empty result.

@@ -1682,24 +1682,39 @@ sub mbForget_ctx {
     my $id_channel = _factoid_id_channel($self, $channel);
     unless ($id_channel) { botNotice($self, $nick, "forget: channel not known to the bot."); return; }
 
-    # who created it?
-    my $sth = $dbh->prepare('SELECT created_by, created_by_nick FROM FACTOID WHERE id_channel = ? AND keyword = ? LIMIT 1');
-    unless ($sth && $sth->execute($id_channel, $keyword)) {
+    # Read the identity as well as authorship: a replacement under the same
+    # keyword must not inherit this row's deletion authorization.
+    my ($sth, $row);
+    my $loaded = eval {
+        $sth = $dbh->prepare('SELECT id_factoid, created_by, created_by_nick FROM FACTOID WHERE id_channel = ? AND keyword = ? LIMIT 1')
+            or die 'factoid lookup prepare failed';
+        $sth->execute($id_channel, $keyword) or die 'factoid lookup execute failed';
+        $row = $sth->fetchrow_hashref;
+        die 'factoid lookup fetch failed' if $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($loaded) {
         botNotice($self, $nick, "forget: lookup failed.");
         return;
     }
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
     unless ($row) {
         botNotice($self, $nick, "I don't know '$keyword'.");
         return;
     }
 
-    # permission: original author (by nick) OR a channel operator (by level).
-    my $is_author = (defined $row->{created_by_nick} && lc($row->{created_by_nick}) eq lc($nick)) ? 1 : 0;
+    # MB966: a recorded account owns the fact even after an IRC nick change.
+    # Nickname ownership remains only for legacy facts with a NULL author id.
+    my $user = eval { $ctx->user };
+    my $authenticated = $user && eval { $user->is_authenticated };
+    my $uid = $authenticated ? eval { $user->id } : undef;
+    my $is_author = defined($row->{created_by})
+        ? (defined($uid) && !ref($uid) && "$uid" =~ /\A[1-9][0-9]*\z/
+            && "$uid" eq "$row->{created_by}" ? 1 : 0)
+        : (defined($row->{created_by_nick}) && lc($row->{created_by_nick}) eq lc($nick) ? 1 : 0);
     my $is_op = 0;
-    unless ($is_author) {
-        my $handle = eval { my $u = $ctx->user; $u ? $u->nickname : undef };
+    if (!$is_author && $authenticated) {
+        my $handle = eval { $user->nickname };
         if (defined $handle && $handle ne '') {
             my (undef, $lvl) = eval { getIdUserChannelLevel($self, $handle, $channel) };
             # USER_CHANNEL.level is the per-channel scale; >=400 is operator+.
@@ -1711,12 +1726,27 @@ sub mbForget_ctx {
         return;
     }
 
-    my $del = $dbh->prepare('DELETE FROM FACTOID WHERE id_channel = ? AND keyword = ?');
-    unless ($del && $del->execute($id_channel, $keyword)) {
-        botNotice($self, $nick, "forget: delete failed.");
+    my ($del, $rows);
+    my $deleted = eval {
+        my $id = $row->{id_factoid};
+        die 'factoid identity unavailable' unless defined($id) && !ref($id)
+            && "$id" =~ /\A[1-9][0-9]*\z/;
+        $del = $dbh->prepare('DELETE FROM FACTOID WHERE id_factoid = ? AND id_channel = ?')
+            or die 'factoid delete prepare failed';
+        $del->execute($id, $id_channel) or die 'factoid delete execute failed';
+        $rows = $del->rows;
+        die 'factoid delete not confirmed' unless defined($rows) && "$rows" =~ /\A[0-9]+\z/;
+        1;
+    };
+    eval { $del->finish } if $del;
+    unless ($deleted) {
+        botNotice($self, $nick, "forget: could not confirm deletion.");
         return;
     }
-    $del->finish;
+    unless ($rows > 0) {
+        botNotice($self, $nick, "forget: '$keyword' changed or is already gone. Please retry.");
+        return;
+    }
 
     botNotice($self, $nick, "Forgot '$keyword' on $channel.");
     $self->{metrics}->inc('mediabot_factoid_total', { channel => $channel, op => 'forget' })

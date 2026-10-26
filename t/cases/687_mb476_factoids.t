@@ -31,17 +31,28 @@ sub _slurp_687 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
 {
     package FakeSTH687;
     sub new { my ($c,%a)=@_; bless { %a, i=>0 }, $c }
+    sub _assign_id {
+        my ($store,$row)=@_;
+        return $row->{id_factoid} if defined $row->{id_factoid};
+        my $max=0;
+        for my $item (values %$store) {
+            $max=$item->{id_factoid} if ($item->{id_factoid}//0)>$max;
+        }
+        return $row->{id_factoid}=$max+1;
+    }
     sub execute {
         my ($s, @bind) = @_;
         my $store = $s->{store};
         my $sql   = $s->{sql};
         $s->{rows} = [];
         $s->{i} = 0;
+        $s->{affected} = 0;
         if ($sql =~ /INSERT INTO FACTOID/i) {
             my ($idc,$kw,$val,$uid,$nick) = @bind;
             my $k = "$idc\0$kw";
             if (exists $store->{$k}) { $store->{$k}{value} = $val; }   # ON DUP UPDATE
-            else { $store->{$k} = { value=>$val, created_by_nick=>$nick, hits=>0 }; }
+            else { $store->{$k} = { value=>$val, created_by=>$uid, created_by_nick=>$nick, hits=>0 }; }
+            _assign_id($store,$store->{$k});
             return 1;
         }
         if ($sql =~ /SELECT value, created_by_nick FROM FACTOID/i) {
@@ -50,17 +61,24 @@ sub _slurp_687 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
               ? [ { value=>$store->{$k}{value}, created_by_nick=>$store->{$k}{created_by_nick} } ] : [];
             return 1;
         }
-        if ($sql =~ /SELECT created_by, created_by_nick FROM FACTOID/i) {
+        if ($sql =~ /SELECT id_factoid, created_by, created_by_nick FROM FACTOID/i) {
             my ($idc,$kw) = @bind; my $k="$idc\0$kw";
             $s->{rows} = exists $store->{$k}
-              ? [ { created_by=>undef, created_by_nick=>$store->{$k}{created_by_nick} } ] : [];
+              ? [ { id_factoid=>_assign_id($store,$store->{$k}),
+                    created_by=>$store->{$k}{created_by}, created_by_nick=>$store->{$k}{created_by_nick} } ] : [];
             return 1;
         }
         if ($sql =~ /UPDATE FACTOID SET hits/i) {
             my ($idc,$kw)=@bind; my $k="$idc\0$kw"; $store->{$k}{hits}++ if exists $store->{$k}; return 1;
         }
         if ($sql =~ /DELETE FROM FACTOID/i) {
-            my ($idc,$kw)=@bind; delete $store->{"$idc\0$kw"}; return 1;
+            my ($id,$idc)=@bind;
+            for my $key (keys %$store) {
+                my ($channel)=split /\0/,$key;
+                next unless $channel==$idc && ($store->{$key}{id_factoid}//0)==$id;
+                delete $store->{$key}; $s->{affected}++;
+            }
+            return 1;
         }
         if ($sql =~ /SELECT keyword FROM FACTOID/i) {
             my $idc = $bind[0];
@@ -83,6 +101,8 @@ sub _slurp_687 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     }
     sub fetchrow_hashref { my $s=shift; return undef if $s->{i} >= @{$s->{rows}}; return $s->{rows}[$s->{i}++]; }
     sub fetchrow_array   { my $s=shift; return () if $s->{i} >= @{$s->{rows}}; my $r=$s->{rows}[$s->{i}++]; return ($r->{keyword}); }
+    sub err { undef }
+    sub rows { $_[0]{affected} }
     sub finish { 1 }
 
     package FakeDBH687;
