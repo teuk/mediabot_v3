@@ -1,3 +1,15 @@
+## MB969 — Reject incomplete quote reads (2026-10-26)
+
+- Check DBI statement errors after fetching quote results, before cleanup can
+  clear the error. Non-throwing fetch failures no longer appear as empty or
+  partial successful searches, counts, rankings or individual quote reads.
+- Fail the whole operation when either stage of a random selection or quote
+  statistics read fails, without publishing partial results or proceeding to
+  recall accounting. Genuine absence keeps its existing successful result.
+- Exercise all eight read operations with real SQLite queries, both DBI error
+  modes, failures before/after a row, later-query failures, cursor cleanup and
+  official plugin commands through the real runtime bridge.
+
 ## MB968 — Confirm factoid write lookups and deletions (2026-10-26)
 
 - Reject failed channel/author lookups in the API v3 factoid write service,

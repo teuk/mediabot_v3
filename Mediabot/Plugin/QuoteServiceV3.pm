@@ -124,6 +124,8 @@ sub _select {
             die "QuoteServiceV3: result bound exceeded\n"
                 if @rows > MAX_SEARCH_RESULTS;
         }
+        die "QuoteServiceV3: data service unavailable\n"
+            if $sth->can('err') && $sth->err;
         1;
     };
     eval { $sth->finish };
