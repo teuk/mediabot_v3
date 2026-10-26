@@ -109,6 +109,6 @@ return sub {
 
         # seen : le compteur 24h (mb497) est best-effort (execute sous eval)
         my ($seen) = $src =~ /(sub mbSeen_ctx \{.*?\n\})/s; $seen //= '';
-        $assert->like($seen, qr/eval \{ \$sth_act->execute/, '[3] seen: compteur 24h best-effort');
+        $assert->like($seen, qr/my \$activity_ok = eval \{.*?\$self->\{dbh\}->prepare.*?\$sth_act->execute.*?\$sth_act->fetchrow_hashref/s, '[3] seen: compteur 24h best-effort');
     }
 };

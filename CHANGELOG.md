@@ -1,3 +1,14 @@
+## MB962 — Keep seen lookups scoped and reliable (2026-10-26)
+
+- Resolve uncached channel identities before reading legacy history. An
+  unresolved requested channel no longer falls back to another channel's quit.
+- Distinguish failed USER_SEEN reads from empty results for exact and wildcard
+  lookups. Contain prepare/execute/fetch exceptions and withhold partial matches.
+- Apply the existing message cleanup and display bound to live/archive legacy
+  text and global quit reasons; remove remaining tab/DEL control characters.
+- Keep the confirmed seen reply when the optional activity counter fails at
+  prepare, execute or fetch. Exercise real SQLite queries and all native facades.
+
 ## MB961 — Preserve reminder snoozes and validate scheduled messages (2026-10-26)
 
 - Claim delivery only while the stored message still matches the selected

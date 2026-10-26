@@ -59,8 +59,8 @@ return sub {
     $assert->like($body, qr/\$self->\{channels\}\{lc \$act_chan\}/,
         '[2] lookup canal en lc (garde 625)');
     # best-effort : jamais bloquant (execute sous eval)
-    $assert->like($body, qr/eval \{ \$sth_act->execute/,
-        '[2] compteur best-effort (execute sous eval)');
+    $assert->like($body, qr/my \$activity_ok = eval \{.*?\$self->\{dbh\}->prepare.*?\$sth_act->execute/s,
+        '[2] compteur best-effort (prepare et execute sous eval)');
     # n'affiche le compteur que s'il y a de l'activité
     $assert->like($body, qr/\$msg \.= " \[\$c msg in last 24h\]" if \$c > 0;/,
         '[2] compteur affiché seulement si > 0');

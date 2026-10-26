@@ -13,6 +13,24 @@ sub botPrivmsg { goto &Mediabot::UserCommands::botPrivmsg }
 sub botNotice  { goto &Mediabot::UserCommands::botNotice }
 sub logBot     { goto &Mediabot::UserCommands::logBot }
 
+# A successful empty result and a failed read must never share the same path.
+# Finish even when RaiseError throws, and withhold partially fetched matches.
+sub _seen_rows {
+    my ($dbh, $sql, @bind) = @_;
+    my ($sth, @rows);
+    my $ok = eval {
+        $sth = $dbh->prepare($sql) or die "seen_prepare\n";
+        $sth->execute(@bind) or die "seen_execute\n";
+        while (my $row = $sth->fetchrow_hashref) { push @rows, $row }
+        die "seen_fetch\n" if $sth->err;
+        1;
+    };
+    my $error = $@;
+    eval { $sth->finish } if $sth;
+    die $error unless $ok;
+    return \@rows;
+}
+
 # Online, persisted and archived last-seen lookups, scoped by the requested channel.
 sub mbSeen_ctx {
     my ($ctx) = @_;
@@ -74,13 +92,11 @@ sub mbSeen_ctx {
             };
             @bind_wc = ($like_pat);
         }
-        my $sth_wc = $self->{dbh}->prepare($sql_wc);
-        unless ($sth_wc && $sth_wc->execute(@bind_wc)) {
+        my $rows = eval { _seen_rows($self->{dbh}, $sql_wc, @bind_wc) };
+        unless ($rows) {
             botNotice($self, $nick, 'Database error.'); return;
         }
-        my @wc_rows;
-        while (my $r = $sth_wc->fetchrow_hashref) { push @wc_rows, $r; }
-        $sth_wc->finish;
+        my @wc_rows = @$rows;
         unless (@wc_rows) {
             my $scope = $chan_for_wc ? " on $chan_for_wc" : '';
             botNotice($self, $nick, "No nicks matching '$target_input'$scope.");
@@ -146,7 +162,7 @@ sub mbSeen_ctx {
         return '' unless defined $txt && $txt ne '';
         $txt =~ s/[\x02\x0f\x16\x1d\x1f]//g;         # bold/reset/reverse/italic/underline
         $txt =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;       # mIRC colour codes
-        $txt =~ s/[\x00-\x08\x0a-\x1f]/ /g;          # remaining control chars -> space
+        $txt =~ s/[\x00-\x1f\x7f]/ /g;               # remaining control chars -> space
         $txt =~ s/\s{2,}/ /g;
         $txt =~ s/^\s+|\s+$//g;
         $txt = Mediabot::Helpers::truncate_utf8($txt, 200, '...') if length($txt) > 200;
@@ -201,11 +217,12 @@ sub mbSeen_ctx {
             @bind = ($targetNick);
         }
 
-        my $sth = $self->{dbh}->prepare($sql);
-        if ($sth && $sth->execute(@bind)) {
-            $seen_row = $sth->fetchrow_hashref;
-            $sth->finish;
+        my $rows = eval { _seen_rows($self->{dbh}, $sql, @bind) };
+        unless ($rows) {
+            botNotice($self, $nick, 'Database error.');
+            return;
         }
+        $seen_row = $rows->[0];
     }
 
     # --- 2. Fallback: CHANNEL_LOG events (older data pre-USER_SEEN) ---
@@ -216,9 +233,13 @@ sub mbSeen_ctx {
         my $id_channel = 0;
 
         if (defined $chan_for_part) {
-            my $channel_obj = $self->{channels}{lc $chan_for_part}
-                           || $self->{channels}{lc($chan_for_part)};
-            $id_channel = eval { $channel_obj->get_id } || 0;
+            # MB962: a cache miss must not turn a scoped request into a global
+            # history query. Resolve the existing DB identity or stop here.
+            $id_channel = Mediabot::Helpers::channel_id_cached($self, $chan_for_part);
+            unless ($id_channel) {
+                botNotice($self, $nick, 'Channel unavailable.');
+                return;
+            }
         }
 
         if (defined($chan_for_part) && $id_channel) {
@@ -318,7 +339,7 @@ sub mbSeen_ctx {
         }
     } elsif ($chanlog) {
         my $host = $fmt_host->($chanlog->{host});
-        my $txt  = $chanlog->{text} // '';
+        my $txt  = $fmt_last->($chanlog->{text});
         my $ev   = $chanlog->{event} // 'message';
         my $ago  = $fmt_ago->($chanlog->{uts});
 
@@ -346,12 +367,12 @@ sub mbSeen_ctx {
         my $part_uts = $part ? ($part->{uts} // 0) : 0;
         if ($part_uts && $part_uts >= $quit_uts && $chan_for_part) {
             my $host = $fmt_host->($part->{host});
-            my $txt  = $part->{text} // '';
+            my $txt  = $fmt_last->($part->{text});
             $msg = "$targetNick ($host) was last seen parting $chan_for_part : $part->{ts}"
                  . ($txt ne '' ? " ($txt)" : '');
         } else {
             my $host = $fmt_host->($quit->{host});
-            my $txt  = $quit->{text} // '';
+            my $txt  = $fmt_last->($quit->{text});
             $msg = "$targetNick ($host) was last seen quitting : $quit->{ts}"
                  . ($txt ne '' ? " ($txt)" : '');
         }
@@ -370,18 +391,24 @@ sub mbSeen_ctx {
             my $chan_obj = $self->{channels}{lc $act_chan};
             my $id_channel = $chan_obj ? eval { $chan_obj->get_id } : undef;
             if (defined $id_channel) {
-                my $sth_act = $self->{dbh}->prepare(q{
+                my ($sth_act, $c);
+                my $activity_ok = eval {
+                    $sth_act = $self->{dbh}->prepare(q{
                     SELECT COUNT(*) AS c
                     FROM CHANNEL_LOG
                     WHERE id_channel = ?
                       AND nick = ?
                       AND event_type IN ('public','action')
                       AND ts >= NOW() - INTERVAL 24 HOUR
-                });
-                if ($sth_act && eval { $sth_act->execute($id_channel, $targetNick) }) {
+                    }) or die "seen_activity_prepare\n";
+                    $sth_act->execute($id_channel, $targetNick) or die "seen_activity_execute\n";
                     my $row = $sth_act->fetchrow_hashref;
-                    $sth_act->finish;
-                    my $c = $row ? ($row->{c} // 0) : 0;
+                    die "seen_activity_fetch\n" if $sth_act->err;
+                    $c = $row ? ($row->{c} // 0) : 0;
+                    1;
+                };
+                eval { $sth_act->finish } if $sth_act;
+                if ($activity_ok) {
                     $msg .= " [$c msg in last 24h]" if $c > 0;
                 }
             }
