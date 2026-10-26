@@ -204,33 +204,46 @@ sub mbQuoteAdd {
     }
 
     my $sQuery = "SELECT QUOTES.id_quotes FROM QUOTES JOIN CHANNEL ON CHANNEL.id_channel = QUOTES.id_channel WHERE CHANNEL.name = ? AND QUOTES.quotetext = ?";
-    my $sth = $self->{dbh}->prepare($sQuery);
+    my $sth = eval { $self->{dbh}->prepare($sQuery) };
 
     unless ($sth) {
-        $self->{logger}->log(1, "mbQuoteAdd() SQL prepare error: $DBI::errstr | Query: $sQuery")
+        $self->{logger}->log(1, "mbQuoteAdd() SQL prepare error while checking quote")
             if $self->{logger};
         botNotice($self, $sNick, "Database error while checking quote.");
         return;
     }
 
-    unless ($sth && $sth->execute($sChannel, $sQuoteText)) {
-        $self->{logger}->log(1, "mbQuoteAdd() SQL execute error: $DBI::errstr | Query: $sQuery")
+    unless (eval { $sth->execute($sChannel, $sQuoteText) }) {
+        $self->{logger}->log(1, "mbQuoteAdd() SQL execute error while checking quote")
             if $self->{logger};
-        $sth->finish if $sth;
+        eval { $sth->finish };
         botNotice($self, $sNick, "Database error while checking quote.");
         return;
     }
 
-    if (my $ref = $sth->fetchrow_hashref()) {
+    # MB974: a failed fetch is not proof that the quote is absent. Check the
+    # statement status before cleanup, and never proceed to INSERT on error.
+    my $ref;
+    my $read_ok = eval {
+        $ref = $sth->fetchrow_hashref();
+        die "quote fetch failed\n" if $sth->can('err') && $sth->err;
+        1;
+    };
+    eval { $sth->finish };
+    unless ($read_ok) {
+        $self->{logger}->log(1, "mbQuoteAdd() SQL fetch error while checking quote")
+            if $self->{logger};
+        botNotice($self, $sNick, "Database error while checking quote.");
+        return;
+    }
+
+    if ($ref) {
         my $id_quotes = $ref->{'id_quotes'};
-        $sth->finish;
 
         botPrivmsg($self, $sChannel, "Quote (id: $id_quotes) already exists");
         logBot($self, $message, $sChannel, "q", @tArgs);
         return;
     }
-
-    $sth->finish;
 
     my $channel_obj = $self->{channels}{lc $sChannel} || $self->{channels}{lc($sChannel)};
 

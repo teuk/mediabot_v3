@@ -1,3 +1,15 @@
+## MB974 — Confirm the native quote duplicate lookup before adding (2026-10-26)
+
+- Reject failed duplicate lookups in native `q add` / `q a`, including DBI
+  fetch errors that return no exception. A failed read no longer becomes
+  permission to insert a new quote or acknowledge a duplicate.
+- Contain lookup prepare/execute/fetch exceptions, inspect statement errors
+  before cleanup, and attempt cursor cleanup independently. Keep the existing
+  fixed database error notice and omit raw driver details from lookup logs.
+- Exercise both native facades and the actual context dispatcher with real
+  SQLite writes, an independent observer, both DBI error modes, duplicate and
+  absent text, cleanup faults, channel scope and author attribution.
+
 ## MB973 — Keep native factoid recall accounting on the observed row (2026-10-26)
 
 - Read the factoid id with its value and increment hits by that id and channel,
