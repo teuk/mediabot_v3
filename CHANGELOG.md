@@ -1,3 +1,14 @@
+## MB970 — Authenticate native factoid authorship (2026-10-26)
+
+- Native `learn` records an account author only when the resolved user is
+  authenticated and has a positive numeric id. Recognized but logged-out users
+  use the existing anonymous SQL NULL identity, retaining their IRC display nick.
+- Pass the same verified identity to community contribution accounting, so an
+  unauthenticated caller cannot inherit a matched account's stored contributions.
+- Exercise all three native facades with actual users, SQLite foreign keys,
+  persisted achievement counts, subsequent `forget`, author-preserving updates
+  and parity with the existing API v3 factoid write service.
+
 ## MB969 — Reject incomplete quote reads (2026-10-26)
 
 - Check DBI statement errors after fetching quote results, before cleanup can

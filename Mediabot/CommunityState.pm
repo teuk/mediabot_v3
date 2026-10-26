@@ -1558,7 +1558,13 @@ sub mbLearn_ctx {
     my $id_channel = _factoid_id_channel($self, $channel);
     unless ($id_channel) { botNotice($self, $nick, "learn: channel not known to the bot."); return; }
 
-    my $uid = eval { my $u = $ctx->user; $u ? $u->id : undef };
+    # Account recognition alone is not authentication. Anonymous learns keep
+    # their IRC display nick but must not acquire a matched account's identity.
+    my $uid = eval {
+        my $user = $ctx->user;
+        my $id = $user && $user->is_authenticated ? $user->id : undef;
+        defined($id) && !ref($id) && "$id" =~ /\A[1-9][0-9]*\z/ ? $id : undef;
+    };
 
     # UPSERT on (id_channel, keyword). On update, keep original author but
     # refresh value/updated_at (ON DUPLICATE preserves created_by/created_at).
