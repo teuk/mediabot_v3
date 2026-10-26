@@ -1291,20 +1291,25 @@ sub mbPollStop_ctx {
 sub _notes_ensure_loaded {
     my ($self, $nick) = @_;
     my $key = lc $nick;
-    return if @{ $self->{_notes}{$key} // [] };
-    eval {
-        my $sth = $self->{dbh}->prepare(
+    return 1 if @{ $self->{_notes}{$key} // [] } && !$self->{_notes_reload}{$key};
+    my ($sth, @db_notes);
+    my $loaded = eval {
+        $sth = $self->{dbh}->prepare(
             'SELECT id_note, text FROM NOTE WHERE nick = ? ORDER BY id_note ASC LIMIT 10'
-        );
-        if ($sth && $sth->execute($key)) {
-            my @db_notes;
-            while (my $r = $sth->fetchrow_hashref) {
-                push @db_notes, { id => $r->{id_note}, text => $r->{text} };
-            }
-            $sth->finish;
-            $self->{_notes}{$key} = \@db_notes if @db_notes;
+        ) or die 'note read prepare failed';
+        $sth->execute($key) or die 'note read execute failed';
+        while (my $r = $sth->fetchrow_hashref) {
+            push @db_notes, { id => $r->{id_note}, text => $r->{text} };
         }
+        die 'note read fetch failed' if $sth->err;
+        1;
     };
+    eval { $sth->finish } if $sth;
+    return 0 unless $loaded;
+    # Publish only a complete read, including a confirmed empty result.
+    $self->{_notes}{$key} = \@db_notes;
+    delete $self->{_notes_reload}{$key};
+    return 1;
 }
 
 sub mbNote_ctx {
@@ -1326,8 +1331,10 @@ sub mbNote_ctx {
     # mb456-B1: all note operations must see the persisted state after a
     # restart. mb437 loaded the DB before add/list, but export/search still
     # inspected the empty in-memory cache and falsely reported no notes.
-    $self->{_notes}{lc $nick} //= [];
-    _notes_ensure_loaded($self, $nick);
+    my $loaded = _notes_ensure_loaded($self, $nick);
+    unless ($loaded) {
+        botNotice($self, $nick, 'Notes unavailable: database error.'); return 1;
+    }
 
     # Y3: !note export — send all notes in one private message
     if ($text =~ /^export$/i) {
@@ -1382,21 +1389,30 @@ sub mbNote_ctx {
     if (scalar @{ $self->{_notes}{lc $nick} } >= 10) {
         botNotice($self, $nick, 'Max 10 notes reached. Delete some with !notes del <id>.'); return;
     }
-    # BB1: persist note to DB — mb84-B8: récupérer last_insert_id pour stocker le vrai id DB
-    my $db_note_id = undef;
-    eval {
-        my $sth = $self->{dbh}->prepare(
+    # MB965: the UI ordinal is never a substitute for a persistent id. Keep
+    # the displayed cache unchanged until both the write and id are confirmed.
+    my ($sth, $db_note_id);
+    my $saved = eval {
+        $sth = $self->{dbh}->prepare(
             'INSERT INTO NOTE (nick, text) VALUES (?, ?)'
-        );
-        if ($sth && $sth->execute(lc($nick), $text)) {
-            $db_note_id = $self->{dbh}->last_insert_id(undef, undef, 'NOTE', 'id_note');
-        }
-        $sth->finish if $sth;
+        ) or die 'note insert prepare failed';
+        $sth->execute(lc($nick), $text) or die 'note insert execute failed';
+        my $rows = $sth->rows;
+        die 'note insert not confirmed' unless defined($rows) && $rows == 1;
+        $db_note_id = $self->{dbh}->last_insert_id(undef, undef, 'NOTE', 'id_note');
+        die 'note insert identity unavailable' unless defined($db_note_id)
+            && !ref($db_note_id) && "$db_note_id" =~ /\A[0-9]+\z/ && "$db_note_id" =~ /[1-9]/;
+        1;
     };
-    $self->{logger}->log(1, "BB1: NOTE insert failed: $@") if $@;
-    # mb84-B8: utiliser l'id DB réel; fallback sur ordinal si INSERT a échoué
-    my $note_id = $db_note_id // (scalar(@{ $self->{_notes}{lc $nick} }) + 1);
-    push @{ $self->{_notes}{lc $nick} }, { id => $note_id, text => $text };
+    eval { $sth->finish } if $sth;
+    unless ($saved) {
+        # The server may have committed before a lost acknowledgement or id
+        # lookup failure. Re-read before displaying or mutating notes again.
+        $self->{_notes_reload}{lc $nick} = 1;
+        botNotice($self, $nick, 'Could not confirm note save. Use !notes before retrying.');
+        return 1;
+    }
+    push @{ $self->{_notes}{lc $nick} }, { id => $db_note_id, text => $text };
     my $n = scalar @{ $self->{_notes}{lc $nick} };
     botNotice($self, $nick, "Note saved (#$n total). Use !notes to list.");
     return 1;
@@ -1410,7 +1426,10 @@ sub mbNotes_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # BB1 / mb437-B1: load from DB if memory is empty (e.g. after restart)
-    _notes_ensure_loaded($self, $nick);
+    my $loaded = _notes_ensure_loaded($self, $nick);
+    unless ($loaded) {
+        botNotice($self, $nick, 'Notes unavailable: database error.'); return 1;
+    }
     my $notes = $self->{_notes}{lc $nick} // [];
 
     # !notes del <index>
@@ -1428,12 +1447,27 @@ sub mbNotes_ctx {
         }
         if ($idx >= 0 && $idx < scalar @$notes) {
             my $del_id = $notes->[$idx]{id};
-            splice @$notes, $idx, 1;
-            # BB1: delete from DB
-            eval {
-                my $sth = $self->{dbh}->prepare('DELETE FROM NOTE WHERE nick = ? AND id_note = ?');
-                $sth->execute(lc($nick), $del_id) if $sth; $sth->finish if $sth;
+            my ($sth, $rows);
+            my $deleted = eval {
+                $sth = $self->{dbh}->prepare('DELETE FROM NOTE WHERE nick = ? AND id_note = ?')
+                    or die 'note delete prepare failed';
+                $sth->execute(lc($nick), $del_id) or die 'note delete execute failed';
+                $rows = $sth->rows;
+                die 'note delete not confirmed' unless defined($rows) && "$rows" =~ /\A[0-9]+\z/;
+                1;
             };
+            eval { $sth->finish } if $sth;
+            unless ($deleted) {
+                $self->{_notes_reload}{lc $nick} = 1;
+                botNotice($self, $nick, 'Could not confirm note deletion. Use !notes to check.');
+                return 1;
+            }
+            unless ($rows > 0) {
+                $self->{_notes_reload}{lc $nick} = 1;
+                botNotice($self, $nick, 'Note is no longer available. Use !notes to refresh the list.');
+                return 1;
+            }
+            splice @$notes, $idx, 1;
             botNotice($self, $nick, 'Note deleted.');
         } else {
             botNotice($self, $nick, 'Note not found.');

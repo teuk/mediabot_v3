@@ -1,3 +1,16 @@
+## MB965 — Confirm personal note storage before changing the cache (2026-10-26)
+
+- Distinguish failed or partial NOTE reads from a confirmed empty result.
+  Add, list, export, search and delete stop on an unconfirmed initial load,
+  preserving the ten-note cap and withholding incomplete cached contents.
+- Acknowledge saves only after confirming the inserted row and its real id;
+  remove the ordinal-id fallback that created unsaved notes in memory.
+- Update the deletion cache only after a confirmed SQL deletion. After an
+  uncertain write, missing insert id or zero-row delete, require a fresh read
+  before the next operation so a committed but unacknowledged write is visible.
+- Exercise native commands through all three facades with SQLite, both DBI
+  error modes, lost acknowledgements, partial reads and successful recovery.
+
 ## MB964 — Preserve dictionary callback runtime scope (2026-10-26)
 
 - Classify dictionary reads from bare-word events as events, retaining their
