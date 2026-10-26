@@ -1603,6 +1603,25 @@ sub mbLearn_ctx {
     return 1;
 }
 
+# Return a complete detached result, including an empty array for absence.
+# DBI can signal a failed fetch without throwing; inspect its error before
+# cleanup and discard partial rows instead of publishing an incomplete result.
+sub _factoid_read_rows {
+    my ($dbh, $sql, @bind) = @_;
+    my ($sth, @rows);
+    my $ok = eval {
+        $sth = $dbh->prepare($sql) or die 'factoid read prepare failed';
+        $sth->execute(@bind) or die 'factoid read execute failed';
+        while (my $row = $sth->fetchrow_hashref) {
+            push @rows, { %$row };
+        }
+        die 'factoid read fetch failed' if $sth->can('err') && $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    return $ok ? \@rows : undef;
+}
+
 sub mbWhatis_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -1634,16 +1653,15 @@ sub mbWhatis_ctx {
     my $id_channel = _factoid_id_channel($self, $channel);
     unless ($id_channel) { botNotice($self, $nick, "whatis: channel not known to the bot.") unless $quiet; return; }
 
-    my $sth = $dbh->prepare(q{
+    my $rows = _factoid_read_rows($dbh, q{
         SELECT value, created_by_nick FROM FACTOID
         WHERE id_channel = ? AND keyword = ? LIMIT 1
-    });
-    unless ($sth && $sth->execute($id_channel, $keyword)) {
+    }, $id_channel, $keyword);
+    unless ($rows) {
         botNotice($self, $nick, "whatis: lookup failed.") unless $quiet;
         return;
     }
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
+    my $row = $rows->[0];
 
     unless ($row) {
         botNotice($self, $nick, "I don't know '$keyword'. Teach me: learn $keyword = ...") unless $quiet;
@@ -1783,18 +1801,16 @@ sub mbFactoids_ctx {
 
     # mb478: "factoids top" — most consulted facts (uses the hits counter).
     if ($pattern eq 'top') {
-        my $sth = $dbh->prepare(q{
+        my $rows = _factoid_read_rows($dbh, q{
             SELECT keyword, hits FROM FACTOID
             WHERE id_channel = ? AND hits > 0
             ORDER BY hits DESC, keyword ASC LIMIT 10
-        });
-        unless ($sth && $sth->execute($id_channel)) {
+        }, $id_channel);
+        unless ($rows) {
             botNotice($self, $nick, "factoids: listing failed.");
             return;
         }
-        my @top;
-        while (my ($k, $h) = $sth->fetchrow_array) { push @top, "$k ($h)"; }
-        $sth->finish;
+        my @top = map { "$_->{keyword} ($_->{hits})" } @$rows;
         unless (@top) {
             botNotice($self, $nick, "No factoids have been recalled yet on $channel.");
             return;
@@ -1822,14 +1838,12 @@ sub mbFactoids_ctx {
         @bind = ($id_channel);
     }
 
-    my $sth = $dbh->prepare($sql);
-    unless ($sth && $sth->execute(@bind)) {
+    my $rows = _factoid_read_rows($dbh, $sql, @bind);
+    unless ($rows) {
         botNotice($self, $nick, "factoids: listing failed.");
         return;
     }
-    my @keys;
-    while (my ($k) = $sth->fetchrow_array) { push @keys, $k; }
-    $sth->finish;
+    my @keys = map { $_->{keyword} } @$rows;
 
     unless (@keys) {
         botNotice($self, $nick, $pattern ne ''
@@ -1871,20 +1885,19 @@ sub mbFactoid_ctx {
     my $id_channel = _factoid_id_channel($self, $channel);
     unless ($id_channel) { botNotice($self, $nick, "factoid: channel not known to the bot."); return; }
 
-    my $sth = $dbh->prepare(q{
+    my $rows = _factoid_read_rows($dbh, q{
         SELECT value, created_by_nick,
                DATE_FORMAT(created_at, '%Y-%m-%d') AS created_d,
                DATE_FORMAT(updated_at, '%Y-%m-%d') AS updated_d,
                hits
         FROM FACTOID
         WHERE id_channel = ? AND keyword = ? LIMIT 1
-    });
-    unless ($sth && $sth->execute($id_channel, $keyword)) {
+    }, $id_channel, $keyword);
+    unless ($rows) {
         botNotice($self, $nick, "factoid: lookup failed.");
         return;
     }
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
+    my $row = $rows->[0];
     unless ($row) {
         botNotice($self, $nick, "I don't know '$keyword'.");
         return;

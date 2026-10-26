@@ -1,3 +1,14 @@
+## MB971 — Confirm native factoid reads (2026-10-26)
+
+- Contain prepare, execute and fetch failures in native `whatis`, `factoid`
+  and `factoids` reads. Inspect the DBI statement error before cursor cleanup
+  and discard partial listings or rankings instead of reporting success.
+- Keep confirmed absence distinct from failed reads. Explicit commands retain
+  their existing lookup/listing error notices; the `?keyword` shortcut remains
+  silent on absence and error, and only confirmed recalls update counters.
+- Exercise all three native facades with real SQLite queries, both DBI error
+  modes, partial results, cursor cleanup, healthy/empty reads and channel scope.
+
 ## MB970 — Authenticate native factoid authorship (2026-10-26)
 
 - Native `learn` records an account author only when the resolved user is
