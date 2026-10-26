@@ -54,6 +54,28 @@ sub isIrcChannelTarget    { goto &Mediabot::UserCommands::isIrcChannelTarget }
 sub truncate_utf8         { goto &Mediabot::UserCommands::truncate_utf8 }
 sub getIdUserChannelLevel { goto &Mediabot::UserCommands::getIdUserChannelLevel }
 
+# MB963: HH:MM schedules follow the server's local calendar, not fixed 24-hour
+# durations. Use UTC noon only to advance calendar dates, then resolve each
+# requested wall time locally. Time::Local normalizes a DST gap forward and
+# selects the first occurrence of a repeated time. Keep the existing >60s guard.
+sub _reminder_next_epoch {
+    my ($now, $hour, $minute, $weekday, $next_week) = @_;
+    die "reminder_calendar\n" unless $hour >= 0 && $hour < 24
+        && $minute >= 0 && $minute < 60
+        && (!defined($weekday) || ($weekday >= 0 && $weekday <= 6));
+    my @today = localtime($now);
+    my $days = defined($weekday) ? ($weekday - $today[6] + 7) % 7 : 0;
+    $days = 7 if defined($weekday) && $next_week && $days == 0;
+    my $date = Time::Local::timegm(0, 0, 12, $today[3], $today[4], $today[5] + 1900);
+    for (1 .. 2) {
+        my @day = gmtime($date + $days * 86400);
+        my $epoch = Time::Local::timelocal(0, $minute, $hour, $day[3], $day[4], $day[5] + 1900);
+        return $epoch if $epoch > $now + 60;
+        $days += defined($weekday) ? 7 : 1;
+    }
+    die "reminder_calendar\n";
+}
+
 # ---------------------------------------------------------------------------
 # mbRemind_ctx --- !remind <nick> <message>
 # Store a memo in DB; deliver it next time the target nick speaks.
@@ -256,22 +278,12 @@ sub mbRemind_ctx {
     # dans deliverReminders pour garantir la coherence.
     if ($remind_daily) {
         my ($hh, $mm) = split /:/, $daily_hhmm;
-        my @now = localtime(time());
-        my $today_delta = ($hh * 3600 + $mm * 60)
-                        - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
-        my $next_secs = $today_delta > 60 ? $today_delta : $today_delta + 86400;
-        my $first_ts  = time() + $next_secs;
+        my $first_ts = _reminder_next_epoch(time(), $hh, $mm);
         $message =~ s/^(\[daily:\d{2}:\d{2}\])\s*/$1 [at:$first_ts] /;
     }
     elsif ($remind_weekly) {
         my ($hh, $mm) = split /:/, $weekly_hhmm;
-        my @now     = localtime(time());
-        my $cur_dow = $now[6];  # 0=Sun..6=Sat
-        my $days_ahead  = ($weekly_dow - $cur_dow + 7) % 7;
-        my $time_offset = ($hh * 3600 + $mm * 60) - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
-        # Meme jour : si l'heure est deja passee (ou < 60s), reporter d'une semaine
-        $days_ahead = 7 if $days_ahead == 0 && $time_offset <= 60;
-        my $first_ts = time() + ($days_ahead * 86400) + $time_offset;
+        my $first_ts = _reminder_next_epoch(time(), $hh, $mm, $weekly_dow);
         $message =~ s/^(\[weekly:\d:\d{2}:\d{2}\])\s*/$1 [at:$first_ts] /;
     }
 
@@ -341,6 +353,7 @@ sub mbRemind_ctx {
     # Q2: parse optional delay prefix — 'dans 2h', 'in 30m', 'dans 1h30', 'at HH:MM', 'in Nd/Nw'
     my $delay_secs = 0;
     my $delay_requested = 1;
+    my $delay_now = time();
     if ($message =~ s/^(?:dans|in)\s+(\d+)h(?:(\d+)m)?\s+//i) {
         $delay_secs = $1 * 3600 + ($2 // 0) * 60;
     } elsif ($message =~ s/^(?:dans|in)\s+(\d+)m\s+//i) {
@@ -357,11 +370,7 @@ sub mbRemind_ctx {
         # mb87-B1: 'at HH:MM' — prochaine occurrence de l'heure (aujourd'hui ou demain)
         my ($hh, $mm) = (int($1), int($2));
         if ($hh < 24 && $mm < 60) {
-            my @now = localtime(time());
-            my $today_delta = ($hh * 3600 + $mm * 60)
-                            - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
-            # Si < 60s dans le futur, reporter à demain (évite un remind quasi-immédiat)
-            $delay_secs = $today_delta > 60 ? $today_delta : $today_delta + 86400;
+            $delay_secs = _reminder_next_epoch($delay_now, $hh, $mm) - $delay_now;
         } else {
             botNotice($self, $nick, "Invalid time. Use: at HH:MM (00:00-23:59)");
             return;
@@ -371,7 +380,7 @@ sub mbRemind_ctx {
     }
     if ($delay_requested) {
         # Prefix message with delivery timestamp so deliverReminders can filter
-        my $deliver_at = time() + $delay_secs;
+        my $deliver_at = $delay_now + $delay_secs;
         # MB961: delivery recognizes only digit timestamps. Inf/scientific
         # notation would make a huge requested delay look immediately due.
         unless ($delay_secs > 0 && "$deliver_at" =~ /\A[0-9]+\z/) {
@@ -548,11 +557,11 @@ sub deliverReminders {
         if (!$was_cancelled && $r->{message} =~ /^\[daily:(\d{2}:\d{2})\]\s*(.*)/) {
             my ($hhmm, $real_msg) = ($1, $2);
             my ($hh, $mm) = split /:/, $hhmm;
-            my @now = localtime(time());
-            my $today_delta = ($hh * 3600 + $mm * 60)
-                            - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
-            my $next_secs   = $today_delta > 60 ? $today_delta : $today_delta + 86400;
-            my $next_ts     = time() + $next_secs;
+            my $next_ts = eval { _reminder_next_epoch(time(), $hh, $mm) };
+            unless (defined $next_ts) {
+                $self->{logger}->log(1, 'daily remind has an invalid local schedule');
+                next;
+            }
             my $next_msg    = "[daily:$hhmm] [at:$next_ts] $real_msg";
             eval {
                 my $sth_daily = $dbh->prepare(q{
@@ -569,13 +578,11 @@ sub deliverReminders {
             # mb90-IMP1: réinsertion hebdomadaire — calcul du prochain occurrence du DOW+HH:MM
             my ($target_dow, $hhmm, $real_msg) = ($1, $2, $3);
             my ($hh, $mm) = split /:/, $hhmm;
-            my @now    = localtime(time());
-            my $cur_dow = $now[6];  # 0=Sun..6=Sat
-            my $days_ahead = ($target_dow - $cur_dow + 7) % 7;
-            $days_ahead = 7 if $days_ahead == 0;  # même jour → semaine suivante
-            my $day_secs    = $days_ahead * 86400;
-            my $time_offset = ($hh * 3600 + $mm * 60) - ($now[2] * 3600 + $now[1] * 60 + $now[0]);
-            my $next_ts     = time() + $day_secs + $time_offset;
+            my $next_ts = eval { _reminder_next_epoch(time(), $hh, $mm, $target_dow, 1) };
+            unless (defined $next_ts) {
+                $self->{logger}->log(1, 'weekly remind has an invalid local schedule');
+                next;
+            }
             my $next_msg    = "[weekly:$target_dow:$hhmm] [at:$next_ts] $real_msg";
             eval {
                 my $sth_wk = $dbh->prepare(q{

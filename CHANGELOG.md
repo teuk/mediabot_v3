@@ -1,3 +1,15 @@
+## MB963 — Keep reminder wall times through daylight-saving changes (2026-10-26)
+
+- Resolve daily, weekly and `at HH:MM` deadlines on the server's local calendar
+  instead of adding fixed 24-hour offsets. Apply the same calculation when
+  reinserting recurring reminders so their requested hour survives DST changes.
+- Keep the existing sixty-second guard, weekly repeat rule and elapsed relative
+  delays. Normalize skipped times forward and select the first repeated time;
+  avoid duplicate daily delivery in the repeated hour.
+- Exercise real native creation/delivery through all three facades with SQLite
+  and independent DateTime expectations, including half-hour DST, leap dates,
+  year rollover, recurring insertions and invalid stored recurrence tags.
+
 ## MB962 — Keep seen lookups scoped and reliable (2026-10-26)
 
 - Resolve uncached channel identities before reading legacy history. An
