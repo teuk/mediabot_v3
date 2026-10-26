@@ -61,8 +61,8 @@ return sub {
         'mb688-890: failed tree family derives from PROJECT_NAME');
 
     $assert->like($deploy,
-        qr/ORIGIN_URL="\$\(git -C "\$\{PROJECT_DIR\}" remote get-url origin/,
-        'mb688-890: clone source is resolved from current Git origin');
+        qr/git -C "\$\{PROJECT_DIR\}" config --null --get-all remote\.origin\.url/,
+        'mb688-890: clone source comes from the configured Git origin');
     $assert->like($deploy,
         qr/git clone "\$\{ORIGIN_URL\}" "\$\{TMP_CLONE_DIR\}"/,
         'mb688-890: candidate clone uses resolved origin');

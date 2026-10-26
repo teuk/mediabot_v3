@@ -1,3 +1,26 @@
+## MB961 — Preserve reminder snoozes and validate scheduled messages (2026-10-26)
+
+- Claim delivery only while the stored message still matches the selected
+  snapshot. A snooze completed after the delivery read now remains pending
+  until its new deadline, including daily and weekly reminders.
+- Apply snoozes conditionally against their original message, retaining a
+  concurrent confirmed edit and reporting a conflict instead of overwriting it.
+- Reject empty urgent/recurring reminders and zero or unrepresentable delays.
+  Validate the 512-character budget after adding scheduling metadata so huge
+  delays cannot become immediately due and oversized messages never reach SQL.
+- Reproduce races with two real SQLite connections through all three native
+  function facades. Preserve recurrence tags, Unicode text and normal delivery.
+
+## MB960 — Keep the configured Git origin across updates (2026-10-26)
+
+- Read the first configured `remote.origin.url` before cloning. Let Git apply
+  `url.*.insteadOf` for transport so a temporary mirror never replaces the
+  installed release's permanent origin.
+- Exercise real local Git repositories and release rotations, including HTTPS
+  without `.git`, SSH syntax, multiple fetch URLs, paths with spaces, and a
+  second update after deleting the mirror. Reject missing/empty origins early.
+- Keep the current shutdown, private-state preservation and activation flow.
+
 ## MB959 — Le mot le plus long (2026-10-25)
 
 - R7: the first accepted dictionary-maximum word wins and closes the round

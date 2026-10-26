@@ -232,6 +232,11 @@ sub mbRemind_ctx {
     my $target  = shift @args;
     my $message = join(' ', @args);
     $message =~ s/^\s+|\s+$//g;
+    # MB961: control tags are metadata, never a substitute for message text.
+    unless (defined $target && $target ne '' && $message ne '') {
+        botNotice($self, $nick, "Syntax: remind <nick> <msg>  |  remind daily HH:MM <nick> <msg>  |  remind weekly <day> HH:MM <nick> <msg>  |  remind list  |  remind cancel <id>");
+        return;
+    }
     $message = '[!] ' . $message if $remind_urgent;
     # mb87-IMP1: tag daily pour réinsertion automatique lors de la livraison
     $message = "[daily:$daily_hhmm] $message" if $remind_daily;
@@ -268,11 +273,6 @@ sub mbRemind_ctx {
         $days_ahead = 7 if $days_ahead == 0 && $time_offset <= 60;
         my $first_ts = time() + ($days_ahead * 86400) + $time_offset;
         $message =~ s/^(\[weekly:\d:\d{2}:\d{2}\])\s*/$1 [at:$first_ts] /;
-    }
-
-    unless (defined $target && $target ne '' && $message ne '') {
-        botNotice($self, $nick, "Syntax: remind <nick> <msg>  |  remind daily HH:MM <nick> <msg>  |  remind weekly <day> HH:MM <nick> <msg>  |  remind list  |  remind cancel <id>");
-        return;
     }
 
     # IMP8: limit pending reminders per sender (max 10) to prevent spam
@@ -340,6 +340,7 @@ sub mbRemind_ctx {
 
     # Q2: parse optional delay prefix — 'dans 2h', 'in 30m', 'dans 1h30', 'at HH:MM', 'in Nd/Nw'
     my $delay_secs = 0;
+    my $delay_requested = 1;
     if ($message =~ s/^(?:dans|in)\s+(\d+)h(?:(\d+)m)?\s+//i) {
         $delay_secs = $1 * 3600 + ($2 // 0) * 60;
     } elsif ($message =~ s/^(?:dans|in)\s+(\d+)m\s+//i) {
@@ -365,11 +366,24 @@ sub mbRemind_ctx {
             botNotice($self, $nick, "Invalid time. Use: at HH:MM (00:00-23:59)");
             return;
         }
+    } else {
+        $delay_requested = 0;
     }
-    if ($delay_secs > 0) {
+    if ($delay_requested) {
         # Prefix message with delivery timestamp so deliverReminders can filter
         my $deliver_at = time() + $delay_secs;
+        # MB961: delivery recognizes only digit timestamps. Inf/scientific
+        # notation would make a huge requested delay look immediately due.
+        unless ($delay_secs > 0 && "$deliver_at" =~ /\A[0-9]+\z/) {
+            botNotice($self, $nick, 'Invalid delay. Use a positive, representable delay.');
+            return;
+        }
         $message = "[at:$deliver_at] $message";
+    }
+    # Include scheduling metadata in the existing VARCHAR(512) budget.
+    if (length($message) > 512) {
+        botNotice($self, $nick, "Message too long (max 512 chars).");
+        return;
     }
 
     # Fetch id_channel inline (getIdChannel is in ChannelCommands scope)
@@ -465,6 +479,7 @@ sub deliverReminders {
     return unless @pending;
 
     for my $r (@pending) {
+        my $stored_message = $r->{message};
         # mb161-B1: le skip des non-dus est desormais fait en amont (boucle
         # @candidates). Ici on strip seulement les tags [at:TS] du message
         # avant livraison.
@@ -475,10 +490,13 @@ sub deliverReminders {
         # H/fix: mark delivered BEFORE sending — prevents double delivery on crash
         my $sth_up = $dbh->prepare(q{
             UPDATE REMINDERS SET delivered = 1 WHERE id_reminder = ? AND delivered = 0
+              AND message = ?
         });
         # C2/fix: test execute return
         if ($sth_up) {
-            unless ($sth_up->execute($r->{id_reminder})) {
+            # A snooze can commit after SELECT. Claim only the exact snapshot
+            # selected above, including its original scheduling tags.
+            unless ($sth_up->execute($r->{id_reminder}, $stored_message)) {
                 $self->{logger}->log(1, "deliverReminders: UPDATE failed for id=$r->{id_reminder}: $DBI::errstr");
                 $sth_up->finish;
                 next;  # skip send if we can't mark delivered
@@ -714,7 +732,8 @@ sub mbRemindSnooze_ctx {
     unless ($row) {
         botNotice($self, $nick, "Reminder #$id not found or already delivered."); return;
     }
-    my $msg = $row->{message} // '';
+    my $stored_message = $row->{message} // '';
+    my $msg = $stored_message;
     # mb88-R2: strip [at:TS] où qu'il soit dans le message (pas seulement en début)
     # Cas daily: "[daily:09:00] [at:1234] texte" → strip le [at:...] interne aussi
     $msg =~ s/^\[at:\d+\]\s*//;       # strip en début (cas standard)
@@ -724,9 +743,9 @@ sub mbRemindSnooze_ctx {
     my ($sth2, $rows);
     my $update_ok = eval {
         $sth2 = $self->{dbh}->prepare(
-            'UPDATE REMINDERS SET message = ? WHERE id_reminder = ? AND from_nick = ? AND delivered = 0'
+            'UPDATE REMINDERS SET message = ? WHERE id_reminder = ? AND from_nick = ? AND delivered = 0 AND message = ?'
         ) or die 'reminder update prepare failed';
-        $sth2->execute($new_msg, $id, lc($nick)) or die 'reminder update execute failed';
+        $sth2->execute($new_msg, $id, lc($nick), $stored_message) or die 'reminder update execute failed';
         $rows = $sth2->rows;
         1;
     };

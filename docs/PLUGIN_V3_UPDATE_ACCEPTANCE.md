@@ -66,6 +66,20 @@ This is a regression guard, not a second production pilot. A failure blocks
 the source commit. It never attempts to repair or modify the accepted nbot
 posture.
 
+## MB960 configured origin preservation
+
+The updater passes the first configured `remote.origin.url` to `git clone`.
+Git still applies `url.*.insteadOf` to select the transport, while the new
+release retains the configured repository URL. Resolving `remote get-url`
+first would instead persist the rewritten mirror URL in the installed clone.
+
+The offline MB960 regression runs the real updater with temporary local mirrors
+and real Git rewrites. It checks HTTPS without `.git`, SSH syntax, multiple
+fetch URLs, spaces in paths, private configuration and saved plugin points.
+It deletes one mirror and performs a second successful update from the original
+repository. Missing or empty origins are rejected before clone or shutdown.
+This test adds no live deployment evidence to the MB785 acceptance above.
+
 ## Recovery boundary
 
 The updater predicts one numeric archive before rotation. The live MB785 run

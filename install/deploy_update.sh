@@ -196,7 +196,15 @@ echo
 [ -d "${PARENT_DIR}" ] || fail "parent directory ${PARENT_DIR} does not exist"
 [ -d "${PROJECT_DIR}/.git" ] || fail "${PROJECT_DIR} is not a Git working tree"
 
-ORIGIN_URL="$(git -C "${PROJECT_DIR}" remote get-url origin 2>/dev/null || true)"
+# MB960: clone the configured URL, not `remote get-url`'s rewritten transport.
+# Git applies url.*.insteadOf itself during clone. Passing the effective URL
+# would store a temporary mirror as the new release's permanent origin.
+# Keep Git's first-URL selection when origin has multiple fetch URLs.
+ORIGIN_URLS=()
+mapfile -d '' -t ORIGIN_URLS < <(
+    git -C "${PROJECT_DIR}" config --null --get-all remote.origin.url 2>/dev/null || true
+)
+ORIGIN_URL="${ORIGIN_URLS[0]:-}"
 [ -n "${ORIGIN_URL}" ] || fail "Git remote 'origin' is not configured"
 
 if [[ "${INSTANCE_CONF}" = /* ]]; then
