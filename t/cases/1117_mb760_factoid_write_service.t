@@ -39,6 +39,8 @@ BEGIN {
         return defined($row) ? { %$row } : undef;
     }
     sub finish { 1 }
+    sub err { undef }
+    sub rows { 1 }
 }
 
 return sub {

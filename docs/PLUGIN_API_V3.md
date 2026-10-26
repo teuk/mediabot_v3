@@ -435,6 +435,15 @@ is deliberately not authorization. The final prepared delete binds both the
 resolved factoid id and channel id. Missing factoids return an idempotent
 `not_found` result.
 
+MB968 distinguishes failed channel/author reads from confirmed absence. Fetch
+exceptions and statement errors fail the service before a mutation can begin.
+Deletion returns `deleted` only after an error-free, known affected-row count;
+zero affected rows return the existing `not_found` outcome for the resolved id.
+If that id disappears or is replaced while deletion is pending, the service
+does not delete the replacement by keyword or retry an uncertain operation.
+An unavailable row count is a service failure, including when the database
+may already have committed the deletion. Driver exception text is not exposed.
+
 All factoid writes require current policy `on`. `observe` returns a suppressed
 result before the mutation service, and `off` remains inert. MB762's recall
 operation normalizes one bounded keyword and performs one prepared

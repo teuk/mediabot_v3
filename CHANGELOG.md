@@ -1,3 +1,14 @@
+## MB968 — Confirm factoid write lookups and deletions (2026-10-26)
+
+- Reject failed channel/author lookups in the API v3 factoid write service,
+  including non-throwing DBI fetch failures. A database error no longer becomes
+  a missing-channel or missing-factoid answer.
+- Require a known, error-free affected-row count before acknowledging deletion.
+  A concurrently removed factoid yields the existing idempotent `not_found`
+  outcome; a replacement under the same keyword is preserved.
+- Exercise real SQLite reads, two-connection deletion/replacement races, both
+  DBI error modes, cursor cleanup and the official plugin command bridge.
+
 ## MB966 — Preserve factoid deletion identity and authorization (2026-10-26)
 
 - Native `forget` authorizes recorded account authors by authenticated user id

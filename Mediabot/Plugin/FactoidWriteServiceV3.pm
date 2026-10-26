@@ -123,8 +123,14 @@ sub _statement {
 sub _one {
     my ($self, $dbh, $sql, @bind) = @_;
     my $sth = $self->_statement($dbh, $sql, @bind);
-    my $row = eval { $sth->fetchrow_hashref };
+    my $row;
+    my $ok = eval {
+        $row = $sth->fetchrow_hashref;
+        die "FactoidWriteServiceV3: data service unavailable\n" if $sth->err;
+        1;
+    };
     eval { $sth->finish };
+    die "FactoidWriteServiceV3: data service unavailable\n" unless $ok;
     return ref($row) eq 'HASH' ? { %$row } : undef;
 }
 
@@ -209,9 +215,17 @@ sub delete {
         DELETE FROM FACTOID
          WHERE id_factoid = ? AND id_channel = ?},
         0 + $factoid->{id}, 0 + $factoid->{channel_id});
+    my $removed;
+    my $ok = eval {
+        $removed = $sth->rows;
+        die "FactoidWriteServiceV3: data service unavailable\n" if $sth->err;
+        1;
+    };
     eval { $sth->finish };
+    die "FactoidWriteServiceV3: data service unavailable\n"
+        unless $ok && defined($removed) && $removed >= 0;
     return {
-        ok => 1, status => 'deleted', keyword => $keyword,
+        ok => 1, status => $removed > 0 ? 'deleted' : 'not_found', keyword => $keyword,
         id => 0 + $factoid->{id},
     };
 }
