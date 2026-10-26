@@ -1,3 +1,13 @@
+## MB964 — Preserve dictionary callback runtime scope (2026-10-26)
+
+- Classify dictionary reads from bare-word events as events, retaining their
+  declared resource name for both quarantine checks and failure reports.
+  Reject new reads and discard late completions for a quarantined event.
+- Record successful dictionary callbacks at the same boundary as failures,
+  clearing the matching active streak while retaining recent failure history.
+- Exercise native command, word-event and scheduled-job invocations with held
+  dictionary completions, channel-scoped quarantine, recovery and policy edits.
+
 ## MB963 — Keep reminder wall times through daylight-saving changes (2026-10-26)
 
 - Resolve daily, weekly and `at HH:MM` deadlines on the server's local calendar

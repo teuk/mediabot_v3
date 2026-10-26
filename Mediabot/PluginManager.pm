@@ -362,8 +362,11 @@ sub _v3_dictionary_solve {
     my $key = lc $policy->{channel}; $key =~ tr/[]\\^/{}|~/;
     my $epoch = $entry->{metadata}{dictionary_policy_epoch}{$key}
         //= ++$entry->{metadata}{dictionary_epoch_serial};
-    my $kind = $invocation->can('command') ? 'command' : 'job';
-    my $resource = $kind eq 'command' ? $invocation->command : $invocation->name;
+    # Word events share InvocationV3 with commands. Its command accessor also
+    # holds event names; preserve that origin for quarantine and diagnostics.
+    my $kind = $invocation->can('command')
+        ? ($invocation->source eq 'event' ? 'event' : 'command') : 'job';
+    my $resource = $kind eq 'job' ? $invocation->name : $invocation->command;
     return { accepted => 0, error => 'quarantined' }
         if $self->_v3_resource_quarantined($name, kind => $kind,
             resource => $resource, channel => $policy->{channel});
@@ -379,6 +382,10 @@ sub _v3_dictionary_solve {
         unless ($ok) {
             $self->_record_v3_failure($name, kind => $kind, resource => $resource,
                 channel => $current->{channel}, error => 'motlong callback failed');
+        }
+        else {
+            $self->_record_v3_success($name, kind => $kind, resource => $resource,
+                channel => $current->{channel});
         }
     });
 }

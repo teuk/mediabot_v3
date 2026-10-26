@@ -709,6 +709,10 @@ indexed parameterized reads, worker cancellation, output bounds and current-poli
 checks. The callback receives a detached complete rack result, never a handle,
 credential or SQL interface. Policy set/reset also invokes an optional
 `policy_changed(context => ..., channel => ..., mode => ...)` package hook.
+Dictionary work retains its originating command, word event or scheduled job
+for quarantine checks before launch and before callback delivery. Callback
+failures use that same resource in the failure ledger; a successful callback
+clears its matching active streak without deleting recent failure history.
 See [the operator and API details](LONGEST_WORD_PLUGIN.md) and the
 [longest-word package](../plugins/longest-word-v3/README.md).
 
