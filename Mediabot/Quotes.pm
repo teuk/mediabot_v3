@@ -971,50 +971,56 @@ sub mbQuoteByNick {
 sub mbQuoteCount_ctx {
     my ($self, $sNick, $sChannel, $targetNick) = @_;
 
-    unless (defined $targetNick && $targetNick ne '') {
-        # Total for channel
-        my $sth = $self->{dbh}->prepare(q{
+    my $total = !defined($targetNick) || $targetNick eq '';
+    my ($sql, @bind);
+    if ($total) {
+        $sql = q{
             SELECT COUNT(*) AS cnt FROM QUOTES q
             JOIN CHANNEL c ON c.id_channel = q.id_channel
             WHERE c.name = ?
-        });
-        if ($sth && $sth->execute($sChannel)) {
-            my $r = $sth->fetchrow_hashref; $sth->finish;
-            botPrivmsg($self, $sChannel,
-                "$sChannel: " . ($r->{cnt} // 0) . " quote(s) total");
-        }
-        return 1;
+        };
+        @bind = ($sChannel);
+    } else {
+        # mb124-B2: escape SQL LIKE wildcards (idem mbQuoteByNick)
+        my $target_lc = lc($targetNick);
+        my $target_esc = $target_lc;
+        $target_esc =~ s/!/!!/g;
+        $target_esc =~ s/%/!%/g;
+        $target_esc =~ s/_/!_/g;
+        my $like = $target_esc . '%';
+        $sql = q{
+            SELECT COUNT(*) AS cnt FROM QUOTES q
+            JOIN CHANNEL c ON c.id_channel = q.id_channel
+            JOIN USER u ON u.id_user = q.id_user
+            WHERE c.name = ? AND LOWER(u.nickname) LIKE ? ESCAPE '!'
+        };
+        @bind = ($sChannel, $like);
     }
 
-    # mb124-B2: escape SQL LIKE wildcards (idem mbQuoteByNick)
-    my $target_lc = lc($targetNick);
-    my $target_esc = $target_lc;
-    $target_esc =~ s/!/!!/g;
-    $target_esc =~ s/%/!%/g;
-    $target_esc =~ s/_/!_/g;
-    my $like = $target_esc . '%';
-    my $sth = $self->{dbh}->prepare(q{
-        SELECT COUNT(*) AS cnt FROM QUOTES q
-        JOIN CHANNEL c ON c.id_channel = q.id_channel
-        JOIN USER u ON u.id_user = q.id_user
-        WHERE c.name = ? AND LOWER(u.nickname) LIKE ? ESCAPE '!'
-    });
-    unless ($sth) {
-        $self->{logger}->log(1, "mbQuoteCount_ctx() SQL prepare error: $DBI::errstr")
+    # MB976: COUNT must produce a confirmed aggregate row. A failed fetch,
+    # including DBI's non-throwing error mode, is not a genuine zero count.
+    my ($sth, $row);
+    my $ok = eval {
+        $sth = $self->{dbh}->prepare($sql) or die "quote count prepare failed\n";
+        $sth->execute(@bind) or die "quote count execute failed\n";
+        $row = $sth->fetchrow_hashref;
+        die "quote count fetch failed\n" if $sth->can('err') && $sth->err;
+        die "quote count result unavailable\n"
+            unless ref($row) eq 'HASH' && defined($row->{cnt})
+                && !ref($row->{cnt}) && "$row->{cnt}" =~ /\A[0-9]+\z/;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($ok) {
+        $self->{logger}->log(1, "mbQuoteCount_ctx() SQL error while counting quotes")
             if $self->{logger};
         botNotice($self, $sNick, 'Database error.');
         return;
     }
-    unless ($sth && $sth->execute($sChannel, $like)) {
-        $self->{logger}->log(1, "mbQuoteCount_ctx() SQL execute error: $DBI::errstr")
-            if $self->{logger};
-        $sth->finish if $sth;
-        botNotice($self, $sNick, 'Database error.');
-        return;
-    }
-    my $row = $sth->fetchrow_hashref; $sth->finish;
-    botPrivmsg($self, $sChannel,
-        "$targetNick: " . ($row->{cnt} // 0) . " quote(s) on $sChannel");
+
+    botPrivmsg($self, $sChannel, $total
+        ? "$sChannel: $row->{cnt} quote(s) total"
+        : "$targetNick: $row->{cnt} quote(s) on $sChannel");
     return 1;
 }
 

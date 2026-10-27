@@ -1,3 +1,16 @@
+## MB976 — Confirm native quote counts before publishing them (2026-10-27)
+
+- Contain SQL prepare/execute/fetch failures in native `quotecount` and
+  `quote count`, for both channel totals and author-prefix counts. Failed
+  reads now use the existing database error notice instead of silence, an
+  uncaught exception or a fabricated zero count.
+- Inspect statement errors and require an aggregate count before cleanup.
+  Attempt cursor cleanup independently and retain confirmed counts when only
+  cleanup fails. Preserve channel scope, anonymous totals and literal LIKE
+  escaping for author prefixes; do not retry a failed count automatically.
+- Exercise both native facades and real registry handlers on read-only SQLite,
+  including both DBI error modes, real empty counts and recovery on a later command.
+
 ## MB975 — Restore native quote-add alias dispatch (2026-10-27)
 
 - Route native `quote add` through the same context-aware handler as `q add`.
