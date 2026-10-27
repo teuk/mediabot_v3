@@ -551,29 +551,41 @@ sub mbQuoteSearch {
                   ORDER BY q.id_quotes DESC
                   LIMIT ?";
 
-    my $sth = $self->{dbh}->prepare($sQuery);
+    my $sth = eval { $self->{dbh}->prepare($sQuery) };
 
     unless ($sth) {
-        $self->{logger}->log(1, "mbQuoteSearch SQL prepare error: $DBI::errstr Query: $sQuery")
+        $self->{logger}->log(1, "mbQuoteSearch SQL prepare error")
             if $self->{logger};
         botNotice($self, $sNick, "Database error during search.");
         return;
     }
 
-    unless ($sth && $sth->execute($sChannel, @binds_words, $MAXQUOTES + 1)) {
-        $self->{logger}->log(1, "mbQuoteSearch SQL execute error: $DBI::errstr Query: $sQuery")
+    unless (eval { $sth->execute($sChannel, @binds_words, $MAXQUOTES + 1) }) {
+        $self->{logger}->log(1, "mbQuoteSearch SQL execute error")
             if $self->{logger};
-        $sth->finish if $sth;
+        eval { $sth->finish; };
         botNotice($self, $sNick, "Database error during search.");
         return;
     }
 
     my @rows;
-    while (my $ref = $sth->fetchrow_hashref) {
-        push @rows, $ref;
+    # MB980: publish only a complete, confirmed search. A fetch error after
+    # some rows must not become a partial ranking or a false empty result.
+    my $read_ok = eval {
+        while (1) {
+            my $ref = $sth->fetchrow_hashref;
+            die "quote search fetch failed\n" if $sth->can('err') && $sth->err;
+            last unless $ref;
+            push @rows, $ref;
+        }
+        1;
+    };
+    eval { $sth->finish; };
+    unless ($read_ok) {
+        $self->{logger}->log(1, "mbQuoteSearch SQL fetch error") if $self->{logger};
+        botNotice($self, $sNick, "Database error during search.");
+        return;
     }
-
-    $sth->finish;
 
     my $display_text = join(' ', @words);
 

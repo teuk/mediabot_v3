@@ -1,3 +1,17 @@
+## MB980 — Publish only confirmed native quote searches (2026-10-27)
+
+- Contain SQL prepare/execute/fetch errors in native `q search` / `q s`.
+  Inspect every fetched row and the end-of-results status before cleanup;
+  discard an unconfirmed result instead of publishing a partial ranking,
+  a false absence or a misleading request to refine the search.
+- Attempt cursor cleanup independently, retain confirmed results if cleanup
+  alone fails, and use the existing fixed database error notice without raw
+  driver details or a successful command log on failure. Do not retry silently.
+- Preserve literal LIKE escaping, AND matching, relevance/newest-id ordering,
+  channel scope, bounded output and read-only behavior. Exercise both native
+  facades and the real `q` registry aliases on SQLite in both DBI error modes.
+  No SQL schema or configuration changes are required.
+
 ## MB979 — Contain native quote insertion failures (2026-10-27)
 
 - Contain INSERT preparation/execution failures in native `q add` and
