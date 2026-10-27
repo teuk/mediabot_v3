@@ -1035,32 +1035,31 @@ sub mbTriviaStop_ctx {
             && !keys %{ $self->{_trivia_fetch} };
 
     my $trivia = $self->{_trivia}{$channel};
+    my $active = $trivia && $trivia->{active};
 
-    unless ($trivia && $trivia->{active}) {
-        if ($pending) {
-            botNotice(
-                $self,
-                $nick,
-                'Pending trivia question request cancelled.',
-            );
-        }
-        else {
-            botNotice(
-                $self,
-                $nick,
-                'No active trivia on this channel.',
-            );
-        }
+    # MB983: a series also exists while fetching or between questions. Merely
+    # cancelling its request token would let the next command resume that series.
+    unless ($active || $pending || ($trivia && $trivia->{multi_total})) {
+        botNotice($self, $nick, 'No active trivia on this channel.');
         return 1;
     }
 
-    $trivia->{active} = 0;
-    delete $trivia->{multi_total};
-    delete $trivia->{multi_current};
+    if ($trivia) {
+        $trivia->{active} = 0;
+        delete $trivia->{multi_total};
+        delete $trivia->{multi_current};
 
-    # B-68-2/fix: clear scores and hint so next game starts clean.
-    delete $trivia->{scores};
-    $trivia->{hint_given} = 0;
+        # B-68-2/fix: clear scores and hint so next game starts clean.
+        delete $trivia->{scores};
+        $trivia->{hint_given} = 0;
+    }
+
+    unless ($active) {
+        botNotice($self, $nick, $pending
+            ? 'Pending trivia question request cancelled.'
+            : 'Trivia game stopped.');
+        return 1;
+    }
 
     Mediabot::Helpers::botPrivmsg(
         $self,

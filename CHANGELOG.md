@@ -1,3 +1,15 @@
+## MB983 — Finish stopping pending and between-round Trivia games (2026-10-27)
+
+- Stop an ongoing Trivia series during an asynchronous question request or
+  between questions, as well as while a question is active. Clear abandoned
+  round counters, session scores and hint state after the existing Master gate.
+- Keep late callbacks inert through the existing per-channel request token;
+  a later plain `trivia` command no longer resumes the cancelled series.
+  Preserve persisted scores, other channels and completed-game scoreboards.
+- Exercise all three native facades and actual registry handlers, delayed and
+  duplicate completions, authorization and real SQLite score persistence.
+  No SQL schema, network-fetch or plugin activation changes are required.
+
 ## MB982 — Keep hyphenated karma targets intact (2026-10-27)
 
 - Recognize a complete hyphenated nickname in automatic `nick++` / `nick--`
