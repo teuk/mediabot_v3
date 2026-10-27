@@ -1,3 +1,17 @@
+## MB981 — Confirm native quote views before recall accounting (2026-10-27)
+
+- Contain SQL prepare/execute/fetch errors in native `q view` / `q v` and
+  distinguish a failed read from a confirmed missing quote. Inspect the row
+  status before cleanup, public display, recall updates and command logging.
+- Use the existing fixed private error notice on an unconfirmed read, omit
+  raw driver details and attempt cursor cleanup independently. Preserve
+  confirmed views/absence when only cleanup fails; recall counters remain
+  best-effort and unrelated random-quote memory stays unchanged.
+- Exercise both native facades and the actual `q` registry aliases with real
+  SQLite writes, foreign keys, an independent observer, both DBI error modes,
+  anonymous/registered authors, Unicode excerpts and cross-channel isolation.
+  No SQL schema or runtime configuration changes are required.
+
 ## MB980 — Publish only confirmed native quote searches (2026-10-27)
 
 - Contain SQL prepare/execute/fetch errors in native `q search` / `q s`.

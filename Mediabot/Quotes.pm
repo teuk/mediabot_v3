@@ -467,24 +467,39 @@ sub mbQuoteView {
         "LEFT JOIN USER ON USER.id_user = QUOTES.id_user ".
         "WHERE CHANNEL.name = ? AND QUOTES.id_quotes = ?";
 
-    my $sth = $self->{dbh}->prepare($sQuery);
+    my $sth = eval { $self->{dbh}->prepare($sQuery) };
 
     unless ($sth) {
-        $self->{logger}->log(1, "mbQuoteView() SQL prepare error: $DBI::errstr Query: $sQuery")
+        $self->{logger}->log(1, "mbQuoteView() SQL prepare error")
             if $self->{logger};
         botNotice($self, $sNick, "Database error while reading quote.");
         return;
     }
 
-    unless ($sth && $sth->execute($sChannel, $id_quotes)) {
-        $self->{logger}->log(1, "mbQuoteView() SQL execute error: $DBI::errstr Query: $sQuery")
+    unless (eval { $sth->execute($sChannel, $id_quotes) }) {
+        $self->{logger}->log(1, "mbQuoteView() SQL execute error")
             if $self->{logger};
-        $sth->finish if $sth;
+        eval { $sth->finish; };
         botNotice($self, $sNick, "Database error while reading quote.");
         return;
     }
 
-    if (my $ref = $sth->fetchrow_hashref()) {
+    # MB981: confirm the row/absence before display, recall accounting or
+    # cleanup, which can clear the statement error. A failed read is not EOF.
+    my $ref;
+    my $read_ok = eval {
+        $ref = $sth->fetchrow_hashref();
+        die "quote view fetch failed\n" if $sth->can('err') && $sth->err;
+        1;
+    };
+    eval { $sth->finish; };
+    unless ($read_ok) {
+        $self->{logger}->log(1, "mbQuoteView() SQL fetch error") if $self->{logger};
+        botNotice($self, $sNick, "Database error while reading quote.");
+        return;
+    }
+
+    if ($ref) {
         my $id_quotes  = $ref->{'id_quotes'};
         my $sQuoteText = $ref->{'quotetext'} // '';
         my $id_user    = $ref->{'id_user'};
@@ -510,7 +525,6 @@ sub mbQuoteView {
         botPrivmsg($self, $sChannel, "Quote (id : $id_quotes) does not exist for channel $sChannel");
     }
 
-    $sth->finish;
     return 1;
 }
 
