@@ -1,3 +1,14 @@
+## MB978 — Use the canonical author key in native quote statistics (2026-10-27)
+
+- Join the native `q stats` top contributor on `USER.id_user`, matching the
+  canonical schema and quote author foreign key. The previous `USER.id` join
+  omitted the contributor or raised a SQL error on a canonical installation.
+- Keep totals, anonymous leaders, channel scope, age text and existing logging
+  unchanged. No schema migration is required.
+- Exercise both native facades and the real command registry with read-only
+  SQLite, both DBI error modes, authenticated/anonymous callers, conflicting
+  legacy ids and parity with the existing API v3 statistics service.
+
 ## MB977 — Confirm native quote rankings (2026-10-27)
 
 - Reject partial or failed ranking and fallback reads; contain database errors and finish cursors independently.

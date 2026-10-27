@@ -812,7 +812,7 @@ sub mbQuoteStats {
             SELECT u.nickname, COUNT(*) AS cnt
             FROM QUOTES q
             JOIN CHANNEL c ON c.id_channel = q.id_channel
-            LEFT JOIN USER u ON u.id = q.id_user
+            LEFT JOIN USER u ON u.id_user = q.id_user
             WHERE c.name = ?
             GROUP BY q.id_user ORDER BY cnt DESC LIMIT 1
         });
