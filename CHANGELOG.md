@@ -1,3 +1,8 @@
+## MB977 — Confirm native quote rankings (2026-10-27)
+
+- Reject partial or failed ranking and fallback reads; contain database errors and finish cursors independently.
+- Preserve confirmed empty results, ranking output and the legacy recent-quotes fallback.
+
 ## MB976 — Confirm native quote counts before publishing them (2026-10-27)
 
 - Contain SQL prepare/execute/fetch failures in native `quotecount` and

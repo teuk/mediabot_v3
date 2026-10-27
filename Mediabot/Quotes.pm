@@ -1049,10 +1049,24 @@ sub mbTopQuote_ctx {
 
     # Tolerant of a pre-migration schema: if `hits` is missing, fall back to a
     # recent-quotes listing rather than erroring out.
-    my $rows;
+    # MB977: reject partial/failed reads before publishing either listing.
+    # Cleanup may clear the statement error and must not hide a good result.
+    my $read = sub {
+        my ($sql) = @_;
+        my ($sth, $result);
+        my $ok = eval {
+            $sth = $dbh->prepare($sql) or die "topquote prepare failed\n";
+            $sth->execute($sChannel, $limit) or die "topquote execute failed\n";
+            $result = $sth->fetchall_arrayref({});
+            die "topquote fetch failed\n" if $sth->can('err') && $sth->err;
+            die "topquote result unavailable\n" unless ref($result) eq 'ARRAY';
+            1;
+        };
+        eval { $sth->finish } if $sth;
+        return $ok ? $result : undef;
+    };
     my $ranked_by_hits = 1;
-    eval {
-        my $sth = $dbh->prepare(q{
+    my $rows = $read->(q{
             SELECT q.id_quotes AS id, q.quotetext AS txt, q.hits AS hits,
                    COALESCE(u.nickname, '?') AS author
             FROM QUOTES q
@@ -1062,12 +1076,9 @@ sub mbTopQuote_ctx {
             ORDER BY q.hits DESC, q.id_quotes DESC
             LIMIT ?
         });
-        $sth->execute($sChannel, $limit) if $sth;
-        $rows = $sth->fetchall_arrayref({}) if $sth;
-    };
-    if ($@ || !defined $rows) {
+    if (!defined $rows) {
         $ranked_by_hits = 0;
-        my $sth = $dbh->prepare(q{
+        $rows = $read->(q{
             SELECT q.id_quotes AS id, q.quotetext AS txt,
                    COALESCE(u.nickname, '?') AS author
             FROM QUOTES q
@@ -1077,12 +1088,13 @@ sub mbTopQuote_ctx {
             ORDER BY q.id_quotes DESC
             LIMIT ?
         });
-        if ($sth && $sth->execute($sChannel, $limit)) {
-            $rows = $sth->fetchall_arrayref({});
-        }
     }
 
-    unless ($rows && @$rows) {
+    unless (defined $rows) {
+        botNotice($self, $sNick, 'topquote: database unavailable.');
+        return;
+    }
+    unless (@$rows) {
         botPrivmsg($self, $sChannel, "No quotes yet on $sChannel — add some with !q add <text>.");
         return 1;
     }
