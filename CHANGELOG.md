@@ -1,3 +1,17 @@
+## MB979 — Contain native quote insertion failures (2026-10-27)
+
+- Contain INSERT preparation/execution failures in native `q add` and
+  `quote add`, inspect statement errors before cleanup, and finish every
+  allocated insertion cursor independently. Unconfirmed writes receive the
+  existing fixed error notice without a success log or contribution hook.
+- Never retry a lost acknowledgement automatically: the row may already be
+  committed. Keep confirmed additions successful when only cleanup or optional
+  inserted-id retrieval fails, retaining the existing id fallback and capturing
+  the quote id before contribution hooks can perform another INSERT.
+- Exercise both native facades and the real command registry with SQLite,
+  foreign keys, an independent observer, both DBI error modes, Unicode,
+  anonymous/authenticated authors and explicit recovery. No SQL schema change.
+
 ## MB978 — Use the canonical author key in native quote statistics (2026-10-27)
 
 - Join the native `q stats` top contributor on `USER.id_user`, matching the

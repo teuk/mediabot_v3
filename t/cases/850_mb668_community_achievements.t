@@ -188,7 +188,9 @@ return sub {
         qr/if\s*\(\$self->\{achievements\}\).*?eval\s*\{.*?check_community_contributions/s,
         'mb668-850: quote achievement hook is optional and failure-isolated');
 
-    my $quote_id_pos = index($quote_add, 'my $id_inserted = $self->{dbh}->last_insert_id');
+    # MB979: the lookup may be guarded by eval; its position before the hook
+    # remains the contract, independently of the assignment's spelling.
+    my $quote_id_pos = index($quote_add, '->last_insert_id(');
     my $quote_hook_pos = index($quote_add, 'check_community_contributions');
     $assert->ok(
         $quote_id_pos >= 0 && $quote_hook_pos > $quote_id_pos,

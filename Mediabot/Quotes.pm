@@ -255,10 +255,10 @@ sub mbQuoteAdd {
     my $id_channel = $channel_obj->get_id;
 
     $sQuery = "INSERT INTO QUOTES (id_channel, id_user, quotetext) VALUES (?, ?, ?)";
-    $sth = $self->{dbh}->prepare($sQuery);
+    $sth = eval { $self->{dbh}->prepare($sQuery) };
 
     unless ($sth) {
-        $self->{logger}->log(1, "mbQuoteAdd() SQL insert prepare error: $DBI::errstr | Query: $sQuery")
+        $self->{logger}->log(1, "mbQuoteAdd() SQL insert prepare error")
             if $self->{logger};
         botNotice($self, $sNick, "Database error while adding quote.");
         return;
@@ -270,22 +270,26 @@ sub mbQuoteAdd {
     my $id_user = ($iMatchingUserId && $iMatchingUserId =~ /^\d+$/)
         ? $iMatchingUserId : undef;
 
-    unless ($sth && $sth->execute($id_channel, $id_user, $sQuoteText)) {
-        $self->{logger}->log(1, "mbQuoteAdd() SQL insert execute error: $DBI::errstr | Query: $sQuery")
+    # MB979: contain write failures and inspect their status before cleanup.
+    # A lost acknowledgement may follow a committed INSERT: never retry here.
+    my $insert_ok = eval {
+        my $result = $sth->execute($id_channel, $id_user, $sQuoteText);
+        $result && !($sth->can('err') && $sth->err);
+    };
+    eval { $sth->finish };
+    unless ($insert_ok) {
+        $self->{logger}->log(1, "mbQuoteAdd() SQL insert execute error")
             if $self->{logger};
-        $sth->finish if $sth;
         botNotice($self, $sNick, "Database error while adding quote.");
         return;
     }
-
-    $sth->finish;
 
     # Capture the quote id before the Achievement hook performs any other DB
     # writes. DBI last_insert_id/mysql_insertid describe the connection's most
     # recent INSERT, so reading them after unlock/progress writes can return an
     # Achievement row id instead of the QUOTES id.
-    my $id_inserted = $self->{dbh}->last_insert_id(undef, undef, undef, undef);
-    $id_inserted //= $self->{dbh}->{mysql_insertid};
+    my $id_inserted = eval { $self->{dbh}->last_insert_id(undef, undef, undef, undef) };
+    $id_inserted //= eval { $self->{dbh}->{mysql_insertid} };
     $id_inserted //= '?';
 
     # mb668 / MB755: achievements are derived from the real QUOTES/FACTOID
