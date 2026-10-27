@@ -192,8 +192,9 @@ sub mbKarma_ctx {
 sub processKarma {
     my ($self, $nick, $channel, $text) = @_;
 
-    # fix: [^\s+\-]+ avoids greedy \S+ consuming the ++ before the pattern can catch it
-    return unless defined $text && $text =~ /[^\s+\-]{2,}(\+\+|--)/;
+    # MB982: a hyphen belongs to the nick, including before a -- operator.
+    # Keep '+' outside the candidate so the ++ operator is not consumed.
+    return unless defined $text && $text =~ /[^\s+]{2,}(\+\+|--)/;
 
     # mb413-R1: id canal via le helper central (cache d'abord, mb411).
     my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel);
@@ -205,7 +206,9 @@ sub processKarma {
     # Use '!karma + <nick>' for reliable explicit votes.
     my $karma_hits = 0;  # C2/fix: cap at 3 karma changes per message
     my @chan_nicks_pk = eval { $self->gethChannelsNicksOnChan($channel) };
-    KARMA_VOTE: while ($text =~ /([^\s+\-]{2,32})(\+\+|--)(?![\w+\-])/g) {
+    # Match a whole token: never fall back to a suffix of an absent/long nick.
+    # A lazy candidate keeps punctuation after the operator outside the nick.
+    KARMA_VOTE: while ($text =~ /(?<!\S)([^\s+]{2,32}?)(\+\+|--)(?![\w+\-])/g) {
         last if ++$karma_hits > 3;
         my ($target, $op) = (lc($1), $2);
         # PRESENCE CHECK: target must be on the channel

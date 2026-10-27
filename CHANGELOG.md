@@ -1,3 +1,15 @@
+## MB982 — Keep hyphenated karma targets intact (2026-10-27)
+
+- Recognize a complete hyphenated nickname in automatic `nick++` / `nick--`
+  and explicit `karma +|-|++|-- <nick>` votes. The old parser could ignore
+  `Alice-Bob` or credit/debit the unrelated `Bob` account instead.
+- Preserve internal/trailing hyphens while separating the vote operator, and
+  require a complete token at the start of a word. An absent or overlong name
+  no longer falls back to a present nickname suffix.
+- Keep presence/self-vote checks, cooldown, brigade protection, the three-vote
+  cap, watchers, achievements and persisted history bound to the same full
+  target. Exercise real handlers and SQLite persistence; no SQL schema change.
+
 ## MB981 — Confirm native quote views before recall accounting (2026-10-27)
 
 - Contain SQL prepare/execute/fetch errors in native `q view` / `q v` and
