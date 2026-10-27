@@ -2360,9 +2360,7 @@ sub _builtin_public_command_handlers {
         quote        => sub { my ($ctx) = @_;
             my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
             if (@a && lc($a[0]) eq 'add') {
-                shift @{ $ctx->args };
-                mbQuoteAdd($ctx->bot, $ctx->nick, $ctx->channel,
-                    join(' ', @{ $ctx->args }));
+                return mbQuotes_ctx($ctx);
             } elsif (@a && lc($a[0]) eq 'count') {
                 shift @{ $ctx->args };
                 my @r = @{ $ctx->args };

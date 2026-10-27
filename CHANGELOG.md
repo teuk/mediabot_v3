@@ -1,3 +1,14 @@
+## MB975 — Restore native quote-add alias dispatch (2026-10-27)
+
+- Route native `quote add` through the same context-aware handler as `q add`.
+  The old registry adapter supplied shifted positional arguments to
+  `mbQuoteAdd`, losing the caller, channel and quote text before any insertion.
+- Retain the original context arguments and the existing author attribution,
+  duplicate detection, syntax/length checks and database failure responses.
+- Exercise real registry entries and SQLite persistence, including the official
+  `quotes-v3` disabled/off/observe/on states and exact native-handler restoration
+  after unload. No SQL schema or plugin activation changes are required.
+
 ## MB974 — Confirm the native quote duplicate lookup before adding (2026-10-26)
 
 - Reject failed duplicate lookups in native `q add` / `q a`, including DBI
