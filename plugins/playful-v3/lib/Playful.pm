@@ -216,9 +216,11 @@ sub command_choose {
     }
     return $context->notice($invocation,
         'No valid options remain after deduplication.') unless @pool;
+    # Repeated weighted entries are still the same result label.
+    my %labels = map { lc($_) => 1 } @pool;
     return $context->notice($invocation,
         'Only one option left after deduplication — nothing to choose from.')
-        unless @pool >= 2;
+        unless keys(%labels) >= 2;
     my $choice = $pool[ $self->_rand_index(scalar @pool) ];
     $self->{choose_last}{$channel} = $choice;
     my $history = $self->{choose_history}{$channel} ||= [];

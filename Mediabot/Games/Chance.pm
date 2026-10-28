@@ -368,8 +368,10 @@ sub mbChoose_ctx {
         return 1;
     }
     # BX-5/fix: better message when only 1 option remains
-    unless (@opts >= 2) {
-        my $msg = scalar(@opts) == 1
+    # Weights repeat pool entries; require distinct result labels, not slots.
+    my %labels = map { lc($_) => 1 } @opts;
+    unless (keys(%labels) >= 2) {
+        my $msg = keys(%labels) == 1
             ? "Only one option left after deduplication — nothing to choose from."
             : 'Syntax: choose <a> | <b>  or  choose <a> ou <b>  (at least 2 options).';
         botNotice($self, $nick, $msg);

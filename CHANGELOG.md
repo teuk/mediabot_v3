@@ -1,3 +1,14 @@
+## MB996 — Require distinct outcomes for weighted choices (2026-10-28)
+
+- Native choose and playful-v3 now require at least two case-insensitively
+  distinct result labels after interpreting weights. Repeated weighted slots
+  no longer turn a single outcome into an accepted choice.
+- Refuse invalid input privately before drawing, changing last/history or
+  logging a successful native choice. Keep valid pools, weights, labels,
+  rendering and channel scope unchanged. Advance playful-v3 to 1.0.3.
+- Add 12 focused assertions through real native and v3 handlers; five fail
+  independently on each old path. No SQL, configuration or dependency change.
+
 ## MB995 — Recall zero as a valid native choice (2026-10-28)
 
 - Native `choose last` now checks whether a stored result is defined rather
