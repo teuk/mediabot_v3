@@ -162,8 +162,13 @@ sub convert {
         unless ($TEMP{$from} && $TEMP{$to}) {
             return (0, "cannot convert between temperature and non-temperature units");
         }
-        my $c   = _temp_to_c($value + 0, $from);
-        my $out = _temp_from_c($c, $to);
+        # A same-unit conversion must not lose a small value by subtracting
+        # and re-adding a temperature offset through the Celsius pivot.
+        my $out = $value;
+        if ($from ne $to) {
+            my $c = _temp_to_c($value, $from);
+            $out = _temp_from_c($c, $to);
+        }
         return (0, "conversion result is outside the supported numeric range")
             unless POSIX::isfinite($out);
         return (1, _fmt($value) . " $LABEL{$from} = " . _fmt($out) . " $LABEL{$to}");

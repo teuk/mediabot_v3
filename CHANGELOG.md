@@ -1,3 +1,13 @@
+## MB989 — Preserve same-unit temperature conversions (2026-10-28)
+
+- Return a temperature's input value when both canonical units are equal,
+  instead of subtracting and re-adding offsets through the Celsius pivot.
+  Small Kelvin/Fahrenheit values no longer become zero or lose precision
+  when converting to the same unit, including aliases.
+- Preserve cross-unit formulas, finite-number validation, formatting and
+  public/private command delivery. No schema or dependency changes.
+- Add 11 focused regression assertions; five fail against the old runtime.
+
 ## MB988 — Remove forced alternation from playful random draws (2026-10-28)
 
 - Replace playful-v3's private linear-generator modulo with the native Perl
