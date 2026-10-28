@@ -1,3 +1,12 @@
+## MB1002 — Confirm greet reads and preserve zero-valued greeting text (2026-10-28)
+
+- Contain `greet` prepare/execute/fetch exceptions and check the read before
+  cleanup, output and auditing. A failed fetch no longer becomes `No greet`;
+  cleanup and failure logging cannot override the confirmed outcome.
+- Treat the text `0` as a valid greeting. Preserve the existing error response,
+  public/private routing, query scope and genuine missing/NULL/empty results.
+- Add nine focused registry/SQLite assertions; five fail before correction.
+
 ## MB1001 — Honor weather comparison through the meteo alias (2026-10-28)
 
 - Dispatch `meteo compare` to the existing cache-only comparison handler,

@@ -255,20 +255,27 @@ WHERE c.name = ?
 LIMIT 1
 SQL
 
-    my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($target_chan, $greet_nick)) {
-        $self->{logger}->log(1, "userGreet_ctx() SQL Error: $DBI::errstr Query: $sql");
+    my ($sth, $ref);
+    my $read_ok = eval {
+        $sth = $self->{dbh}->prepare($sql);
+        die "prepare failed\n" unless $sth;
+        die "execute failed\n" unless $sth->execute($target_chan, $greet_nick);
+        $ref = $sth->fetchrow_hashref();
+        die "fetch failed\n" if $sth->err;
+        1;
+    };
+    # Decide whether the read succeeded before cleanup can clear DBI errors.
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
+        eval { $self->{logger}->log(1, "userGreet_ctx() database read failed.") }
+            if $self->{logger};
         $say->("Database error while fetching greet for $greet_nick on $target_chan.");
-        $sth->finish if $sth;
         return;
     }
 
-    my $ref = $sth->fetchrow_hashref();
-    $sth->finish;
-
     my $greet = ($ref && defined $ref->{greet} && $ref->{greet} ne '') ? $ref->{greet} : undef;
 
-    if ($greet) {
+    if (defined $greet) {
         $say->("greet on $target_chan ($greet_nick) $greet");
     } else {
         $say->("No greet for $greet_nick on $target_chan");
