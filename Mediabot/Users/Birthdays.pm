@@ -50,14 +50,25 @@ sub userBirthday_ctx {
     if (@args == 1 && $args[0] !~ /^(add|del|next)$/i) {
         my $target = $args[0];
 
-        my $sth = $self->{dbh}->prepare("SELECT birthday FROM USER WHERE nickname = ?");
-        unless ($sth && $sth->execute($target)) {
-            $self->{logger}->log(1, "userBirthday_ctx() SQL Error: $DBI::errstr");
-            $sth->finish if $sth;
+        my ($sth, $row);
+        my $read_ok = eval {
+            $sth = $self->{dbh}->prepare("SELECT birthday FROM USER WHERE nickname = ?");
+            die "prepare failed\n" unless $sth;
+            die "execute failed\n" unless $sth->execute($target);
+            $row = $sth->fetchrow_hashref;
+            die "fetch failed\n" if $sth->err;
+            1;
+        };
+        # Check the read before cleanup, which can clear the DBI error state.
+        eval { $sth->finish } if $sth;
+        unless ($read_ok) {
+            eval { $self->{logger}->log(1, "userBirthday_ctx() database read failed.") }
+                if $self->{logger};
+            botNotice($self, $nick, "Database error.");
             return;
         }
 
-        if (my $row = $sth->fetchrow_hashref) {
+        if ($row) {
             if (defined $row->{birthday} && $row->{birthday} ne '') {
                 my $msg = "${target}'s birthday is $row->{birthday}";
                 $is_private ? botNotice($self, $nick, $msg) : botPrivmsg($self, $reply_chan, $msg);
@@ -70,7 +81,6 @@ sub userBirthday_ctx {
             $is_private ? botNotice($self, $nick, $msg) : botPrivmsg($self, $reply_chan, $msg);
         }
 
-        $sth->finish;
         return 1;
     }
 
@@ -329,38 +339,42 @@ sub _birthday_next_ctx {
 
     my $window_days = 30;
 
-    my $sth = $self->{dbh}->prepare(q{
-        SELECT nickname, birthday
-        FROM USER
-        WHERE birthday IS NOT NULL AND birthday != ''
-    });
+    my ($sth, @upcoming);
+    my $now = time();
+    my $read_ok = eval {
+        $sth = $self->{dbh}->prepare(q{
+            SELECT nickname, birthday
+            FROM USER
+            WHERE birthday IS NOT NULL AND birthday != ''
+        });
+        die "prepare failed\n" unless $sth;
+        die "execute failed\n" unless $sth->execute;
+        while (my $row = $sth->fetchrow_hashref) {
+            my ($month, $day) = _birthday_mmdd_from_value($row->{birthday});
+            next unless defined($month) && defined($day);
 
-    unless ($sth && $sth->execute) {
-        $self->{logger}->log(1, "_birthday_next_ctx() SQL error: $DBI::errstr");
+            my $days_ahead = _birthday_days_ahead($month, $day, $now);
+            next unless defined($days_ahead);
+            next if $days_ahead > $window_days;
+
+            push @upcoming, {
+                nick       => $row->{nickname},
+                bday       => $row->{birthday},
+                mmdd       => sprintf("%02d-%02d", $month, $day),
+                days_ahead => $days_ahead,
+            };
+        }
+        # EOF is valid only when DBI confirms that fetching did not fail.
+        die "fetch failed\n" if $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
+        eval { $self->{logger}->log(1, "_birthday_next_ctx() database read failed.") }
+            if $self->{logger};
         botNotice($self, $nick, "Database error.");
         return;
     }
-
-    my @upcoming;
-    my $now = time();
-
-    while (my $row = $sth->fetchrow_hashref) {
-        my ($month, $day) = _birthday_mmdd_from_value($row->{birthday});
-        next unless defined($month) && defined($day);
-
-        my $days_ahead = _birthday_days_ahead($month, $day, $now);
-        next unless defined($days_ahead);
-        next if $days_ahead > $window_days;
-
-        push @upcoming, {
-            nick       => $row->{nickname},
-            bday       => $row->{birthday},
-            mmdd       => sprintf("%02d-%02d", $month, $day),
-            days_ahead => $days_ahead,
-        };
-    }
-
-    $sth->finish;
 
     @upcoming = sort {
         $a->{days_ahead} <=> $b->{days_ahead}

@@ -1,3 +1,15 @@
+## MB994 — Confirm birthday reads before reporting results (2026-10-28)
+
+- Distinguish failed birthday lookups from confirmed unknown users or unset
+  birthdays. Contain prepare, execute and fetch failures in both DBI error
+  modes and reply with the existing private database-error notice.
+- Confirm EOF before publishing upcoming birthdays, so an interrupted fetch
+  cannot produce a partial list or false absence. Keep fixed diagnostics and
+  best-effort cursor cleanup/logging without exposing raw driver errors.
+- Preserve healthy replies, calendar/DST/Feb 29 rules, sorting, limits and
+  birthday writes/authorization. Add 17 real-SQLite regression assertions;
+  15 fail on the original implementation. No schema or dependency change.
+
 ## MB993 — Apply roll options when the dice token is omitted (2026-10-28)
 
 - Preserve the first modifier or advantage/disadvantage option when roll uses
