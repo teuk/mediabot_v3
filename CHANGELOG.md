@@ -1,3 +1,14 @@
+## MB988 — Remove forced alternation from playful random draws (2026-10-28)
+
+- Replace playful-v3's private linear-generator modulo with the native Perl
+  random index calculation already used by the built-in games. Coin flips
+  no longer alternate mechanically; dice and choices use the same corrected
+  helper without changing their limits, weighting, rendering or history.
+- Advance playful-v3 to 1.0.1 without changing activation, permissions, jobs
+  or configuration. Remove the obsolete private-generator test seed.
+- Add 18 deterministic assertions for repeatable coin/dice outcomes, bounds,
+  counters, channel isolation, advantage and weighted choices.
+
 ## MB987 — Preserve round() values at numeric boundaries (2026-10-28)
 
 - Compare the fractional part before rounding instead of adding a half first.

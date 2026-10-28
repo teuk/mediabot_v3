@@ -1,7 +1,7 @@
 {
   "api": 3,
   "name": "playful-v3",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A reversible v3 home for Mediabot's small playful commands and one quiet autonomous ritual.",
   "runtime": {
     "api": 3,

@@ -12,7 +12,6 @@ sub new {
         flip_stats     => {},
         choose_history => {},
         choose_last    => {},
-        rng            => (time() ^ $$ ^ 0x504c4159) & 0xffffffff,
     }, $class;
 }
 
@@ -22,8 +21,9 @@ sub stop  { $_[0]{started} = 0; 1 }
 sub _rand_index {
     my ($self, $size) = @_;
     $size = 1 unless defined($size) && $size > 0;
-    $self->{rng} = (1664525 * $self->{rng} + 1013904223) & 0xffffffff;
-    return $self->{rng} % $size;
+    # Match the native games: reducing the low bits of the old linear
+    # generator modulo two forced every coin to alternate heads/tails.
+    return int(rand($size));
 }
 
 sub _reply  { $_[0]{context}->reply($_[1], $_[2]) }

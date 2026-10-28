@@ -20,7 +20,6 @@ return sub {
         requested => [qw(irc.reply irc.notice)],
         granted => [qw(irc.reply irc.notice)]);
     my $plugin = Mediabot::Plugin::Playful->new(context => $authority);
-    $plugin->{rng} = 42;
 
     my (@replies, @notices);
     my $invoke = sub {
