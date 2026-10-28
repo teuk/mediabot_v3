@@ -1692,7 +1692,7 @@ sub _seconds_to_human {
 
 # ---------------------------------------------------------------------------
 # mbWeatherCompare_ctx --- !weather compare <city1> <city2>
-# Fetch and display weather for two cities side by side.
+# Compare cached weather for two cities without requesting new data.
 # ---------------------------------------------------------------------------
 sub mbWeatherCompare_ctx {
     my ($ctx) = @_;
@@ -1709,12 +1709,16 @@ sub mbWeatherCompare_ctx {
 
     my ($city1, $city2) = ($args[0], $args[1]);
 
-    # Cache key is simply lc($location) — same as displayWeather_ctx line 419
+    # Match the maximum stale-fallback age in displayWeather_ctx.
+    my $now = time();
+    my $max_age = 900;
+    # Cache key is simply lc($location), as in displayWeather_ctx.
     my @parts;
     for my $city ($city1, $city2) {
         my $cache_key = lc($city);
         my $cache     = $self->{_weather_cache}{$cache_key};
-        if ($cache && ($cache->{text} // '') ne '') {
+        if ($cache && defined($cache->{ts}) && $cache->{ts} <= $now
+            && $now - $cache->{ts} <= $max_age && ($cache->{text} // '') ne '') {
             push @parts, $cache->{text};
         } else {
             push @parts, "$city: no cached data (use !weather $city first)";

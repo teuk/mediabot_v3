@@ -1,3 +1,15 @@
+## MB998 — Bound cached weather comparisons by age (2026-10-28)
+
+- Weather comparison now requires a timestamp no later than the current
+  time and at most 900 seconds old, matching the normal weather command's
+  maximum stale-fallback age. Old or undated entries use the existing
+  no-cached-data response instead of being displayed indefinitely.
+- Check each city separately and preserve cached text, key casing behavior,
+  output routing, syntax feedback and cache-only operation. Normal weather
+  fetching and cache retention are unchanged.
+- Add 11 focused assertions through the real weather registry, with an
+  offline HTTP fixture and controlled clock; four fail before correction.
+
 ## MB997 — Mask service credentials after leading whitespace (2026-10-28)
 
 - Recognize supported private service commands even when preceded by spaces
