@@ -1,3 +1,14 @@
+## MB993 — Apply roll options when the dice token is omitted (2026-10-28)
+
+- Preserve the first modifier or advantage/disadvantage option when roll uses
+  its default 1d6. Previously `roll +2` silently ignored the bonus and
+  `roll adv` rolled only once. Fix native and playful-v3 parsing together.
+- Consume an argument only when it specifies the dice. Keep explicit NdN
+  and numeric-side syntax, modifier bounds, rendering, draws, audit behavior
+  and five-entry channel histories. Advance playful-v3 to 1.0.2.
+- Add 17 deterministic assertions through the native registered handler and
+  real v3 invocation. Eight fail on each old implementation independently.
+
 ## MB992 — Honor timeout-first weighted poll syntax (2026-10-28)
 
 - Recognize the documented `poll 60 weighted Question | A:3 | B:1` order.

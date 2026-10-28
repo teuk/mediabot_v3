@@ -187,13 +187,16 @@ sub mbRoll_ctx {
         ($num, $sides) = ($1, $2);
         $num   = 1   if $num   < 1;  $num   = 20  if $num   > 20;
         $sides = 2   if $sides < 2;  $sides = 100 if $sides > 100;
+        shift @args;
     } elsif (@args && $args[0] =~ /^\d+$/) {
         $sides = int($args[0]);
         $sides = 2 if $sides < 2; $sides = 100 if $sides > 100;
+        shift @args;
     }
 
-    # mb85-IMP2: parse trailing modifier (+N/-N) and adv/dis keyword
-    for my $extra (@args[1..$#args]) {
+    # Consume a dice token only when present; otherwise options start at zero
+    # and apply to the default 1d6 roll.
+    for my $extra (@args) {
         if ($extra =~ /^([+-]\d+)$/) {
             $modifier = int($1);
             $modifier =  100 if $modifier >  100;

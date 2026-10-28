@@ -99,13 +99,16 @@ sub command_roll {
         $number = 20 if $number > 20;
         $sides = 2 if $sides < 2;
         $sides = 100 if $sides > 100;
+        shift @args;
     }
     elsif (@args && $args[0] =~ /\A\d+\z/) {
         $sides = int($args[0]);
         $sides = 2 if $sides < 2;
         $sides = 100 if $sides > 100;
+        shift @args;
     }
-    for my $extra (@args > 1 ? @args[1 .. $#args] : ()) {
+    # With no explicit dice token, the first option belongs to the default 1d6.
+    for my $extra (@args) {
         if ($extra =~ /\A([+-]\d+)\z/) {
             $modifier = int($1);
             $modifier = 100 if $modifier > 100;
