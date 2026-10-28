@@ -1,3 +1,12 @@
+## MB995 — Recall zero as a valid native choice (2026-10-28)
+
+- Native `choose last` now checks whether a stored result is defined rather
+  than testing its truth value. A genuine zero, including a weighted zero
+  label, no longer produces a false "no previous choice" reply.
+- Preserve draws, weighted pools, stored history, channel scope, audit and
+  all other commands. playful-v3 already handles zero correctly and is
+  unchanged. Add nine focused real-registry assertions; two fail before fix.
+
 ## MB994 — Confirm birthday reads before reporting results (2026-10-28)
 
 - Distinguish failed birthday lookups from confirmed unknown users or unset

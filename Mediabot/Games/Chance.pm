@@ -330,7 +330,8 @@ sub mbChoose_ctx {
     # X4: !choose last — recall the last choice made on this channel
     if (@args && lc($args[0]) eq 'last') {
         my $last = $self->{_choose_last}{$channel};
-        if ($last) {
+        # Zero is a valid option label; only undef means no prior choice.
+        if (defined $last) {
             botPrivmsg($self, $channel, "$nick: last choice was: $last");
         } else {
             botPrivmsg($self, $channel, "$nick: no previous choice on this channel.");
