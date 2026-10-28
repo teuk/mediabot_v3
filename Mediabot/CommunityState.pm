@@ -100,37 +100,48 @@ sub mbRemind_ctx {
     # V9: !remind show — see reminders set FOR the caller (by others)
     if (@args && lc($args[0]) eq 'show') {
         my ($sth_s, @bind_s);
-        if (defined $channel && $channel =~ /^#/) {
-            $sth_s = $self->{dbh}->prepare(q{
-                SELECT r.id_reminder, r.from_nick, r.message, r.created_at
-                FROM REMINDERS r
-                JOIN CHANNEL c ON c.id_channel = r.id_channel
-                WHERE c.name = ? AND r.to_nick = ? AND r.delivered = 0
-                ORDER BY r.id_reminder ASC LIMIT 10
-            });
-            @bind_s = ($channel, lc($nick));
-        } else {
-            # mb90-B1: en PM, chercher sur tous les canaux
-            $sth_s = $self->{dbh}->prepare(q{
-                SELECT r.id_reminder, r.from_nick, r.message, r.created_at
-                FROM REMINDERS r
-                WHERE r.to_nick = ? AND r.delivered = 0
-                ORDER BY r.id_reminder ASC LIMIT 10
-            });
-            @bind_s = (lc($nick));
-        }
-        if ($sth_s && $sth_s->execute(@bind_s)) {
-            my @rows;
-            while (my $r = $sth_s->fetchrow_hashref) { push @rows, $r; }
-            $sth_s->finish;
-            if (@rows) {
-                botNotice($self, $nick, 'Reminders set for you:');
-                for my $r (@rows) {
-                    botNotice($self, $nick, "  [#$r->{id_reminder}] from $r->{from_nick}: $r->{message}");
-                }
+        my @rows;
+        my $read_ok = eval {
+            if (defined $channel && $channel =~ /^#/) {
+                $sth_s = $self->{dbh}->prepare(q{
+                    SELECT r.id_reminder, r.from_nick, r.message, r.created_at
+                    FROM REMINDERS r
+                    JOIN CHANNEL c ON c.id_channel = r.id_channel
+                    WHERE c.name = ? AND r.to_nick = ? AND r.delivered = 0
+                    ORDER BY r.id_reminder ASC LIMIT 10
+                });
+                @bind_s = ($channel, lc($nick));
             } else {
-                botNotice($self, $nick, 'No pending reminders set for you.');
+                # mb90-B1: en PM, chercher sur tous les canaux
+                $sth_s = $self->{dbh}->prepare(q{
+                    SELECT r.id_reminder, r.from_nick, r.message, r.created_at
+                    FROM REMINDERS r
+                    WHERE r.to_nick = ? AND r.delivered = 0
+                    ORDER BY r.id_reminder ASC LIMIT 10
+                });
+                @bind_s = (lc($nick));
             }
+            die "prepare failed\n" unless $sth_s;
+            die "execute failed\n" unless $sth_s->execute(@bind_s);
+            while (my $r = $sth_s->fetchrow_hashref) { push @rows, $r; }
+            die "fetch failed\n" if $sth_s->err;
+            1;
+        };
+        # Decide whether the read completed before cleanup can clear DBI errors.
+        eval { $sth_s->finish } if $sth_s;
+        unless ($read_ok) {
+            eval { $self->{logger}->log(1, "mbRemind_ctx(show) database read failed.") }
+                if $self->{logger};
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        if (@rows) {
+            botNotice($self, $nick, 'Reminders set for you:');
+            for my $r (@rows) {
+                botNotice($self, $nick, "  [#$r->{id_reminder}] from $r->{from_nick}: $r->{message}");
+            }
+        } else {
+            botNotice($self, $nick, 'No pending reminders set for you.');
         }
         return 1;
     }
@@ -138,38 +149,49 @@ sub mbRemind_ctx {
     # K1: subcommands list and cancel
     if (@args && lc($args[0]) eq 'list') {
         my ($sth_l, @bind_l);
-        if (defined $channel && $channel =~ /^#/) {
-            $sth_l = $self->{dbh}->prepare(q{
-                SELECT r.id_reminder, r.to_nick, r.message, r.created_at
-                FROM REMINDERS r
-                JOIN CHANNEL c ON c.id_channel = r.id_channel
-                WHERE c.name = ? AND r.from_nick = ? AND r.delivered = 0
-                ORDER BY r.id_reminder ASC LIMIT 10
-            });
-            @bind_l = ($channel, lc($nick));
-        } else {
-            # mb90-B1: en PM, chercher sur tous les canaux
-            $sth_l = $self->{dbh}->prepare(q{
-                SELECT r.id_reminder, r.to_nick, r.message, r.created_at
-                FROM REMINDERS r
-                WHERE r.from_nick = ? AND r.delivered = 0
-                ORDER BY r.id_reminder ASC LIMIT 10
-            });
-            @bind_l = (lc($nick));
-        }
-        if ($sth_l && $sth_l->execute(@bind_l)) {
-            my @rows;
-            while (my $r = $sth_l->fetchrow_hashref) { push @rows, $r; }
-            $sth_l->finish;
-            if (@rows) {
-                botNotice($self, $nick, 'Pending reminders:');
-                for my $r (@rows) {
-                    botNotice($self, $nick,
-                        "  [#$r->{id_reminder}] for $r->{to_nick}: $r->{message}");
-                }
+        my @rows;
+        my $read_ok = eval {
+            if (defined $channel && $channel =~ /^#/) {
+                $sth_l = $self->{dbh}->prepare(q{
+                    SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+                    FROM REMINDERS r
+                    JOIN CHANNEL c ON c.id_channel = r.id_channel
+                    WHERE c.name = ? AND r.from_nick = ? AND r.delivered = 0
+                    ORDER BY r.id_reminder ASC LIMIT 10
+                });
+                @bind_l = ($channel, lc($nick));
             } else {
-                botNotice($self, $nick, 'No pending reminders.');
+                # mb90-B1: en PM, chercher sur tous les canaux
+                $sth_l = $self->{dbh}->prepare(q{
+                    SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+                    FROM REMINDERS r
+                    WHERE r.from_nick = ? AND r.delivered = 0
+                    ORDER BY r.id_reminder ASC LIMIT 10
+                });
+                @bind_l = (lc($nick));
             }
+            die "prepare failed\n" unless $sth_l;
+            die "execute failed\n" unless $sth_l->execute(@bind_l);
+            while (my $r = $sth_l->fetchrow_hashref) { push @rows, $r; }
+            die "fetch failed\n" if $sth_l->err;
+            1;
+        };
+        # Decide whether the read completed before cleanup can clear DBI errors.
+        eval { $sth_l->finish } if $sth_l;
+        unless ($read_ok) {
+            eval { $self->{logger}->log(1, "mbRemind_ctx(list) database read failed.") }
+                if $self->{logger};
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        if (@rows) {
+            botNotice($self, $nick, 'Pending reminders:');
+            for my $r (@rows) {
+                botNotice($self, $nick,
+                    "  [#$r->{id_reminder}] for $r->{to_nick}: $r->{message}");
+            }
+        } else {
+            botNotice($self, $nick, 'No pending reminders.');
         }
         return 1;
     }
@@ -610,33 +632,41 @@ sub mbRemindList_ctx {
     my $channel = $ctx->channel;
 
     my ($sth, @bind_rl);
-    if (defined $channel && $channel =~ /^#/) {
-        $sth = $self->{dbh}->prepare(q{
-            SELECT r.id_reminder, r.to_nick, r.message, r.created_at
-            FROM REMINDERS r
-            JOIN CHANNEL c ON c.id_channel = r.id_channel
-            WHERE r.from_nick = ? AND c.name = ? AND r.delivered = 0
-            ORDER BY r.created_at ASC
-        });
-        @bind_rl = (lc($nick), $channel);
-    } else {
-        # mb90-B1: en PM, afficher tous les reminders cross-canal
-        $sth = $self->{dbh}->prepare(q{
-            SELECT r.id_reminder, r.to_nick, r.message, r.created_at
-            FROM REMINDERS r
-            WHERE r.from_nick = ? AND r.delivered = 0
-            ORDER BY r.created_at ASC
-        });
-        @bind_rl = (lc($nick));
-    }
-    unless ($sth && $sth->execute(@bind_rl)) {
+    my @rows;
+    my $read_ok = eval {
+        if (defined $channel && $channel =~ /^#/) {
+            $sth = $self->{dbh}->prepare(q{
+                SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+                FROM REMINDERS r
+                JOIN CHANNEL c ON c.id_channel = r.id_channel
+                WHERE r.from_nick = ? AND c.name = ? AND r.delivered = 0
+                ORDER BY r.created_at ASC
+            });
+            @bind_rl = (lc($nick), $channel);
+        } else {
+            # mb90-B1: en PM, afficher tous les reminders cross-canal
+            $sth = $self->{dbh}->prepare(q{
+                SELECT r.id_reminder, r.to_nick, r.message, r.created_at
+                FROM REMINDERS r
+                WHERE r.from_nick = ? AND r.delivered = 0
+                ORDER BY r.created_at ASC
+            });
+            @bind_rl = (lc($nick));
+        }
+        die "prepare failed\n" unless $sth;
+        die "execute failed\n" unless $sth->execute(@bind_rl);
+        while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
+        die "fetch failed\n" if $sth->err;
+        1;
+    };
+    # Decide whether the read completed before cleanup can clear DBI errors.
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
+        eval { $self->{logger}->log(1, "mbRemindList_ctx() database read failed.") }
+            if $self->{logger};
         botNotice($self, $nick, 'Database error.');
-        $sth->finish if $sth;
         return;
     }
-    my @rows;
-    while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
-    $sth->finish;
 
     unless (@rows) {
         botNotice($self, $nick, 'No pending reminders.');

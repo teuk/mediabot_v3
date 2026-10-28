@@ -1,3 +1,13 @@
+## MB999 — Distinguish failed reminder reads from empty or partial listings (2026-10-28)
+
+- Confirm complete, error-free fetches before publishing `remind show`,
+  `remind list` or `remindlist` results. Contain DBI prepare/execute/fetch
+  exceptions and send a private database error instead of false absence,
+  partial results or silent failure.
+- Preserve incoming/outgoing and channel/private query scopes, list formats,
+  pending filters and stored reminders. Cleanup and logging are best-effort.
+- Add 14 focused registry/SQLite assertions; 8 fail before the correction.
+
 ## MB998 — Bound cached weather comparisons by age (2026-10-28)
 
 - Weather comparison now requires a timestamp no later than the current
