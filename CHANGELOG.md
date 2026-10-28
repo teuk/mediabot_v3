@@ -1,3 +1,13 @@
+## MB987 — Preserve round() values at numeric boundaries (2026-10-28)
+
+- Compare the fractional part before rounding instead of adding a half first.
+  Values immediately below a half no longer round away from zero, and large
+  exactly represented integers no longer gain or lose one unit.
+- Preserve the existing half-away-from-zero rule, numeric limits, parser,
+  result formatting, command routing and calculation history.
+- Add 22 focused regression assertions, including the actual public/private
+  calc handler. No schema, configuration or dependency changes.
+
 ## MB985 — Apply duel karma as one confirmed score pair (2026-10-27)
 
 - Replace the two independent duel karma writes with one parameterized

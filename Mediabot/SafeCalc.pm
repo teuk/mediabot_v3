@@ -278,7 +278,11 @@ sub _apply_function {
 
     if ($name eq 'round') {
         return _checked(sub {
-            int($a[0] + 0.5 * ($a[0] >= 0 ? 1 : -1));
+            # Adding 0.5 first can cross a floating-point boundary, even for
+            # an already integral value. Compare the fractional part instead.
+            my $whole = int($a[0]);
+            return $whole if abs($a[0] - $whole) < 0.5;
+            return $whole + ($a[0] >= 0 ? 1 : -1);
         });
     }
 
