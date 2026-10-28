@@ -141,22 +141,28 @@ sub mbDuel_ctx {
     # mb414-R1: id canal via le helper central (cache d'abord, mb411).
     my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel) // 0;
 
-    if ($id_channel) {
-        # +1 winner
-        my $sth_w = $dbh->prepare(q{
-            INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, 1)
-            ON DUPLICATE KEY UPDATE score = score + 1
+    # MB985: one statement on the canonical InnoDB table changes both scores
+    # or neither. Never publish a winner after an unconfirmed or partial write.
+    # Do not commit/roll back a transaction owned by another caller.
+    my $sth_karma;
+    my $confirmed = eval {
+        die "duel_database_unavailable\n" unless $dbh && $id_channel && $dbh->{AutoCommit};
+        $sth_karma = $dbh->prepare(q{
+            INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, 1), (?, ?, -1)
+            ON DUPLICATE KEY UPDATE score = score + VALUES(score)
         });
-        $sth_w->execute($id_channel, $winner) if $sth_w;
-        $sth_w->finish if $sth_w;
-
-        # -1 loser
-        my $sth_l = $dbh->prepare(q{
-            INSERT INTO KARMA (id_channel, nick, score) VALUES (?, ?, -1)
-            ON DUPLICATE KEY UPDATE score = score - 1
-        });
-        $sth_l->execute($id_channel, $loser) if $sth_l;
-        $sth_l->finish if $sth_l;
+        die "duel_prepare\n" unless $sth_karma;
+        my $affected = $sth_karma->execute($id_channel, $winner, $id_channel, $loser);
+        die "duel_write_unconfirmed\n" unless defined($affected) && !ref($affected)
+            && "$affected" =~ /\A[234]\z/ && !$sth_karma->err;
+        1;
+    };
+    # Capture the result before finish(), which may clear or replace DBI errors.
+    eval { $sth_karma->finish } if $sth_karma;
+    unless ($confirmed) {
+        eval { $self->{logger}->log(1, 'mbDuel_ctx(): karma result unconfirmed') if $self->{logger} };
+        botNotice($self, $nick, 'Duel result not confirmed. Check karma before retrying.');
+        return;
     }
 
     # Update in-memory stats
@@ -221,12 +227,17 @@ sub mbDuel_ctx {
         eval { $self->{achievements}->check_duel($winner, $channel, $wins, $underdog_streak) };
         if ($@) { $self->{logger}->log(1, "achievements check_duel error: $@") }
         # Karma achievements potentiellement aussi
-        my $sth_s = $dbh->prepare("SELECT score FROM KARMA WHERE id_channel=? AND nick=?");
-        if ($sth_s && $sth_s->execute($id_channel, $winner)) {
-            my $r = $sth_s->fetchrow_hashref; $sth_s->finish;
-            if ($r) {
-                eval { $self->{achievements}->check_karma($winner, $channel, $r->{score}, undef, undef) };
+        my ($sth_s, $karma_score);
+        eval {
+            $sth_s = $dbh->prepare("SELECT score FROM KARMA WHERE id_channel=? AND nick=?");
+            if ($sth_s && $sth_s->execute($id_channel, $winner) && !$sth_s->err) {
+                my $r = $sth_s->fetchrow_hashref;
+                $karma_score = $r->{score} if $r && !$sth_s->err;
             }
+        };
+        eval { $sth_s->finish } if $sth_s;
+        if (defined $karma_score) {
+            eval { $self->{achievements}->check_karma($winner, $channel, $karma_score, undef, undef) };
         }
     }
 

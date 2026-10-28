@@ -1,3 +1,16 @@
+## MB985 — Apply duel karma as one confirmed score pair (2026-10-27)
+
+- Replace the two independent duel karma writes with one parameterized
+  multi-row UPSERT on the canonical InnoDB KARMA table. A losing-row SQL
+  failure no longer leaves the winner's point committed by itself.
+- Require the existing autocommit context and a confirmed two-row result
+  before updating wins, losses, streaks, cooldown, achievements and success
+  accounting. Contain write errors, clean up independently and never retry an
+  uncertain acknowledgement automatically or expose raw driver details.
+- Keep a confirmed duel successful when cleanup or the optional karma
+  achievement read fails. Preserve draw/critical/fumble rules, channel scope,
+  opponent checks, the Games gate and existing achievements. No schema change.
+
 ## MB983 — Finish stopping pending and between-round Trivia games (2026-10-27)
 
 - Stop an ongoing Trivia series during an asynchronous question request or
