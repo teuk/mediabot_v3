@@ -994,6 +994,9 @@ sub mbPoll_ctx {
         $poll_timeout = int($1); $poll_timeout = 10 if $poll_timeout < 10;
         $poll_timeout = 3600 if $poll_timeout > 3600;
     }
+    # Accept the documented timeout-first order as well as weighted-first.
+    # Once enabled, leave any further "weighted" in the question untouched.
+    if (!$poll_weighted && $raw =~ s/^weighted\s+//i) { $poll_weighted = 1; }
     # Retain trailing empty fields so a malformed poll cannot replace the
     # current question and ballots with an empty question or option.
     my @parts = map { s/^\s+|\s+$//gr } split(/\|/, $raw, -1);

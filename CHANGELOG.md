@@ -1,3 +1,14 @@
+## MB992 — Honor timeout-first weighted poll syntax (2026-10-28)
+
+- Recognize the documented `poll 60 weighted Question | A:3 | B:1` order.
+  Previously the keyword became part of the question and the poll silently
+  counted unweighted votes, potentially selecting a different winner.
+- Keep weighted-first syntax, timeout defaults and clamps, literal question
+  text after an already consumed keyword, Master authorization and MB991
+  empty-field validation. Only the creation parser changes at runtime.
+- Add 17 focused real-registry assertions; six fail before correction,
+  including public live tally, final result and closing winner checks.
+
 ## MB991 — Reject empty poll fields before replacing ballots (2026-10-28)
 
 - Keep trailing fields while parsing poll input and require a nonempty
