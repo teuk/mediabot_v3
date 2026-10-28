@@ -2317,7 +2317,13 @@ sub _builtin_public_command_handlers {
                 mbWeatherCompare_ctx($ctx);
             } else { displayWeather_ctx($ctx) }
         },
-        meteo        => sub { my ($ctx) = @_; displayWeather_ctx($ctx) },
+        meteo        => sub { my ($ctx) = @_;
+            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+            if (@a && lc($a[0]) eq 'compare') {
+                shift @{ $ctx->args };
+                mbWeatherCompare_ctx($ctx);
+            } else { displayWeather_ctx($ctx) }
+        },
         addbadword   => sub { my ($ctx) = @_; channelAddBadword_ctx($ctx) },
         rembadword   => sub { my ($ctx) = @_; channelRemBadword_ctx($ctx) },
         ignores      => sub { my ($ctx) = @_; IgnoresList_ctx($ctx) },

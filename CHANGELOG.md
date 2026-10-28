@@ -1,3 +1,12 @@
+## MB1001 — Honor weather comparison through the meteo alias (2026-10-28)
+
+- Dispatch `meteo compare` to the existing cache-only comparison handler,
+  matching `weather compare`. Missing cities now use its private syntax notice
+  instead of a provider lookup for a fictitious city.
+- Preserve ordinary meteo requests, their gates, URL encoding, cache and audit;
+  retain the shared comparison's freshness checks and reply routing.
+- Add nine focused registry/HTTP-fixture assertions; four fail before correction.
+
 ## MB1000 — Contain birthday UPDATE errors and preserve confirmed writes (2026-10-28)
 
 - Catch prepare/execute exceptions when setting or clearing birthdays.
