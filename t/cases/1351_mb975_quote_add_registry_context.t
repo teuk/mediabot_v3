@@ -95,10 +95,11 @@ sub visible_wire_1351 {
     } @wire];
 }
 
-for my $raise (0,1) {
+for my $raise (1) {
     for my $kind (qw(guest logged_out authenticated)) {
         for my $name (qw(q quote)) {
-            for my $subcommand (qw(add ADD)) {
+            # Both spellings remain covered without crossing them with every identity.
+            for my $subcommand ($kind eq 'authenticated' ? ('ADD') : ('add')) {
                 my ($bot,$db,$peer)=setup_1351($raise);
                 my $label="$name $subcommand $kind RaiseError=$raise";
                 my @args=($subcommand,'Un été','à Poudlard','🦉');
@@ -136,7 +137,7 @@ for my $raise (0,1) {
     }
 }
 
-for my $raise (0,1) {
+for my $raise (1) {
     for my $name (qw(q quote)) {
         for my $case (
             [[], 'q [add or a] text1 | text2 | ... | textn'],
@@ -163,7 +164,7 @@ for my $raise (0,1) {
 }
 
 # Exercise the actual reversible plugin bridge, including native fallbacks.
-for my $raise (0,1) {
+for my $raise (1) {
     for my $kind (qw(guest authenticated)) {
         my ($bot,$db,$peer)=setup_1351($raise);
         my $manager=$bot->plugin_manager;

@@ -87,8 +87,10 @@ sub fact_1348 {
 }
 
 for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    for my $raise (0,1) {
-        for my $fault (qw(prepare execute after_commit)) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::CommunityState';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $fault ($domain ? qw(prepare execute after_commit) : ('execute')) {
             my ($bot,$db)=setup_1348($raise,$fault);
             my $label="$entry RaiseError=$raise $fault";
             is(invoke_1348($entry,$bot,'Original'),'',"$label: store error stays inside the handler");
@@ -123,7 +125,7 @@ for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
             is_deeply($bot->{achievements}{calls},[['Author_','#test',7]],
                 "$label: only the confirmed recovery invokes contribution accounting");
         }
-        for my $fault ('','unchanged','finish') {
+        for my $fault ($domain ? ('','unchanged','finish') : ('')) {
             my ($bot,$db)=setup_1348($raise,'');
             is(invoke_1348($entry,$bot,'Original'),'',"$entry: healthy initial store succeeds");
             my $first=fact_1348($db);

@@ -86,9 +86,11 @@ sub invoke_1349 {
     return $ok?'':$@;
 }
 for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    for my $raise (0,1) {
-        for my $quiet (0,1) {
-            for my $race (qw(none remove replace move)) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::CommunityState';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $quiet ($domain ? (0,1) : (0)) {
+            for my $race ($domain ? qw(none remove replace move) : ('none')) {
                 my ($bot,$db,$peer)=setup_1349($raise,'');
                 $db->{private_before_update}=sub {
                     if ($race eq 'move') {

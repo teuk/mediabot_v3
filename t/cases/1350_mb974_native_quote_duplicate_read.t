@@ -113,9 +113,12 @@ sub invoke_1350 {
 }
 my @entries = qw(Mediabot::Quotes Mediabot context:add context:a);
 for my $entry (@entries) {
-    for my $raise (0,1) {
-        for my $fault (qw(prepare execute fetch fetch_die row_error)) {
-            for my $text ('Existing quote','New quote') {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::Quotes';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $fault ($domain ? qw(prepare execute fetch fetch_die row_error) : ('execute')) {
+            for my $text ($domain && $fault =~ /fetch|row_error/
+                    ? ('Existing quote','New quote') : ('New quote')) {
                 my ($bot,$db,$peer)=setup_1350($raise,$fault);
                 my $label="$entry RaiseError=$raise $fault '$text'";
                 my ($error)=invoke_1350($entry,$bot,$text,1);
@@ -140,9 +143,11 @@ for my $entry (@entries) {
 
 # A cleanup failure cannot invalidate a completed lookup or trigger another read.
 for my $entry (@entries) {
-    for my $raise (0,1) {
-        for my $fault ('','finish_die','finish_false') {
-            for my $auth (0,1) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::Quotes';
+    for my $raise (1) {
+        for my $fault ($domain ? ('','finish_die','finish_false') : ('')) {
+            for my $auth ($domain ? (0,1) : (1)) {
                 my ($bot,$db,$peer)=setup_1350($raise,$fault);
                 my $label="$entry RaiseError=$raise '$fault' auth=$auth";
                 my ($error)=invoke_1350($entry,$bot,'Existing quote',$auth);

@@ -79,9 +79,11 @@ sub invoke_1354 {
 }
 
 for my $entry (qw(Mediabot::Quotes Mediabot registry:q)) {
-    for my $raise (0,1) {
-        for my $shadow (0,1) {
-            for my $anonymous (0,1) {
+    # Schema/author combinations are independent of DBI error mode on success.
+    my $domain = $entry eq 'Mediabot::Quotes';
+    for my $raise (1) {
+        for my $shadow ($domain ? (0,1) : (0)) {
+            for my $anonymous ($domain ? (0,1) : (0)) {
                 my ($bot,$db)=setup_1354($raise,$shadow,$anonymous);
                 my $label="$entry RaiseError=$raise legacy-id=$shadow anonymous-top=$anonymous";
                 my ($error,$result)=invoke_1354($entry,$bot,'#test',0);

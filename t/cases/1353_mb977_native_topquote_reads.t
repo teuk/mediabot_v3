@@ -128,10 +128,12 @@ sub expected_1353 {
 }
 my @entries=qw(Mediabot::Quotes Mediabot registry:topquote registry:halloffame);
 for my $entry (@entries) {
-    for my $raise (0,1) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::Quotes';
+    for my $raise ($domain ? (0,1) : (1)) {
         # Both normal ranking and an actual schema without hits remain usable.
-        for my $legacy (0,1) {
-            for my $cleanup (0,1) {
+        for my $legacy ($domain ? (0,1) : (0)) {
+            for my $cleanup ($domain ? (0,1) : (0)) {
                 my ($bot,$db)=setup_1353($raise,$legacy,$cleanup?{($legacy?2:1)=>'finish'}:{});
                 my $label="$entry RaiseError=$raise legacy=$legacy cleanup=$cleanup";
                 my ($error,$result)=invoke_1353($entry,$bot,'#test',undef);
@@ -143,7 +145,7 @@ for my $entry (@entries) {
                 is(scalar @warnings,0,"$label: no warning escapes");
             }
         }
-        for my $fault (qw(prepare execute fetch_die fetch_empty fetch_partial)) {
+        for my $fault ($domain ? qw(prepare execute fetch_die fetch_empty fetch_partial) : ('execute')) {
             my ($bot,$db)=setup_1353($raise,0,{1=>$fault});
             my $label="$entry RaiseError=$raise primary $fault";
             my ($error)=invoke_1353($entry,$bot,'#test',undef);
@@ -153,8 +155,8 @@ for my $entry (@entries) {
             is_deeply($db->{private_finished},$db->{private_prepared},"$label: failed and successful cursors get cleanup");
             is(scalar @warnings,0,"$label: no driver warning escapes");
         }
-        for my $fault (qw(prepare execute fetch_die fetch_empty fetch_partial)) {
-            for my $legacy (0,1) {
+        for my $fault ($domain ? qw(prepare execute fetch_die fetch_empty fetch_partial) : ('execute')) {
+            for my $legacy ($domain ? (0,1) : (0)) {
                 my $faults=$legacy?{2=>$fault}:{1=>'fetch_partial',2=>$fault};
                 my ($bot,$db)=setup_1353($raise,$legacy,$faults);
                 my $label="$entry RaiseError=$raise legacy=$legacy fallback $fault";
@@ -170,7 +172,7 @@ for my $entry (@entries) {
                     "$label: driver details do not enter runtime logs");
             }
         }
-        for my $legacy (0,1) {
+        for my $legacy ($domain ? (0,1) : (0)) {
             my ($bot,$db)=setup_1353($raise,$legacy,{});
             my ($error)=invoke_1353($entry,$bot,'#empty',undef);
             is($error,'',"$entry legacy=$legacy: real empty channel completes");
@@ -178,7 +180,7 @@ for my $entry (@entries) {
                 'No quotes yet on #empty — add some with !q add <text>.']],
                 "$entry legacy=$legacy: only confirmed absence produces the empty message");
         }
-        for my $spec ([0,1],[99,10]) {
+        for my $spec ($domain ? ([0,1],[99,10]) : ()) {
             my ($bot,$db)=setup_1353($raise,0,{});
             invoke_1353($entry,$bot,'#test',$spec->[0]);
             is_deeply(\@wire,expected_1353(1,$spec->[1]),"$entry: requested limit is bounded");

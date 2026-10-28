@@ -96,9 +96,11 @@ sub invoke_1352 {
 }
 my @entries=qw(Mediabot::Quotes Mediabot registry:quotecount registry:quote);
 for my $entry (@entries) {
-    for my $raise (0,1) {
-        for my $target (undef,'Author') {
-            for my $fault (qw(prepare execute fetch fetch_die row_error no_row missing_count)) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::Quotes';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $target ($domain ? (undef,'Author') : (undef)) {
+            for my $fault ($domain ? qw(prepare execute fetch fetch_die row_error no_row missing_count) : ('execute')) {
                 my ($bot,$db)=setup_1352($raise,$fault);
                 my $label="$entry RaiseError=$raise ".($target//'total')." $fault";
                 my ($error,$result)=invoke_1352($entry,$bot,$target,'#test');
@@ -114,12 +116,16 @@ for my $entry (@entries) {
                     "$label: raw database details do not enter runtime logs");
             }
         }
-        for my $fault ('','finish') {
+        for my $fault ($domain ? ('','finish') : ('')) {
+            # Normal data/format variants need one DBI mode; cleanup needs one row shape.
+            next if $raise == 0;
             for my $case (
                 [undef,'#test',6],['Author','#test',2],['aUtH','#test',2],
                 ['Bob_','#test',1],['Absent','#test',0],[undef,'#empty',0],
                 [undef,'#other',1],['Author','#other',1],
             ) {
+                next if (!$domain || $fault eq 'finish') && defined($case->[0]);
+                next if (!$domain || $fault eq 'finish') && $case->[1] ne '#test';
                 my ($target,$channel,$count)=@$case;
                 my ($bot,$db)=setup_1352($raise,$fault);
                 my $label="$entry RaiseError=$raise '$fault' $channel ".($target//'total');

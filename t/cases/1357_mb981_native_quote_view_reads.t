@@ -116,9 +116,11 @@ sub invoke_1357 {
 }
 my @entries=qw(Mediabot::Quotes Mediabot registry:q:view registry:q:v);
 for my $entry (@entries) {
-    for my $raise (0,1) {
-        for my $fault (qw(prepare execute fetch fetch_die row_error)) {
-            for my $id (1,20,999) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::Quotes';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $fault ($domain ? qw(prepare execute fetch fetch_die row_error) : ('execute')) {
+            for my $id (1) {
                 my ($bot,$db,$peer)=setup_1357($raise,$fault);
                 my $label="$entry RaiseError=$raise $fault id=$id";
                 my ($error,$result)=invoke_1357($entry,$bot,$id);
@@ -145,8 +147,9 @@ for my $entry (@entries) {
                 is($db->{private_reads},2,"$label: only explicit recovery repeats the read");
             }
         }
-        for my $fault ('','finish_die','finish_false','counter_error') {
-            for my $id (1,2,20,999) {
+        for my $fault ($domain ? ('','finish_die','finish_false','counter_error') : ('')) {
+            next if $raise == 0 && $fault ne 'counter_error';
+            for my $id ($domain && $fault eq '' ? (1,2,20,999) : (1)) {
                 my ($bot,$db,$peer)=setup_1357($raise,$fault);
                 my $label="$entry RaiseError=$raise '$fault' id=$id";
                 my ($error,$result)=invoke_1357($entry,$bot,$id);

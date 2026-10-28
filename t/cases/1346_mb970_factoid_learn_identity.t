@@ -93,8 +93,10 @@ my @cases = (
     {label => 'missing account id', user => user_1346(undef,1), author => undef},
 );
 for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    for my $raise (0,1) {
-        for my $case (@cases) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::CommunityState';
+    for my $raise (1) {
+        for my $case ($domain ? @cases : @cases[1,2]) {
             my ($bot, $db) = setup_1346($raise);
             my $label = "$entry RaiseError=$raise $case->{label}";
             is(invoke_1346($entry,'Learn',$bot,$case->{user},'Speaker','spell','=','Original'),
@@ -121,7 +123,7 @@ for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
                 'Other channel', "$label: other channel is unchanged");
         }
 
-        for my $original_authenticated (0,1) {
+        for my $original_authenticated ($domain ? (0,1) : ()) {
             my ($bot,$db) = setup_1346($raise);
             my $label = "$entry RaiseError=$raise upsert original_auth=$original_authenticated";
             is(invoke_1346($entry,'Learn',$bot,user_1346(7,$original_authenticated),

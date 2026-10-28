@@ -142,8 +142,10 @@ sub visible_1355 {
 my @entries=qw(Mediabot::Quotes Mediabot registry:q registry:quote);
 my $text='Un été à Poudlard 🦉';
 for my $entry (@entries) {
-    for my $raise (0,1) {
-        for my $fault (qw(prepare prepare_die execute execute_die after_commit after_commit_finish status_error)) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::Quotes';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $fault ($domain ? qw(prepare prepare_die execute execute_die after_commit after_commit_finish status_error) : ('execute')) {
             my ($bot,$db,$peer)=setup_1355($raise,$fault);
             my $label="$entry RaiseError=$raise $fault";
             my ($error,$result)=invoke_1355($entry,$bot,1,$text);
@@ -179,8 +181,9 @@ for my $entry (@entries) {
                 is($db->{private_attempts},2,"$label: one insertion per explicit attempt");
             }
         }
-        for my $fault ('','finish_die','finish_false','id_die','id_undef') {
-            for my $auth (0,1) {
+        for my $fault ($domain ? ('','finish_die','finish_false','id_die','id_undef') : ('')) {
+            next if $raise == 0; # Quiet/loud write faults are covered above.
+            for my $auth ($domain ? (0,1) : (1)) {
                 my ($bot,$db,$peer)=setup_1355($raise,$fault);
                 my $label="$entry RaiseError=$raise '$fault' auth=$auth";
                 my ($error,$id)=invoke_1355($entry,$bot,$auth,$text);

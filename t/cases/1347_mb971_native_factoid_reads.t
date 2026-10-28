@@ -99,11 +99,13 @@ my @cases = (
     {command=>'Factoids',args=>['top'],error=>'factoids: listing failed.',list=>1},
 );
 for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    for my $raise (0,1) {
-        for my $case (@cases) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::CommunityState';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $case ($domain ? @cases : @cases[0,3]) {
             my $label = "$entry $case->{command} @{$case->{args}} RaiseError=$raise";
-            for my $fault ('fetch', ($entry eq 'Mediabot' ? ('prepare','execute') : ()),
-                    ($case->{list} ? 'partial' : ())) {
+            for my $fault ($domain ? ('fetch','prepare','execute',
+                    ($case->{list} ? 'partial' : ())) : ('execute')) {
                 my ($bot,$db) = setup_1347($raise,$fault);
                 my $error = invoke_1347($entry,$bot,$case);
                 $db->{private_fault} = '';

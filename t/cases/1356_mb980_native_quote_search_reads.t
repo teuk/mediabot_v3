@@ -129,9 +129,13 @@ sub texts_1356 {
 }
 my @entries=qw(Mediabot::Quotes Mediabot registry:q:search registry:q:s);
 for my $entry (@entries) {
-    for my $raise (0,1) {
-        for my $fault (qw(prepare execute fetch_zero fetch_partial fetch_die row_error)) {
-            for my $word (qw(lumos missing crowded)) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::Quotes';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $fault ($domain ? qw(prepare execute fetch_zero fetch_partial fetch_die row_error) : ('execute')) {
+            # Only partial/EOF failures depend on the result-set shape.
+            for my $word ($domain && $fault eq 'fetch_partial' ? qw(lumos missing crowded)
+                    : $domain && $fault eq 'fetch_die' ? qw(lumos missing) : ('lumos')) {
                 my ($bot,$db)=setup_1356($raise,$fault);
                 my $label="$entry RaiseError=$raise $fault $word";
                 my ($error,$result)=invoke_1356($entry,$bot,$word);
@@ -158,7 +162,8 @@ for my $entry (@entries) {
                 is($result,$expected,"$label: recovery returns the complete confirmed result size");
             }
         }
-        for my $fault ('','finish_die','finish_false') {
+        for my $fault ($domain ? ('','finish_die','finish_false') : ('')) {
+            next if $raise == 0 && $fault eq '';
             my ($bot,$db)=setup_1356($raise,$fault);
             my $label="$entry RaiseError=$raise '$fault'";
             for my $case (
@@ -169,6 +174,8 @@ for my $entry (@entries) {
                 [['many'],11,qr/11 quote\(s\).*210\|209\|208\|207\|206\|205\|204\|203\|202\|201 \.\.\./],
                 (map {[[$_],1,qr/1 quote\(s\).* : 5\nBest match.*by Alice.*id : 5/]} ('100%','a_b','wow!','.*[','café','🦉')),
             ) {
+                # Literal matching/ranking/bounds run once; cleanup and facade checks use lumos.
+                next if (!$domain || $fault ne '') && join(' ',@{$case->[0]}) ne 'lumos';
                 my ($words,$expected,$pattern)=@$case;
                 my ($error,$count)=invoke_1356($entry,$bot,@$words);
                 is($error,'',"$label @$words: confirmed read survives cleanup faults");

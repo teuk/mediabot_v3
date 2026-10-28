@@ -104,9 +104,11 @@ sub rows_1341 {
 sub notices_1341 { join(' ', map { $_->[1] } @wire) }
 
 for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    for my $raise (0,1) {
-        for my $fault (qw(read.prepare read.execute read.fetch read.partial)) {
-            for my $op (qw(add list export search delete)) {
+    # Full fault coverage belongs to the implementation; facades get wiring checks.
+    my $domain = $entry eq 'Mediabot::CommunityState';
+    for my $raise ($domain ? (0,1) : (1)) {
+        for my $fault ($domain ? qw(read.prepare read.execute read.fetch read.partial) : ('read.execute')) {
+            for my $op ($domain ? qw(add list export search delete) : ('list')) {
                 my ($bot,$db) = setup_1341(raise=>$raise,count=>10);
                 my $before = rows_1341($db);
                 $db->{private_mb965_fault} = $fault;
@@ -129,9 +131,9 @@ for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
             }
         }
 
-        for my $warm (0,1) {
+        for my $warm ($domain ? (0,1) : (0)) {
             for my $kind (qw(insert delete)) {
-                for my $stage (qw(prepare execute ack_lost rows)) {
+                for my $stage ($domain ? qw(prepare execute ack_lost rows) : ('execute')) {
                     my ($bot,$db) = setup_1341(raise=>$raise,warm=>$warm);
                     invoke_1341($entry,$bot,'mbNotes_ctx');
                     my $cache = copy_1341($bot->{_notes}{alice});
@@ -163,7 +165,7 @@ for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
             }
         }
 
-        for my $fault (qw(identity.missing identity.error)) {
+        for my $fault ($domain ? qw(identity.missing identity.error) : ()) {
             my ($bot,$db) = setup_1341(raise=>$raise,warm=>1);
             my $cache = copy_1341($bot->{_notes}{alice});
             $db->{private_mb965_fault} = $fault;
@@ -181,7 +183,7 @@ for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
                 "$label: recovered ordinal deletes only the newly stored note");
         }
 
-        {
+        if ($domain) {
             my ($bot,$db) = setup_1341(raise=>$raise,warm=>1);
             $db->do(q{DELETE FROM NOTE WHERE id_note=20});
             @wire = ();
@@ -191,7 +193,7 @@ for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
             is_deeply([map {$_->{id}} @{$bot->{_notes}{alice}}], [10], "$entry: stale cache refreshes after a missing row");
         }
 
-        for my $kind (qw(insert delete)) {
+        for my $kind ($domain ? qw(insert delete) : ()) {
             for my $op (qw(list add)) {
                 my ($bot,$db) = setup_1341(raise=>$raise,warm=>1);
                 my $cache = copy_1341($bot->{_notes}{alice});
@@ -216,7 +218,7 @@ for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
             }
         }
 
-        {
+        if ($domain) {
             my ($bot,$db) = setup_1341(raise=>$raise,count=>0);
             is(invoke_1341($entry,$bot,'mbNotes_ctx'), '', "$entry: empty successful read is handled");
             like(notices_1341(), qr/No notes\./, "$entry: confirmed empty list remains distinct from a read failure");
