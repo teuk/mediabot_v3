@@ -137,6 +137,13 @@ sub _trivia_parse_api_content {
 sub _trivia_fetch_sync {
     my ($category_id, $difficulty, %opts) = @_;
 
+    # MB984: French is an additional source. The complete English HTTP path
+    # below, its category ids, retry budget and validation remain unchanged.
+    if (($opts{language} // '') eq 'fr') {
+        require Mediabot::External::TriviaFR;
+        return Mediabot::External::TriviaFR::fetch($category_id, $difficulty, %opts);
+    }
+
     require Time::HiRes;
 
     my $started_at = Time::HiRes::time();

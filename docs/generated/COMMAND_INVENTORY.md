@@ -244,7 +244,7 @@ Source version line: `3.6dev`
 | `topic` | private/admin | registry-private | `topic #channel <topic>` | Change the topic of a channel. |  |
 | `topquote` | public | registry-public | `topquote [n]` | Channel hall of fame: the most-recalled quotes (default 5, max 10). Alias: halloffame |  |
 | `topsay` | public | registry-public, registry-private | `topsay [#channel]` | Show top talkers. |  |
-| `trivia` | public | registry-public | `trivia [cat] [start N]` | Trivia. 'categories' to list. Named cats: science, history, music, film, tv... |  |
+| `trivia` | public | registry-public | `trivia [fr/en] [category] [difficulty] or trivia [fr/en] start N` | Trivia in French (OpenQuizzDB) or English (Open Trivia DB). 'categories' to list; 'help' for usage. |  |
 | `triviareset` | master | registry-public | `triviareset <nick>` | Reset a nick's trivia score in DB. |  |
 | `triviascore` | public | registry-public | `triviascore` | Show trivia scores for the current channel session. |  |
 | `triviastop` | master | registry-public | `triviastop` | Stop the active trivia game on this channel. |  |

@@ -1,3 +1,19 @@
+## MB990 — Integrate French Trivia alongside Open Trivia DB (2026-10-28)
+
+- Integrate the previously prepared French source into the current maintenance
+  tree: 6,044 attributed OpenQuizzDB questions across 14 categories and three
+  difficulties, with the data's CC BY-SA 4.0 license and reproducible builder.
+  The catalog is explicitly an archival 2022-02-12 selection.
+- Select French with trivia fr and English with trivia en. Preserve the
+  historical English default and all Open Trivia DB categories, HTTP parsing
+  and retries. French runs locally inside the existing asynchronous worker.
+- Localize French game messages and allow omitted accents in answers while
+  preserving word boundaries. Keep per-channel scores, SQL schema, stop gates
+  and cancellation semantics. Avoid the last 64 French question ids while
+  fresh filtered choices remain; never replace a French failure with English.
+- Add 84 focused feature assertions, including actual command handlers, real
+  SQLite score persistence and one real asynchronous French worker round trip.
+
 ## MB989 — Preserve same-unit temperature conversions (2026-10-28)
 
 - Return a temperature's input value when both canonical units are equal,

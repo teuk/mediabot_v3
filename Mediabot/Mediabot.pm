@@ -2982,7 +2982,7 @@ qg|qg [stop|top]|public|Alias for quotegame.
 triviareset|triviareset <nick>|master|Reset a nick's trivia score in DB.
 triviatop|triviatop [n]|public|Show top trivia scores from DB (hall of fame, max 15).
 triviastop|triviastop|master|Stop the active trivia game on this channel.
-trivia|trivia [cat] [start N]|public|Trivia. 'categories' to list. Named cats: science, history, music, film, tv...
+trivia|trivia [fr/en] [category] [difficulty] or trivia [fr/en] start N|public|Trivia in French (OpenQuizzDB) or English (Open Trivia DB). 'categories' to list; 'help' for usage.
 triviascore|triviascore|public|Show trivia scores for the current channel session.
 
 # Dictionary / external

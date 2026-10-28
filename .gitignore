@@ -16,6 +16,7 @@ config/
 *.env
 *.ini
 *.json
+!Mediabot/Games/data/trivia-fr.json
 
 # Public Grafana dashboards are versioned project artifacts.
 !contrib/grafana/*.json

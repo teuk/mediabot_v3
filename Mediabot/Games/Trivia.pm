@@ -26,6 +26,20 @@ sub _ach_progress { goto &Mediabot::UserCommands::_ach_progress }
 sub logBot { goto &Mediabot::UserCommands::logBot }
 sub _trivia_fetch_sync { goto &Mediabot::UserCommands::_trivia_fetch_sync }
 
+# Preserve the existing English default; French is selected explicitly.
+sub _trivia_language { return 'en' }
+sub _trivia_text { return $_[0] eq 'fr' ? $_[2] : $_[1] }
+sub _trivia_game_language {
+    my ($self,$channel) = @_;
+    my $game = $self->{_trivia}{$channel};
+    return ($game ? $game->{language} : undef) // _trivia_language($self,$channel);
+}
+sub _trivia_difficulty {
+    my ($language, $difficulty) = @_;
+    return uc($difficulty) unless $language eq 'fr';
+    return {easy=>'FACILE',medium=>'MOYEN',hard=>'DIFFICILE'}->{$difficulty} // $difficulty;
+}
+
 # MB319: Open Trivia DB HTTP and DNS work must not run in the IRC event loop.
 # Execute the synchronous request in a forked child and consume its bounded JSON
 # result through IO::Async. MB394 extends the child budget for one rate-limit
@@ -36,6 +50,8 @@ sub _trivia_fetch_async {
     my ($self, $category_id, $difficulty, $callback, %opts) = @_;
 
     return 0 unless ref($callback) eq 'CODE';
+    my %source_opts = ($opts{language} // '') eq 'fr'
+        ? (language=>'fr', exclude_ids=>$opts{exclude_ids}) : ();
 
     require Time::HiRes;
     require JSON::PP;
@@ -93,7 +109,7 @@ sub _trivia_fetch_async {
     unless ($loop && $loop->can('add') && $loop->can('remove')) {
         $debug_log->(2, "sync fallback label=$debug_label reason=no_event_loop");
         my $result = eval {
-            _trivia_fetch_sync($category_id, $difficulty);
+            _trivia_fetch_sync($category_id, $difficulty, %source_opts);
         };
         if ($@) {
             my $error = $@;
@@ -295,6 +311,7 @@ sub _trivia_fetch_async {
                     _trivia_fetch_sync(
                         $category_id,
                         $difficulty,
+                        %source_opts,
                         progress_cb => sub {
                             my ($event) = @_;
                             return unless ref($event) eq 'HASH';
@@ -384,6 +401,16 @@ sub mbTrivia_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
+    my $previous_game = $self->{_trivia}{$channel};
+    my $language = @args && $args[0] =~ /\A(?:fr|en)\z/i ? lc(shift @args)
+        : ($previous_game && $previous_game->{multi_total} ? $previous_game->{language} : undef)
+            // _trivia_language($self, $channel);
+    if (@args && $args[0] =~ /\A(?:aide|help)\z/i) {
+        botNotice($self,$nick,_trivia_text($language,
+            'Trivia: !trivia [en|fr] [category] [easy|medium|hard] | start N | categories | myscore | leaderboard. !triviastop stops the game.',
+            'Trivia : !trivia [fr|en] [catégorie] [facile|moyen|difficile] | start N | categories | myscore | leaderboard. !triviastop arrête la partie.'));
+        return 1;
+    }
     # mb104-IMP1: !trivia reset [nick] — réinitialiser score
     # Sans nick : reset all (Owner only). Avec nick : délègue à mbTriviaReset_ctx (Master)
     if (@args && lc($args[0]) eq 'reset') {
@@ -397,14 +424,14 @@ sub mbTrivia_ctx {
         return unless $ctx->require_level('Owner');
         # mb413-R1: id canal via le helper central (cache d'abord, mb411).
         my $cid_tda = Mediabot::Helpers::channel_id_cached($self, $channel);
-        unless (defined $cid_tda) { botNotice($self, $nick, 'Channel not found.'); return; }
+        unless (defined $cid_tda) { botNotice($self, $nick, _trivia_text($language, 'Channel not found.', 'Salon introuvable.')); return; }
         my $rc = { id_channel => $cid_tda };
         my $sth = $self->{dbh}->prepare('DELETE FROM TRIVIA_SCORES WHERE id_channel = ?');
         unless ($sth && $sth->execute($rc->{id_channel})) {
-            botNotice($self, $nick, 'DB error.'); $sth->finish if $sth; return;
+            botNotice($self, $nick, _trivia_text($language, 'DB error.', 'Erreur de base de données.')); $sth->finish if $sth; return;
         }
         my $rows = $sth->rows; $sth->finish;
-        botPrivmsg($self, $channel, "All trivia scores reset on $channel ($rows row(s) deleted).");
+        botPrivmsg($self, $channel, _trivia_text($language, "All trivia scores reset on $channel ($rows row(s) deleted).", "Tous les scores Trivia de $channel ont été remis à zéro ($rows lignes supprimées)."));
         return 1;
     }
 
@@ -421,14 +448,14 @@ sub mbTrivia_ctx {
             WHERE c.name = ? AND ts.nick = ?
         });
         unless ($sth_ms && $sth_ms->execute($channel, $channel, $target)) {
-            botNotice($self, $nick, 'DB error.'); return;
+            botNotice($self, $nick, _trivia_text($language, 'DB error.', 'Erreur de base de données.')); return;
         }
         my $r = $sth_ms->fetchrow_hashref; $sth_ms->finish;
         unless ($r) {
-            botPrivmsg($self, $channel, "$target has no trivia score on $channel yet."); return 1;
+            botPrivmsg($self, $channel, _trivia_text($language, "$target has no trivia score on $channel yet.", "$target n’a pas encore de score Trivia sur $channel.")); return 1;
         }
         botPrivmsg($self, $channel, sprintf(
-            "Trivia score for %s on %s: %d correct answer(s)  |  rank #%d  |  last: %s",
+            _trivia_text($language, "Trivia score for %s on %s: %d correct answer(s)  |  rank #%d  |  last: %s", "Score Trivia de %s sur %s : %d bonne(s) réponse(s) | rang #%d | dernière : %s"),
             $target, $channel, $r->{score}, $r->{rank}, $r->{last_correct} // '?'));
         return 1;
     }
@@ -447,18 +474,18 @@ sub mbTrivia_ctx {
             LIMIT ?
         });
         unless ($sth_lb && $sth_lb->execute($channel, $limit)) {
-            botNotice($self, $nick, 'DB error fetching leaderboard.'); return;
+            botNotice($self, $nick, _trivia_text($language, 'DB error fetching leaderboard.', 'Erreur de lecture du classement.')); return;
         }
         my @lb;
         while (my $r = $sth_lb->fetchrow_hashref) { push @lb, $r; }
         $sth_lb->finish;
         unless (@lb) {
-            botPrivmsg($self, $channel, "No trivia scores yet on $channel."); return 1;
+            botPrivmsg($self, $channel, _trivia_text($language, "No trivia scores yet on $channel.", "Aucun score Trivia sur $channel pour le moment.")); return 1;
         }
-        botPrivmsg($self, $channel, "Trivia leaderboard on $channel (top $limit):");
+        botPrivmsg($self, $channel, _trivia_text($language, "Trivia leaderboard on $channel (top $limit):", "Classement Trivia sur $channel (top $limit) :"));
         my $rank = 1;
         for my $r (@lb) {
-            botPrivmsg($self, $channel, sprintf("  %d. %-20s %d correct answer(s)  (last: %s)",
+            botPrivmsg($self, $channel, sprintf(_trivia_text($language, "  %d. %-20s %d correct answer(s)  (last: %s)", "  %d. %-20s %d bonne(s) réponse(s) (dernière : %s)"),
                 $rank++, $r->{nick}, $r->{score}, $r->{last_correct} // '?'));
         }
         return 1;
@@ -476,21 +503,33 @@ sub mbTrivia_ctx {
         film       => 11, movies     => 11, books      => 10,
         mythology  => 20, nature     => 27,
     );
+    if ($language eq 'fr') {
+        %trivia_cats = (%trivia_cats, 'général'=>9, general=>9, 'culture'=>9,
+            'littérature'=>10,litterature=>10,'cinéma'=>11,cinema=>11,musique=>12,
+            'télévision'=>14,television=>14,jeux=>15,sciences=>17,informatique=>18,
+            mythologie=>20,sport=>21,'géographie'=>22,geographie=>22,histoire=>23,
+            arts=>25,animaux=>27);
+    }
 
     # !trivia categories remains available even while a question is active.
-    if (@args && lc($args[0]) eq 'categories') {
+    if (@args && $args[0] =~ /\Acat(?:é|e)gories\z/i) {
         botPrivmsg($self, $channel,
-            'Trivia categories: ' . join(', ', sort keys %trivia_cats));
+            $language eq 'fr'
+                ? 'Catégories Trivia FR : culture, littérature, cinéma, musique, télévision, jeux, sciences, informatique, mythologie, sports, géographie, histoire, arts, animaux.'
+                : 'Trivia categories: ' . join(', ', sort keys %trivia_cats));
         return 1;
     }
 
     if ($self->{_trivia}{$channel} && $self->{_trivia}{$channel}{active}) {
-        botNotice($self, $nick, 'A trivia question is already active. Answer it or wait.');
+        botNotice($self, $nick, _trivia_text($language,
+            'A trivia question is already active. Answer it or wait.',
+            'Une question Trivia est déjà en cours. Réponds ou patiente.'));
         return;
     }
 
     if ($self->{_trivia_fetch}{$channel}) {
-        botNotice($self, $nick, 'A trivia question request is already in progress.');
+        botNotice($self, $nick, _trivia_text($language,
+            'A trivia question request is already in progress.', 'Une question Trivia est déjà en cours de chargement.'));
         return 1;
     }
 
@@ -505,14 +544,20 @@ sub mbTrivia_ctx {
         $self->{_trivia}{$channel}{multi_total}   = $rounds;
         $self->{_trivia}{$channel}{multi_current} = 0;
         $self->{_trivia}{$channel}{scores}        = {};
+        $self->{_trivia}{$channel}{language}      = $language;
 
-        botPrivmsg($self, $channel,
-            "Trivia: starting $rounds-round game! Scores reset.");
+        botPrivmsg($self, $channel, _trivia_text($language,
+            "Trivia: starting $rounds-round game! Scores reset.",
+            "Trivia : début d'une partie de $rounds manches ! Scores de session remis à zéro."));
 
         @args = ();
     }
 
     # Optional named category filter.
+    if ($language eq 'fr') {
+        my %difficulty_fr = (facile=>'easy',moyen=>'medium',moyenne=>'medium',difficile=>'hard');
+        @args = map {$difficulty_fr{lc($_)} // $_} @args;
+    }
     my $trivia_cat = (
         @args
         && $args[0] !~ /^\d/
@@ -527,7 +572,7 @@ sub mbTrivia_ctx {
         botNotice(
             $self,
             $nick,
-            "Unknown trivia category '$trivia_cat'. Use !trivia categories.",
+            _trivia_text($language, "Unknown trivia category '$trivia_cat'. Use !trivia categories.", "Catégorie Trivia inconnue : $trivia_cat. Utilise !trivia fr categories."),
         );
         return 1;
     }
@@ -536,6 +581,14 @@ sub mbTrivia_ctx {
     my $trivia_diff;
     if (@args && $args[0] =~ /^(?:easy|medium|hard)$/i) {
         $trivia_diff = lc(shift @args);
+    }
+
+    if ($language eq 'fr') {
+        require Mediabot::External::TriviaFR;
+        unless (!defined($trivia_cat_id) || exists(Mediabot::External::TriviaFR::categories()->{$trivia_cat_id})) {
+            botNotice($self,$nick,'Catégorie non disponible en français. !trivia fr categories ; !trivia en pour Open Trivia DB.');
+            return 1;
+        }
     }
 
     my $request_token = join(
@@ -549,6 +602,7 @@ sub mbTrivia_ctx {
         token        => $request_token,
         requested_by => $nick,
         started      => time(),
+        language     => $language,
     };
 
     my $log_message = $ctx->message;
@@ -652,6 +706,11 @@ sub mbTrivia_ctx {
                                     ? 'Trivia: the question service returned an unusable response. Details were logged.'
                                     : 'Trivia: could not fetch question. Details were logged.';
 
+                if ($language eq 'fr') {
+                    $message = $error =~ /\Afr_(?:empty|category|difficulty)\z/
+                        ? 'Trivia : aucune question française pour ces filtres. !trivia fr categories.'
+                        : 'Trivia : le catalogue français est indisponible. Aucun remplacement par une question anglaise.';
+                }
                 botPrivmsg($self, $channel, $message);
                 return;
             }
@@ -702,8 +761,8 @@ sub mbTrivia_ctx {
             }
 
             unless ($question ne '' && $answer ne '' && @wrong) {
-                botPrivmsg($self, $channel,
-                    'Trivia: no usable question in response.');
+                botPrivmsg($self, $channel, _trivia_text($language,
+                    'Trivia: no usable question in response.', 'Trivia : aucune question exploitable.'));
                 return;
             }
 
@@ -727,7 +786,7 @@ sub mbTrivia_ctx {
                 botPrivmsg(
                     $self,
                     $channel,
-                    "Round $multi_current/$multi_total:",
+                    _trivia_text($language, "Round $multi_current/$multi_total:", "Manche $multi_current/$multi_total :"),
                 );
             }
 
@@ -763,7 +822,14 @@ sub mbTrivia_ctx {
                 multi_current  => $multi_current,
                 timeout        => $trivia_timeout,
                 deadline       => time() + $trivia_timeout,
+                language       => $language,
             };
+            if ($language eq 'fr' && defined($q->{id}) && !ref($q->{id})
+                    && $q->{id} =~ /\Aoqdb-[0-9]+-[0-9]+\z/) {
+                my $recent = $self->{_trivia_fr_recent}{$channel} //= [];
+                push @$recent, $q->{id};
+                splice @$recent, 0, @$recent - 64 if @$recent > 64;
+            }
 
             my $opts = join('  ', map { "[$_]" } @choices);
 
@@ -776,8 +842,8 @@ sub mbTrivia_ctx {
                 );
                 my $color = $diff_colors{$difficulty} // '';
                 $diff_tag = $color
-                    ? " ${color}[" . uc($difficulty) . "]\x0f"
-                    : " [" . uc($difficulty) . "]";
+                    ? " ${color}[" . _trivia_difficulty($language, $difficulty) . "]\x0f"
+                    : " [" . _trivia_difficulty($language, $difficulty) . "]";
             }
 
             botPrivmsg(
@@ -788,9 +854,12 @@ sub mbTrivia_ctx {
             botPrivmsg(
                 $self,
                 $channel,
-                "Choices: $opts -- reply with !answer <choice> "
-                . "or just say it (${trivia_timeout}s)",
+                _trivia_text($language,
+                    "Choices: $opts -- reply with !answer <choice> " . "or just say it (${trivia_timeout}s)",
+                    "Choix : $opts — !answer <réponse> ou écris-la dans le salon (${trivia_timeout}s)"),
             );
+            botPrivmsg($self,$channel,'Questions : OpenQuizzDB.org — CC BY-SA 4.0 — https://creativecommons.org/licenses/by-sa/4.0/')
+                if $language eq 'fr' && (!$multi_total || $multi_current == 1);
 
             $self->{metrics}->inc('mediabot_trivia_questions_total')
                 if $self->{metrics};
@@ -806,6 +875,8 @@ sub mbTrivia_ctx {
             return 1;
         },
         debug_label => "channel=$channel token=$request_token requested_by=$nick",
+        language => $language,
+        exclude_ids => [@{$self->{_trivia_fr_recent}{$channel} // []}],
     );
 }
 
@@ -814,6 +885,7 @@ sub checkTriviaAnswer {
     my ($self, $nick, $channel, $text) = @_;
     my $trivia = $self->{_trivia}{$channel};
     return unless $trivia && $trivia->{active};
+    my $language = $trivia->{language} // 'en';
     if (time() > $trivia->{deadline}) {
         $trivia->{active} = 0;
         # DD6: enriched timeout message with category + mb108-IMP1: difficulty
@@ -823,10 +895,13 @@ sub checkTriviaAnswer {
             my %dc = ( easy => "\x0303", medium => "\x0308", hard => "\x0304" );
             my $dl = lc($trivia->{difficulty});
             my $c  = $dc{$dl} // '';
-            $diff_str = $c ? " ${c}[" . uc($dl) . "]\x0f" : " [" . uc($dl) . "]";
+            $diff_str = $c ? " ${c}[" . _trivia_difficulty($language,$dl) . "]\x0f"
+                : " [" . _trivia_difficulty($language,$dl) . "]";
         }
         Mediabot::Helpers::botPrivmsg($self, $channel,
-            "Time's up!$diff_str The answer was: $trivia->{answer_display}${cat_str}");
+            _trivia_text($language,
+                "Time's up!$diff_str The answer was: $trivia->{answer_display}${cat_str}",
+                "Temps écoulé !$diff_str La réponse était : $trivia->{answer_display}${cat_str}"));
         $self->{metrics}->inc('mediabot_trivia_timeout_total') if $self->{metrics};
         return;
     }
@@ -846,7 +921,7 @@ sub checkTriviaAnswer {
             $rest =~ s/[^\s'\-]/_/g;
             $hint = substr($ans, 0, 1) . $rest;
         }
-        Mediabot::Helpers::botPrivmsg($self, $channel, "Hint: $hint");
+        Mediabot::Helpers::botPrivmsg($self, $channel, _trivia_text($language, "Hint: $hint", "Indice : $hint"));
     }
     # B3/fix: guard against undef answer + wrap regex in eval
     return unless defined $trivia->{answer};
@@ -858,13 +933,19 @@ sub checkTriviaAnswer {
     # l'auteur (mb121-B2) : "the answer is paris" / "paris!" gagnent toujours,
     # mais "warsaw" ne valide plus "war".
     my $answer = $trivia->{answer};
+    my $candidate = lc($text // '');
+    if ($language eq 'fr') {
+        require Mediabot::External::TriviaFR;
+        $answer = Mediabot::External::TriviaFR::answer_key($answer);
+        $candidate = Mediabot::External::TriviaFR::answer_key($candidate);
+    }
     # mb443-B1: keep legacy high bytes inside words. MB920 also treats decoded
     # Unicode letters, numbers and combining marks as word material. Public
     # IRC text is decoded at the application boundary; a wider letter must not
     # turn an embedded answer into a complete word. Existing punctuation rules remain.
     my $matched = eval {
-        lc($text) eq $answer
-        || lc($text) =~ /(?<![A-Za-z0-9\x80-\xFF\p{L}\p{N}\p{M}])\Q$answer\E(?![A-Za-z0-9\x80-\xFF\p{L}\p{N}\p{M}])/
+        $candidate eq $answer
+        || $candidate =~ /(?<![A-Za-z0-9\x80-\xFF\p{L}\p{N}\p{M}])\Q$answer\E(?![A-Za-z0-9\x80-\xFF\p{L}\p{N}\p{M}])/
     };
     return unless $matched;
     $trivia->{active} = 0;
@@ -904,10 +985,13 @@ sub checkTriviaAnswer {
         my %diff_colors = ( easy => "\x0303", medium => "\x0308", hard => "\x0304" );
         my $dl  = lc($trivia->{difficulty});
         my $col = $diff_colors{$dl} // '';
-        $diff_str = $col ? " ${col}[" . uc($dl) . "]\x0f" : " [" . uc($dl) . "]";
+        $diff_str = $col ? " ${col}[" . _trivia_difficulty($language,$dl) . "]\x0f"
+            : " [" . _trivia_difficulty($language,$dl) . "]";
     }
     Mediabot::Helpers::botPrivmsg($self, $channel,
-        "Correct, $nick!$diff_str The answer was: $trivia->{answer_display}  (score: $score)");
+        _trivia_text($language,
+            "Correct, $nick!$diff_str The answer was: $trivia->{answer_display}  (score: $score)",
+            "Bonne réponse, $nick !$diff_str La réponse était : $trivia->{answer_display}  (score : $score)"));
 
     # mb115: hook achievements trivia (score atteint, sniper si réponse <= 2s)
     if ($self->{achievements}) {
@@ -932,10 +1016,11 @@ sub checkTriviaAnswer {
         my @sboard = map { "$_:$sc{$_}" }
                      sort { $sc{$b} <=> $sc{$a} } keys %sc;
         Mediabot::Helpers::botPrivmsg($self, $channel,
-            "Scores after round $cur/$tot: " . join('  ', @sboard[0..($#sboard > 4 ? 4 : $#sboard)]));
+            _trivia_text($language, "Scores after round $cur/$tot: ", "Scores après la manche $cur/$tot : ")
+                . join('  ', @sboard[0..($#sboard > 4 ? 4 : $#sboard)]));
         if ($cur >= $tot) {
             Mediabot::Helpers::botPrivmsg($self, $channel,
-                "Game over! Final scores: " . join('  ', @sboard));
+                _trivia_text($language, "Game over! Final scores: ", "Partie terminée ! Scores finaux : ") . join('  ', @sboard));
             delete $trivia->{multi_total};
             delete $trivia->{multi_current};
         }
@@ -951,12 +1036,13 @@ sub mbTriviaTop_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my $language = _trivia_game_language($self,$channel);
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $limit   = (@args && $args[0] =~ /^(\d+)$/) ? int($args[0]) : 5;
     $limit = 1 if $limit < 1; $limit = 15 if $limit > 15;
     # mb411-R1: id canal via le helper central (cache d'abord).
     my $cid_tt = Mediabot::Helpers::channel_id_cached($self, $channel);
-    unless (defined $cid_tt) { botPrivmsg($self, $channel, 'Channel not found.'); return; }
+    unless (defined $cid_tt) { botPrivmsg($self, $channel, _trivia_text($language, 'Channel not found.', 'Salon introuvable.')); return; }
     my $rc = { id_channel => $cid_tt };
     my $sth = $self->{dbh}->prepare(q{
         SELECT nick, score, last_correct
@@ -965,7 +1051,7 @@ sub mbTriviaTop_ctx {
         ORDER BY score DESC LIMIT ?
     });
     unless ($sth && $sth->execute($rc->{id_channel}, $limit)) {
-        botPrivmsg($self, $channel, 'DB error.'); $sth->finish if $sth; return;
+        botPrivmsg($self, $channel, _trivia_text($language, 'DB error.', 'Erreur de base de données.')); $sth->finish if $sth; return;
     }
     my @ranked; my $i = 1;
     my @raw;  # JJ2: collect all rows first to compute total
@@ -980,9 +1066,9 @@ sub mbTriviaTop_ctx {
         $i++;
     }
     unless (@ranked) {
-        botPrivmsg($self, $channel, 'No trivia scores in DB yet.'); return 1;
+        botPrivmsg($self, $channel, _trivia_text($language, 'No trivia scores in DB yet.', 'Aucun score Trivia enregistré pour le moment.')); return 1;
     }
-    botPrivmsg($self, $channel, "Trivia hall of fame ($channel): " . join('  ', @ranked));
+    botPrivmsg($self, $channel, _trivia_text($language, "Trivia hall of fame ($channel): ", "Palmarès Trivia ($channel) : ") . join('  ', @ranked));
     return 1;
 }
 
@@ -995,6 +1081,7 @@ sub mbTriviaReset_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my $language = _trivia_game_language($self,$channel);
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     return unless $ctx->require_level('Master');
     my $target = lc($args[0] // '');
@@ -1003,20 +1090,20 @@ sub mbTriviaReset_ctx {
     }
     # mb411-R1: id canal via le helper central (cache d'abord).
     my $cid_ts = Mediabot::Helpers::channel_id_cached($self, $channel);
-    unless (defined $cid_ts) { botNotice($self, $nick, 'Channel not found.'); return; }
+    unless (defined $cid_ts) { botNotice($self, $nick, _trivia_text($language, 'Channel not found.', 'Salon introuvable.')); return; }
     my $rc = { id_channel => $cid_ts };
     my $sth = $self->{dbh}->prepare(
         'DELETE FROM TRIVIA_SCORES WHERE id_channel = ? AND nick = ?'
     );
     unless ($sth && $sth->execute($rc->{id_channel}, $target)) {
-        botNotice($self, $nick, 'DB error.'); $sth->finish if $sth; return;
+        botNotice($self, $nick, _trivia_text($language, 'DB error.', 'Erreur de base de données.')); $sth->finish if $sth; return;
     }
     my $rows = $sth->rows; $sth->finish;
     if ($rows > 0) {
         Mediabot::Helpers::botPrivmsg($self, $channel,
-            "$nick reset trivia score for $target.");
+            _trivia_text($language, "$nick reset trivia score for $target.", "$nick a remis à zéro le score Trivia de $target."));
     } else {
-        botNotice($self, $nick, "No trivia score found for '$target' on $channel.");
+        botNotice($self, $nick, _trivia_text($language, "No trivia score found for '$target' on $channel.", "Aucun score Trivia pour $target sur $channel."));
     }
     return 1;
 }
@@ -1030,6 +1117,8 @@ sub mbTriviaStop_ctx {
     return unless $ctx->require_level('Master');
 
     my $pending = delete $self->{_trivia_fetch}{$channel};
+    my $language = ($pending ? $pending->{language} : undef)
+        // _trivia_game_language($self,$channel);
     delete $self->{_trivia_fetch}
         if $self->{_trivia_fetch}
             && !keys %{ $self->{_trivia_fetch} };
@@ -1040,7 +1129,8 @@ sub mbTriviaStop_ctx {
     # MB983: a series also exists while fetching or between questions. Merely
     # cancelling its request token would let the next command resume that series.
     unless ($active || $pending || ($trivia && $trivia->{multi_total})) {
-        botNotice($self, $nick, 'No active trivia on this channel.');
+        botNotice($self, $nick, _trivia_text($language,
+            'No active trivia on this channel.', 'Aucune partie Trivia en cours sur ce salon.'));
         return 1;
     }
 
@@ -1056,15 +1146,17 @@ sub mbTriviaStop_ctx {
 
     unless ($active) {
         botNotice($self, $nick, $pending
-            ? 'Pending trivia question request cancelled.'
-            : 'Trivia game stopped.');
+            ? _trivia_text($language, 'Pending trivia question request cancelled.', 'Chargement de la question Trivia annulé.')
+            : _trivia_text($language, 'Trivia game stopped.', 'Partie Trivia arrêtée.'));
         return 1;
     }
 
     Mediabot::Helpers::botPrivmsg(
         $self,
         $channel,
-        "Trivia stopped by $nick. Answer: $trivia->{answer_display}",
+        _trivia_text($language,
+            "Trivia stopped by $nick. Answer: $trivia->{answer_display}",
+            "Trivia arrêté par $nick. Réponse : $trivia->{answer_display}"),
     );
 
     return 1;
@@ -1075,9 +1167,10 @@ sub mbTriviaScore_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my $language = _trivia_game_language($self,$channel);
     my $scores  = $self->{_trivia}{$channel}{scores} // {};
     unless (%$scores) {
-        botPrivmsg($self, $channel, 'No trivia scores yet.'); return 1;
+        botPrivmsg($self, $channel, _trivia_text($language, 'No trivia scores yet.', 'Aucun score Trivia pour le moment.')); return 1;
     }
     my @sorted = sort { $scores->{$b} <=> $scores->{$a} } keys %$scores;
     # IMP17: also show total correct answers this session
@@ -1088,7 +1181,7 @@ sub mbTriviaScore_ctx {
         "$_: $scores->{$_}$pct"
     } @sorted[0..($#sorted > 4 ? 4 : $#sorted)]);
     botPrivmsg($self, $channel,
-        "Trivia scores on $channel ($total_correct total): $top");
+        _trivia_text($language, "Trivia scores on $channel ($total_correct total): $top", "Scores Trivia sur $channel ($total_correct au total) : $top"));
     logBot($self, $ctx->message, $channel, 'triviascore', '');  # Q1
     return 1;
 }
