@@ -994,8 +994,10 @@ sub mbPoll_ctx {
         $poll_timeout = int($1); $poll_timeout = 10 if $poll_timeout < 10;
         $poll_timeout = 3600 if $poll_timeout > 3600;
     }
-    my @parts = map { s/^\s+|\s+$//gr } split(/\|/, $raw);
-    unless (@parts >= 3) {
+    # Retain trailing empty fields so a malformed poll cannot replace the
+    # current question and ballots with an empty question or option.
+    my @parts = map { s/^\s+|\s+$//gr } split(/\|/, $raw, -1);
+    unless (@parts >= 3 && !grep { $_ eq '' } @parts) {
         botNotice($self, $nick, 'Syntax: poll <question> | option1 | option2 ...');
         return;
     }

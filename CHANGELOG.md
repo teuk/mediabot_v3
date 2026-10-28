@@ -1,3 +1,13 @@
+## MB991 — Reject empty poll fields before replacing ballots (2026-10-28)
+
+- Keep trailing fields while parsing poll input and require a nonempty
+  question and every option after whitespace trimming. Malformed polls now
+  return the existing private syntax notice before altering active polls,
+  ballots, metrics or successful-command audit logs.
+- Preserve valid zero labels, weighted/Unicode options, timeouts and the
+  Master gate. Add 19 focused real-registry assertions; 12 fail before the fix.
+  No SQL, configuration, dependency or Trivia changes.
+
 ## MB990 — Integrate French Trivia alongside Open Trivia DB (2026-10-28)
 
 - Integrate the previously prepared French source into the current maintenance
