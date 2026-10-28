@@ -1,3 +1,13 @@
+## MB1000 — Contain birthday UPDATE errors and preserve confirmed writes (2026-10-28)
+
+- Catch prepare/execute exceptions when setting or clearing birthdays.
+  Report an unconfirmed UPDATE privately without a success acknowledgement,
+  raw SQL error details or an automatic retry.
+- Keep cleanup and failure logging from overriding the UPDATE outcome.
+  Preserve true-zero success and remove the undefined-date audit warning
+  when clearing through `birthday add user <name>`.
+- Add 15 focused registry/SQLite assertions; 8 fail before correction.
+
 ## MB999 — Distinguish failed reminder reads from empty or partial listings (2026-10-28)
 
 - Confirm complete, error-free fetches before publishing `remind show`,

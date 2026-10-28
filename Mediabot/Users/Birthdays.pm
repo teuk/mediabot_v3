@@ -176,22 +176,29 @@ sub _birthday_add_ctx {
         return;
     }
 
-    my $sth = $self->{dbh}->prepare(
-        "UPDATE USER SET birthday = ? WHERE id_user = ?"
-    );
-    unless ($sth && $sth->execute($normalized, $id_user)) {
-        $self->{logger}->log(1, "_birthday_add_ctx() SQL error: $DBI::errstr");
+    my $sth;
+    my $write_ok = eval {
+        $sth = $self->{dbh}->prepare(
+            "UPDATE USER SET birthday = ? WHERE id_user = ?"
+        );
+        die "prepare failed\n" unless $sth;
+        die "execute failed\n" unless $sth->execute($normalized, $id_user);
+        1;
+    };
+    # Cleanup must not override the UPDATE outcome or trigger a second write.
+    eval { $sth->finish } if $sth;
+    unless ($write_ok) {
+        eval { $self->{logger}->log(1, "_birthday_add_ctx() database write failed.") }
+            if $self->{logger};
         botNotice($self, $nick, "Database error.");
-        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
 
     my $msg = defined $normalized
         ? "Birthday set to $normalized for $target."
         : "Birthday cleared for $target.";
     botNotice($self, $nick, $msg);
-    logBot($self, $ctx->message, undef, "birthday add", "$target $normalized");
+    logBot($self, $ctx->message, undef, "birthday add", "$target " . ($normalized // ''));
     return 1;
 }
 
@@ -213,16 +220,23 @@ sub _birthday_del_ctx {
         return;
     }
 
-    my $sth = $self->{dbh}->prepare(
-        "UPDATE USER SET birthday = NULL WHERE id_user = ?"
-    );
-    unless ($sth && $sth->execute($id_user)) {
-        $self->{logger}->log(1, "_birthday_del_ctx() SQL error: $DBI::errstr");
+    my $sth;
+    my $write_ok = eval {
+        $sth = $self->{dbh}->prepare(
+            "UPDATE USER SET birthday = NULL WHERE id_user = ?"
+        );
+        die "prepare failed\n" unless $sth;
+        die "execute failed\n" unless $sth->execute($id_user);
+        1;
+    };
+    # Cleanup must not override the UPDATE outcome or trigger a second write.
+    eval { $sth->finish } if $sth;
+    unless ($write_ok) {
+        eval { $self->{logger}->log(1, "_birthday_del_ctx() database write failed.") }
+            if $self->{logger};
         botNotice($self, $nick, "Database error.");
-        $sth->finish if $sth;
         return;
     }
-    $sth->finish;
 
     botNotice($self, $nick, "Birthday cleared for $target.");
     logBot($self, $ctx->message, undef, "birthday del", $target);
