@@ -1,3 +1,14 @@
+## MB997 — Mask service credentials after leading whitespace (2026-10-28)
+
+- Recognize supported private service commands even when preceded by spaces
+  or tabs. Trim only the recognized log copy before tokenization so its
+  credential positions remain correct. Scope Unicode whitespace semantics
+  to the redaction helper, including nonbreaking-space separators.
+- Keep caller scalars, actual PRIVMSG/ACTION/NOTICE payloads, chunk limits,
+  ordinary-message whitespace and existing unprefixed masking unchanged.
+- Add 17 focused assertions through the shared helper and real output paths;
+  12 fail before correction. No transport, SQL or dependency changes.
+
 ## MB996 — Require distinct outcomes for weighted choices (2026-10-28)
 
 - Native choose and playful-v3 now require at least two case-insensitively

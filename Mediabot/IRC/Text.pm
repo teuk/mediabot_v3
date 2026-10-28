@@ -29,13 +29,16 @@ sub decode_irc_text {
 }
 
 sub _redact_irc_service_secret_for_log {
+    use feature 'unicode_strings';
     my ($msg) = @_;
 
     return $msg unless defined($msg) && $msg ne '';
 
     my $log_msg = $msg;
 
-    if ($log_msg =~ /^(identify|id|login|register|auth|ghost|recover|release|set\s+password)\b/i) {
+    if ($log_msg =~ /^\s*(identify|id|login|register|auth|ghost|recover|release|set\s+password)\b/i) {
+        # Normalize only recognized log copies, before whitespace tokenization.
+        $log_msg =~ s/^\s+//;
         my @parts = split /\s+/, $log_msg;
         my $verb = lc($parts[0] // '');
 
