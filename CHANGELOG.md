@@ -1,3 +1,14 @@
+## MB1018 — Honor explicit HTTP redirect budgets (2026-10-29)
+
+- Forward the caller's max_redirect option through the shared HTTP factory,
+  preserving explicit zero. News/horoscope requests that disable redirects no
+  longer silently use the library's default, and positive hop limits apply.
+- Preserve existing redirect behavior when the option is omitted, along with
+  timeout, TLS, response-byte limits, headers and provider fallback behavior.
+- Add eight focused real-loopback HTTP assertions, including the native news
+  caller and a cross-origin POST 303; four fail before the fix. No existing
+  tests, schema, configuration or dependencies change.
+
 ## MB1017 — Share channel letter-case identity for membership and duels (2026-10-29)
 
 - Resolve membership and random-nick lookups when the received channel target

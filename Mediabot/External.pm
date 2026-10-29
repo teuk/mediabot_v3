@@ -209,6 +209,7 @@ sub _make_http {
         verify_SSL => $verify,
         %ssl_opts,
         max_size   => $opts{max_size} // 512 * 1024,
+        (exists($opts{max_redirect}) ? (max_redirect => $opts{max_redirect}) : ()),
         (ref($opts{default_headers}) eq 'HASH' ? (default_headers => $opts{default_headers}) : ()),   # mb495
     );
 }
