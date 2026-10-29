@@ -1,3 +1,26 @@
+## MB1007 — Give Trivia its full duration and reject expired answers (2026-10-29)
+
+- Derive each question's start and deadline from one high-resolution timestamp.
+  Use one high-resolution arrival sample for expiry and the half-time hint,
+  and expire at the deadline itself. Fractional starts no longer round the
+  deadline down; answers at or after expiry cannot win a point.
+- Preserve EN/FR feedback, score persistence, timeout counters, achievements,
+  channel isolation and the existing expiry-on-next-message lifecycle.
+- Add six focused clock/registry/SQLite assertions; three fail before the fix.
+  Align the existing answer-boundary fixture's clocks and update the static
+  Sniper clock contract to verify the shared precise start and deadline.
+  No assertions or coverage are removed.
+
+## MB1006 — Match chance-game numeric tokens to Perl's integer parsing (2026-10-29)
+
+- Restrict dice counts/sides, signed modifiers, flip counts and choice weights
+  to ASCII digits in native games and playful-v3. Unicode decimal digits no
+  longer reach arithmetic as zero or a partly converted numeric prefix.
+- Preserve existing unrecognized-token defaults, ASCII bounds, random draws,
+  histories, flip counters, native audit and Unicode option labels. Invalid
+  weight suffixes remain literal labels. Bump playful-v3 to 1.0.4.
+- Add ten focused deterministic assertions; six fail before correction.
+
 ## MB1005 — Distinguish failed profile reads from missing users and hostmasks (2026-10-29)
 
 - Contain `userinfo` prepare/execute/fetch errors and confirm reads before

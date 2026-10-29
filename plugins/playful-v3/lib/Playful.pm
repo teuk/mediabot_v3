@@ -93,7 +93,8 @@ sub command_roll {
     }
 
     my ($number, $sides, $modifier, $mode) = (1, 6, 0, '');
-    if (@args && $args[0] =~ /\A(\d+)d(\d+)\z/i) {
+    # Match numeric conversion's ASCII grammar, not Unicode \d.
+    if (@args && $args[0] =~ /\A([0-9]+)d([0-9]+)\z/i) {
         ($number, $sides) = ($1, $2);
         $number = 1 if $number < 1;
         $number = 20 if $number > 20;
@@ -101,7 +102,7 @@ sub command_roll {
         $sides = 100 if $sides > 100;
         shift @args;
     }
-    elsif (@args && $args[0] =~ /\A\d+\z/) {
+    elsif (@args && $args[0] =~ /\A[0-9]+\z/) {
         $sides = int($args[0]);
         $sides = 2 if $sides < 2;
         $sides = 100 if $sides > 100;
@@ -109,7 +110,7 @@ sub command_roll {
     }
     # With no explicit dice token, the first option belongs to the default 1d6.
     for my $extra (@args) {
-        if ($extra =~ /\A([+-]\d+)\z/) {
+        if ($extra =~ /\A([+-][0-9]+)\z/) {
             $modifier = int($1);
             $modifier = 100 if $modifier > 100;
             $modifier = -100 if $modifier < -100;
@@ -163,7 +164,7 @@ sub command_flip {
             $nick, $channel, $stats->{h}, 100 * $stats->{h} / $total,
             $stats->{t}, 100 * $stats->{t} / $total, $total));
     }
-    my $number = @args && $args[0] =~ /\A\d+\z/ ? int($args[0]) : 1;
+    my $number = @args && $args[0] =~ /\A[0-9]+\z/ ? int($args[0]) : 1;
     $number = 1 if $number < 1;
     $number = 10 if $number > 10;
     my @results;
@@ -209,7 +210,7 @@ sub command_choose {
     }
     my @pool;
     for my $option (@unique) {
-        if ($option =~ /\A(.+?):(\d+)\z/ && $2 >= 1 && $2 <= 20) {
+        if ($option =~ /\A(.+?):([0-9]+)\z/ && $2 >= 1 && $2 <= 20) {
             push @pool, ($1) x $2;
         }
         else { push @pool, $option }

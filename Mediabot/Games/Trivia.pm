@@ -809,11 +809,12 @@ sub mbTrivia_ctx {
                     && $difficulty =~ /\A(?:easy|medium|hard)\z/i;
             $difficulty = lc($difficulty);
 
+            my $started = Time::HiRes::time();
             $self->{_trivia}{$channel} = {
                 active         => 1,
                 answer         => lc($answer),
                 answer_display => $answer,
-                started        => Time::HiRes::time(),
+                started        => $started,
                 hint_given     => 0,
                 category       => $category,
                 difficulty     => $difficulty,
@@ -821,7 +822,7 @@ sub mbTrivia_ctx {
                 multi_total    => $multi_total,
                 multi_current  => $multi_current,
                 timeout        => $trivia_timeout,
-                deadline       => time() + $trivia_timeout,
+                deadline       => $started + $trivia_timeout,
                 language       => $language,
             };
             if ($language eq 'fr' && defined($q->{id}) && !ref($q->{id})
@@ -886,7 +887,8 @@ sub checkTriviaAnswer {
     my $trivia = $self->{_trivia}{$channel};
     return unless $trivia && $trivia->{active};
     my $language = $trivia->{language} // 'en';
-    if (time() > $trivia->{deadline}) {
+    my $now = Time::HiRes::time();
+    if ($now >= $trivia->{deadline}) {
         $trivia->{active} = 0;
         # DD6: enriched timeout message with category + mb108-IMP1: difficulty
         my $cat_str  = $trivia->{category}   ? " ($trivia->{category})"  : '';
@@ -907,7 +909,7 @@ sub checkTriviaAnswer {
     }
     # Y5: hint at half-time — reveal first letter(s)
     if (!$trivia->{hint_given} && defined $trivia->{deadline}
-            && $trivia->{deadline} - time() < ($trivia->{timeout} // 30) / 2) {
+            && $trivia->{deadline} - $now < ($trivia->{timeout} // 30) / 2) {
         $trivia->{hint_given} = 1;
         my $ans = $trivia->{answer} // '';
         # mb402-R1: préserver la STRUCTURE de la réponse dans l'indice. Avant,

@@ -183,12 +183,13 @@ sub mbRoll_ctx {
     my $modifier = 0;   # mb85-IMP2: +N / -N bonus
     my $adv_mode = '';  # 'adv', 'dis', or ''
 
-    if (@args && $args[0] =~ /^(\d+)d(\d+)$/i) {
+    # Numeric conversion accepts ASCII digits, unlike Perl's Unicode \d.
+    if (@args && $args[0] =~ /^([0-9]+)d([0-9]+)$/i) {
         ($num, $sides) = ($1, $2);
         $num   = 1   if $num   < 1;  $num   = 20  if $num   > 20;
         $sides = 2   if $sides < 2;  $sides = 100 if $sides > 100;
         shift @args;
-    } elsif (@args && $args[0] =~ /^\d+$/) {
+    } elsif (@args && $args[0] =~ /^[0-9]+$/) {
         $sides = int($args[0]);
         $sides = 2 if $sides < 2; $sides = 100 if $sides > 100;
         shift @args;
@@ -197,7 +198,7 @@ sub mbRoll_ctx {
     # Consume a dice token only when present; otherwise options start at zero
     # and apply to the default 1d6 roll.
     for my $extra (@args) {
-        if ($extra =~ /^([+-]\d+)$/) {
+        if ($extra =~ /^([+-][0-9]+)$/) {
             $modifier = int($1);
             $modifier =  100 if $modifier >  100;
             $modifier = -100 if $modifier < -100;
@@ -279,7 +280,7 @@ sub mbFlip_ctx {
 
     # mb85-IMP3: !flip N — multi-flip (max 10)
     my $n = 1;
-    if (@args && $args[0] =~ /^(\d+)$/) {
+    if (@args && $args[0] =~ /^([0-9]+)$/) {
         $n = int($1); $n = 1 if $n < 1; $n = 10 if $n > 10;
     }
 
@@ -356,7 +357,7 @@ sub mbChoose_ctx {
     # U5: weighted choice — 'pizza:3' means pizza appears 3x in pool
     my @opts;
     for my $opt (@raw_opts) {
-        if ($opt =~ /^(.+?):(\d+)$/ && $2 >= 1 && $2 <= 20) {
+        if ($opt =~ /^(.+?):([0-9]+)$/ && $2 >= 1 && $2 <= 20) {
             push @opts, ($1) x $2;
         } else {
             push @opts, $opt;

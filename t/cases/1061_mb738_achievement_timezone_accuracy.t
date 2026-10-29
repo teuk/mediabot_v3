@@ -120,8 +120,9 @@ return sub {
     $assert->like($history,
         qr/sub mbStreak_ctx\b.*?my \$channel_timezone = eval.*?my \$sql_timezone = .*?DATE\(CONVERT_TZ\(cl\.ts, \@\@session\.time_zone, \?\)\) AS day/s,
         'mb738-1051: activity streak declares and uses its channel-local calendar');
+    # MB1007: the sampled high-resolution start also defines the deadline.
     $assert->like($trivia,
-        qr/started\s*=>\s*Time::HiRes::time\(\).*?my \$response_time = Time::HiRes::time\(\)/s,
+        qr/my \$started = Time::HiRes::time\(\);.*?started\s*=>\s*\$started,.*?deadline\s*=>\s*\$started \+ \$trivia_timeout,.*?my \$response_time = Time::HiRes::time\(\)\s*-\s*\(\$trivia->\{started\}/s,
         'mb738-1051: Trivia Sniper uses high-resolution elapsed time end to end');
     $assert->like($karma,
         qr/bump_progress\(\s*'karma_given'/s,

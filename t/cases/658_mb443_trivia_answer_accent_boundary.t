@@ -98,6 +98,7 @@ sub fixture {
   metrics=>bless({counts=>{}},'MB920::Metrics')},'MB920::Bot';return($b,$state);
 }
 no warnings qw(redefine once);
+local *Time::HiRes::time=sub {CORE::GLOBAL::time()};
 local *Mediabot::Helpers::botPrivmsg=sub {my($b,$to,$text)=@_;push @{$b->{probe}{out}},[$to,$text,utf8::is_utf8($text)?1:0,unpack('H*',utf8::is_utf8($text)?encode('UTF-8',$text):$text)];1};
 local *Mediabot::UserCommands::botPrivmsg=sub {goto &Mediabot::Helpers::botPrivmsg};
 local *Mediabot::UserCommands::botNotice=sub {goto &Mediabot::Helpers::botPrivmsg};
