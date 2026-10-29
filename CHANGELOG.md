@@ -1,3 +1,14 @@
+## MB1014 — Read namespaced RSS/Atom articles instead of silently skipping them (2026-10-29)
+
+- Accept namespace prefixes on Atom entries and RDF/RSS items/channels, just as
+  feed roots and article fields already do. Match each structural end tag to
+  its opening qualified name and keep Atom source titles outside entry content.
+- Preserve article keys, baseline suppression, repeat-poll deduplication, item
+  limits, HTTP validators and announcement formatting. No storage schema,
+  network policy, pacing or delivery lifecycle changes.
+- Add seven focused parser/fetch/poller assertions; six fail before the fix.
+  No existing tests are changed or removed.
+
 ## MB1013 — Preserve complete Spotify metadata in quoted HTML attributes (2026-10-29)
 
 - Parse complete quoted meta attributes rather than ending their content at

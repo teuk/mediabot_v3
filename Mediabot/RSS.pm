@@ -275,8 +275,10 @@ sub _parse_rss_items {
     my ($xml, $limit) = @_;
     my @items;
 
-    while ($xml =~ m{<item\b[^>]*>(.*?)</item>}sig) {
-        my $block = $1;
+    # Feed roots and fields already accept namespace prefixes. Structural
+    # nodes must do the same, with the same qualified name on their end tag.
+    while ($xml =~ m{<((?:[A-Za-z_][\w.-]*:)?item)\b[^>]*>(.*?)</\1>}sig) {
+        my $block = $2;
         my $title = _xml_tag_text($block, 'title');
         next unless length $title;
 
@@ -300,8 +302,8 @@ sub _parse_atom_items {
     my ($xml, $limit) = @_;
     my @items;
 
-    while ($xml =~ m{<entry\b[^>]*>(.*?)</entry>}sig) {
-        my $block = $1;
+    while ($xml =~ m{<((?:[A-Za-z_][\w.-]*:)?entry)\b[^>]*>(.*?)</\1>}sig) {
+        my $block = $2;
         my $title = _xml_tag_text($block, 'title');
         next unless length $title;
 
@@ -354,15 +356,15 @@ sub parse_feed_document {
     if ($xml =~ /<(?:[A-Za-z_][\w.-]*:)?feed\b/i) {
         $format = 'atom';
 
-        my ($head) = $xml =~ m{\A(.*?)(?=<entry\b)}si;
+        my ($head) = $xml =~ m{\A(.*?)(?=<(?:[A-Za-z_][\w.-]*:)?entry\b)}si;
         $title = _xml_tag_text($head // $xml, 'title');
         $items = _parse_atom_items($xml, $limit);
     }
     elsif ($xml =~ /<(?:rss|(?:[A-Za-z_][\w.-]*:)?RDF)\b/i) {
         $format = 'rss';
 
-        my ($channel) =
-            $xml =~ m{<channel\b[^>]*>(.*?)</channel>}si;
+        my (undef, $channel) =
+            $xml =~ m{<((?:[A-Za-z_][\w.-]*:)?channel)\b[^>]*>(.*?)</\1>}si;
 
         $title = _xml_tag_text($channel // $xml, 'title');
         $items = _parse_rss_items($xml, $limit);
