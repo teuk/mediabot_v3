@@ -1360,11 +1360,17 @@ sub mbDbCommand {
 	# Atomic increment avoids losing simultaneous uses. Invalid templates never
 	# increase hits. A statistics outage must not suppress a valid response.
 	$sQuery = "UPDATE PUBLIC_COMMANDS SET hits=hits+1 WHERE id_public_commands=?";
-	my $sth_upd = $self->{dbh}->prepare($sQuery);
-	unless ($sth_upd && $sth_upd->execute($id_public_commands)) {
-		$self->{logger}->log(1,"mbDbCommand() SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-	}
-	$sth_upd->finish if $sth_upd;
+	my $sth_upd;
+	my $hit_recorded = eval {
+		$sth_upd = $self->{dbh}->prepare($sQuery) or die "hit prepare failed";
+		$sth_upd->execute($id_public_commands) or die "hit execute failed";
+		1;
+	};
+	# Cleanup and diagnostics are best effort too. Never retry an increment
+	# after an exception: its acknowledgement may have been lost after writing.
+	eval { $sth_upd->finish } if $sth_upd;
+	eval { $self->{logger}->log(1, 'mbDbCommand() hit statistics update failed') }
+		unless $hit_recorded;
 
 	$self->{logger}->log(2,"SQL command found : $sCommand description : $description action : $action");
 	if ($actionType eq 'PRIVMSG') { botPrivmsg($self, $sChannel, $actionDo) }

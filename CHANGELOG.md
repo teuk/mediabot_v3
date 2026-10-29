@@ -1,3 +1,14 @@
+## MB1012 — Isolate dynamic-command hit-counter failures from valid replies (2026-10-29)
+
+- Contain exceptions and false results from the best-effort hit increment.
+  A successfully read and rendered dynamic command still sends its message or
+  action when statistics prepare/execute fails, including a lost acknowledgement.
+- Keep cleanup and failure logging best effort, use a fixed diagnostic without
+  driver details and never retry an uncertain increment. Preserve the atomic SQL,
+  template behavior, valid zero-row results and held/invalid-command guards.
+- Add seven focused native-dispatch/SQLite assertions; five fail before the fix.
+  No existing tests are modified or removed.
+
 ## MB1011 — Keep encoded UTF-8 characters whole in IRC chunks (2026-10-29)
 
 - Recognize valid UTF-8 in a bounded window of raw byte input before choosing
