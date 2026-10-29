@@ -30,7 +30,7 @@ ConversationRuntimeState supply independent connection/activity/JOIN states;
 contradictions remain visible. SQL failure does not hide an independent JOIN.
 The report is an observation during the request, not an atomic cross-system snapshot.
 
-AppleMusicFallback requires AppleMusic previews. Reddit and Youtube have their
+AppleMusicFallback requires AppleMusic previews. Reddit, MixCloud and Youtube have their
 own flags; UrlTitle covers generic URLs, Spotify, Instagram, Facebook and X.
 These explanations do not replace any feature gate. Games missing, for example,
 is not a claim that games are effectively off.

@@ -1,3 +1,16 @@
+## MB1020 — Add opt-in MixCloud show previews (2026-10-29)
+
+- Add a dedicated asynchronous Mixcloud API preview with a turntable-style
+  badge, show title, creator and duration. Shared-link tracking parameters do
+  not enter requests or split cache identities.
+- Add the independent, default-off MixCloud chanset. An authorized +MixCloud
+  registers the catalogue row by name as needed; no schema migration or
+  automatic channel activation. Disabling revokes pending replies.
+- Bound HTTP, worker concurrency, start rate, caches and IRC output; validate
+  the requested show identity and recheck transport/channel policy on delivery.
+- Expose MixCloud in channel diagnostics and mbweb, retaining older publication
+  compatibility. Add fourteen focused offline assertions with native workers.
+
 ## MB1019 — Reserve the first plugin store attempt before calling its sink (2026-10-29)
 
 - Consume the script invocation's single storage attempt before entering the

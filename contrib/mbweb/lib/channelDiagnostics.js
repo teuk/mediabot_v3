@@ -5,7 +5,7 @@ const { constants } = require('node:fs');
 const path = require('node:path');
 const { escapeHtml } = require('./html');
 
-const FLAGS = Object.freeze(('UrlTitle Youtube YoutubeSearch AppleMusic AppleMusicFallback Reddit '
+const FLAGS = Object.freeze(('UrlTitle Youtube YoutubeSearch AppleMusic AppleMusicFallback Reddit MixCloud '
   + 'Hailo HailoLearn HailoRespond HailoChatter Spark SparkAction Claude Gemini MetaAI '
   + 'VDM RandomQuote Games AchievementAnnounce Radio AntiFlood NoColors').split(' '));
 const MAX_BYTES = 65536;
@@ -75,7 +75,12 @@ function projectReport(raw, id, name) {
   object(raw);
   if (raw.version !== 3 || raw.channel_id !== id || raw.channel !== name) throw new Error('Identity mismatch');
   const flags = {};
-  for (const key of FLAGS) flags[key] = choice(object(raw.flags)[key], ['on', 'off', 'missing', 'unknown']);
+  for (const key of FLAGS) {
+    const value = object(raw.flags)[key];
+    // Reports published before MB1020 have no MixCloud observation.
+    flags[key] = choice(key === 'MixCloud' && value === undefined ? 'unknown' : value,
+      ['on', 'off', 'missing', 'unknown']);
+  }
   const rss = object(raw.rss_failures);
   const rssFailures = { state: choice(rss.state, ['observed', 'unavailable', 'unknown']) };
   if (rssFailures.state === 'observed') {

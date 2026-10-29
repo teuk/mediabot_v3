@@ -66,6 +66,7 @@ use Mediabot::External::XTwitter qw(
 
 # MB930: dedicated opt-in Reddit previews, independent of generic UrlTitle.
 use Mediabot::External::Reddit ();
+use Mediabot::External::MixCloud ();
 
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use HTML::Entities qw(decode_entities);
@@ -400,6 +401,12 @@ sub displayUrlTitle {
     
         $self->{logger}->log(4, "displayUrlTitle() URL: $url");
     
+        if (Mediabot::External::MixCloud::is_mixcloud_url($url)) {
+            return undef unless Mediabot::External::MixCloud::enabled($self, $sChannel);
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'mixcloud' }) if $self->{metrics}; };
+            return Mediabot::External::MixCloud::handle($self, $message, $sNick, $sChannel, $url);
+        }
+
         if (Mediabot::External::Reddit::is_reddit_url($url)) {
             return undef unless Mediabot::External::Reddit::enabled($self, $sChannel);
             eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'reddit' }) if $self->{metrics}; };

@@ -11,7 +11,7 @@ use Mediabot::Diagnostics::Plugins;
 # Configuration observations only: never substitute this inventory for the
 # feature's own authorization, caching, provider or delivery policy.
 my @GROUPS = (
-    ['links',qw(UrlTitle Youtube YoutubeSearch AppleMusic AppleMusicFallback Reddit)],
+    ['links',qw(UrlTitle Youtube YoutubeSearch AppleMusic AppleMusicFallback Reddit MixCloud)],
     ['conversation',qw(Hailo HailoLearn HailoRespond HailoChatter Spark SparkAction)],
     ['ai',qw(Claude Gemini MetaAI)],
     ['community',qw(VDM RandomQuote Games AchievementAnnounce Radio)],
@@ -120,7 +120,7 @@ sub collect {
         && $report->{transport_connected} ne $report->{runtime_connected}) {
         push @{$report->{notes}},'Transport and runtime connection observations disagree.';
     }
-    push @{$report->{notes}},'Reddit and Youtube use their own flags; UrlTitle covers generic links, Spotify, Instagram, Facebook and X.';
+    push @{$report->{notes}},'Reddit, MixCloud and Youtube use their own flags; UrlTitle covers generic links, Spotify, Instagram, Facebook and X.';
     push @{$report->{notes}},'on/off describe persisted flags; runtime caches may lag. Missing is not an effective default.';
     $report->{activity}=Mediabot::Diagnostics::Activity->new(bot=>$bot)->collect($report->{channel},$report->{observed_at});
     $report->{plugins}=eval {$bot->{plugin_manager}->channel_diagnostic_snapshot($report->{channel})};
