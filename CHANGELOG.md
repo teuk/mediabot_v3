@@ -1,3 +1,12 @@
+## MB1010 — Validate complete poll vote numbers before updating ballots (2026-10-29)
+
+- Require a complete ASCII option number before comparing or storing a vote.
+  Mixed Unicode digits such as `2١` no longer become a partial numeric prefix
+  that casts or replaces a ballot, changes a weighted winner or emits warnings.
+- Preserve valid ASCII votes, leading zeroes, ballot changes, weights, audit,
+  metrics, channel isolation, withdrawal and the existing lazy-expiry rule.
+- Add eight focused native-registry assertions; five fail before correction.
+
 ## MB1009 — Honor scheduling prefixes on urgent reminders (2026-10-29)
 
 - Parse one-off reminder delays without the internally added urgency marker,

@@ -1086,7 +1086,9 @@ sub mbVote_ctx {
     }
 
     my $n = $args[0] // '';
-    unless ($n =~ /^\d+$/ && $n >= 1 && $n <= scalar @{ $poll->{options} }) {
+    # Match the whole ASCII number before Perl's numeric comparisons: mixed
+    # Unicode digits can otherwise be partly converted and replace a ballot.
+    unless ($n =~ /\A[0-9]+\z/ && $n >= 1 && $n <= scalar @{ $poll->{options} }) {
         botNotice($self, $nick, 'Vote: use !vote <number> (1 to ' . scalar(@{ $poll->{options} }) . ')');
         return;
     }
