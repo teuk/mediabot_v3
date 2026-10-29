@@ -372,7 +372,12 @@ sub mbRemind_ctx {
         }
     }
 
-    # Q2: parse optional delay prefix — 'dans 2h', 'in 30m', 'dans 1h30', 'at HH:MM', 'in Nd/Nw'
+    # Urgency is metadata, not part of a one-off reminder's scheduling text.
+    # Recurring reminders already carry their own calendar metadata.
+    my $urgent_delay = $remind_urgent && !$remind_daily && !$remind_weekly;
+    $message =~ s/^\[!\] // if $urgent_delay;
+
+    # Q2: parse optional delay prefix — 'dans 2h', 'in 30m', 'dans 1h30m', 'at HH:MM', 'in Nd/Nw'
     my $delay_secs = 0;
     my $delay_requested = 1;
     my $delay_now = time();
@@ -411,6 +416,7 @@ sub mbRemind_ctx {
         }
         $message = "[at:$deliver_at] $message";
     }
+    $message = '[!] ' . $message if $urgent_delay;
     # Include scheduling metadata in the existing VARCHAR(512) budget.
     if (length($message) > 512) {
         botNotice($self, $nick, "Message too long (max 512 chars).");

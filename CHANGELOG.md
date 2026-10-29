@@ -1,3 +1,14 @@
+## MB1009 — Honor scheduling prefixes on urgent reminders (2026-10-29)
+
+- Parse one-off reminder delays without the internally added urgency marker,
+  then restore that marker before the final storage-length check. Urgent
+  `in`, `dans`, `at` and `tomorrow` reminders now retain their deadline instead
+  of being treated as immediately deliverable plain messages.
+- Preserve urgency, reminder/tell routing, Unicode text, the 512-character
+  metadata budget, audit scope and the existing delivery/claim logic. Ordinary
+  reminders and daily/weekly scheduling retain their current behavior.
+- Add ten native registry/SQLite assertions; seven fail before correction.
+
 ## MB1008 — Confirm Trivia score persistence separately from round credit (2026-10-29)
 
 - Count a saved Trivia point only after a confirmed one-row upsert outcome
