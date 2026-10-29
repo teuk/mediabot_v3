@@ -1,3 +1,13 @@
+## MB1005 — Distinguish failed profile reads from missing users and hostmasks (2026-10-29)
+
+- Contain `userinfo` prepare/execute/fetch errors and confirm reads before
+  cleanup. Account failures now produce a private database error rather than
+  false absence, silent failure or an escaped exception.
+- Keep confirmed account fields when only the hostmask read fails, but label
+  masks unavailable and never publish a partial list. Preserve Administrator
+  authorization, password-presence projection, SQL, ordering and pagination.
+- Add eleven focused registry/SQLite assertions; six fail before correction.
+
 ## MB1004 — Confirm account totals and level statistics before output (2026-10-29)
 
 - Contain `users` prepare/execute/fetch errors and require a confirmed total

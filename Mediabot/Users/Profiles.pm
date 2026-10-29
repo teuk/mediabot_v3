@@ -122,35 +122,49 @@ sub userInfo_ctx {
         LIMIT 1
     };
 
-    my $sth = $self->{dbh}->prepare($sQuery);
-    unless ($sth && $sth->execute($target)) {
-        $self->{logger}->log(1, "userInfo_ctx() SQL Error: $DBI::errstr | Query: $sQuery");
-        $sth->finish if $sth;
+    my ($sth, $ref);
+    my $profile_ok = eval {
+        $sth = $self->{dbh}->prepare($sQuery);
+        die "prepare failed\n" unless $sth;
+        die "execute failed\n" unless $sth->execute($target);
+        $ref = $sth->fetchrow_hashref();
+        die "fetch failed\n" if $sth->err;
+        1;
+    };
+    # Confirm the read before cleanup can clear DBI's error state.
+    eval { $sth->finish } if $sth;
+    unless ($profile_ok) {
+        eval { $self->{logger}->log(1, "userInfo_ctx() profile read failed.") }
+            if $self->{logger};
+        botNotice($self, $nick, "Database error while fetching user information.");
         return;
     }
 
-    if (my $ref = $sth->fetchrow_hashref()) {
+    if ($ref) {
         my $id_user     = $ref->{id_user}       // '?';
         my $nickname    = $ref->{nickname}      // '?';
         my $created     = $ref->{creation_date} // 'N/A';
         my $last_login  = $ref->{last_login}    // 'never';
 
         my @hostmasks;
-        my $hm_sth = $self->{dbh}->prepare(
-            "SELECT hostmask FROM USER_HOSTMASK WHERE id_user=? ORDER BY id_user_hostmask LIMIT 20"
-        );
-
-        if ($hm_sth && $hm_sth->execute($id_user)) {
+        my $hm_sth;
+        my $masks_ok = eval {
+            $hm_sth = $self->{dbh}->prepare(
+                "SELECT hostmask FROM USER_HOSTMASK WHERE id_user=? ORDER BY id_user_hostmask LIMIT 20"
+            );
+            die "prepare failed\n" unless $hm_sth;
+            die "execute failed\n" unless $hm_sth->execute($id_user);
             while (my $hm_ref = $hm_sth->fetchrow_hashref) {
                 push @hostmasks, $hm_ref->{hostmask}
                     if defined($hm_ref->{hostmask}) && $hm_ref->{hostmask} ne '';
             }
-            $hm_sth->finish;
-        }
-        else {
-            $self->{logger}->log(1, "userInfo_ctx() hostmask SQL Error: $DBI::errstr")
+            die "fetch failed\n" if $hm_sth->err;
+            1;
+        };
+        eval { $hm_sth->finish } if $hm_sth;
+        unless ($masks_ok) {
+            eval { $self->{logger}->log(1, "userInfo_ctx() masks read failed.") }
                 if $self->{logger};
-            $hm_sth->finish if $hm_sth;
         }
 
         my $has_password = defined($ref->{has_password}) ? int($ref->{has_password}) : 0;
@@ -173,7 +187,10 @@ sub userInfo_ctx {
             . ($info2 ne '' ? " | Info2: $info2" : "")
         );
 
-        if (@hostmasks) {
+        if (!$masks_ok) {
+            botNotice($self, $nick, "Hostmasks: unavailable (database error).");
+        }
+        elsif (@hostmasks) {
             my $mask_count = scalar(@hostmasks);
             botNotice($self, $nick, "Hostmasks: $mask_count shown, max 20");
 
@@ -200,7 +217,6 @@ sub userInfo_ctx {
         botNotice($self, $nick, "Unknown user $target");
     }
 
-    $sth->finish;
     return;
 }
 
