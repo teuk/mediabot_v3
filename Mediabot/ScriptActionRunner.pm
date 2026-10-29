@@ -324,7 +324,8 @@ sub _validate_storage_object {
     my $keys = 0;
     my $why = _count_storage_nodes($data, 1, \$keys);
     return (0, $why) if $why;
-    my $json = eval { JSON::PP->new->canonical->encode($data) };
+    # Count the byte-safe representation written by the legacy storage sink.
+    my $json = eval { JSON::PP->new->canonical->latin1->encode($data) };
     return (0, 'store data is not JSON-serializable') unless defined $json;
     return (0, "store data exceeds $MAX_STORE_BYTES bytes")
         if length($json) > $MAX_STORE_BYTES;

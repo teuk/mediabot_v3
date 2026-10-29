@@ -1,3 +1,14 @@
+## MB1015 — Preserve Unicode in native plugin storage (2026-10-29)
+
+- Escape characters outside Latin-1 before raw JSON publication, avoiding
+  wide-print warnings and corrupted keys/values at the next read. Keep exact
+  historical ASCII/Latin-1 bytes without changing or guessing the reader format.
+- Apply the same serialized-byte representation to the shared 16 KiB validator,
+  so planning and writing reject oversized state before replacing existing data.
+- Cover direct storage, repeated round-trips, the API v3 repository, native
+  action application, byte bounds and legacy compatibility with eight assertions;
+  six fail before the fix. No existing tests are changed or removed.
+
 ## MB1014 — Read namespaced RSS/Atom articles instead of silently skipping them (2026-10-29)
 
 - Accept namespace prefixes on Atom entries and RDF/RSS items/channels, just as

@@ -2331,7 +2331,10 @@ sub _store_plugin_data {
     my ($valid, $why) = _validate_plugin_data_object($obj);
     return (0, $why) unless $valid;
 
-    my $json = eval { JSON::PP->new->canonical->encode($obj) };
+    # Preserve historical ASCII/Latin-1 bytes, but escape wider code points.
+    # Raw print would otherwise UTF-8-encode the whole document while the
+    # existing byte-oriented reader decodes it as Latin-1, corrupting text.
+    my $json = eval { JSON::PP->new->canonical->latin1->encode($obj) };
     return (0, 'storage object is not JSON-serializable') unless defined $json;
 
     my ($path, $err) = $self->_plugin_data_path($key, create => 1);
