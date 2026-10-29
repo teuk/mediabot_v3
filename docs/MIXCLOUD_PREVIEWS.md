@@ -1,6 +1,7 @@
 # MixCloud previews
 
-Post a public Mixcloud show link on an explicitly enabled channel. For example:
+Post a public Mixcloud show or creator profile link on an explicitly enabled
+channel. For example:
 
 ```text
 https://www.mixcloud.com/leekid/shut-up-and-dance/
@@ -13,8 +14,19 @@ creator's name and the duration when the API supplies it:
 (Listener) [🎛️ MixCloud] Shut Up And Dance ! — Leekid · 2h06m16s
 ```
 
-This example uses metadata read from the public API on 29 October 2026; it is
-not a claim that a bot has delivered it on a live IRC channel.
+The operator confirmed this show preview on development `#radiocapsule` on
+29 October 2026. MB1021 also accepts the creator's general profile:
+
+```text
+https://www.mixcloud.com/leekid/
+(Listener) [🎛️ MixCloud] Leekid · Profil · Sw, France · 49 mixes · 1 089 abonnés — …
+```
+
+The profile card adds the public biography, clipped to fit the line. This
+example's counts were read from the API on 29 October 2026 and may change.
+Optional fields are omitted when unavailable; a supplied zero remains zero.
+The profile API and local render were checked during development; live profile
+delivery remains an operator check after updating. Show rendering is unchanged.
 
 ## Enable or disable
 
@@ -47,21 +59,23 @@ without that field as `unknown`. Updating the bot does not deploy mbweb itself.
 ## Scope and limits
 
 - Supports public `mixcloud.com`, `www.mixcloud.com` and `m.mixcloud.com` show
-  links of the form `/creator/show/`, with or without a trailing slash.
-- Uses only `https://api.mixcloud.com/creator/show/`. Sharing queries and
+  links `/creator/show/` and profiles `/creator/`, with or without a trailing slash.
+- Uses only `https://api.mixcloud.com/creator/show/` or
+  `https://api.mixcloud.com/creator/`, one request per card. Sharing queries and
   fragments are discarded; no embedded HTML, player or audio is downloaded.
-- Profiles, live rooms, playlists, search and other multi-part pages are outside
-  this show preview. Unsupported Mixcloud links produce no generic preview.
+- Live rooms, playlists, search and other site pages remain outside this
+  preview. Unsupported Mixcloud links produce no generic preview.
 - Credentials, non-default ports, control characters and unsafe paths are
-  refused before HTTP. API results must identify the exact requested show.
+  refused before HTTP. API results must identify the exact requested show or profile.
 - One request has an 8-second timeout, a 256 KiB response limit, TLS verification
   and redirects disabled. A supervised worker has a 12-second deadline; HTTP
   never runs in the IRC event loop. There is no immediate HTTP retry.
 - At most four workers and twelve starts per minute per instance; up to sixteen
-  waiting channel deliveries share a show request. Duplicate links on the same
+  waiting channel deliveries share one request. Duplicate links on the same
   channel are suppressed for five minutes, including tracking variants.
 - Successful metadata is cached for five minutes, failures for thirty seconds;
-  caches retain at most 128 shows and 512 recent channel/show pairs.
+  caches retain at most 128 cards and 512 recent channel/card pairs. Profile
+  and show keys remain distinct, even for the same creator.
 - Unavailable, deleted, private or rate-limited content gets a concise
   `aperçu indisponible` rather than a guessed title or provider error text.
 - One sanitized IRC message is bounded to 400 wire bytes. Existing output

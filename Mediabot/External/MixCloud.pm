@@ -48,6 +48,27 @@ sub url_info {
         api => 'https://api.mixcloud.com'.$key };
 }
 
+# Profiles use a separate one-segment identity. Keep the original show URL
+# contract and show cache keys unchanged.
+sub profile_info {
+    my ($url) = @_;
+    return unless is_mixcloud_url($url) && $url !~ /[\x00-\x20\x7f\\]/;
+    my $u = eval { URI->new($url) };
+    return unless $u && !defined($u->userinfo);
+    my $port = eval { $u->port };
+    return unless defined($port) && $port =~ /\A[0-9]{1,5}\z/
+        && $port == (lc($u->scheme) eq 'https' ? 443 : 80);
+    return unless $u->path =~ m{\A/((?:[a-z0-9_-]|%[0-9a-f]{2}){1,100})/?\z}i;
+    my $owner = $1;
+    my $decoded = uri_unescape($owner);
+    return if $decoded =~ /[\x00-\x20\x7f\\\/?#]/ || $decoded eq '.' || $decoded eq '..';
+    return if $decoded =~ /\A(?:genres|discover|search|live|upload|settings|oauth|dashboard|login|signup|developers|about|terms|privacy|premium|pro|listen|community|trending|new|popular|notifications|messages|logout|account|settings|support|help|reset-password)\z/i;
+    my $key = "/$owner/";
+    return {kind=>'profile', key=>$key, url=>'https://www.mixcloud.com'.$key,
+        api=>'https://api.mixcloud.com'.$key};
+}
+sub link_info { return url_info($_[0]) // profile_info($_[0]) }
+
 # Fresh, per-channel opt-in; a missing catalogue row or failed read is off.
 sub enabled {
     my ($bot, $channel) = @_;
@@ -104,6 +125,19 @@ sub _result {
     my $title = _plain($raw->{title});
     return {state=>'unavailable'} unless defined $title;
     my $out = {state=>'ok', title=>$title};
+    if (defined($raw->{kind}) && !ref($raw->{kind}) && $raw->{kind} eq 'profile') {
+        $out->{kind} = 'profile';
+        for my $field (qw(location biog)) {
+            my $value = _plain($raw->{$field}, $field eq 'biog' ? 512 : 100);
+            $out->{$field} = _irc_prefix_for_budget($value, $field eq 'biog' ? 512 : 80)
+                if defined $value;
+        }
+        for my $field (qw(followers shows)) {
+            $out->{$field} = 0+$raw->{$field} if defined($raw->{$field}) && !ref($raw->{$field})
+                && "$raw->{$field}" =~ /\A[0-9]{1,10}\z/;
+        }
+        return $out;
+    }
     my $author = _plain($raw->{author}, 80);
     $author = _irc_prefix_for_budget($author, 80) if defined $author;
     $out->{author} = $author if defined $author;
@@ -128,21 +162,70 @@ sub parse_show {
     return $out->{state} eq 'ok' ? $out : undef;
 }
 
+sub parse_profile {
+    my ($payload, $info) = @_;
+    return unless ref($info) eq 'HASH' && ($info->{kind}//'') eq 'profile'
+        && defined($payload) && !ref($payload) && length($payload) <= 256*1024;
+    my $data = eval { decode_json_payload($payload) };
+    return unless ref($data) eq 'HASH' && !exists($data->{error});
+    return unless defined($data->{key}) && !ref($data->{key}) && $data->{key} eq $info->{key};
+    if (exists $data->{url}) {
+        my $link = profile_info($data->{url});
+        return unless $link && $link->{key} eq $info->{key};
+    }
+    my @location = grep {defined} map {_plain($_, 80)} @{$data}{qw(city country)};
+    my $title = _plain($data->{name}) // _plain($data->{username});
+    return unless defined $title;
+    my $out = _result({state=>'ok', kind=>'profile',
+        title=>$title,
+        location=>join(', ', @location), biog=>$data->{biog},
+        followers=>$data->{follower_count}, shows=>$data->{cloudcast_count}});
+    return $out->{state} eq 'ok' ? $out : undef;
+}
+
 sub fetch {
     my ($url) = @_;
-    my $info = url_info($url);
+    my $info = link_info($url);
     return {state=>'unavailable'} unless $info;
     # A fixed public API destination, one bounded request, no cookies or tokens.
     my $http = HTTP::Tiny->new(timeout=>8, max_size=>256*1024,
         max_redirect=>0, verify_SSL=>1, agent=>'Mediabot MixCloud preview');
     my $r = eval { $http->get($info->{api}, {headers=>{Accept=>'application/json'}}) };
     return {state=>'unavailable'} unless ref($r) eq 'HASH' && $r->{success};
+    return parse_profile($r->{content}, $info) // {state=>'unavailable'} if ($info->{kind}//'') eq 'profile';
     return parse_show($r->{content}, $info) // {state=>'unavailable'};
+}
+
+sub _profile_clip {
+    my ($text, $budget) = @_;
+    return _irc_wire_bytes($text) <= $budget ? $text
+        : _irc_prefix_for_budget($text, $budget-3).'…';
+}
+sub _profile_count {
+    my ($count) = @_;
+    $count =~ s/(?<=[0-9])(?=(?:[0-9]{3})+\z)/ /g;
+    return $count;
+}
+sub _render_profile {
+    my ($nick, $r) = @_;
+    $nick = _irc_prefix_for_budget(_plain($nick, 80) // '', 80);
+    my @meta = ('Profil');
+    push @meta, $r->{location} if defined $r->{location};
+    push @meta, _profile_count($r->{shows}).($r->{shows} == 1 ? ' mix' : ' mixes') if defined $r->{shows};
+    push @meta, _profile_count($r->{followers}).($r->{followers} == 1 ? ' abonné' : ' abonnés') if defined $r->{followers};
+    my $line = "($nick) ".badge()." \x02"._profile_clip($r->{title}, 80)."\x02 · ".join(' · ', @meta);
+    if (defined $r->{biog}) {
+        my $budget = 400 - _irc_wire_bytes($line.' — '."\x0f");
+        $budget = 160 if $budget > 160;
+        $line .= ' — '._profile_clip($r->{biog}, $budget) if $budget >= 4;
+    }
+    return $line."\x0f";
 }
 
 sub render {
     my ($nick, $raw) = @_;
     my $r = _result($raw);
+    return _render_profile($nick, $r) if ($r->{kind}//'') eq 'profile';
     $nick = _irc_prefix_for_budget(_plain($nick, 80) // '', 80);
     my $prefix = "($nick) ".badge().' ';
     my $title = $r->{state} eq 'ok' ? $r->{title} : 'aperçu indisponible';
@@ -159,7 +242,7 @@ sub render {
 
 sub handle {
     my ($bot, $message, $nick, $channel, $url) = @_;
-    my $info = url_info($url);
+    my $info = link_info($url);
     return 0 unless $info && enabled($bot, $channel);
     my $binding = capture_delivery_context($bot, $channel);
     my $epoch = epoch($bot, $channel);

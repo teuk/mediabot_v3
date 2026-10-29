@@ -1,3 +1,14 @@
+## MB1021 — Preview public MixCloud creator profiles (2026-10-29)
+
+- Extend the existing MixCloud preview to /creator/ profile links with a
+  compact biography, location, mix count and follower count when available.
+- Preserve the show card byte for byte, its URL parser, the existing badge,
+  chanset, request limits, worker ownership and late delivery guards. Profile
+  and show cache identities stay separate; no additional API request is needed.
+- Add eight focused assertions, including actual worker/router delivery of a
+  profile and a show together. Keep all fourteen MB1020 assertions unchanged.
+  No schema, configuration, dependency or automatic activation changes.
+
 ## MB1020 — Add opt-in MixCloud show previews (2026-10-29)
 
 - Add a dedicated asynchronous Mixcloud API preview with a turntable-style
