@@ -1,3 +1,13 @@
+## MB1016 — Reclaim expired automatic nick mutes (2026-10-29)
+
+- Remove expired nick-mute entries during the existing periodic command-flood
+  cleanup, including sanctions for nicks that never return. They no longer
+  accumulate indefinitely while old command histories are already being pruned.
+- Preserve active mutes independently of the shorter history TTL, the five-minute
+  sanction, strike thresholds, fast path, notification cadence and metrics.
+- Add seven focused native-guard assertions; three fail before the fix.
+  No existing tests are changed or removed. No schema, configuration or timer changes.
+
 ## MB1015 — Preserve Unicode in native plugin storage (2026-10-29)
 
 - Escape characters outside Latin-1 before raw JSON publication, avoiding

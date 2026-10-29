@@ -194,6 +194,11 @@ sub checkNickFlood {
             my $last = @{ $st->{hits} // [] } ? $st->{hits}[-1] : 0;
             delete $self->{_nick_flood}{$k} if ($now - $last) > $ttl;
         }
+        # A muted nick may never return. Reclaim its expired sanction on the
+        # same sweep, while retaining active mutes independently of history TTL.
+        for my $k (keys %{ $self->{_nick_mute} // {} }) {
+            delete $self->{_nick_mute}{$k} if ($self->{_nick_mute}{$k} // 0) <= $now;
+        }
         $self->{_nick_flood_last_cleanup} = $now;
     }
 
