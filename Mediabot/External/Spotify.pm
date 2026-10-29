@@ -108,15 +108,23 @@ sub _spotify_extract_meta {
     my ($self, $info, $html, $context) = @_;
     return unless defined $html && $html ne '';
     my ($og_title, $twitter_title, $title_tag, $description);
-    while ($html =~ /<meta\b([^>]*?)>/sig) {
+    # A quoted attribute may contain the other quote character or even '>'.
+    # Consume complete quoted values before looking for the tag terminator.
+    while ($html =~ /<meta\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/sig) {
         my $attrs = $1;
-        if ($attrs =~ /(?:property|name)=["']og:title["']/i && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
-            $og_title = $1;
-        } elsif ($attrs =~ /(?:property|name)=["']twitter:title["']/i && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
-            $twitter_title = $1;
-        } elsif ($attrs =~ /(?:property|name)=["'](?:og:description|description|twitter:description)["']/i
-            && $attrs =~ /\bcontent=["']([^"']+)["']/i) {
-            $description = $1;
+        my %attr;
+        while ($attrs =~ /\b([A-Za-z_:][A-Za-z0-9_:.-]*)\s*=\s*(["'])(.*?)\2/sig) {
+            my ($name, $value) = (lc($1), $3);
+            $attr{$name} = $value unless exists $attr{$name};
+        }
+        next unless exists($attr{content}) && length($attr{content});
+        my $key = lc($attr{property} // $attr{name} // '');
+        if ($key eq 'og:title') {
+            $og_title = $attr{content};
+        } elsif ($key eq 'twitter:title') {
+            $twitter_title = $attr{content};
+        } elsif ($key =~ /\A(?:og:description|description|twitter:description)\z/) {
+            $description = $attr{content};
         }
     }
     if ($html =~ /<title[^>]*>(.*?)<\/title>/si) { $title_tag = $1; }

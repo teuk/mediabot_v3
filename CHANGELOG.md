@@ -1,3 +1,14 @@
+## MB1013 — Preserve complete Spotify metadata in quoted HTML attributes (2026-10-29)
+
+- Parse complete quoted meta attributes rather than ending their content at
+  either quote character or at a quoted `>`. Titles and artists containing
+  apostrophes/double quotes no longer truncate or lose the description's year.
+- Accept ordinary attribute whitespace, ordering and case; ignore content-like
+  text inside unrelated attributes. Preserve existing metadata priority, shell
+  rejection, entity cleanup, formatting and asynchronous worker behavior.
+- Add seven focused parser/fetch/native-worker assertions; six fail before the
+  fix. No existing tests are changed or removed.
+
 ## MB1012 — Isolate dynamic-command hit-counter failures from valid replies (2026-10-29)
 
 - Contain exceptions and false results from the best-effort hit increment.
