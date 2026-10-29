@@ -1,3 +1,15 @@
+## MB1008 — Confirm Trivia score persistence separately from round credit (2026-10-29)
+
+- Count a saved Trivia point only after a confirmed one-row upsert outcome
+  (affected count 1 or 2, no statement error). Missing channel/database,
+  prepare/execute failures, zero/unknown counts and lost acknowledgements no
+  longer produce a false successful-save metric. Never retry an uncertain write.
+- Preserve the valid round point, normal EN/FR win response and achievements;
+  send one localized private notice when the leaderboard save is unconfirmed.
+  Cleanup and failure logging cannot override the write result. Refuse point
+  writes in another caller's transaction; never commit or roll it back.
+- Add nine focused SQLite/fault assertions; seven fail before correction.
+
 ## MB1007 — Give Trivia its full duration and reject expired answers (2026-10-29)
 
 - Derive each question's start and deadline from one high-resolution timestamp.

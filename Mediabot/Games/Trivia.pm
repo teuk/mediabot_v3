@@ -954,31 +954,32 @@ sub checkTriviaAnswer {
     $trivia->{scores}{$nick} = ($trivia->{scores}{$nick} // 0) + 1;
     # X10: Prometheus counter for correct trivia answers
     # AA1: persist trivia score in DB (TRIVIA_SCORES table)
-    eval {
+    my $sth_u;
+    my $save_confirmed = eval {
         # mb413-R1: id canal via le helper central (cache d'abord, mb411).
         my $cid_tsi = Mediabot::Helpers::channel_id_cached($self, $channel);
-        {
-            my $rc = defined($cid_tsi) ? { id_channel => $cid_tsi } : undef;
-            if ($rc) {
-                my $sth_u = $self->{dbh}->prepare(q{
-                    INSERT INTO TRIVIA_SCORES (id_channel, nick, score, last_correct)
-                    VALUES (?, ?, 1, NOW())
-                    ON DUPLICATE KEY UPDATE score = score + 1, last_correct = NOW()
-                });
-                if ($sth_u) {
-                    unless ($sth_u->execute($rc->{id_channel}, lc($nick))) {
-                        $self->{logger}->log(1, "TRIVIA_SCORES persist execute failed: $DBI::errstr")
-                            if $self->{logger};
-                    }
-                    $sth_u->finish;
-                }
-            }
-        }
+        die "score channel unavailable\n" unless defined $cid_tsi;
+        my $dbh = $self->{dbh};
+        # Do not write into, commit or roll back another caller's transaction.
+        die "score database unavailable\n" unless $dbh && $dbh->{AutoCommit};
+        $sth_u = $dbh->prepare(q{
+            INSERT INTO TRIVIA_SCORES (id_channel, nick, score, last_correct)
+            VALUES (?, ?, 1, NOW())
+            ON DUPLICATE KEY UPDATE score = score + 1, last_correct = NOW()
+        });
+        die "score prepare failed\n" unless $sth_u;
+        my $affected = $sth_u->execute($cid_tsi, lc($nick));
+        die "score write unconfirmed\n" unless defined($affected) && !ref($affected)
+            && "$affected" =~ /\A[12]\z/ && !$sth_u->err;
+        1;
     };
-    if ($@) {
-        $self->{logger}->log(1, "AA1: TRIVIA_SCORES persist failed: $@");
-    } else {
+    # Preserve the write outcome even if cleanup clears errors or throws.
+    eval { $sth_u->finish } if $sth_u;
+    if ($save_confirmed) {
         $self->{metrics}->inc('mediabot_trivia_db_saves_total') if $self->{metrics};
+    } else {
+        eval { $self->{logger}->log(1, 'checkTriviaAnswer(): score save unconfirmed') }
+            if $self->{logger};
     }
     $self->{metrics}->inc('mediabot_trivia_correct_total') if $self->{metrics};
     my $score = $trivia->{scores}{$nick};
@@ -994,6 +995,11 @@ sub checkTriviaAnswer {
         _trivia_text($language,
             "Correct, $nick!$diff_str The answer was: $trivia->{answer_display}  (score: $score)",
             "Bonne réponse, $nick !$diff_str La réponse était : $trivia->{answer_display}  (score : $score)"));
+    unless ($save_confirmed) {
+        botNotice($self, $nick, _trivia_text($language,
+            'Round point counted, but its leaderboard save could not be confirmed.',
+            'Point de manche compté, mais son enregistrement au classement n’a pas pu être confirmé.'));
+    }
 
     # mb115: hook achievements trivia (score atteint, sniper si réponse <= 2s)
     if ($self->{achievements}) {
