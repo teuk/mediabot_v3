@@ -1,3 +1,14 @@
+## MB1011 — Keep encoded UTF-8 characters whole in IRC chunks (2026-10-29)
+
+- Recognize valid UTF-8 in a bounded window of raw byte input before choosing
+  a split or prefix boundary. Accents and emoji can no longer be divided
+  between individually invalid IRC messages, notices or ACTION payloads.
+- Return raw input as encoded bytes, retain character input behavior and the
+  existing byte budgets, sanitation, word wrapping and non-UTF-8 fallback.
+  Tiny prefix budgets return no fragment when a complete character cannot fit.
+- Add eight focused boundary and real-output assertions; seven fail before
+  correction. No existing tests are changed or removed.
+
 ## MB1010 — Validate complete poll vote numbers before updating ballots (2026-10-29)
 
 - Require a complete ASCII option number before comparing or storing a vote.

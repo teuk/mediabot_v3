@@ -36,6 +36,9 @@ sub _irc_prefix_for_budget {
         return _irc_chunk_prefix(_sanitize_irc_text($text), $max_bytes);
     }
 
+    my $characters = !utf8::is_utf8($text)
+        ? _irc_raw_utf8_window($text, $max_bytes) : undef;
+    $text = $characters if defined $characters;
     my ($prefix, $used) = ('', 0);
     for my $ch (split //, $text) {
         my $cost = _irc_wire_bytes($ch);
@@ -43,7 +46,7 @@ sub _irc_prefix_for_budget {
         $prefix .= $ch;
         $used += $cost;
     }
-    return $prefix;
+    return defined($characters) ? encode('UTF-8', $prefix) : $prefix;
 }
 
 # Count application character text as UTF-8, including downgraded Latin-1
@@ -90,14 +93,29 @@ sub _split_text_for_irc {
     return @chunks;
 }
 
+# Recognize a valid UTF-8 prefix without changing the caller's byte buffer.
+sub _irc_raw_utf8_window {
+    my ($text, $max_bytes) = @_;
+    # Four look-ahead bytes suffice to complete a character crossing the cut.
+    # Decode only this bounded window; never repair legacy non-UTF-8 bytes.
+    my $probe = substr($text, 0, $max_bytes + 4);
+    my $characters = decode('UTF-8', $probe, FB_QUIET);
+    utf8::upgrade($characters);
+    return undef if length($probe) && _irc_wire_bytes($characters) < $max_bytes;
+    return $characters;
+}
+
 # Inspect only enough characters to decide the next chunk. Every input
 # character occupies at least one wire byte, so budget + 1 characters also
 # suffice to distinguish a final chunk from one needing a cut. Keep this
 # decision shared with prefix-only callers without building unused chunks.
 sub _irc_chunk_prefix {
     my ($text, $max_bytes) = @_;
+    my $characters = !utf8::is_utf8($text)
+        ? _irc_raw_utf8_window($text, $max_bytes) : undef;
+    $text = $characters if defined $characters;
     my $window = substr($text, 0, $max_bytes + 1);
-    return $text
+    return defined($characters) ? encode('UTF-8', $text) : $text
         if length($window) <= $max_bytes && _irc_wire_bytes($window) <= $max_bytes;
 
     my $is_chars = utf8::is_utf8($window);
@@ -114,12 +132,12 @@ sub _irc_chunk_prefix {
 
     my $prefix = substr($text, 0, $n);
     # Preserve the historical half-prefix word-break rule, including trailing
-    # whitespace and the distinction between character and raw byte input.
+    # whitespace. Encoded input is returned as bytes after character-safe cuts.
     if ($prefix =~ /^(.*\s)\S+\z/s) {
         my $ws = $1;
         $prefix = $ws if length($ws) >= int($n / 2) && length($ws) >= 1;
     }
-    return $prefix;
+    return defined($characters) ? encode('UTF-8', $prefix) : $prefix;
 }
 
 # Legacy contract: max bounds the content; ellipsis is appended OUTSIDE max.
