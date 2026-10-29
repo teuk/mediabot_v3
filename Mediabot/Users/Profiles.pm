@@ -27,20 +27,22 @@ sub userStats_ctx {
     my $nick = $ctx->nick;
 
     my $sql_total = "SELECT COUNT(*) AS nbUsers FROM USER";
-    my $sth = $bot->{dbh}->prepare($sql_total);
-
-    unless ($sth && $sth->execute()) {
-        $bot->{logger}->log(1, "userStats_ctx() SQL error: $DBI::errstr Query: $sql_total")
+    my ($sth, $total);
+    my $total_ok = eval {
+        $sth = $bot->{dbh}->prepare($sql_total);
+        die "prepare failed\n" unless $sth;
+        die "execute failed\n" unless $sth->execute();
+        ($total) = $sth->fetchrow_array;
+        die "fetch failed\n" if $sth->err || !defined($total);
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($total_ok) {
+        eval { $bot->{logger}->log(1, "userStats_ctx() total read failed.") }
             if $bot->{logger};
-        $sth->finish if $sth;
         $bot->botNotice($nick, "Internal error while reading user statistics.");
         return;
     }
-
-    my ($total) = $sth->fetchrow_array;
-    $sth->finish;
-
-    $total //= 0;
 
     my $sql_levels = q{
         SELECT description, COUNT(*)
@@ -50,22 +52,26 @@ sub userStats_ctx {
         ORDER BY level
     };
 
-    $sth = $bot->{dbh}->prepare($sql_levels);
-
-    unless ($sth && $sth->execute()) {
-        $bot->{logger}->log(1, "userStats_ctx() SQL error: $DBI::errstr Query: $sql_levels")
+    my ($level_sth, @level_parts);
+    my $levels_ok = eval {
+        $level_sth = $bot->{dbh}->prepare($sql_levels);
+        die "prepare failed\n" unless $level_sth;
+        die "execute failed\n" unless $level_sth->execute();
+        # II10: collect levels and display as one-liner after confirming EOF.
+        while (my ($desc, $count) = $level_sth->fetchrow_array) {
+            $desc  //= 'Unknown';
+            $count //= 0;
+            push @level_parts, "$desc:$count";
+        }
+        die "fetch failed\n" if $level_sth->err;
+        1;
+    };
+    eval { $level_sth->finish } if $level_sth;
+    unless ($levels_ok) {
+        eval { $bot->{logger}->log(1, "userStats_ctx() levels read failed.") }
             if $bot->{logger};
-        $sth->finish if $sth;
         $bot->botNotice($nick, "Internal error while reading user level statistics.");
         return;
-    }
-
-    # II10: collect levels and display as one-liner
-    my @level_parts;
-    while (my ($desc, $count) = $sth->fetchrow_array) {
-        $desc  //= 'Unknown';
-        $count //= 0;
-        push @level_parts, "$desc:$count";
     }
     if (@level_parts) {
         $bot->botNotice($nick, "Users: $total total — " . join(', ', @level_parts));
@@ -73,7 +79,6 @@ sub userStats_ctx {
         $bot->botNotice($nick, "Users: $total total");
     }
 
-    $sth->finish;
 }
 
 sub userInfo_ctx {

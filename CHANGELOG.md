@@ -1,3 +1,12 @@
+## MB1004 — Confirm account totals and level statistics before output (2026-10-29)
+
+- Contain `users` prepare/execute/fetch errors and require a confirmed total
+  plus a complete level breakdown before publishing. Failed reads no longer
+  become fabricated zero totals or partial statistics.
+- Preserve Master authorization, existing private error notices, SQL and
+  successful output. Cleanup and failure logging cannot override read results.
+- Add ten focused registry/SQLite assertions; six fail before correction.
+
 ## MB1003 — Recheck weather cache age after HTTP and clock changes (2026-10-28)
 
 - Reject future or undated cache entries as fresh weather. Recompute age at
