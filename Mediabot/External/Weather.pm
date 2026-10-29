@@ -57,7 +57,8 @@ sub displayWeather_ctx {
     my $ttl_ok = 180;  # 3 minutes
     my $ttl_stale = 900; # 15 minutes (fallback if provider unhappy)
 
-    if ($cache && ($now - ($cache->{ts}||0) <= $ttl_ok) && ($cache->{text}||'') ne '') {
+    my $cache_age = $cache && defined($cache->{ts}) ? $now - $cache->{ts} : undef;
+    if (defined($cache_age) && $cache_age >= 0 && $cache_age <= $ttl_ok && ($cache->{text}||'') ne '') {
         Mediabot::Helpers::botPrivmsg($self, $channel, $cache->{text});
         return 1;
     }
@@ -91,7 +92,9 @@ sub displayWeather_ctx {
     # Helper to use cached text when provider is flaky
     my $use_cache_or_msg = sub {
         my ($msg) = @_;
-        if ($cache && ($now - ($cache->{ts}||0) <= $ttl_stale) && ($cache->{text}||'') ne '') {
+        # HTTP may consume the remaining lifetime or span a clock adjustment.
+        my $age = $cache && defined($cache->{ts}) ? time() - $cache->{ts} : undef;
+        if (defined($age) && $age >= 0 && $age <= $ttl_stale && ($cache->{text}||'') ne '') {
             Mediabot::Helpers::botPrivmsg($self, $channel, $cache->{text} . "  (cached)");
         } else {
             Mediabot::Helpers::botPrivmsg($self, $channel, $msg);
@@ -117,6 +120,7 @@ sub displayWeather_ctx {
     }
 
     # Save cache + reply
+    $now = time(); # Date the completed response, not the start of its request.
     $self->{_weather_cache}{$cache_key} = { ts => $now, text => $line };
 
     # Remove expired data first, then the oldest excess entries, so a burst of

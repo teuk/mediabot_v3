@@ -1,3 +1,12 @@
+## MB1003 — Recheck weather cache age after HTTP and clock changes (2026-10-28)
+
+- Reject future or undated cache entries as fresh weather. Recompute age at
+  fallback use so an entry that expires during HTTP, or becomes future-dated
+  after a clock adjustment, cannot be displayed as valid cached data.
+- Preserve the inclusive 180/900-second limits and existing output. Date a
+  successful response when stored rather than when its request started.
+- Add nine focused registry/HTTP/clock assertions; five fail before correction.
+
 ## MB1002 — Confirm greet reads and preserve zero-valued greeting text (2026-10-28)
 
 - Contain `greet` prepare/execute/fetch exceptions and check the read before
