@@ -1,3 +1,13 @@
+## MB1017 — Share channel letter-case identity for membership and duels (2026-10-29)
+
+- Resolve membership and random-nick lookups when the received channel target
+  differs in letter case from JOIN/NAMES, preserving exact snapshot priority.
+- Share all duel state across those spellings so opponents remain visible,
+  the pair cooldown cannot split into multiple buckets, and stats, streaks and
+  the general duel leaderboard stay consistent. Keep original reply targets.
+- Add eight focused native-helper/registry/SQLite assertions; seven fail before
+  the fix. No existing tests, schema, configuration or dependencies change.
+
 ## MB1016 — Reclaim expired automatic nick mutes (2026-10-29)
 
 - Remove expired nick-mute entries during the existing periodic command-flood

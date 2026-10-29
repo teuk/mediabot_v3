@@ -33,6 +33,10 @@ sub mbDuel_ctx {
         botNotice($self, $nick, 'Syntax: !duel <nick>  (must be in a channel)'); return;
     }
 
+    # Match the channel cache's letter-case identity for every duel bucket.
+    # Keep the original target for replies, membership, policy and audit hooks.
+    my $channel_key = lc($channel);
+
     # mb118-IMP2: gate par chanset +Games (default=1 backward compat)
     unless (Mediabot::Helpers::chanset_enabled($self, $channel, 'Games', default => 1)) {
         botNotice($self, $nick, "Games are disabled on $channel (chanset -Games)");
@@ -43,7 +47,7 @@ sub mbDuel_ctx {
     if (@args && lc($args[0]) eq 'stats') {
         shift @args;
         my $target = @args ? lc(shift @args) : lc($nick);
-        my $stats = $self->{_duel_stats}{$channel}{$target} // {};
+        my $stats = $self->{_duel_stats}{$channel_key}{$target} // {};
         my $w = $stats->{wins}   // 0;
         my $l = $stats->{losses} // 0;
         my $tot = $w + $l;
@@ -55,7 +59,7 @@ sub mbDuel_ctx {
 
     # !duel top — classement des duellistes
     if (@args && lc($args[0]) eq 'top') {
-        my $tbl = $self->{_duel_stats}{$channel} // {};
+        my $tbl = $self->{_duel_stats}{$channel_key} // {};
         unless (%$tbl) {
             botPrivmsg($self, $channel, 'No duels recorded on this channel yet.'); return 1;
         }
@@ -102,7 +106,7 @@ sub mbDuel_ctx {
     # Cooldown 24h par paire — ordre indépendant
     my $pair_key = join("\x00", sort (lc($nick), $target));
     my $now = time();
-    my $cooldown_until = $self->{_duel_cooldown}{$channel}{$pair_key} // 0;
+    my $cooldown_until = $self->{_duel_cooldown}{$channel_key}{$pair_key} // 0;
     if ($cooldown_until > $now) {
         my $wait = $cooldown_until - $now;
         my $wait_str = $wait < 60 ? "${wait}s"
@@ -166,8 +170,8 @@ sub mbDuel_ctx {
     }
 
     # Update in-memory stats
-    $self->{_duel_stats}{$channel}{$winner}{wins}++;
-    $self->{_duel_stats}{$channel}{$loser}{losses}++;
+    $self->{_duel_stats}{$channel_key}{$winner}{wins}++;
+    $self->{_duel_stats}{$channel_key}{$loser}{losses}++;
 
     # mb120-B3: tracking streak corrigé.
     #
@@ -183,35 +187,35 @@ sub mbDuel_ctx {
     # Detection underdog (gagner apres 8 defaites consecutives) :
     #   - on regarde le streak du winner *avant* l'update
     #   - si <= -5, c'est un underdog
-    my $prev_winner_result = $self->{_duel_last_result}{$channel}{$winner};
-    my $prev_loser_result  = $self->{_duel_last_result}{$channel}{$loser};
-    my $prev_winner_streak = $self->{_duel_streak}{$channel}{$winner} // 0;
+    my $prev_winner_result = $self->{_duel_last_result}{$channel_key}{$winner};
+    my $prev_loser_result  = $self->{_duel_last_result}{$channel_key}{$loser};
+    my $prev_winner_streak = $self->{_duel_streak}{$channel_key}{$winner} // 0;
 
     # Calcul d'eligibilite underdog AVANT update
     my $underdog_streak = $prev_winner_streak < 0 ? -$prev_winner_streak : 0;
 
     # Update last_result
-    $self->{_duel_last_result}{$channel}{$winner} = 'win';
-    $self->{_duel_last_result}{$channel}{$loser}  = 'loss';
+    $self->{_duel_last_result}{$channel_key}{$winner} = 'win';
+    $self->{_duel_last_result}{$channel_key}{$loser}  = 'loss';
 
     # Update streak winner
     if (defined $prev_winner_result && $prev_winner_result eq 'win') {
-        $self->{_duel_streak}{$channel}{$winner}++;
+        $self->{_duel_streak}{$channel_key}{$winner}++;
     } else {
         # Premier duel OU transition loss -> win
-        $self->{_duel_streak}{$channel}{$winner} = 1;
+        $self->{_duel_streak}{$channel_key}{$winner} = 1;
     }
 
     # Update streak loser
     if (defined $prev_loser_result && $prev_loser_result eq 'loss') {
-        $self->{_duel_streak}{$channel}{$loser}--;
+        $self->{_duel_streak}{$channel_key}{$loser}--;
     } else {
         # Premier duel OU transition win -> loss
-        $self->{_duel_streak}{$channel}{$loser} = -1;
+        $self->{_duel_streak}{$channel_key}{$loser} = -1;
     }
 
     # Set cooldown 24h
-    $self->{_duel_cooldown}{$channel}{$pair_key} = $now + 24*3600;
+    $self->{_duel_cooldown}{$channel_key}{$pair_key} = $now + 24*3600;
 
     # Annonce résultat
     botPrivmsg($self, $channel,
@@ -223,7 +227,7 @@ sub mbDuel_ctx {
         # mb610-B1: victoires cumulees persistantes (la table memoire
         # servait de compteur et repartait a zero a chaque redemarrage).
         my $wins = _ach_progress($self, 'duel_win', $winner, $channel)
-                // ($self->{_duel_stats}{$channel}{$winner}{wins} // 0);
+                // ($self->{_duel_stats}{$channel_key}{$winner}{wins} // 0);
         eval { $self->{achievements}->check_duel($winner, $channel, $wins, $underdog_streak) };
         if ($@) { $self->{logger}->log(1, "achievements check_duel error: $@") }
         # Karma achievements potentiellement aussi

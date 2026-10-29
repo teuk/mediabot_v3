@@ -1810,7 +1810,7 @@ sub mbLeaderboard_ctx {
     # --- Top 3 duels (mémoire) ----------------------------------------------
     my @duel_top;
     if ($show_alltime_sections && (!$only || $only eq 'duels')) {
-        my $dst = $self->{_duel_stats}{$channel} // {};
+        my $dst = $self->{_duel_stats}{lc($channel)} // {};
         my @sorted = sort {
             ($dst->{$b}{wins} // 0) <=> ($dst->{$a}{wins} // 0)
             || $a cmp $b

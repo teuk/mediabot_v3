@@ -3118,16 +3118,23 @@ sub displayLeetString_ctx {
 
 sub gethChannelsNicksOnChan {
 	my ($self,$sChannel) = @_;
+	return () unless defined($sChannel) && $sChannel ne '';
 	my %hChannelsNicks;
 	if (defined($self->{hChannelsNicks})) {
 		%hChannelsNicks = %{$self->{hChannelsNicks}};
 	}
+	# Keep exact entries authoritative, but a PRIVMSG target may spell the
+	# same channel with different letter case from its JOIN/NAMES snapshot.
 	if (defined($hChannelsNicks{$sChannel})) {
-		return @{$hChannelsNicks{$sChannel}};
+		return ref($hChannelsNicks{$sChannel}) eq 'ARRAY'
+			? @{$hChannelsNicks{$sChannel}} : ();
 	}
-	else {
-		return ();
+	my $key = lc($sChannel);
+	for my $stored (sort keys %hChannelsNicks) {
+		return @{$hChannelsNicks{$stored}}
+			if lc($stored) eq $key && ref($hChannelsNicks{$stored}) eq 'ARRAY';
 	}
+	return ();
 }
 
 
@@ -3148,14 +3155,9 @@ sub mbEcho {
 
 sub getRandomNick {
 	my ($self,$sChannel) = @_;
-	my %hChannelsNicks;
-	if (defined($self->{hChannelsNicks})) {
-		%hChannelsNicks = %{$self->{hChannelsNicks}};
-	}
     # mb106-B1: guard contre canal inexistant ou liste vide
-    my $nicks_ref = $hChannelsNicks{$sChannel};
-    return '' unless defined $nicks_ref && ref($nicks_ref) eq 'ARRAY' && @$nicks_ref;
-	my @tChannelNicks = @$nicks_ref;
+	my @tChannelNicks = gethChannelsNicksOnChan($self, $sChannel);
+	return '' unless @tChannelNicks;
 	my $sRandomNick = $tChannelNicks[rand @tChannelNicks];
 	return $sRandomNick;
 }
