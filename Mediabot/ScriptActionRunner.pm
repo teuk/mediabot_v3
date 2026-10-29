@@ -831,10 +831,12 @@ sub apply_actions {
                     error => 'only one store action per run' };
                 next;
             }
+            # Claim the single attempt before calling injected code. A failure
+            # must not promote a later document into the first store's place.
+            $store_done = 1;
             my ($ok, $err) = eval { $store_sink->($action->{data}, $context) };
             $err = $@ || $err || 'store sink failed' unless $ok;
             if ($ok) {
-                $store_done = 1;
                 push @applied, { index => $idx, type => 'store' };
             }
             else {

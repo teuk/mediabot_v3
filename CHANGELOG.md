@@ -1,3 +1,13 @@
+## MB1019 — Reserve the first plugin store attempt before calling its sink (2026-10-29)
+
+- Consume the script invocation's single storage attempt before entering the
+  sink, including a false or throwing receipt. A later store can no longer
+  replace the first document after failure or an uncertain acknowledgement.
+- Keep the original failure and existing duplicate diagnostic, fresh budgets
+  for new invocations, all gates and continued unrelated authorized actions.
+- Add eight focused planner/native-file assertions; five fail before the fix.
+  No existing tests, schema, configuration, storage format or dependencies change.
+
 ## MB1018 — Honor explicit HTTP redirect budgets (2026-10-29)
 
 - Forward the caller's max_redirect option through the shared HTTP factory,
