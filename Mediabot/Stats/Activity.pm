@@ -230,6 +230,12 @@ sub mbStats_ctx {
             "SELECT cl2.nick AS nick, COUNT(*) AS cnt"
           . " FROM __CLSRC__ cl2 JOIN CHANNEL c2 ON c2.id_channel=cl2.id_channel"
           . " WHERE c2.name=? AND cl2.event_type IN ('public','action')"
+          # Rank must compare the same message counts as the numerator and
+          # denominator above, including exclusion of the current !stats.
+          . q{ AND NOT (
+                LOWER(TRIM(COALESCE(cl2.publictext, ''))) REGEXP '^m[[:space:]]+stats([[:space:]]|$)'
+                OR LOWER(TRIM(COALESCE(cl2.publictext, ''))) REGEXP '^!stats([[:space:]]|$)'
+            )}
           . " GROUP BY cl2.nick",
             # mb577-B1: cle lc — la collation SQL est insensible a la casse,
             # les tables peuvent rendre SlaY et slay pour la meme identite.
@@ -770,7 +776,9 @@ sub mbMonthStats_ctx {
         }
         my %by_month;
         while (my $r = $sth->fetchrow_hashref) {
-            $by_month{$r->{ym}}{$r->{nick}} = $r->{cnt};
+            # SQL may return a group's original display case. Use the same
+            # identity key as the requested nicks, merging any case variants.
+            $by_month{$r->{ym}}{lc $r->{nick}} += $r->{cnt};
         }
         $sth->finish;
         unless (%by_month) {

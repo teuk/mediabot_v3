@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1029 — Keep activity charts and ranks consistent with their counts
+
+- Normalize SQL-returned nickname keys in monthly comparisons, matching the
+  requested identities. Mixed-case display names no longer produce zero bars;
+  merge grouped case variants instead of replacing an already counted row.
+- Exclude `!stats` and `m stats` commands from ranking counts, as already done
+  for the displayed message count and channel total. Asking for your own stats
+  no longer makes the current command count as a better-ranked participant.
+- Add nine focused assertions through native command dispatch and a read-only
+  local SQL fixture. Four fail before correction. Preserve single-user charts,
+  date/channel scope, ties, actions, NULL text and non-command prefix words.
+  No schema, configuration, dependency, archive policy or existing test changes.
+
 ### MB1028 — Render short emphasis and preserve escaped Markdown literals
 
 - Accept a single non-space character in bold, italic and underline spans.
