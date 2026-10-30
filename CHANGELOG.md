@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1032 — Keep the shell quiet and give it a channel context
+
+- Suppress partyline chat/presence/command broadcasts to command-mode sessions.
+  Suspend existing console-hook delivery while preserving its requested level;
+  exit restores delivery without replaying suppressed background events.
+- Add `.command #channel`, use/context and a channel-aware prompt. Select a
+  registered cached channel identity, revalidate it for channel observations
+  and refuse silent history replay across contexts or recreated identities.
+- Add bounded channel discovery, cached channel/topic/nick observations, loaded
+  API v3 projections, persisted diagnostic flags, native read-only diagnosis and
+  global runtime status. Whitelist fields; never expose channel keys or config.
+- Extend read pipelines with tail/sort, task filters with running/stopped/failed,
+  and navigation with cd -, clear, history clear and focused help. Keep global
+  task action scope explicit. Add native multi-session/console/context coverage.
+  No schema, configuration, provider, dependency or version-policy change.
+
 ### MB1031 — Add an interactive internal task shell to the partyline
 
 - Enter with `.command`, navigate virtual worker/scheduler directories with

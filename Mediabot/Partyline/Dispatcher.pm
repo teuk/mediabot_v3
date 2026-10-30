@@ -150,7 +150,7 @@ sub _handle_line {
     # Announce dot-commands to all other partyline users so every session
     # knows who triggered what, without needing to run .whom.
     # History is private; presence commands announce only validated state changes.
-    if ($line =~ /^\./ && $line !~ /^\.(?:quit$|(?:history|away|back|diagnose)(?:\s|$))/i) {
+    if (!$session->{command_mode} && $line =~ /^\./ && $line !~ /^\.(?:quit$|(?:history|away|back|diagnose)(?:\s|$))/i) {
         my $cmd_display = $self->_display_nick($id);
         $self->_broadcast("[${cmd_display}] $line", $id);
     }

@@ -407,6 +407,9 @@ sub _broadcast {
     for my $fid (keys %{ $self->{users} }) {
         next if $fid == $exclude_id;
         next unless $self->{users}{$fid}{authenticated};
+        # Shell output owns the terminal until exit; discard, never replay,
+        # background chat, presence and generic command announcements.
+        next if $self->{users}{$fid}{command_mode};
         my $stream = $self->{streams}{$fid};
         next unless $stream;
         $stream->write($msg . "\r\n");

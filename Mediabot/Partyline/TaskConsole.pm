@@ -4,9 +4,11 @@ use warnings;
 use utf8;
 use Encode qw(decode FB_CROAK);
 use Mediabot::AsyncWorker ();
+use Mediabot::Partyline::ShellContext ();
 
 sub _error {die bless {public=>$_[0]},__PACKAGE__.'::Usage'}
-my @COMMANDS=qw(help pwd cd ls ps jobs show cat kill stop start restart history complete exit);
+my @COMMANDS=qw(help pwd cd ls ps jobs show cat kill stop start restart history complete
+    channels use context channel topic who plugins chansets diagnose status clear exit);
 sub _text {
     my ($s,$limit)=@_;return '' unless defined($s) && !ref($s);
     $s=eval {decode('UTF-8',$s,FB_CROAK)} unless utf8::is_utf8($s);
@@ -16,7 +18,11 @@ sub _text {
     return substr($s,0,$limit//100);
 }
 sub _write {my ($out,@lines)=@_;$out->write(join('',map {$_ . "\r\n"} @lines))}
-sub _prompt {my ($out,$state)=@_;$out->write('mediabot:'.$state->{cwd}.'> ')}
+sub _prompt {
+    my ($out,$state)=@_;
+    my $context=defined($state->{channel}) ? '['._text($state->{channel},200).']' : '';
+    $out->write('mediabot'.$context.':'.$state->{cwd}.'> ');
+}
 sub _loop {
     my ($p)=@_;my $bot=$p->{bot};
     return eval {$bot->getLoop} || $bot->{loop} || $p->{loop};
@@ -75,17 +81,121 @@ sub _id {
     return $arg =~ /\A[ws][1-9][0-9]{0,15}\z/?$arg:'';
 }
 sub _help {
-    my ($out)=@_;_write($out,
+    my ($out,$command)=@_;
+    my %help=(
+        use=>'use #channel | use - : select a registered channel or global context',
+        context=>'context : selected cached channel identity; task control always remains GLOBAL',
+        channel=>'channel : cached channel ID, description, timezone and observed join state',
+        topic=>'topic : cached registered topic; no IRC request or topic change',
+        who=>'who [page] : cached nicks of the selected channel, twenty per page',
+        channels=>'channels [page] : registered channel cache; use #channel selects one',
+        plugins=>'plugins [page] : loaded API v3 observations for the selected channel',
+        chansets=>'chansets [page] : persisted diagnostic flag catalogue; not effective runtime defaults',
+        diagnose=>'diagnose [page] : existing read-only channel diagnostic (includes database reads)',
+        status=>'status : process uptime, IRC connection and globally tracked tasks',
+        ps=>'ps [all|workers|schedulers|slow|running|stopped|failed] [page] : global task listing',
+        kill=>'kill <id> : cancel an owned worker or disable future scheduler ticks; global scope',
+        history=>'history | history clear | !! | !number : private history; clear never reuses numbers',
+        complete=>'complete [prefix] : commands, resource directories, IDs and registered channels',
+    );
+    if (defined $command) {
+        _error("No detailed help for this command. Use help.\n") unless exists $help{$command};
+        _write($out,$help{$command});return;
+    }
+    _write($out,
         'Mediabot internal shell — resources belonging to this bot.',
         '  pwd | cd /workers | cd /schedulers | cd .. | ls [path]',
-        '  ps [all|workers|schedulers|slow] [page]   (slow: >= 1 second)',
+        '  ps [all|workers|schedulers|slow|running|stopped|failed] [page]',
         '  show <id> / cat <id>    details; IDs are w12 or s4, never OS PIDs',
         '  kill <id> / stop <id>   cancel worker or disable scheduler',
         '  start <s-id> | restart <s-id>   scheduler control',
-        '  ps | grep [-i] "text" | head 5   literal filters, quotes supported',
-        '  history | !! | !number | complete [prefix] | help | exit',
+        '  channels [page]; use #channel; use -; context; status',
+        '  channel; topic; who; plugins; chansets; diagnose [page]',
+        '  ps | grep [-i] "text" | head 5   also tail N, sort [-r]',
+        '  history [clear]; !!; !number; complete [prefix]; help [command]; clear; exit',
+        'Background broadcasts and .console logs are muted until exit; no replay.',
+        'Channel context never narrows ps/kill/start/restart: task control is GLOBAL.',
         'Coverage: Scheduler and shared AsyncWorker. Times are elapsed/callback durations, not CPU.',
         'Synchronous Perl code blocking the event loop cannot be interrupted from this shell.');
+}
+sub _listing {
+    my ($out,$heading,$lines,$filters,$page,$next)=@_;
+    my @lines=map {_text($_,1000)} @$lines;
+    for my $filter (@$filters) {
+        my ($name,@args)=@$filter;
+        if ($name eq 'grep') {
+            my $ignore=@args==2;my $needle=$args[-1];
+            @lines=grep {index($ignore?lc($_):$_,$ignore?lc($needle):$needle)>=0} @lines;
+        } elsif ($name eq 'head') {splice @lines,$args[0] if @lines>$args[0]}
+        elsif ($name eq 'tail') {splice @lines,0,@lines-$args[0] if @lines>$args[0]}
+        else {@lines=sort @lines;@lines=reverse @lines if @args}
+    }
+    my $count=@lines;my $pages=int(($count+19)/20)||1;
+    _error("Page outside listing ($pages page(s)).\n") if $page>$pages;
+    my @visible=splice @lines,($page-1)*20,20;
+    _write($out,$heading,@visible?@visible:('(no matching entries)'),
+        "$count ".($next=~/\Aps /?'task(s)':'entry/entries').", page $page/$pages."
+        .($page<$pages?" Next: $next ".($page+1).(@$filters?' (repeat filters)':''):''));
+}
+sub _context_command {
+    my ($p,$out,$state,$cmd,$args,$filters)=@_;
+    my $bot=$p->{bot};my $owner='Mediabot::Partyline::ShellContext';
+    if ($cmd eq 'use') {
+        _error("Usage: use #channel or use -.\n") unless @$args==1;
+        if ($args->[0] eq '-') {delete @$state{qw(channel channel_id)}}
+        else {my $row=$owner->select($bot,$args->[0]);@$state{qw(channel channel_id)}=@$row{qw(name channel_id)}}
+        _write($out,defined($state->{channel})?"Channel context: $state->{channel} (id $state->{channel_id}).":'Global context.');return;
+    }
+    if ($cmd eq 'context') {
+        _error("Usage: context\n") if @$args;
+        my $row=defined($state->{channel})?$owner->current($bot,$state):undef;
+        _write($out,$row?"Channel context: $row->{name} (id $row->{channel_id}).":'Global context.',
+            'Task inspection and control are GLOBAL; channel commands use the selected identity.');return;
+    }
+    if ($cmd eq 'status') {
+        _error("Usage: status\n") if @$args;
+        my @workers=Mediabot::AsyncWorker->active_workers(_loop($p));
+        my @tasks=$bot->{scheduler}?$bot->{scheduler}->all_info:();
+        my $enabled=grep {$_->{started}} @tasks;
+        my $connected=$bot->{irc}?($bot->{irc}->is_connected?'yes':'no'):'unknown';
+        my $up=defined($bot->{_start_time}) && !ref($bot->{_start_time})
+            && $bot->{_start_time}=~/\A[0-9]+\z/ ? time-$bot->{_start_time}:undef;
+        _write($out,'Runtime observation (GLOBAL)',
+            'Uptime: '.(defined($up)?$up.'s':'unknown')." | IRC connected: $connected",
+            'Workers: '.scalar(@workers).' | Schedulers: '.scalar(@tasks)." ($enabled enabled)",
+            'Context: '._text($state->{channel}//'global',200));return;
+    }
+    if ($cmd eq 'channel' || $cmd eq 'topic') {
+        _error("Usage: $cmd\n") if @$args;my $row=$owner->details($bot,$state);
+        my @lines=('Channel: '.$row->{name}.' (id '.$row->{channel_id}.')');
+        push @lines,'Timezone: '.($row->{timezone}//'unknown').' | Joined: '.$row->{joined},
+            'Description: '.($row->{description}//'') if $cmd eq 'channel';
+        push @lines,'Cached topic: '.($row->{topic}//'(unavailable)');
+        _write($out,map {_text($_,1000)} @lines);return;
+    }
+    _error("Usage: $cmd [page]\n") if @$args>1 || (@$args && $args->[0]!~/\A[1-9][0-9]{0,4}\z/);
+    my $page=$args->[0]//1;my (@lines,$title);
+    if ($cmd eq 'channels') {
+        @lines=map {$_->{name}.'  id='.$_->{channel_id}} $owner->channels($bot);
+        $title='Registered channels (cache; select with use #channel)';
+    } elsif ($cmd eq 'who') {
+        @lines=$owner->nicks($bot,$state);$title='Cached nicks for '.$state->{channel};
+    } elsif ($cmd eq 'plugins') {
+        my $report=$owner->plugins($bot,$state);
+        for my $row (@{$report->{packages}}) {
+            push @lines,$row->{name}.': '.($row->{state} eq 'observed'
+                ? join(' ',map {$_.'='.($row->{$_}//'unknown')} qw(lifecycle policy decision missing_capabilities quarantined_resources retained_failures))
+                : 'unavailable');
+        }
+        $title="Loaded API v3 for $state->{channel}; state=$report->{state}; omitted=$report->{omitted}; legacy policy unknown";
+    } else {
+        my ($diagnostic,$report)=$owner->diagnosis($bot,$state);
+        if ($cmd eq 'chansets') {
+            @lines=map {$_.'='.$report->{flags}{$_}} sort keys %{$report->{flags}};
+            $title="Diagnostic flag catalogue for $state->{channel}; database=$report->{database}; persisted observations";
+        } else {@lines=@{$diagnostic->lines($report)};$title='Channel diagnostic (read-only)'}
+    }
+    _listing($out,_text($title,400),\@lines,$filters,$page,$cmd);
 }
 sub _read {
     my ($p,$out,$state,$cmd,$args,$filters)=@_;
@@ -96,55 +206,59 @@ sub _read {
         if ($path eq '/') {_error("Filters require a task listing.\n") if @$filters;_write($out,'workers/    schedulers/','Use ps to list all tasks.');return}
         _error("No such resource directory.\n") unless $path =~ m{\A/(workers|schedulers)\z};$kind=$1;
     } else {
-        _error("Usage: ps [all|workers|schedulers|slow] [page]\n") if @$args>2;
+        _error("Usage: ps [all|workers|schedulers|slow|running|stopped|failed] [page]\n") if @$args>2;
         my @a=@$args;
         $kind=shift @a if @a && $a[0]!~/\A[0-9]+\z/;
         $kind='workers' if $kind eq 'async';$kind='schedulers' if $kind eq 'sched';
-        _error("Unknown task filter. Use all, workers, schedulers or slow.\n") unless $kind=~/\A(?:all|workers|schedulers|slow)\z/;
+        _error("Unknown task filter. Use help ps.\n") unless $kind=~/\A(?:all|workers|schedulers|slow|running|stopped|failed)\z/;
         $page=shift @a if @a;
         _error("Invalid page.\n") if @a || $page!~/\A[1-9][0-9]{0,4}\z/;
     }
     my @rows=_rows($p);
     @rows=grep {$kind eq 'all' || ($kind eq 'workers' && $_->{type} eq 'worker')
         || ($kind eq 'schedulers' && $_->{type} eq 'scheduler')
-        || ($kind eq 'slow' && ($_->{elapsed_s}//$_->{last_duration_s}//0)>=1)} @rows;
+        || ($kind eq 'slow' && ($_->{elapsed_s}//$_->{last_duration_s}//0)>=1)
+        || ($kind eq 'running' && $_->{state}=~/\A(?:running|enabled|stopping)\z/)
+        || ($kind eq 'stopped' && $_->{state} eq 'stopped')
+        || ($kind eq 'failed' && ($_->{callback_exceptions}//0)>0)} @rows;
     @rows=sort {(($a->{type} eq 'worker'?0:1)<=>($b->{type} eq 'worker'?0:1)) || (($b->{elapsed_s}//$b->{last_duration_s}//0)<=>($a->{elapsed_s}//$a->{last_duration_s}//0)) || $a->{id} cmp $b->{id}} @rows;
     my @lines=map {sprintf('%-7s %-9s %-9s %8.3fs  %s',$_->{id},$_->{type},$_->{state},
         $_->{elapsed_s}//$_->{last_duration_s}//0,$_->{name})} @rows;
-    for my $f (@$filters) {
-        my ($name,@a)=@$f;
-        if ($name eq 'grep') {
-            my $ignore=@a && $a[0] eq '-i'?shift(@a):'';
-            my $needle=$a[0];@lines=grep {index($ignore?lc($_):$_,$ignore?lc($needle):$needle)>=0} @lines;
-        } else {splice @lines,$a[0] if @lines>$a[0]}
-    }
-    my $count=@lines;my $pages=int(($count+19)/20)||1;
-    _error("Page outside listing ($pages page(s)).\n") if $page>$pages;
-    my @visible=splice @lines,($page-1)*20,20;
-    _write($out,'ID      TYPE      STATE      AGE / LAST  NAME',@visible?@visible:('(no matching tasks)'),
-        "$count task(s), page $page/$pages. show <id> for details; exit to chat."
-        .($page<$pages?" Next: ps $kind ".($page+1):''));
+    _listing($out,'ID      TYPE      STATE      AGE / LAST  NAME (GLOBAL)',\@lines,$filters,$page,"ps $kind");
 }
 sub _execute {
     my ($p,$out,$state,$parts)=@_;my ($cmd,@a)=@{$parts->[0]};my @filters=@$parts[1..$#$parts];
     for my $f (@filters) {
         my ($name,@args)=@$f;
-        _error("Filters: grep [-i] <literal> or head <1..50>.\n") unless
+        _error("Filters: grep [-i] <literal>, head/tail <1..50>, sort [-r].\n") unless
             ($name eq 'grep' && (@args==1 || (@args==2 && $args[0] eq '-i')))
-            || ($name eq 'head' && @args==1 && $args[0]=~/\A[1-9][0-9]?\z/ && $args[0]<=50);
+            || ($name=~/\A(?:head|tail)\z/ && @args==1 && $args[0]=~/\A[1-9][0-9]?\z/ && $args[0]<=50)
+            || ($name eq 'sort' && (!@args || (@args==1 && $args[0] eq '-r')));
     }
-    _error("Filters apply only to ps, jobs and ls.\n") if @filters && $cmd!~/\A(?:ps|jobs|ls)\z/;
+    _error("Filters apply only to read listings.\n") if @filters && $cmd!~/\A(?:ps|jobs|ls|channels|who|plugins|chansets|diagnose)\z/;
     if ($cmd =~ /\A(?:ps|jobs|ls)\z/) {_read($p,$out,$state,$cmd,\@a,\@filters);return}
-    if ($cmd eq 'help' || $cmd eq '?') {_error("Usage: help\n") if @a;_help($out);return}
+    if ($cmd =~ /\A(?:channels|use|context|channel|topic|who|plugins|chansets|diagnose|status)\z/) {
+        _context_command($p,$out,$state,$cmd,\@a,\@filters);return;
+    }
+    if ($cmd eq 'help' || $cmd eq '?') {_error("Usage: help [command]\n") if @a>1;_help($out,$a[0]);return}
+    if ($cmd eq 'clear') {_error("Usage: clear\n") if @a;$out->write("\e[2J\e[H");return}
     if ($cmd eq 'pwd') {_error("Usage: pwd\n") if @a;_write($out,$state->{cwd});return}
     if ($cmd eq 'cd') {
-        _error("Usage: cd [directory]\n") if @a>1;my $path=_path($state->{cwd},$a[0]);
-        _error("Directories: /, /workers, /schedulers.\n") unless $path=~m{\A/(?:workers|schedulers)?\z};$state->{cwd}=$path;return;
+        _error("Usage: cd [directory]\n") if @a>1;
+        my $path=(@a && $a[0] eq '-') ? ($state->{previous_cwd}//'/') : _path($state->{cwd},$a[0]);
+        _error("Directories: /, /workers, /schedulers.\n") unless $path=~m{\A/(?:workers|schedulers)?\z};
+        ($state->{previous_cwd},$state->{cwd})=($state->{cwd},$path);return;
     }
-    if ($cmd eq 'history') {_error("Usage: history\n") if @a;_write($out,map {sprintf('%4d  %s',$_->{n},$_->{line})} @{$state->{history}});return}
+    if ($cmd eq 'history') {
+        _error("Usage: history [clear]\n") if @a>1 || (@a && $a[0] ne 'clear');
+        if (@a) {$state->{history}=[];_write($out,'Shell history cleared.');return}
+        _write($out,map {sprintf('%4d  %s',$_->{n},$_->{line})} @{$state->{history}});return;
+    }
     if ($cmd eq 'complete') {
         _error("Usage: complete [prefix]\n") if @a>1;my $prefix=$a[0]//'';
         my @names=(@COMMANDS,'/workers','/schedulers',map {$_->{id}} _rows($p));
+        push @names,map {$_->{name}} Mediabot::Partyline::ShellContext->channels($p->{bot})
+            if ref($p->{bot}{channels}) eq 'HASH';
         @names=grep {index($_,$prefix)==0} @names;splice @names,40 if @names>40;
         _write($out,@names?join('  ',@names):'(no completion)');return;
     }
@@ -182,33 +296,53 @@ sub _execute {
     _error("Unknown internal command. Type help, complete or exit.\n");
 }
 sub handle_line {
-    my ($p,$out,$id,$raw)=@_;my $session=$p->{users}{$id} or return 0;
+    my ($p,$out,$id,$raw)=@_;
+    my $session=$p->{users}{$id} or return 0;
     return 0 unless $session->{authenticated};
-    my $entry=$raw =~ /\A\.command(?:\s+(on|off))?\s*\z/i;
-    my $switch=$entry?lc($1//'on'):'';
+    my $entry=$raw =~ /\A\.command(?:\s|\z)/i;
     return 0 if !$entry && (!$session->{command_mode} || $raw=~/\A\./);
-    if (($entry && $switch eq 'off') || ($session->{command_mode} && $raw=~/\A\s*exit\s*\z/)) {
-        delete $session->{command_mode};_write($out,'Chat mode. Type .command to return to the internal shell.');return 1;
+    if (($entry && $raw=~/\A\.command\s+off\s*\z/i)
+        || ($session->{command_mode} && $raw=~/\A\s*exit\s*\z/)) {
+        delete $session->{command_mode};
+        _write($out,'Chat mode. Type .command to return to the internal shell.');
+        return 1;
     }
     unless (defined($session->{level}) && !ref($session->{level}) && "$session->{level}"=~/\A[01]\z/) {
-        delete $session->{command_mode};_write($out,'Access denied: command mode requires Master or Owner.');return 1;
+        delete $session->{command_mode};
+        _write($out,'Access denied: command mode requires Master or Owner.');
+        return 1;
     }
     my $state=$session->{command_shell}||={cwd=>'/',history=>[],serial=>0};
     $state->{actor}=_text($session->{login},32);
-    if ($entry) {$session->{command_mode}=1;_help($out);_prompt($out,$state);return 1}
     my $ok=eval {
         _error("Command is too long.\n") if length($raw)>1024;
         my $line=utf8::is_utf8($raw)?$raw:decode('UTF-8',$raw,FB_CROAK);
         _error("Control characters are not allowed.\n") if $line =~ /[\x00-\x1f\x7f-\x9f]/;
         $line =~ s/^\s+|\s+$//g;
-        if (length $line) {
+        if ($entry) {
+            $line =~ s/\A\.command\s*//i;
+            if (length($line) && lc($line) ne 'on') {
+                _error("Usage: .command [#channel|on|off]\n") if $line =~ /\s/;
+                my $row=Mediabot::Partyline::ShellContext->select($p->{bot},$line);
+                @$state{qw(channel channel_id)}=@$row{qw(name channel_id)};
+            }
+            $session->{command_mode}=1;
+            _help($out);
+        } elsif (length $line) {
             if ($line =~ /\A!(?:!|([1-9][0-9]{0,15}))\z/) {
-                my $number=$1;my ($h)=defined($number)?grep {$_->{n}==$number} @{$state->{history}}:$state->{history}[-1];
-                _error("History entry not available.\n") unless $h;$line=$h->{line};_write($out,$line);
+                my $number=$1;
+                my ($h)=defined($number)?grep {$_->{n}==$number} @{$state->{history}}:$state->{history}[-1];
+                _error("History entry not available.\n") unless $h;
+                # A channel command is never replayed into another channel.
+                _error("History context changed; type the command again.\n")
+                    unless ($h->{channel}//'') eq ($state->{channel}//'')
+                        && ($h->{channel_id}//'') eq ($state->{channel_id}//'');
+                $line=$h->{line};_write($out,$line);
             }
             my @parts=_tokens($line);
             unless ($parts[0][0] eq 'history') {
-                push @{$state->{history}},{n=>++$state->{serial},line=>$line};
+                push @{$state->{history}},{n=>++$state->{serial},line=>$line,
+                    channel=>$state->{channel},channel_id=>$state->{channel_id}};
                 shift @{$state->{history}} while @{$state->{history}}>20;
             }
             _execute($p,$out,$state,\@parts);
@@ -217,11 +351,12 @@ sub handle_line {
     };
     unless ($ok) {
         my $err=$@;
-        # Parser/usage errors are fixed messages; backend exception text stays private.
         my $public=ref($err) eq __PACKAGE__.'::Usage'
+            || ref($err) eq 'Mediabot::Partyline::ShellContext::Usage'
             ? _text($err->{public},160) : 'Operation failed. Inspect ps/show or use help.';
         _write($out,$public);
     }
-    _prompt($out,$state);return 1;
+    _prompt($out,$state) if $p->{users}{$id} && $p->{users}{$id}==$session && $session->{command_mode};
+    return 1;
 }
 1;

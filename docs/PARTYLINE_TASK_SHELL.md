@@ -20,6 +20,51 @@ Chat mode. Type .command to return to the internal shell.
 
 Use actual IDs from your listing. `w12` and `s4` above are examples.
 
+MB1032 makes shell sessions quiet: incoming partyline broadcasts, chat,
+presence and generic command announcements are discarded until exit. Existing
+`.console` hooks also suspend delivery without changing the requested level.
+Exit resumes future output; suppressed events are never queued for replay.
+An explicit `.console off` or level change inside the shell remains in effect.
+Direct command responses and explicit disconnect/error responses still work.
+
+## Channel context
+
+```text
+.command #radiocapsule
+mediabot[#radiocapsule]:/> channel
+mediabot[#radiocapsule]:/> who | sort -r | head 5
+mediabot[#radiocapsule]:/> plugins
+mediabot[#radiocapsule]:/> chansets | grep MixCloud
+mediabot[#radiocapsule]:/> diagnose
+mediabot[#radiocapsule]:/> use #test
+mediabot[#test]:/> topic
+mediabot[#test]:/> use -
+mediabot:/> status
+```
+
+Use `channels` to discover registered channel-cache names. Selection is private
+to this connection and resolves the canonical cached name with its database ID.
+It does not JOIN, send a message or change a setting. Unknown or ambiguous
+identities fail without replacing the current context. Channel commands check
+the selected ID again; a purged/recreated same-name channel needs reselection.
+If a fresh database diagnostic disagrees with the selected cached identity, it
+is refused until the channel cache is refreshed and that channel is reselected.
+There is no automatic default channel. Bare `.command` retains this connection's
+previous selection; `use -` explicitly clears it.
+
+`channel`, `topic` and `who` expose cached metadata/nicks, not a fresh IRC query.
+An unavailable join-state observation stays unknown. `plugins` reuses the safe
+loaded API v3 channel diagnostic projection; legacy policy remains unknown.
+`chansets` shows the native diagnostic's flag catalogue, not every possible
+setting or effective defaults. `chansets` and `diagnose` invoke the existing
+read-only channel diagnostic, including its parameterized synchronous database
+reads; other new context observations do not query SQL. Diagnostic/database
+failures retain unavailable/error states rather than fabricated empty success.
+
+**Task inspection and actions remain GLOBAL.** Selecting a channel does not
+filter ps or restrict kill/start/restart to that channel: workers currently lack
+reliable per-channel ownership metadata. The listing/help/context output says so.
+
 ## Commands
 
 | Command | Behavior |
@@ -29,18 +74,27 @@ Use actual IDs from your listing. `w12` and `s4` above are examples.
 | `ls [path]` | Resource directories or tasks in the selected directory |
 | `ps` / `jobs` | All tracked tasks; active workers first, longest durations first |
 | `ps workers`, `ps schedulers`, `ps slow` | Filter by owner; slow means at least one second |
+| `ps running`, `ps stopped`, `ps failed` | Active/armed tasks, disabled schedules, or retained scheduler callback exceptions |
 | `ps all 2` | Next listing page; at most twenty rows per page |
 | `show <id>` / `cat <id>` | State, deadline/PID/progress count or scheduler timing/ticks |
 | `kill <id>` / `stop <id>` | Request worker cancellation, or disable future scheduler ticks |
 | `start <s-id>`, `restart <s-id>` | Use the scheduler's native lifecycle |
 | `history`, `!!`, `!number` | Last twenty commands, with non-rebound numbered replay |
+| `history clear` | Clear shell history without reusing old sequence numbers |
 | `complete [prefix]` | Text suggestions for commands, directories and active IDs |
+| `channels [page]`, `use #channel`, `use -`, `context` | Discover/select a registered channel or inspect/clear context |
+| `channel`, `topic`, `who [page]` | Cached channel description/timezone/join observation, topic, nicks |
+| `plugins [page]`, `chansets [page]`, `diagnose [page]` | Existing safe channel observations and diagnostic catalogue |
+| `status` | Global process uptime, IRC connection, tracked worker/scheduler counts |
+| `cd -`, `clear`, `help [command]` | Previous successful directory, terminal clear, focused command help |
 | `exit` | Return to ordinary partyline chat without disconnecting |
 
 Quoted arguments and backslash escaping are supported. Read listings accept up
 to two literal filters: `ps | grep -i "radio lookup" | head 5`. Pipes may be
 adjacent to words. `grep` uses literal substring matching, with optional `-i`;
-`head` accepts 1–50. Filters are validated before the listing or action starts;
+`head` and `tail` accept 1–50. `sort` and `sort -r` order the rendered rows
+lexically. Read filters also work on channels/who/plugins/chansets/diagnose.
+Filters are validated before the listing or action starts;
 mutating commands cannot be piped. No OS command, substitution, redirect or
 general-purpose interpreter is invoked. This is a line-oriented shell; textual
 `complete` supplies suggestions, without claiming a terminal TAB/arrow editor.
@@ -48,6 +102,14 @@ general-purpose interpreter is invoked. This is a line-oriented shell; textual
 Existing dot commands remain usable, including `.quit`. `.command off` is an
 additional way back to chat. Bare unknown commands in shell mode stay private
 and produce help guidance instead of being broadcast as partyline chat.
+Generic dot-command announcements from shell sessions stay private too; an
+explicit native command with its own side effect/presence announcement retains
+that command's behavior for ordinary chat recipients. Dot-command arguments are
+not silently rewritten to use the selected channel.
+
+History entries bind their channel name/ID at recording time. Replaying one in
+another context is refused; type it explicitly there. `history clear` clears
+only shell history, not the separate native `.history` or on-disk logs.
 
 ## Observation and action semantics
 
