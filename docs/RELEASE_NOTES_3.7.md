@@ -1,9 +1,10 @@
 # Mediabot 3.7 — The Next Chapter of the Grimoire 📖🪄
 
-**Draft for review. Release decision pending. The published stable remains
-3.5; this document creates no release, tag or deployment.**
+**Stable release approved by the operator on 30 October 2026.**
+The final commit must pass both CI workflows before its tag and public
+artifacts are created. Source publication does not deploy an instance.
 
-The proposed 3.7 brings the 3.6dev line together around a more observable IRC
+Mediabot 3.7 brings the 3.6dev line together around a more observable IRC
 bot, an extensible Perl plugin platform and clearer behavior when operations
 fail. This is a summary of source changes, not proof that every optional
 feature is enabled on every instance.
@@ -69,6 +70,25 @@ alone do not certify IRC reconnection, web authorization or operational
 stability. Provider availability and third-party data freshness remain external
 dependencies; the French catalog is the documented 2022 archival selection.
 
-No new production rollout, plugin activation, broad refactor or additional
-feature is part of this preparation. Add the actual accepted commit, dates,
-results and known limitations before converting these notes to published ones.
+## Accepted preparation and remaining field evidence
+
+The functional preparation is commit
+`1d2e97a4c7fa9e64476fe229429188f4c78a6921`, development VERSION
+`3.6dev-20261030_084326`. On 30 October 2026 both its normal CI and Debian 13
+fresh-install workflow completed successfully. The Debian gate includes fresh
+MariaDB, 3.3/3.5 migration, logical restore and deterministic reapplication.
+The operator reproduced all six rehearsal artifacts and confirmed the dev
+smoke recipe after restart, including Partyline, scores and MixCloud previews.
+
+The next metadata commit must obtain its own two green CI results before any
+tag or public download is created. Earlier evidence does not certify that new
+commit automatically. The acceptance sheet records what the operator has not
+reported: a fresh installed IRC/first-Owner walkthrough, installed-instance
+update/rollback, real mbweb account/expiry checks and sustained observation.
+The operator approved the release with these documented limits retained;
+they are not fabricated successes. API v3 remains experimental and optional features stay opt-in.
+
+No production rollout, plugin activation, schema change or new development
+line is included. The exact published source is identified by the annotated
+3.7 tag when it is created after final-commit qualification. The operator
+records the artifact publication in the separate release receipt.

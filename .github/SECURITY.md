@@ -6,7 +6,7 @@ Security fixes are primarily provided for the current stable release and the act
 
 | Version        | Supported             |
 | -------------- | --------------------- |
-| 3.5 stable     | Yes                   |
+| 3.7 stable     | Yes                   |
 | 3.6dev         | Yes, development code |
 | Older versions | No                    |
 

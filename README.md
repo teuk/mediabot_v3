@@ -20,7 +20,7 @@
 Mediabot helps IRC communities **run, remember and understand their channels**. It combines an event-driven IRC core, channel administration, persistent MariaDB-backed memory, community analytics, media integrations and production-oriented tooling.
 
 <p align="center">
-  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5"><strong>Download stable 3.5</strong></a>
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.7"><strong>Download stable 3.7</strong></a>
   ·
   <a href="https://github.com/teuk/mediabot_v3/wiki/Installation"><strong>Installation guide</strong></a>
   ·
@@ -50,7 +50,9 @@ Start with [Trivia](Mediabot/Games/Trivia.pm),
 [plugin workshop](docs/PLUGIN_WORKSHOP.md), then follow
 [CONTRIBUTING.md](CONTRIBUTING.md) to prepare a focused change.
 
-`master` is 3.6dev. Use the verified stable 3.5 release for production.
+`master` identifies the selected 3.7 source. Use the verified, tagged 3.7
+release artifacts for production after publication. The completed 3.6dev line
+remains the development lineage; the next development line is not opened here.
 
 ## Development walkthroughs
 
@@ -92,15 +94,24 @@ flowchart TB
 
 | Line | Status | Recommended use |
 | --- | --- | --- |
-| **3.5** | Current stable release | Production installations from verified release artifacts |
-| **3.6dev** | Current development line | Testing, contribution and evaluation of current development |
+| **3.7** | Current stable release | Production installations from verified release artifacts |
+| **3.6dev** | Development line completed for 3.7 | Evaluation of the preceding development snapshots |
 
 Stable and development installations should use separate directories, configurations, systemd instances, runtime files and IRC identities.
 
 ```text
-3.5      current stable release
+3.7      current stable release
 3.6dev   current development line
 ```
+
+### Mediabot 3.7 release notes
+
+See [the 3.7 notes](docs/RELEASE_NOTES_3.7.md) for the plugin platform,
+longest-word game, French Trivia, link previews and operational fixes.
+The [acceptance sheet](docs/RELEASE_ACCEPTANCE_3.7.md) distinguishes the
+verified candidate/CI from operator-managed field checks. The 3.5 artwork
+and badge in the preserved header are historical; the release identity and
+downloads above refer to 3.7.
 
 ### Stable 3.5 release evidence
 
@@ -156,32 +167,32 @@ Mediabot must not run as root. Continue the remaining installation as `mediabot`
 su - mediabot
 ```
 
-### 3A. Install stable 3.5
+### 3A. Install stable 3.7
 
-Use this path for production. Download one published archive and both checksum manifests from the [3.5 release](https://github.com/teuk/mediabot_v3/releases/tag/3.5), then place them in `/home/mediabot`.
+Use this path for production. Download one published archive and both checksum manifests from the [3.7 release](https://github.com/teuk/mediabot_v3/releases/tag/3.7), then place them in `/home/mediabot`.
 
 As `mediabot`, for the `.tar.gz` archive:
 
 ```bash
 cd /home/mediabot || exit 1
 
-grep 'mediabot_v3-3.5.tar.gz$' mediabot_v3-3.5-SHA256SUMS |
+grep 'mediabot_v3-3.7.tar.gz$' mediabot_v3-3.7-SHA256SUMS |
   sha256sum -c -
-grep 'mediabot_v3-3.5.tar.gz$' mediabot_v3-3.5-SHA512SUMS |
+grep 'mediabot_v3-3.7.tar.gz$' mediabot_v3-3.7-SHA512SUMS |
   sha512sum -c -
 
-tar -xzf mediabot_v3-3.5.tar.gz
-mv mediabot_v3-3.5 mediabot_v3
+tar -xzf mediabot_v3-3.7.tar.gz
+mv mediabot_v3-3.7 mediabot_v3
 cd /home/mediabot/mediabot_v3 || exit 1
 
-test "$(tr -d '\n' < VERSION)" = '3.5'
+test "$(tr -d '\n' < VERSION)" = '3.7'
 ```
 
 For the `.tar.xz` archive, select its checksum lines and extract it with `tar -xJf`. Do not use GitHub's automatically generated source ZIP instead of the verified project release artifacts.
 
-### 3B. Install 3.6dev
+### 3B. Inspect the selected source with Git
 
-Use this path for development and testing:
+Use a separate directory and identity for source evaluation:
 
 ```bash
 cd /home/mediabot || exit 1
@@ -191,10 +202,11 @@ cd /home/mediabot/mediabot_v3 || exit 1
 git status --short
 git branch --show-current
 cat VERSION
-grep -Eq '^3\.6dev-' VERSION
 ```
 
-The default Git branch is the active development line, not a stable release.
+Check `VERSION` and the exact commit before choosing a deployment. The default
+branch can move after a release; it is not a substitute for the verified tag.
+Do not overwrite an existing installation with these fresh-install commands.
 
 ### 4. Run `./configure`
 

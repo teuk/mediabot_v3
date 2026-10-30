@@ -1,3 +1,19 @@
+## [3.7] — 2026-10-30
+
+### MB1023 — Approve the final Mediabot 3.7 identity
+
+- Record the operator's explicit stable-release approval on 30 October 2026.
+  Tagging and public artifacts follow the final commit's two green CI workflows.
+- Align the exact VERSION, README body, security support table, release guide
+  and generated command inventory for the selected stable source.
+- Complete the release notes and record the accepted MB1022 candidate, its two
+  green CI workflows and the operator-confirmed development smoke test.
+- Keep unreported fresh-install, installed-instance update/rollback, real web
+  account and observation checks open as documented operator follow-up.
+  Source approval does not claim a deployment or open a new development line.
+- Preserve the README header, historical 3.5 evidence, application code,
+  configuration, plugins, all tests and every SQL migration byte for byte.
+
 ## MB1022 — Prepare the final 3.7 qualification path (2026-10-30)
 
 - Let Debian CI select the explicit final VERSION=3.7 archive as well as its
@@ -877,7 +893,7 @@ release. The current development line is `3.6dev`.
 
 ---
 
-## [Unreleased] — 3.6dev
+
 
 ### MB946 — Revisit a channel day and follow its history (2026-10-24)
 

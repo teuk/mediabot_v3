@@ -8,12 +8,12 @@ creating a private development snapshot.
 Mediabot uses odd minor versions for stable releases and even minor versions for
 development lines.
 
-The currently published release remains:
+The selected stable identity for the final metadata commit is:
 
 ```text
-stable version: 3.5
-Git tag:        3.5
-archive root:   mediabot_v3-3.5/
+stable version: 3.7
+Git tag:        3.7
+archive root:   mediabot_v3-3.7/
 ```
 
 Every release command must name both the intended stable version and its exact
@@ -25,7 +25,7 @@ The examples below use shell variables. Set them once, review them, and keep
 them unchanged for the complete release procedure:
 
 ```bash
-release_version='3.5'
+release_version='3.7'
 release_ref="$release_version"
 release_dest='/home/wws/downloads/mediabot'
 
@@ -33,7 +33,9 @@ printf 'VERSION=%s REF=%s DEST=%s\n' \
   "$release_version" "$release_ref" "$release_dest"
 ```
 
-Mediabot 3.5 became stable through the explicit MB727 release decision. For a
+Mediabot 3.5 became stable through the explicit MB727 release decision.
+The operator explicitly approved the stable 3.7 release on 30 October 2026.
+The tag and public artifacts follow green CI on the final metadata commit. For a
 later candidate, substituting another version in preparation commands does not declare it stable:
 the final release gate must still set the exact stable
 `VERSION`, create the matching tag and publish the verified artifacts.
@@ -75,8 +77,9 @@ publish an artifact; those remain explicit release actions below.
 
 ## MB787 3.7 candidate qualification
 
-The published stable version remains **3.5**. On the `3.6dev` line, the Debian
-13 workflow packages the tested development commit as a non-publishable 3.7
+Before the 3.7 publication, the published stable remains **3.5**. On the
+`3.6dev` line, the Debian 13 workflow packages the tested development commit as
+a non-publishable 3.7
 rehearsal. MB1022 also accepts the explicit final `VERSION=3.7` commit and its
 matching stable-shaped archive; it requires a dated committed 3.7 release
 heading. It installs only the selected unpacked archive. The historical stable 3.3 upgrade and its
@@ -97,17 +100,25 @@ inside disposable GitHub Actions CI. Its output does not declare 3.7 stable or
 authorize publication, tagging, database changes on an installed instance, or
 an update of production. A later release decision must be explicit.
 
-There is no 3.7 release schedule. Current development priorities and the
-separate acceptance steps for `#i/o` are in the
+The 3.7 release was approved on 30 October 2026; artifact publication is
+recorded separately after final qualification. The completed
+development work and the separate acceptance steps for `#i/o` are in the
 [`3.6dev roadmap`](ROADMAP_3.6DEV.md). Qualification evidence can continue to
 run in CI without opening a release or changing production.
 
-## MB1022 — Prepare the decision for 3.7
+## MB1022 / MB1023 — Prepare, decide, then publish
 
-The published identity at the top of this file remains 3.5 until an explicit
-release decision. The generic publication examples below describe that
-published release; they are not instructions to republish 3.5 for the next one.
-For the present 3.6dev candidate, use only the non-publishing preparation:
+The preparation candidate is `1d2e97a4c7fa9e64476fe229429188f4c78a6921`,
+VERSION `3.6dev-20261030_084326`. Its two CI workflows and reproducible
+archives are verified; the operator confirmed the dev smoke recipe.
+The operator confirmed the release decision with other unreported field checks
+retained as documented follow-up. This evidence
+does not automatically qualify the next metadata commit.
+
+The variables and file names below describe the approved 3.7 publication.
+They are a procedure, not evidence that publication happened. Run tag and
+public-directory commands only after the final commit's two green workflows.
+For development preparation before the final identity transition, use:
 
 ```bash
 perl t/test_commands.pl --progress
@@ -125,13 +136,13 @@ are not an exemption from that gate. The migration qualification remains
 read-only with `--lineage-only` and starts MariaDB only in disposable CI.
 
 The [3.7 acceptance sheet](RELEASE_ACCEPTANCE_3.7.md) records remaining real
-checks. [Draft 3.7 notes](RELEASE_NOTES_3.7.md) describe the intended release
-without declaring it published. The earlier 3.6dev acceptance sheet remains
+checks. [Approved 3.7 notes](RELEASE_NOTES_3.7.md) describe the selected release
+without claiming that the tag or artifacts are already published. The earlier 3.6dev acceptance sheet remains
 historical evidence, not a successful new 3.7 recipe.
 
-If publication is later approved, prepare one final metadata commit with:
+The approved final metadata patch prepares one coherent set of changes:
 
-- exact `VERSION=3.7` through native `commit.sh --release 3.7`;
+- exact `VERSION=3.7`, committed through native `commit.sh --release 3.7`;
 - one dated `[3.7]` changelog section replacing the completed 3.6dev unreleased
   section, retaining historical entries and the dated 3.5 section;
 - README status/download sections, SECURITY support table and this guide's
@@ -139,10 +150,13 @@ If publication is later approved, prepare one final metadata commit with:
 - final 3.7 notes and the regenerated command inventory for source line 3.7.
 
 The existing README header and its historical 3.5 artwork/evidence are retained.
+Its body links and installation instructions identify 3.7.
 Do not relabel old test counts or old operational evidence as 3.7 results.
 Release tests validate these two defined phases; an unrelated version is still
-refused. Qualify the final metadata commit before tagging it. Creating an
-archive in a disposable test fixture does not approve its publication.
+refused. The release decision is recorded above. Apply and commit the approved
+metadata with the native helper, then qualify both remote workflows before
+tagging it. Creating an archive in a disposable test fixture does not approve
+its publication.
 
 ## Supported release-path authorities
 
@@ -213,18 +227,18 @@ tools/build_release_artifacts.sh \
 The exact directory spelling above is intentional and follows the current
 server path. Change `--dest` only if the web root uses a different path.
 
-For `release_version=3.5`, the generated files are:
+For `release_version=3.7`, the generated files are:
 
 ```text
-mediabot_v3-3.5.tar.gz
-mediabot_v3-3.5.tar.xz
-mediabot_v3-3.5-FILES.txt
-mediabot_v3-3.5-RELEASE.txt
-mediabot_v3-3.5-SHA256SUMS
-mediabot_v3-3.5-SHA512SUMS
+mediabot_v3-3.7.tar.gz
+mediabot_v3-3.7.tar.xz
+mediabot_v3-3.7-FILES.txt
+mediabot_v3-3.7-RELEASE.txt
+mediabot_v3-3.7-SHA256SUMS
+mediabot_v3-3.7-SHA512SUMS
 ```
 
-Both archives contain the same `mediabot_v3-3.5/` tree. The release includes the
+Both archives contain the same `mediabot_v3-3.7/` tree. The release includes the
 tracked `contrib/` and `plugins/` directories. It excludes local/runtime-only
 material such as `commit.sh`, `mediabot.conf`, `mp3/` and `node_modules/`.
 
