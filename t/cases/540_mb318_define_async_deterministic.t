@@ -94,7 +94,7 @@ return sub {
         }
         else {
             $code .= q{require Scalar::Util;
-                for my $name (qw(_define_pick_entry _define_lookup_sync)) {
+                for my $name (qw(_define_pick_entry _define_lookup_sync _define_lookup_async)) {
                     die 'legacy owner mismatch' unless
                         Scalar::Util::refaddr(Mediabot::UserCommands->can($name)) ==
                         Scalar::Util::refaddr(Mediabot::External::Wiktionary->can($name));
@@ -128,9 +128,10 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'External', 'Wiktionary.pm')
     );
 
+    my $worker_source = _slurp_mb318('Mediabot/AsyncWorker.pm');
     my $pick    = _extract_sub_mb318($source, '_define_pick_entry');
     my $sync    = _extract_sub_mb318($source, '_define_lookup_sync');
-    my $async   = _extract_sub_mb318($src, '_define_lookup_async');
+    my $async   = _extract_sub_mb318($source, '_define_lookup_async');
     my $command = _extract_sub_mb318($src, 'mbDefine_ctx');
 
     $assert->ok(defined $pick,    'deterministic definition selector found');
@@ -164,55 +165,55 @@ return sub {
 
     $assert->like(
         $async // '',
-        qr/open\(my\s+\$pipe,\s*'-\|'\)/,
+        qr/Mediabot::AsyncWorker->start\(/,
         'blocking Wiktionary work runs in a child process'
     );
 
     $assert->like(
         $async // '',
-        qr/_define_lookup_sync\(\{\},\s*\$word,\s*\$lang\)/,
+        qr/_compat_define\(\{\},\s*\$word,\s*\$lang\)/,
         'child reuses the guarded synchronous lookup implementation'
     );
 
     $assert->like(
-        $async // '',
+        $worker_source,
         qr/POSIX::_exit\(0\)/,
         'forked child exits without inherited destructors'
     );
 
     $assert->like(
-        $async // '',
+        $worker_source,
         qr/IO::Async::Stream->new/,
         'parent consumes the result asynchronously'
     );
 
     $assert->like(
-        $async // '',
+        $worker_source,
         qr/IO::Async::Timer::Countdown->new/,
-        'timeouts and child reaping use asynchronous timers'
+        'shared worker uses asynchronous timeout timers'
     );
 
     $assert->like(
-        $async // '',
-        qr/waitpid\(\$child_pid,\s*POSIX::WNOHANG\(\)\)/,
-        'define worker is reaped non-blockingly'
+        $worker_source,
+        qr/\$loop->watch_process\(/,
+        'shared worker gives definition child collection to the event loop'
     );
 
     $assert->like(
-        $async // '',
-        qr/kill\s+'TERM',\s*\$child_pid/,
+        $worker_source,
+        qr/->_signal_child\('TERM'\)/,
         'timeout sends TERM first'
     );
 
     $assert->like(
-        $async // '',
-        qr/kill\s+'KILL',\s*\$child_pid/,
+        $worker_source,
+        qr/->_signal_child\('KILL'\)/,
         'timeout escalates to KILL'
     );
 
     $assert->like(
         $async // '',
-        qr/my\s+\$remaining\s*=\s*4096\s*-\s*length\(\$state->\{output\}\)/,
+        qr/max_output\s*=>\s*8192\b/,
         'child output is bounded'
     );
 

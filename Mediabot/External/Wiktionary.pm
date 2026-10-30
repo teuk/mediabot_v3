@@ -1,15 +1,16 @@
 package Mediabot::External::Wiktionary;
 
-# MB888: synchronous remote source and response parsing. UserCommands retains
-# command policy and asynchronous orchestration, importing the legacy names.
+# Source and asynchronous adaptation belong here. UserCommands retains command
+# policy and imports the historical lookup names without owning worker internals.
 use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
 use Encode ();
+use Mediabot::AsyncWorker ();
 
 our $VERSION = '1.00';
-our @EXPORT_OK = qw(_define_pick_entry _define_lookup_sync);
+our @EXPORT_OK = qw(_define_pick_entry _define_lookup_sync _define_lookup_async);
 
 # ---------------------------------------------------------------------------
 # _define_pick_entry($data, $preferred_lang)
@@ -126,6 +127,67 @@ sub _define_lookup_sync {
     my $pos_tag  = $pos ne '' ? " ($pos)" : '';
 
     return "$word$lang_tag$pos_tag: $first_def";
+}
+
+# Late legacy overrides remain available without loading UserCommands just to
+# use this source module. The child receives an empty bot state as before.
+sub _compat_define {
+    return Mediabot::UserCommands::_define_lookup_sync(@_)
+        if defined &Mediabot::UserCommands::_define_lookup_sync;
+    return _define_lookup_sync(@_);
+}
+
+sub _define_lookup_async {
+    my ($self, $word, $lang, $callback, %opts) = @_;
+    return 0 unless ref($callback) eq 'CODE';
+
+    my $timeout = $opts{timeout};
+    $timeout = 10 unless defined($timeout) && !ref($timeout)
+        && $timeout =~ /\A\d+(?:\.\d+)?\z/;
+    $timeout = 0.1 if $timeout < 0.1;
+    $timeout = 20 if $timeout > 20;
+    my $loop = eval { $self->getLoop };
+    $loop ||= $self->{loop} if ref($self);
+    my $fallback = "define: could not fetch definition for '$word'.";
+
+    unless ($loop && $loop->can('add') && $loop->can('remove')) {
+        my $message = eval { _compat_define($self, $word, $lang) };
+        $message = $fallback unless defined($message) && !ref($message) && $message ne '';
+        eval { $callback->($message); 1 };
+        return 1;
+    }
+
+    my $finished = 0;
+    my $done = sub {
+        my ($result) = @_;
+        return if $finished++;
+        my $message = $fallback;
+        if (ref($result) eq 'HASH' && $result->{ok} && ref($result->{value}) eq 'HASH') {
+            my $candidate = $result->{value}{message};
+            $message = $candidate if defined($candidate) && !ref($candidate)
+                && $candidate ne '' && length($candidate) <= 1024;
+        }
+        my $run = $callback;
+        undef $callback;
+        my $ok = eval { $run->($message); 1 };
+        if (!$ok && $self->{logger}) {
+            my $error = $@ || 'unknown callback failure';
+            $error =~ s/\s+/ /g;
+            eval { $self->{logger}->log(1, "define async callback failed: $error") };
+        }
+    };
+    my $worker = eval { Mediabot::AsyncWorker->start(
+        loop => $loop, label => 'definition lookup', timeout => $timeout,
+        term_grace => 0.2, force_grace => 1, max_output => 8192,
+        child => sub {
+            my $message = _compat_define({}, $word, $lang);
+            $message = $fallback unless defined($message) && !ref($message) && $message ne '';
+            return { message => substr($message, 0, 1024) };
+        },
+        on_done => $done,
+    ) };
+    $done->({ ok => 0, error => 'worker_setup' }) unless $worker;
+    return 1;
 }
 
 1;

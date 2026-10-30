@@ -7,11 +7,23 @@ use JSON::PP ();
 use File::Basename qw(dirname);
 
 our ($surface,$mode,$last_pid,$resolver_launches);
+our $worker_write;
 
 # Installed only in the fresh probe interpreter, before loading real owners.
 # Replace the external DNS producer, retaining its real Perl '-|' pipe and
 # every parent-side stream, timer, wait and signal operation.
 sub install_open_hook {
+    # Shared workers write to a dedicated pipe, not STDOUT. Keep early-eof
+    # probes closing the actual result endpoint after the MB1030 migration.
+    if (@ARGV && $ARGV[0] =~ /\A(?:country|define)\z/) {
+        no warnings qw(redefine once);
+        *CORE::GLOBAL::pipe = sub {
+            my $ok = CORE::pipe($_[0], $_[1]);
+            $worker_write = $_[1] if $ok;
+            return $ok;
+        };
+        return;
+    }
     return unless @ARGV && $ARGV[0] =~ /\A(?:resolve|reverse-dns)\z/;
     no warnings qw(redefine once);
     *CORE::GLOBAL::open = sub (*;$@) {
@@ -95,7 +107,7 @@ sub child_main {
     my $loop=IO::Async::Loop->new;
     my $bot=bless {loop=>$loop,conf=>bless({},'MB900PipeFixture::Conf'),
         logger=>bless({lines=>[]},'MB900PipeFixture::Log')},'MB900PipeFixture::Bot';
-    my (@callbacks,@warnings,@ticks,@lines,$return,$exception,$party);
+    my (@callbacks,@warnings,@ticks,@lines,@worker_events,$return,$exception,$party);
     local $SIG{__WARN__}=sub {push @warnings,@_};
     my $start=Time::HiRes::time();
     my $heartbeat=IO::Async::Timer::Countdown->new(delay=>0.05,on_expire=>sub {
@@ -104,7 +116,8 @@ sub child_main {
     $loop->add($heartbeat);$heartbeat->start;
     my $producer=sub {
         if ($mode eq 'early-eof') {
-            $SIG{TERM}='IGNORE';close STDOUT;Time::HiRes::sleep(5);POSIX::_exit(0);
+            $SIG{TERM}='IGNORE';close STDOUT;close $worker_write if $worker_write;
+            Time::HiRes::sleep(5);POSIX::_exit(0);
         }
         return $surface eq 'country' ? 'FR'
              : $surface eq 'define' ? 'definition accepted'
@@ -112,6 +125,16 @@ sub child_main {
     };
     {
         no warnings qw(redefine once);
+        my $consume = Mediabot::AsyncWorker->can('_consume_output');
+        my $terminate = Mediabot::AsyncWorker->can('_begin_termination');
+        local *Mediabot::AsyncWorker::_consume_output = sub {
+            push @worker_events, 'eof' if $_[2];
+            $consume->(@_);
+        };
+        local *Mediabot::AsyncWorker::_begin_termination = sub {
+            push @worker_events, 'terminate';
+            $terminate->(@_);
+        };
         local *Mediabot::Helpers::whereis=$producer;
         local *Mediabot::UserCommands::_define_lookup_sync=$producer;
         local *Mediabot::External::YouTube::_youtube_search_fetch_sync=$producer;
@@ -197,12 +220,14 @@ sub child_main {
     my $ok=$success && !defined($exception) && !@warnings && $reap==-1 && @ticks==1 && $ticks[0]<1;
     $ok&&=$elapsed<($surface eq 'resolve' && $mode eq 'early-eof'?4.3:3);
     $ok&&=$resolver_launches==1 if $surface eq 'resolve' || $surface eq 'reverse-dns';
+    $ok&&=@worker_events && $worker_events[0] eq 'eof'
+        if $worker_write && $mode eq 'early-eof' && $surface =~ /\A(?:country|define)\z/;
     # A failing probe must still clean up its own surviving child.
     if ($reap==0 && $last_pid) {kill 'KILL',$last_pid;waitpid($last_pid,0)}
     my $data={ok=>$ok?1:0,surface=>$surface,mode=>$mode,callbacks=>\@callbacks,lines=>\@lines,
         exception=>$exception,warnings=>\@warnings,child_check=>$reap,elapsed=>$elapsed,
         heartbeat=>\@ticks,peer_host=>$party ? $party->{users}{probe}{peer_host} : undef,
-        resolver_launches=>$resolver_launches//0};
+        resolver_launches=>$resolver_launches//0,worker_events=>\@worker_events};
     $data->{detail}=JSON::PP->new->canonical->encode($data);
     print JSON::PP->new->canonical->encode($data);
 }

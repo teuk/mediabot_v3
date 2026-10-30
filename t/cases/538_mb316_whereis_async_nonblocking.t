@@ -85,6 +85,7 @@ return sub {
     my $main = _slurp_mb316('mediabot.pl');
 
     my $country = _slurp_mb316('Mediabot/External/Country.pm');
+    my $worker_source = _slurp_mb316('Mediabot/AsyncWorker.pm');
     my $async = _extract_sub_mb316($country, 'whereis_async');
     $assert->ok(defined $async, 'whereis_async helper found');
 
@@ -96,7 +97,7 @@ return sub {
 
     $assert->like(
         $async // '',
-        qr/open\(my\s+\$pipe,\s*'-\|'\)/,
+        qr/Mediabot::AsyncWorker->start\(/,
         'blocking resolver/API work runs in a child process'
     );
 
@@ -107,44 +108,44 @@ return sub {
     );
 
     $assert->like(
-        $async // '',
+        $worker_source,
         qr/POSIX::_exit\(0\)/,
         'forked child exits without running inherited bot destructors'
     );
 
     $assert->like(
-        $async // '',
+        $worker_source,
         qr/IO::Async::Stream->new/,
         'parent consumes the result pipe through IO::Async::Stream'
     );
 
     $assert->like(
-        $async // '',
+        $worker_source,
         qr/IO::Async::Timer::Countdown->new/,
-        'lookup timeout and reap polling use asynchronous timers'
+        'shared worker uses asynchronous timeout timers'
     );
 
     $assert->like(
-        $async // '',
-        qr/waitpid\(\$child_pid,\s*WNOHANG\)/,
-        'child collection is non-blocking'
+        $worker_source,
+        qr/\$loop->watch_process\(/,
+        'shared worker gives child collection to the event loop'
     );
 
     $assert->like(
-        $async // '',
-        qr/kill\s+'TERM',\s*\$child_pid/,
+        $worker_source,
+        qr/->_signal_child\('TERM'\)/,
         'timeout first sends TERM'
     );
 
     $assert->like(
-        $async // '',
-        qr/kill\s+'KILL',\s*\$child_pid/,
+        $worker_source,
+        qr/->_signal_child\('KILL'\)/,
         'timeout escalates to KILL when required'
     );
 
     $assert->like(
         $async // '',
-        qr/my\s+\$remaining\s*=\s*256\s*-\s*length\(\$state->\{output\}\)/,
+        qr/max_output\s*=>\s*1024\b/,
         'child output is bounded'
     );
 

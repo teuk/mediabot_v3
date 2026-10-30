@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1030 — Give external lookups one shared worker lifecycle
+
+- Replace the independent country and definition fork/pipe/timer implementations
+  with the existing AsyncWorker owner for framing, deadlines, TERM/KILL and
+  process collection. Keep source-specific normalization and failure messages.
+- Move definition async adaptation into External::Wiktionary. UserCommands
+  retains command validation and Context routing through the historical alias;
+  late source overrides and explicit no-loop compatibility remain supported.
+- Guard one completion per request, release caller callbacks after delivery,
+  and never retry a failed worker launch as blocking work in the IRC parent.
+  Preserve text limits with bounded UTF-8 JSON transport budgets.
+- Retain the historical assertion counts, directing lifecycle checks to their
+  shared owner. Update early-EOF probes to close the actual dedicated pipe.
+  Add eleven focused adapter/ownership/native-process assertions and document
+  the architecture. No dependency, command, schema or configuration changes.
+
 ### MB1029 — Keep activity charts and ranks consistent with their counts
 
 - Normalize SQL-returned nickname keys in monthly comparisons, matching the
