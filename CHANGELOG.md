@@ -1,3 +1,16 @@
+## MB1022 — Prepare the final 3.7 qualification path (2026-10-30)
+
+- Let Debian CI select the explicit final VERSION=3.7 archive as well as its
+  non-publishable 3.6dev rehearsal. Preserve the 3.3/3.5 upgrade history,
+  immutable migrations, exact commit/root checks and CI-only SQL trial.
+- Require a dated committed 3.7 changelog heading in the final upgrade gate.
+  Make release-identity tests check the matching development or final public
+  identity while retaining historical 3.5 evidence and all existing assertions.
+- Run the offline mbweb lane and generated command inventory explicitly in CI.
+  Add eight isolated native gate assertions and a draft release/acceptance guide.
+- No application runtime, schema, configuration, published VERSION, tag,
+  production deployment or plugin activation changes. Release decision pending.
+
 ## MB1021 — Preview public MixCloud creator profiles (2026-10-29)
 
 - Extend the existing MixCloud preview to /creator/ profile links with a

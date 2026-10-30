@@ -119,6 +119,12 @@ jobs:
               CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}-rehearsal-${CANDIDATE_SHORT}"
               CANDIDATE_ARGS=(--rehearsal)
               ;;
+            3.7)
+              CANDIDATE_VERSION=3.7
+              CANDIDATE_KIND=stable
+              CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}"
+              CANDIDATE_ARGS=()
+              ;;
             *)
               echo "ERROR: unsupported release/development VERSION: $SOURCE_VERSION" >&2
               exit 1
@@ -602,7 +608,7 @@ jobs:
           cmp --silent "$MIGRATED_DUMP" "$REAPPLIED_DUMP"
           echo 'MB725_REAPPLY=OK'
 
-      - name: Exercise stable 3.5 to 3.7 rehearsal database upgrade
+      - name: Exercise stable 3.5 to 3.7 candidate database upgrade
         if: env.MEDIABOT_CANDIDATE_VERSION == '3.7'
         shell: bash
         run: |
@@ -611,7 +617,8 @@ jobs:
 
           # The historical 3.3 gate above stays independent. This gate starts
           # from the actual annotated stable 3.5 tag and uses the same unpacked
-          # and explicitly non-publishable 3.7 rehearsal as the fresh trial.
+          # 3.7 archive as the fresh trial: rehearsal during development,
+          # stable-shaped only on the explicit final VERSION=3.7 commit.
           bash "$MEDIABOT_CANDIDATE_ROOT/tools/qualify_37_upgrade.sh" \
             --repo "$GITHUB_WORKSPACE" \
             --candidate "$MEDIABOT_CANDIDATE_ROOT"
@@ -627,4 +634,4 @@ jobs:
           cd "$GITHUB_WORKSPACE"
 
           perl t/test_commands.pl \
-            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|718_|719_|720_|723_|830_|884_|885_|886_|887_|888_|889_|1043_|1152_)'
+            -f '^(119_|125_|132_|597_|598_|599_|600_|610_|717_|718_|719_|720_|723_|830_|884_|885_|886_|887_|888_|889_|1043_|1050_|1152_|1397_)'

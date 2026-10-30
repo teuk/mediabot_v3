@@ -32,6 +32,9 @@ return sub {
     my $gitattributes = _slurp_721($attrs);
     my $readme = _slurp_721(File::Spec->catfile('.', 'README.md'));
     my $changelog = _slurp_721(File::Spec->catfile('.', 'CHANGELOG.md'));
+    my $version = _slurp_721('VERSION');
+    $version =~ s/\s+\z//;
+    my $stable = $version eq '3.7' ? '3.7' : '3.5';
 
     $assert->like($script, qr/git archive --format=tar --prefix="\$PREFIX" "\$REF"/,
         'builder archives the selected committed Git ref');
@@ -77,21 +80,21 @@ return sub {
 
     $assert->like($doc, qr/release_dest='\/home\/wws\/downloads\/mediabot'/,
         'release documentation records the requested server destination');
-    $assert->like($doc, qr/release_version='3\.5'/,
-        'release documentation prepares the intended 3.5 identity explicitly');
+    $assert->like($doc, qr/release_version='\Q$stable\E'/,
+        'release documentation prepares the intended stable identity explicitly');
     $assert->like($doc, qr/--version "\$release_version"/,
         'release documentation passes the explicit version to the builder');
     $assert->like($doc, qr/--ref "\$release_ref"/,
         'release documentation passes the exact ref to the builder');
-    $assert->like($doc, qr/mediabot_v3-3\.5-SHA256SUMS/,
-        'release documentation names the planned 3.5 SHA-256 manifest');
-    $assert->like($doc, qr/mediabot_v3-3\.5-SHA512SUMS/,
-        'release documentation names the planned 3.5 SHA-512 manifest');
+    $assert->like($doc, qr/mediabot_v3-\Q$stable\E-SHA256SUMS/,
+        'release documentation names the planned stable SHA-256 manifest');
+    $assert->like($doc, qr/mediabot_v3-\Q$stable\E-SHA512SUMS/,
+        'release documentation names the planned stable SHA-512 manifest');
     $assert->like($doc, qr/does not declare it stable/,
         'release preparation does not prematurely publish 3.5');
 
-    $assert->like($readme, qr/3\.5\s+current stable release/i,
-        'README marks 3.5 as current stable');
+    $assert->like($readme, qr/\Q$stable\E\s+current stable release/i,
+        'README marks the phase-appropriate version as current stable');
     $assert->like($readme, qr/3\.6dev\s+current development line/i,
         'README names the current development line');
     $assert->like($changelog, qr/^##\s*\[3\.5\]\s+\x{2014}\s+2026-09-06/m,

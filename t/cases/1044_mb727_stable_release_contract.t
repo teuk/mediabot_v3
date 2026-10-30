@@ -24,14 +24,15 @@ return sub {
     my $workflow = _slurp_1044('.github/workflows/debian13.yml');
 
     $version =~ s/\s+\z//;
-    $assert->like($version, qr/^3\.6dev-[0-9]{8}_[0-9]{6}$/,
-        'mb731: master has the timestamped 3.6 development VERSION');
+    my $stable = $version eq '3.7' ? '3.7' : '3.5';
+    $assert->like($version, qr/^(?:3\.6dev-[0-9]{8}_[0-9]{6}|3\.7)$/,
+        'mb731: source is the 3.6 development candidate or explicit final 3.7');
 
-    $assert->like($readme, qr/^3\.5\s+current stable release$/m,
-        'mb727: README publishes 3.5 as current stable');
+    $assert->like($readme, qr/^\Q$stable\E\s+current stable release$/m,
+        'mb727: README publishes the stable identity appropriate to the source phase');
     $assert->like($readme, qr/^3\.6dev\s+current development line$/m,
         'mb731: README exposes the active even development line');
-    $assert->like($readme, qr{releases/tag/3\.5},
+    $assert->like($readme, qr{releases/tag/\Q$stable\E},
         'mb727: README links the matching stable release');
 
     $assert->like($change, qr/^## \[3\.5\] — 2026-09-06$/m,
@@ -42,16 +43,16 @@ return sub {
     $assert->unlike($change, qr/^## \[Unreleased\] — 3\.4dev$/m,
         'mb727: released work is no longer labelled Unreleased');
 
-    $assert->like($security, qr/^\| 3\.5 stable\s+\| Yes\s+\|$/m,
-        'mb727: security policy supports stable 3.5');
+    $assert->like($security, qr/^\| \Q$stable\E stable\s+\| Yes\s+\|$/m,
+        'mb727: security policy supports the current stable identity');
     $assert->like($security, qr/^\| 3\.6dev\s+\| Yes, development code\s+\|$/m,
         'mb727: security policy and README agree on the next line');
 
-    $assert->like($releasing, qr/^stable version: 3\.5$/m,
-        'mb727: release guide records stable 3.5');
-    $assert->like($releasing, qr/^Git tag:\s+3\.5$/m,
-        'mb727: release guide records the plain 3.5 tag');
-    $assert->like($releasing, qr/^archive root:\s+mediabot_v3-3\.5\/$/m,
+    $assert->like($releasing, qr/^stable version: \Q$stable\E$/m,
+        'mb727: release guide records the current stable identity');
+    $assert->like($releasing, qr/^Git tag:\s+\Q$stable\E$/m,
+        'mb727: release guide records the matching plain tag');
+    $assert->like($releasing, qr/^archive root:\s+mediabot_v3-\Q$stable\E\/$/m,
         'mb727: release guide records the stable archive root');
     $assert->like($releasing, qr/explicit MB727 release decision/,
         'mb727: stable identity derives from the explicit operator gate');

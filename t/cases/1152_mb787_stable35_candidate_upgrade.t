@@ -41,8 +41,8 @@ return sub {
     $assert->like($workflow, qr/Exercise stable 3\.3 to current database upgrade/,
         'historical 3.3 upgrade gate remains present');
     $assert->like($workflow,
-        qr/Exercise stable 3\.5 to 3\.7 rehearsal database upgrade\n\s+if: env\.MEDIABOT_CANDIDATE_VERSION == '3\.7'/,
-        '3.5 gate runs only for 3.7 rehearsal candidates');
+        qr/Exercise stable 3\.5 to 3\.7 candidate database upgrade\n\s+if: env\.MEDIABOT_CANDIDATE_VERSION == '3\.7'/,
+        '3.5 gate runs only for 3.7 rehearsal or final candidates');
     $assert->like($workflow,
         qr/qualify_37_upgrade\.sh"\s+\\\s+--repo "\$GITHUB_WORKSPACE"\s+\\\s+--candidate "\$MEDIABOT_CANDIDATE_ROOT"/,
         'CI uses the extracted candidate and the real Git history');

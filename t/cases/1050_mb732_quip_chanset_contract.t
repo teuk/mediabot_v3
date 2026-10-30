@@ -25,5 +25,9 @@ return sub {
     my $change=_slurp_1050('CHANGELOG.md');
     my @entries=$change =~ /^### mb732\b/gm;
     $a->is(scalar @entries,1,'mb732: changelog contains one entry');
-    $a->like($change,qr/^## \[Unreleased\].*?^### mb732.*?^## \[3\.5\]/ms,'mb732: change belongs to development, not the frozen stable release');
+    my $version=_slurp_1050('VERSION');$version =~ s/\s+\z//;
+    my $section=$version eq '3.7'
+        ? qr/^## \[3\.7\].*?^### mb732.*?^## \[3\.5\]/ms
+        : qr/^## \[Unreleased\].*?^### mb732.*?^## \[3\.5\]/ms;
+    $a->like($change,$section,'mb732: post-3.5 work belongs to the current development or final 3.7 section');
 };

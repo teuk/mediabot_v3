@@ -139,6 +139,22 @@ jobs:
           export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
           perl tools/security_audit.pl --quiet
 
+      - name: Run the offline mbweb application tests
+        shell: bash
+        working-directory: contrib/mbweb
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          npm test
+
+      - name: Check the generated command inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
+          perl tools/mb_architecture_inventory.pl --check docs/generated/COMMAND_INVENTORY.md
+
       - name: Run the startup integrity check
         shell: bash
         run: |

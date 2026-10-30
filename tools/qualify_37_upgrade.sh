@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MB787: qualify the non-publishable 3.7 rehearsal against the released 3.5 schema.
+# Qualify the 3.7 rehearsal or final source archive against released stable 3.5.
 set -Eeuo pipefail
 umask 077
 
@@ -7,7 +7,8 @@ usage() {
   cat <<'USAGE'
 Usage: tools/qualify_37_upgrade.sh --repo ROOT --candidate ROOT [--lineage-only]
 
-The candidate must be an unpacked 3.7 rehearsal (VERSION remains 3.6dev).
+The candidate must be an unpacked 3.7 rehearsal (VERSION=3.6dev) or the
+explicit final VERSION=3.7 archive. Neither mode publishes or tags a release.
 --lineage-only checks the immutable 3.5 migration history and exact published
 order without starting MariaDB. The database trial runs only in disposable CI.
 USAGE
@@ -46,12 +47,20 @@ CANDIDATE="$(cd "$CANDIDATE" && pwd -P)"
 }
 SOURCE_VERSION="$(tr -d '\r\n' <"$CANDIDATE/VERSION")"
 case "$SOURCE_VERSION" in
-  3.6dev|3.6dev-*) ;;
-  *) echo "ERROR: expected an unpacked 3.6dev candidate, got $SOURCE_VERSION" >&2; exit 1 ;;
+  3.6dev|3.6dev-*) CANDIDATE_KIND=rehearsal ;;
+  3.7) CANDIDATE_KIND=stable ;;
+  *) echo "ERROR: expected an unpacked 3.6dev or final 3.7 candidate, got $SOURCE_VERSION" >&2; exit 1 ;;
 esac
 [ "$SOURCE_VERSION" = "$(git -C "$REPO" show HEAD:VERSION | tr -d '\r\n')" ] || {
   echo 'ERROR: candidate VERSION differs from checked-out commit' >&2; exit 1;
 }
+if [ "$CANDIDATE_KIND" = stable ]; then
+  RELEASE_CHANGELOG="$(git -C "$REPO" show HEAD:CHANGELOG.md)"
+  grep -Eq '^##[[:space:]]*\[3\.7\][[:space:]]+—[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$' \
+    <<<"$RELEASE_CHANGELOG" || {
+    echo 'ERROR: final 3.7 candidate requires a dated committed release heading' >&2; exit 1;
+  }
+fi
 WORK="$(mktemp -d /tmp/mediabot-37-upgrade.XXXXXX)"
 DB_PID=''
 DB_LOG=''
@@ -129,9 +138,13 @@ cat "$WORK/ordered-new"
 [ "$REPO" = "$(cd "$GITHUB_WORKSPACE" && pwd -P)" ] || {
   echo 'ERROR: repository differs from the CI checkout' >&2; exit 1
 }
-EXPECTED_ROOT="/opt/mediabot-candidate/mediabot_v3-3.7-rehearsal-${GITHUB_SHA:0:12}"
+if [ "$CANDIDATE_KIND" = rehearsal ]; then
+  EXPECTED_ROOT="/opt/mediabot-candidate/mediabot_v3-3.7-rehearsal-${GITHUB_SHA:0:12}"
+else
+  EXPECTED_ROOT="/opt/mediabot-candidate/mediabot_v3-3.7"
+fi
 [ "$CANDIDATE" = "$EXPECTED_ROOT" ] || {
-  echo 'ERROR: database trial requires the exact unpacked CI rehearsal' >&2; exit 1
+  echo 'ERROR: database trial requires the exact unpacked CI candidate' >&2; exit 1
 }
 . /etc/os-release
 [ "$ID" = debian ] && [ "$VERSION_ID" = 13 ] || {

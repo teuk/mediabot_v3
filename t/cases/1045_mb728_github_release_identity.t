@@ -19,8 +19,8 @@ return sub {
     my $version = _slurp_1045('VERSION');
     $version =~ s/\s+\z//;
 
-    $assert->like($version, qr/^3\.6dev-[0-9]{8}_[0-9]{6}$/,
-        'mb731: moving source identity is the timestamped 3.6 development line');
+    $assert->like($version, qr/^(?:3\.6dev-[0-9]{8}_[0-9]{6}|3\.7)$/,
+        'mb731: moving source identity is 3.6dev or the explicit final 3.7');
 
     for my $workflow (qw(ci debian13)) {
         $assert->like(

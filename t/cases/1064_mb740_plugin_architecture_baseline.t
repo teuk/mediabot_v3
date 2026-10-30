@@ -84,8 +84,11 @@ return sub {
     $assert->is($exit, 0, 'generated command inventory matches source truth');
 
     my $generated = _slurp_1064(File::Spec->catfile('.', $inventory));
-    $assert->like($generated, qr/Source version line: `3\.6dev`/,
-        'development inventory records the stable version line');
+    my $line = _slurp_1064('VERSION');
+    $line =~ s/\s+\z//;
+    $line =~ s/-[0-9]{8}_[0-9]{6}\z//;
+    $assert->like($generated, qr/Source version line: `\Q$line\E`/,
+        'inventory records the actual source version line');
     $assert->unlike($generated, qr/Source version: `[^`]+-\d{8}_\d{6}`/,
         'development inventory excludes volatile commit timestamps');
     $assert->like($generated, qr/\| Internal help entries \| 250 \|/,

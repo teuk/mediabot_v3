@@ -40,7 +40,7 @@ the final release gate must still set the exact stable
 
 ## 0. Rehearse the artifacts from the committed candidate
 
-From a clean committed `3.4dev` candidate, run:
+From a clean committed candidate on the preceding even development line, run:
 
 ```bash
 cd /home/mediabot/mediabot_v3 || exit 1
@@ -76,8 +76,10 @@ publish an artifact; those remain explicit release actions below.
 ## MB787 3.7 candidate qualification
 
 The published stable version remains **3.5**. On the `3.6dev` line, the Debian
-13 workflow packages the tested commit as a non-publishable 3.7 rehearsal and
-installs only that unpacked archive. The historical stable 3.3 upgrade and its
+13 workflow packages the tested development commit as a non-publishable 3.7
+rehearsal. MB1022 also accepts the explicit final `VERSION=3.7` commit and its
+matching stable-shaped archive; it requires a dated committed 3.7 release
+heading. It installs only the selected unpacked archive. The historical stable 3.3 upgrade and its
 rollback/reapplication proof remain in the same workflow.
 
 MB787 adds an independent path from the actual annotated `3.5` tag. The gate
@@ -89,7 +91,7 @@ dump byte for byte and reapplies the upgrade to the same final dump. Success
 reports `MB787_LINEAGE=OK`, `MB787_ROLLBACK=OK` and `MB787_REAPPLY=OK`.
 
 To inspect migration lineage without starting a database, unpack the verified
-rehearsal archive and run `tools/qualify_37_upgrade.sh --repo <checkout>
+rehearsal or final archive and run `tools/qualify_37_upgrade.sh --repo <checkout>
 --candidate <unpacked archive> --lineage-only`. The database trial runs only
 inside disposable GitHub Actions CI. Its output does not declare 3.7 stable or
 authorize publication, tagging, database changes on an installed instance, or
@@ -99,6 +101,48 @@ There is no 3.7 release schedule. Current development priorities and the
 separate acceptance steps for `#i/o` are in the
 [`3.6dev roadmap`](ROADMAP_3.6DEV.md). Qualification evidence can continue to
 run in CI without opening a release or changing production.
+
+## MB1022 — Prepare the decision for 3.7
+
+The published identity at the top of this file remains 3.5 until an explicit
+release decision. The generic publication examples below describe that
+published release; they are not instructions to republish 3.5 for the next one.
+For the present 3.6dev candidate, use only the non-publishing preparation:
+
+```bash
+perl t/test_commands.pl --progress
+(cd contrib/mbweb && npm test)
+perl tools/security_audit.pl --quiet
+perl tools/startup_integrity_check.pl --quiet
+perl tools/mb_architecture_inventory.pl --check docs/generated/COMMAND_INVENTORY.md
+# After the reviewed preparation commit, with a clean tracked worktree:
+bash tools/rehearse_release_artifacts.sh --version 3.7 --ref HEAD
+```
+
+CI now runs mbweb and inventory checks explicitly. Both normal CI and Debian
+13 acceptance must pass on the selected commit; local process-fixture failures
+are not an exemption from that gate. The migration qualification remains
+read-only with `--lineage-only` and starts MariaDB only in disposable CI.
+
+The [3.7 acceptance sheet](RELEASE_ACCEPTANCE_3.7.md) records remaining real
+checks. [Draft 3.7 notes](RELEASE_NOTES_3.7.md) describe the intended release
+without declaring it published. The earlier 3.6dev acceptance sheet remains
+historical evidence, not a successful new 3.7 recipe.
+
+If publication is later approved, prepare one final metadata commit with:
+
+- exact `VERSION=3.7` through native `commit.sh --release 3.7`;
+- one dated `[3.7]` changelog section replacing the completed 3.6dev unreleased
+  section, retaining historical entries and the dated 3.5 section;
+- README status/download sections, SECURITY support table and this guide's
+  current identity/examples synchronized to 3.7;
+- final 3.7 notes and the regenerated command inventory for source line 3.7.
+
+The existing README header and its historical 3.5 artwork/evidence are retained.
+Do not relabel old test counts or old operational evidence as 3.7 results.
+Release tests validate these two defined phases; an unrelated version is still
+refused. Qualify the final metadata commit before tagging it. Creating an
+archive in a disposable test fixture does not approve its publication.
 
 ## Supported release-path authorities
 
