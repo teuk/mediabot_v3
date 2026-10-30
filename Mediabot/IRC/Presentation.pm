@@ -142,20 +142,22 @@ sub _markdown_to_irc {
     $text = join '', @parts;
 
     # Strong is evaluated first so ***nested emphasis*** becomes bold+italic.
-    $text =~ s/\*\*\s*(?=\S)(.+?\S)\s*\*\*/IRC_BOLD . $1 . IRC_BOLD/gse;
-    $text =~ s/(?<![\w_])__\s*(?=\S)(.+?\S)\s*__(?![\w_])/IRC_BOLD . $1 . IRC_BOLD/gse;
-    $text =~ s/(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)/IRC_ITALIC . $1 . IRC_ITALIC/gse;
-    $text =~ s/(?<![\w_])_(?=\S)(.+?\S)_(?![\w_])/IRC_ITALIC . $1 . IRC_ITALIC/gse;
-    $text =~ s/\+\+(?=\S)(.+?\S)\+\+/IRC_UNDERLINE . $1 . IRC_UNDERLINE/gse;
-    $text =~ s/~~(?=\S)(.+?\S)~~/$1/gs;
-
-    $text =~ s/\x{f0000}(\d+)\x{f0001}/
-        defined($literal[$1]) ? $literal[$1] : ''
-    /gex;
+    # A lookbehind lets the same character satisfy both non-space boundaries.
+    $text =~ s/\*\*\s*(?=\S)(.+?)(?<=\S)\s*\*\*/IRC_BOLD . $1 . IRC_BOLD/gse;
+    $text =~ s/(?<![\w_])__\s*(?=\S)(.+?)(?<=\S)\s*__(?![\w_])/IRC_BOLD . $1 . IRC_BOLD/gse;
+    $text =~ s/(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)/IRC_ITALIC . $1 . IRC_ITALIC/gse;
+    $text =~ s/(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w_])/IRC_ITALIC . $1 . IRC_ITALIC/gse;
+    $text =~ s/\+\+(?=\S)(.+?)(?<=\S)\+\+/IRC_UNDERLINE . $1 . IRC_UNDERLINE/gse;
+    $text =~ s/~~(?=\S)(.+?)(?<=\S)~~/$1/gs;
 
     # Remove unsupported Markdown scaffolding that survived malformed input.
     $text =~ s/`+//g;
     $text =~ s/\*\*|__|~~//g;
+    # Escaped markers are literal content, including doubled markers/ticks.
+    # Restore them only after removing unescaped Markdown scaffolding.
+    $text =~ s/\x{f0000}(\d+)\x{f0001}/
+        defined($literal[$1]) ? $literal[$1] : ''
+    /gex;
     $text =~ s/[\t ]+/ /g;
     $text =~ s/^\s+|\s+$//g;
 

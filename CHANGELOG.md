@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1028 — Render short emphasis and preserve escaped Markdown literals
+
+- Accept a single non-space character in bold, italic and underline spans.
+  Short ASCII, accented and emoji spans no longer retain their markers or
+  turn bold into italic text with visible asterisks. Keep adjacent spans separate.
+- Restore escaped markers after unescaped-scaffolding cleanup, preserving
+  literal doubled asterisks/underscores, backticks and strike markers instead
+  of deleting text the caller explicitly escaped.
+- Add nine focused assertions through the shared renderer and its AI facade;
+  six fail before correction. Preserve long/nested emphasis, filtering, the
+  two-line cap, byte budgets and truncation suffix. No provider, configuration,
+  dependency, command, schema or delivery changes; all existing tests retained.
+
 ### MB1027 — Isolate network-statistics reply bursts before parsing counts
 
 - Treat each LUSERS 251 as a new sample boundary even when its visibility
