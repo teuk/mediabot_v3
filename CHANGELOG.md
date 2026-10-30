@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1027 — Isolate network-statistics reply bursts before parsing counts
+
+- Treat each LUSERS 251 as a new sample boundary even when its visibility
+  breakdown is restricted, malformed or uses an unrecognized server format.
+  A later 255/266 reply no longer inherits the previous burst's counts or age.
+- Retain fresh optional counters and explicit zeros, allow a valid total-only
+  fallback, and discard an unfinished new burst without replacing the last
+  confirmed private snapshot. Preserve settling, expiry and disconnect rules.
+- Add seven focused offline assertions, including actual core numeric dispatch
+  and JSON file publication; four fail before the fix. No existing tests,
+  schema, configuration, polling cadence or dashboard protocol changes.
+
 ### MB1026 — Keep development-version checks portable to public CI
 
 - Check the timestamped 3.8dev identity and its ordering after stable 3.7 with

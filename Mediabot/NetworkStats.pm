@@ -70,13 +70,15 @@ sub observe {
     my ($s,$n,$args,$text)=@_;
     return unless $s->{enabled};
     my $now=int($s->{now}->());
+    if ($n eq '251') {
+        # A 251 starts a new burst even when its counts cannot be parsed.
+        # Otherwise a restricted/new server format can retain the previous
+        # cycle's completed sample and mix it with the next 255/266 reply.
+        $s->{pending}={sampled_at=>$now,counts=>{},schema=>1,network=>$s->{network},interval=>$s->{interval}};
+        $s->{last_numeric}=$now;
+    }
     my $v=parse_numeric($n,$args,$text);
     return unless keys %$v;
-    if ($n eq '251') {
-        # A new reply starts a new sample. Never reuse the previous cycle's
-        # optional fields; an omitted/restricted numeric remains unknown.
-        $s->{pending}={sampled_at=>$now,counts=>{},schema=>1,network=>$s->{network},interval=>$s->{interval}};
-    }
     if (!$s->{pending} && ($n eq '255' || $n eq '266')) {
         $s->{pending}={sampled_at=>$now,counts=>{},schema=>1,network=>$s->{network},interval=>$s->{interval}};
     }
