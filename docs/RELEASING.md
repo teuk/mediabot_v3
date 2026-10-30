@@ -3,6 +3,20 @@
 This page documents the stable release path. It is intentionally stricter than
 creating a private development snapshot.
 
+## Current development line: 3.8dev
+
+The operator opened 3.8dev on 30 October 2026 after publication of stable 3.7.
+Use `bash ./commit.sh --development 3.8` for the opening commit. The native
+format is `3.8dev-YYYYMMDD_HHMMSS`; subsequent ordinary commits continue that
+line automatically. Keep VERSION, the Unreleased changelog, support policy
+and generated inventory aligned before testing and committing.
+
+Debian CI builds a non-publishable 3.9 rehearsal from the 3.8dev source. This
+is packaging validation, not a 3.9 release decision. The existing fresh-install
+and 3.3 database upgrade checks continue; the historical 3.5-to-3.7 qualifier
+remains specific to its accepted 3.7 candidate. The tag-scoped 3.7 publisher
+and published 3.7 artifacts stay unchanged.
+
 ## Release identity
 
 Mediabot uses odd minor versions for stable releases and even minor versions for

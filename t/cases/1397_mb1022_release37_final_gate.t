@@ -28,17 +28,18 @@ my $script=$selector."\nprintf '%s|%s|%s|%s\\n' \"\$CANDIDATE_VERSION\" \"\$CAND
 {
     my @got;
     local $ENV{CANDIDATE_SHORT}='123456abcdef';
-    for my $version ('3.4dev-20260101_010203','3.5','3.6dev-20261030_080000','3.7') {
+    for my $version ('3.4dev-20260101_010203','3.5','3.6dev-20261030_080000','3.7','3.8dev-20261030_130708') {
         local $ENV{SOURCE_VERSION}=$version;push @got,run_1397('bash','-c',$script);
     }
     is_deeply(\@got,[[0,"3.5|rehearsal|mediabot_v3-3.5-rehearsal-123456abcdef|--rehearsal\n"],
         [0,"3.5|stable|mediabot_v3-3.5|\n"],[0,"3.7|rehearsal|mediabot_v3-3.7-rehearsal-123456abcdef|--rehearsal\n"],
-        [0,"3.7|stable|mediabot_v3-3.7|\n"]],
-        'actual CI selector preserves old identities and distinguishes final 3.7 from its development rehearsal');
+        [0,"3.7|stable|mediabot_v3-3.7|\n"],
+        [0,"3.9|rehearsal|mediabot_v3-3.9-rehearsal-123456abcdef|--rehearsal\n"]],
+        'actual CI selector preserves released identities and keeps 3.6/3.8 development candidates non-publishable');
 }
 {
     my @rc;local $ENV{CANDIDATE_SHORT}='123456abcdef';
-    for my $version ('','3.7dev','3.7-rc1','3.8dev','4.0') {
+    for my $version ('','3.7dev','3.7-rc1','3.10dev','4.0') {
         local $ENV{SOURCE_VERSION}=$version;push @rc,run_1397('bash','-c',$script)->[0];
     }
     is_deeply(\@rc,[(1)x5],'unknown and provisional identities cannot silently enter the stable path');

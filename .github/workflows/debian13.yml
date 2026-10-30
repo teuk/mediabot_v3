@@ -125,6 +125,12 @@ jobs:
               CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}"
               CANDIDATE_ARGS=()
               ;;
+            3.8dev|3.8dev-*)
+              CANDIDATE_VERSION=3.9
+              CANDIDATE_KIND=rehearsal
+              CANDIDATE_BASE="mediabot_v3-${CANDIDATE_VERSION}-rehearsal-${CANDIDATE_SHORT}"
+              CANDIDATE_ARGS=(--rehearsal)
+              ;;
             *)
               echo "ERROR: unsupported release/development VERSION: $SOURCE_VERSION" >&2
               exit 1

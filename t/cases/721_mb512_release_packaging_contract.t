@@ -34,7 +34,8 @@ return sub {
     my $changelog = _slurp_721(File::Spec->catfile('.', 'CHANGELOG.md'));
     my $version = _slurp_721('VERSION');
     $version =~ s/\s+\z//;
-    my $stable = $version eq '3.7' ? '3.7' : '3.5';
+    my $stable = $version eq '3.7' || $version =~ /\A3\.8dev-/ ? '3.7' : '3.5';
+    my $development = $version =~ /\A3\.8dev-/ ? '3.8dev' : '3.6dev';
 
     $assert->like($script, qr/git archive --format=tar --prefix="\$PREFIX" "\$REF"/,
         'builder archives the selected committed Git ref');
@@ -95,7 +96,7 @@ return sub {
 
     $assert->like($readme, qr/\Q$stable\E\s+current stable release/i,
         'README marks the phase-appropriate version as current stable');
-    $assert->like($readme, qr/3\.6dev\s+current development line/i,
+    $assert->like($readme, qr/\Q$development\E\s+current development line/i,
         'README names the current development line');
     $assert->like($changelog, qr/^##\s*\[3\.5\]\s+\x{2014}\s+2026-09-06/m,
         'CHANGELOG dates the 3.5 release');

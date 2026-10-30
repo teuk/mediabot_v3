@@ -122,7 +122,8 @@ sub mbCompat_ctx {
             }
         }
         # Garder top 100 mots
-        my @top = (sort { $w_counts{$b} <=> $w_counts{$a} } keys %w_counts)[0..99];
+        # Equal frequencies need a stable cutoff across hash seeds and restarts.
+        my @top = (sort { $w_counts{$b} <=> $w_counts{$a} || $a cmp $b } keys %w_counts)[0..99];
         @top = grep { defined } @top;
         $words{$who} = { map { $_ => 1 } @top };
     }

@@ -24,14 +24,19 @@ return sub {
     my $workflow = _slurp_1047('.github/workflows/debian13.yml');
 
     $version =~ s/\s+\z//;
-    my $stable = $version eq '3.7' ? '3.7' : '3.5';
-    $assert->like($version, qr/^(?:3\.6dev-[0-9]{8}_[0-9]{6}|3\.7)$/,
-        'mb731-1047: source carries a timestamped 3.6dev or exact final 3.7 identity');
+    my $stable = $version eq '3.7' || $version =~ /\A3\.8dev-/ ? '3.7' : '3.5';
+    my $development = $version =~ /\A3\.8dev-/ ? '3.8dev' : '3.6dev';
+    $assert->like($version, qr/^(?:3\.(?:6|8)dev-[0-9]{8}_[0-9]{6}|3\.7)$/,
+        'mb731-1047: source carries a supported timestamped development or exact final 3.7 identity');
     $assert->like($readme, qr/^\Q$stable\E\s+current stable release$/m,
         'mb731-1047: README stable identity follows the source phase');
-    $assert->like($readme, qr/^3\.6dev\s+current development line$/m,
-        'mb731-1047: README exposes 3.6dev as current development');
-    if ($version eq '3.7') {
+    $assert->like($readme, qr/^\Q$development\E\s+current development line$/m,
+        'mb731-1047: README exposes the current development line');
+    if ($version =~ /\A3\.8dev-/) {
+        $assert->like($change, qr/^## \[Unreleased\] — 3\.8dev$/m,
+            'mb1025: the new work has its own 3.8dev unreleased heading');
+    }
+    if ($stable eq '3.7') {
         $assert->like($change, qr/^## \[3\.7\] — [0-9]{4}-[0-9]{2}-[0-9]{2}$/m,
             'mb1022: final 3.7 has a dated release heading');
         $assert->unlike($change, qr/^## \[Unreleased\] — 3\.6dev$/m,

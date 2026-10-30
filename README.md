@@ -50,9 +50,9 @@ Start with [Trivia](Mediabot/Games/Trivia.pm),
 [plugin workshop](docs/PLUGIN_WORKSHOP.md), then follow
 [CONTRIBUTING.md](CONTRIBUTING.md) to prepare a focused change.
 
-`master` identifies the selected 3.7 source. Use the verified, tagged 3.7
-release artifacts for production after publication. The completed 3.6dev line
-remains the development lineage; the next development line is not opened here.
+`master` now follows the **3.8dev** development line. Use the verified, tagged
+**3.7** release artifacts for production. The completed 3.6dev line remains
+the history of the 3.7 release; new work is recorded separately under Unreleased.
 
 ## Development walkthroughs
 
@@ -95,13 +95,14 @@ flowchart TB
 | Line | Status | Recommended use |
 | --- | --- | --- |
 | **3.7** | Current stable release | Production installations from verified release artifacts |
+| **3.8dev** | Current development line | Development and supervised testing |
 | **3.6dev** | Development line completed for 3.7 | Evaluation of the preceding development snapshots |
 
 Stable and development installations should use separate directories, configurations, systemd instances, runtime files and IRC identities.
 
 ```text
 3.7      current stable release
-3.6dev   current development line
+3.8dev   current development line
 ```
 
 ### Mediabot 3.7 release notes
@@ -357,7 +358,7 @@ Install optional components only after the IRC bot is healthy:
 | TCP/DCC Partyline | [Partyline guide](https://github.com/teuk/mediabot_v3/wiki/Partyline) |
 | Plugins and external scripts | [Developing plugins](https://github.com/teuk/mediabot_v3/wiki/Developing-plugins) |
 
-The shared radio service documented for current development belongs to the 3.6dev line. Stable operators should follow the documentation shipped with their selected release.
+The shared radio service was delivered during the completed 3.6dev cycle. Stable operators should follow the documentation shipped with their selected release.
 
 ## Upgrading an existing instance
 

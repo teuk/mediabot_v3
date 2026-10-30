@@ -18,10 +18,10 @@ return sub {
     my $preview = _slurp_1045('docs/mediabot-3.5-github-social-preview.svg');
     my $version = _slurp_1045('VERSION');
     $version =~ s/\s+\z//;
-    my $hero_version = $version eq '3.7' ? '3.7' : '3.5';
+    my $hero_version = $version eq '3.7' || $version =~ /\A3\.8dev-/ ? '3.7' : '3.5';
 
-    $assert->like($version, qr/^(?:3\.6dev-[0-9]{8}_[0-9]{6}|3\.7)$/,
-        'mb731: moving source identity is 3.6dev or the explicit final 3.7');
+    $assert->like($version, qr/^(?:3\.(?:6|8)dev-[0-9]{8}_[0-9]{6}|3\.7)$/,
+        'mb731: moving source identity is a supported development line or the explicit final 3.7');
 
     for my $workflow (qw(ci debian13)) {
         $assert->like(

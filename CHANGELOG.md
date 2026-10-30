@@ -1,3 +1,21 @@
+## [Unreleased] — 3.8dev
+
+### MB1025 — Open 3.8dev with reproducible compatibility scores
+
+- Break equal-frequency vocabulary ties lexically in `!compat` before the
+  existing top-100 cutoff. Identical channel histories no longer yield different
+  vocabulary overlap and final scores merely because Perl was restarted with
+  another hash seed or received the same words in another insertion order.
+- Preserve frequency priority, tokenization, sampling limits, SQL, all four
+  score components, channel output, achievements and accounting.
+- Open the explicitly requested 3.8dev line through native `commit.sh
+  --development 3.8`, using one timestamp for both the full test suite and the
+  commit. Keep stable 3.7 and its banner, tag and published artifacts intact.
+- Align current source metadata and release-identity guards. Extend Debian CI
+  to a non-publishable 3.9 rehearsal; retain historical release gates.
+- Add six native-handler/hash-seed assertions and focused development-line
+  checks. No schema, configuration, dependency or feature activation changes.
+
 ## [3.7] — 2026-10-30
 
 ### MB1024 — Give 3.7 its release page and a new README banner
