@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1026 — Keep development-version checks portable to public CI
+
+- Check the timestamped 3.8dev identity and its ordering after stable 3.7 with
+  the versioned runtime module in every checkout.
+- Run the three native commit-plan assertions only when the intentionally
+  local-only `commit.sh` is present. Public CI no longer tries to launch an
+  absent maintainer tool; a present broken tool still fails its assertions.
+- Preserve the native VERSION/commit behavior, all three maintainer assertions
+  and the complete test suite. No runtime or workflow changes.
+
 ### MB1025 — Open 3.8dev with reproducible compatibility scores
 
 - Break equal-frequency vocabulary ties lexically in `!compat` before the

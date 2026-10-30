@@ -2,11 +2,13 @@ use strict;
 use warnings;
 use Test::More;
 use File::Temp qw(tempdir);
+use File::Spec;
 use Cwd qw(abs_path getcwd);
-my $commit=abs_path('commit.sh');
+use lib '.';
+use Mediabot::Version::Format ();
+my $commit=File::Spec->rel2abs('commit.sh');
 my $dir=tempdir('mb1025-version-XXXXXX',TMPDIR=>1,CLEANUP=>1);
 my $cwd=getcwd();
-system('git','init','-q',$dir)==0 or die 'local version-plan repository initialization failed';
 sub read_1399 {open my $f,'<',$_[0] or die $!;local $/;return <$f>}
 sub write_1399 {open my $f,'>',$_[0] or die $!;print {$f} $_[1];close $f or die $!}
 sub plan_1399 {
@@ -17,6 +19,22 @@ sub plan_1399 {
  }
  waitpid($pid,0);return [$? >> 8,read_1399($out)];
 }
+is_deeply(
+ [Mediabot::Version::Format::getDetailedVersion(undef,'3.8dev-20261030_130708')],
+ [3,8,'devel','20261030130708'],
+ 'the versioned runtime recognizes the native timestamped 3.8dev identity');
+cmp_ok(Mediabot::Version::Format::_compare_mediabot_versions('3.8dev-20261030_130708','3.7'),'>',0,
+ 'the versioned runtime orders the new development line after stable 3.7');
+
+# commit.sh is intentionally ignored and absent from public clones. Its three
+# maintainer checks still run when it is installed; a broken present script
+# must fail rather than being treated as an unavailable optional tool.
+SKIP: {
+skip('commit.sh is a local maintainer tool, absent from public checkouts',3)
+ unless -e $commit || -l $commit;
+die 'local commit.sh is not a readable regular file' unless -f $commit && -r $commit;
+$commit=abs_path($commit) // die 'cannot resolve local commit.sh';
+system('git','init','-q',$dir)==0 or die 'local version-plan repository initialization failed';
 write_1399("$dir/VERSION","3.7\n");
 my $open=plan_1399('--development','3.8');
 ok($open->[0]==0 && $open->[1]=~/VERSION plan: 3\.8dev-20261030_130708/
@@ -30,5 +48,6 @@ my $next=plan_1399();
 ok($next->[0]==0 && $next->[1]=~/VERSION plan: 3\.8dev-20261030_130708/
  && read_1399("$dir/VERSION") eq "3.8dev-20260101_010203\n",
  'later ordinary commits continue the native 3.8dev timestamp format without a manual version edit');
+}
 is(getcwd(),$cwd,'the version-plan trials do not change the test runner working directory');
 done_testing;
