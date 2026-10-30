@@ -5,6 +5,38 @@ use warnings;
 
 use JSON::PP ();
 use Time::HiRes ();
+use Scalar::Util qw(weaken refaddr);
+
+# Observation never owns worker lifetime. IDs are process-local monotonic
+# handles, distinct from OS PIDs; every lookup is scoped to the owning loop.
+our (%ACTIVE, $SERIAL); # Preserve IDs and registrations across an in-process module reload.
+sub active_workers {
+    my ($class, $loop) = @_;
+    return () unless ref($loop);
+    my @rows;
+    for my $id (keys %ACTIVE) {
+        my $w = $ACTIVE{$id};
+        unless ($w && !$w->{finalized}) { delete $ACTIVE{$id}; next }
+        next unless $w->{owner_pid} == $$ && ref($w->{loop})
+            && refaddr($w->{loop}) == refaddr($loop);
+        push @rows, { id=>$id, label=>$w->{label}, pid=>$w->{pid},
+            elapsed_s=>Time::HiRes::time()-$w->{started_at}, timeout=>$w->{timeout},
+            state=>$w->{cancelled} || $w->{timed_out} ? 'stopping' : 'running',
+            progress_count=>$w->{progress_count} };
+    }
+    my @sorted=sort { $b->{elapsed_s}<=>$a->{elapsed_s} || $a->{id} cmp $b->{id} } @rows;
+    return @sorted;
+}
+
+sub cancel_worker {
+    my ($class, $loop, $id) = @_;
+    return 0 unless defined($id) && !ref($id) && $id =~ /\Aw[1-9][0-9]*\z/ && ref($loop);
+    my $w = $ACTIVE{$id} or return 0;
+    return 0 if $w->{finalized} || $w->{owner_pid} != $$ || !ref($w->{loop})
+        || refaddr($w->{loop}) != refaddr($loop);
+    return 1 if $w->{cancelled};
+    return $w->cancel('partyline operator requested cancellation');
+}
 
 our $VERSION = '1.0';
 
@@ -112,6 +144,10 @@ sub start {
     }
 
     $self->{pid}      = $pid;
+    $self->{owner_pid} = $$;
+    $self->{task_id} = 'w'.++$SERIAL;
+    $ACTIVE{$self->{task_id}} = $self;
+    weaken($ACTIVE{$self->{task_id}});
     $self->{read_fh}  = $read_fh;
     $self->{write_fh} = $write_fh;
     eval { close $write_fh };
@@ -651,6 +687,7 @@ sub _complete {
     return 0 if $self->{finalized};
 
     $self->{finalized} = 1;
+    delete $ACTIVE{$self->{task_id}} if defined $self->{task_id};
     $result = _error_result(
         'worker_failed', 'completion', 'invalid worker result',
     ) unless ref($result) eq 'HASH';

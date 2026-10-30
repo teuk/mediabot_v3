@@ -38,6 +38,12 @@ sub _run_task_callback {
     my $err = $@;
     my $elapsed = Time::HiRes::tv_interval($t0);
     my $current=$self->{_tasks}{$name};
+    if ($observed_task && $current && refaddr($observed_task)==refaddr($current)) {
+        $current->{last_duration_s} = $elapsed;
+        $current->{total_duration_s} = ($current->{total_duration_s}//0) + $elapsed;
+        $current->{max_duration_s} = $elapsed
+            if $elapsed > ($current->{max_duration_s}//0);
+    }
     if ($err && $observed_task && $current && refaddr($observed_task)==refaddr($current)
         && $current->{generation}==$observed_generation) {
         $current->{callback_exceptions}++;
@@ -111,6 +117,7 @@ sub add {
 
     my $mode = $next_run_cb ? 'calendar' : 'periodic';
     my $task = {
+        task_id        => ++$self->{_task_serial},
         mode           => $mode,
         interval       => 0 + $interval,
         first_interval => defined($first) ? 0 + $first : undef,
@@ -462,6 +469,10 @@ sub task_info {
     my $task = $self->{_tasks}{$name} or return undef;
     return {
         name           => $name,
+        task_id        => $task->{task_id},
+        last_duration_s => $task->{last_duration_s}//0,
+        max_duration_s => $task->{max_duration_s}//0,
+        total_duration_s => $task->{total_duration_s}//0,
         mode           => $task->{mode},
         interval       => $task->{interval},
         first_interval => $task->{first_interval},

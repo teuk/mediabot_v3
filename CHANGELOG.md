@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1031 — Add an interactive internal task shell to the partyline
+
+- Enter with `.command`, navigate virtual worker/scheduler directories with
+  pwd/cd/ls, inspect ps/show, and return to chat with exit. Add private bounded
+  history/replay, textual completion and literal grep/head read pipelines.
+- Observe active shared AsyncWorker jobs through detached, loop/process-scoped
+  snapshots and weak registrations. Cancel owned logical IDs through the
+  existing TERM/KILL lifecycle; preserve IDs across module reloads.
+- Give scheduler registrations non-reused logical IDs and callback-duration
+  statistics. Reuse native stop/start/restart; stopping a plan leaves separately
+  running workers explicit. Same-name replacements do not inherit old IDs.
+- Keep command mode private to one authenticated Master/Owner session, retain
+  partyline throttling and prevent filters from executing mutation commands.
+  Add native dispatcher, scheduler, child-process and cancellation coverage.
+  No operating-system shell, configuration, schema or dependency changes.
+
 ### MB1030 — Give external lookups one shared worker lifecycle
 
 - Replace the independent country and definition fork/pipe/timer implementations

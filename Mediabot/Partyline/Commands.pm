@@ -1399,6 +1399,7 @@ sub _cmd_help {
       . "  .back               - clear this connection\'s away state\r\n"
       . "  .whois <nick>       - send WHOIS to IRC and display result\r\n"
       . "  .timers             - list all scheduled tasks\r\n"
+      . "  .command            - internal task shell (ps, show, kill, history; exit to chat)\r\n"
       . "  .schedule <list|status|start|stop|restart> [name] - control scheduler tasks\r\n"
       . "  .log [n]            - show last N lines of the bot log (default 20)\r\n"
       . "  .ping               - check partyline session is alive\r\n"

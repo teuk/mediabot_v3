@@ -13,6 +13,7 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use Mediabot::Partyline::TaskConsole ();
 
 our @EXPORT_OK = qw(
     _handle_line
@@ -130,6 +131,9 @@ sub _handle_line {
         $stream->write("Please enter your nickname.\r\n");
         return;
     }
+
+    # The internal shell consumes bare lines privately before chat/history.
+    return if Mediabot::Partyline::TaskConsole::handle_line($self,$stream,$id,$line);
 
     # ---- Authenticated : dispatch commands --------------------------------
     # Record command in per-session history (max 10, skip all .history requests).
