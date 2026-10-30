@@ -18,6 +18,7 @@ return sub {
     my $preview = _slurp_1045('docs/mediabot-3.5-github-social-preview.svg');
     my $version = _slurp_1045('VERSION');
     $version =~ s/\s+\z//;
+    my $hero_version = $version eq '3.7' ? '3.7' : '3.5';
 
     $assert->like($version, qr/^(?:3\.6dev-[0-9]{8}_[0-9]{6}|3\.7)$/,
         'mb731: moving source identity is 3.6dev or the explicit final 3.7');
@@ -39,8 +40,8 @@ return sub {
 
     $assert->like(
         $readme,
-        qr{releases/tag/3\.5">\s*<img\s+src="docs/mediabot-3\.5-github-social-preview\.png"}s,
-        'mb728: 3.5 hero points at the matching release'
+        qr{releases/tag/\Q$hero_version\E">\s*<img\s+src="docs/mediabot-\Q$hero_version\E-github-social-preview\.png"}s,
+        "mb728: $hero_version hero points at the matching release"
     );
     $assert->unlike($readme, qr{<img[^>]+mediabot-3\.3-github-social-preview\.png},
         'mb728: historical 3.3 artwork is not presented as current');

@@ -260,9 +260,23 @@ tar -tJf "mediabot_v3-${release_version}.tar.xz" |
 
 ## 6. GitHub release and homepage
 
-Upload the two archives and checksum files only after the local verification is
-clean. Publish the same filenames on GitHub and on the homepage so users can
-verify identical artifacts from either location.
+Pushing the annotated `3.7` tag now triggers `release37.yml` on this repository.
+The workflow builds the exact tag with the native artifact builder and uses the
+built-in GitHub Actions token; no local GitHub CLI or additional secret is
+required. It independently verifies both successful master-push CI workflows
+on that exact commit, the two local checksum manifests, and the names, sizes
+and SHA-256 digests of all six uploaded assets. The release remains a draft
+until the complete upload is verified, then becomes the latest stable release.
+
+A retry resumes an exact managed draft or verifies an already complete managed
+publication without rewriting it. A different existing release, unexpected
+asset or mismatched digest stops publication without deletion. If a workflow
+fails, inspect its reported step and rerun the job; never force-move the tag.
+
+The public GitHub body is `docs/GITHUB_RELEASE_3.7.md`, including the banner
+from the same immutable tag. Publishing does not restart or update instances.
+The separate homepage download directory, if used, must receive the same native
+filenames and byte-identical artifacts; the workflow does not write to teuk.org.
 
 Do not start the next development line until the new release assets and public
 release notes have been checked.

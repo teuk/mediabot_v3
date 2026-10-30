@@ -1,5 +1,18 @@
 ## [3.7] — 2026-10-30
 
+### MB1024 — Give 3.7 its release page and a new README banner
+
+- Replace the historical README hero with an original 3.7 release banner and
+  synchronize its link/badge; preserve the title, introduction, other badges,
+  historical 3.5 artwork and explicitly dated qualification evidence.
+- Publish the six native release artifacts through a tag-scoped GitHub Actions
+  job using its built-in token. Verify the annotated tag, both exact-commit
+  push CI workflows, local manifests and remote SHA-256 digests before making
+  the managed draft public. Preserve unmanaged releases and support safe retries.
+- Add six focused offline publication tests to normal CI. Update one existing
+  hero identity assertion without removing assertions or historical SVG checks.
+  No runtime, SQL, feature activation, dependency or development-line change.
+
 ### MB1023 — Approve the final Mediabot 3.7 identity
 
 - Record the operator's explicit stable-release approval on 30 October 2026.

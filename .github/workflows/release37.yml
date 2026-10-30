@@ -1,0 +1,65 @@
+name: Publish Mediabot 3.7
+
+on:
+  push:
+    tags:
+      - '3.7'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mediabot-release-3.7
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'teuk/mediabot_v3' && github.ref == 'refs/tags/3.7'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the native artifact builder baseline
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libdbi-perl
+
+      - name: Verify the publisher offline
+        run: node --test tools/test_github_release_37.cjs
+
+      - name: Build the six native artifacts from the annotated tag
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/tags/3.7
+          test "$(git cat-file -t refs/tags/3.7)" = tag
+          RELEASE_COMMIT="$(git rev-parse HEAD)"
+          test "$(git rev-parse '3.7^{commit}')" = "$RELEASE_COMMIT"
+          test "$(git show HEAD:VERSION)" = 3.7
+          RELEASE_ARTIFACT_DIR="$RUNNER_TEMP/mediabot-release-3.7"
+          bash tools/build_release_artifacts.sh \
+            --version 3.7 --ref 3.7 --dest "$RELEASE_ARTIFACT_DIR"
+          printf 'RELEASE_COMMIT=%s\n' "$RELEASE_COMMIT" >> "$GITHUB_ENV"
+          printf 'RELEASE_ARTIFACT_DIR=%s\n' "$RELEASE_ARTIFACT_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify both CI workflows and publish the complete release
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { publish } = require(process.env.GITHUB_WORKSPACE + '/tools/github_release_37.cjs');
+            return await publish({
+              github, context, core,
+              artifactDir: process.env.RELEASE_ARTIFACT_DIR,
+              commit: process.env.RELEASE_COMMIT,
+              notesFile: process.env.GITHUB_WORKSPACE + '/docs/GITHUB_RELEASE_3.7.md',
+            });

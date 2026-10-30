@@ -139,6 +139,9 @@ jobs:
           export PERL5LIB="$GITHUB_WORKSPACE/local/lib/perl5:$GITHUB_WORKSPACE${PERL5LIB:+:$PERL5LIB}"
           perl tools/security_audit.pl --quiet
 
+      - name: Verify the GitHub 3.7 publisher offline
+        run: node --test tools/test_github_release_37.cjs
+
       - name: Run the offline mbweb application tests
         shell: bash
         working-directory: contrib/mbweb

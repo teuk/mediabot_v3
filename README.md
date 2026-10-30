@@ -3,13 +3,13 @@
 > An IRC companion for community memory, channel administration and opt-in conversation. Written in Perl, with per-channel controls and an offline test suite.
 
 <p align="center">
-  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5">
-    <img src="docs/mediabot-3.5-github-social-preview.png" width="1280" alt="Mediabot 3.5: IRC events flow through per-channel policy, MariaDB memory, Hailo or opt-in Gemini, then return as bounded replies with mbweb and Prometheus visibility.">
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.7">
+    <img src="docs/mediabot-3.7-github-social-preview.png" width="1280" alt="Mediabot 3.7 stable release: a luminous community chat core, Perl plugins and memory rise from an open technological grimoire.">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.5"><img alt="Stable release 3.5" src="https://img.shields.io/badge/stable-3.5-2ea44f"></a>
+  <a href="https://github.com/teuk/mediabot_v3/releases/tag/3.7"><img alt="Stable release 3.7" src="https://img.shields.io/badge/stable-3.7-2ea44f"></a>
   <a href="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/teuk/mediabot_v3/actions/workflows/ci.yml/badge.svg?branch=master&event=push"></a>
   <a href="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml"><img alt="Debian 13 fresh-install gate" src="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml/badge.svg?branch=master&event=push"></a>
   <a href="https://github.com/teuk/mediabot_v3/actions/workflows/debian13.yml"><img alt="Tested with Perl 5.40" src="https://img.shields.io/badge/Perl-5.40-39457E?logo=perl&logoColor=white"></a>
@@ -109,9 +109,8 @@ Stable and development installations should use separate directories, configurat
 See [the 3.7 notes](docs/RELEASE_NOTES_3.7.md) for the plugin platform,
 longest-word game, French Trivia, link previews and operational fixes.
 The [acceptance sheet](docs/RELEASE_ACCEPTANCE_3.7.md) distinguishes the
-verified candidate/CI from operator-managed field checks. The 3.5 artwork
-and badge in the preserved header are historical; the release identity and
-downloads above refer to 3.7.
+verified candidate/CI from operator-managed field checks. The banner celebrates the 3.7 release; the 3.5 qualification results below
+remain historical evidence for their original tagged source.
 
 ### Stable 3.5 release evidence
 
