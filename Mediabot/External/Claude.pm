@@ -805,11 +805,13 @@ sub claude_ctx {
         my $aux_key     = lc($nick) . "\x00" . $chan_part;
 
         my $had = (exists $self->{_claude_history}{$hist_key}
+                || exists $self->{_claude_inflight}{$hist_key}
                 || exists $self->{_claude_persona}{$persona_key}
                 || exists $self->{_claude_pinned}{$aux_key}
                 || exists $self->{_ai_last_active}{$aux_key}) ? 1 : 0;
 
         delete $self->{_claude_history}{$hist_key};
+        delete $self->{_claude_inflight}{$hist_key};
         delete $self->{_claude_persona}{$persona_key};
         delete $self->{_claude_pinned}{$aux_key};
         delete $self->{_ai_last_active}{$aux_key};
@@ -1405,6 +1407,7 @@ sub claude_ctx {
     if (@args && lc($args[0]) eq 'reset') {
         my $hist_key = "$nick\x00" . ($channel // "__private__");
         delete $self->{_claude_history}{$hist_key};
+        delete $self->{_claude_inflight}{$hist_key};
         Mediabot::Helpers::botNotice($self, $nick, 'Conversation history cleared.');
         return 1;
     }
@@ -1606,10 +1609,19 @@ sub claudeAI {
     };
 
     if ($use_async) {
-        $self->{_claude_inflight}{$hist_key} = time();
+        # MB1047: an identity, rather than a timestamp, owns this conversation.
+        # reset/forget can retire it and admit a new request in the same second.
+        # An obsolete completion must never release that replacement's lock.
+        my $owner = {};
+        $self->{_claude_inflight}{$hist_key} = $owner;
+        my $is_current = sub {
+            my $active = $self->{_claude_inflight}{$hist_key};
+            return ref($active) eq 'HASH' && $active == $owner;
+        };
 
         my $completion = sub {
             my ($answer, $state) = @_;
+            return unless $is_current->();
             delete $self->{_claude_inflight}{$hist_key};
 
             $state //= 'failure';
@@ -1627,12 +1639,13 @@ sub claudeAI {
             $self,
             $request,
             $completion,
+            $is_current,
         );
 
         # The async adapter is required to complete every launch attempt, but
         # keep this defensive backstop so an unexpected contract break cannot
         # leave the conversation permanently locked.
-        unless ($started) {
+        if (!$started && $is_current->()) {
             delete $self->{_claude_inflight}{$hist_key};
             $rollback_orphan->();
             _claude_emit($self, $request,
@@ -1855,8 +1868,10 @@ sub _claude_send_and_parse {
 }
 
 sub _claude_send_and_parse_async {
-    my ($self, $p, $on_complete) = @_;
+    my ($self, $p, $on_complete, $is_current) = @_;
     return 0 unless ref($on_complete) eq 'CODE';
+    $is_current //= sub { 1 };
+    return 0 unless ref($is_current) eq 'CODE';
 
     my $adapter_done = 0;
     my $done = sub {
@@ -1903,6 +1918,13 @@ sub _claude_send_and_parse_async {
 
     my $client_done = sub {
         my ($result) = @_;
+        return if $adapter_done;
+        # Discard before accepting: acceptance writes history/cache and can
+        # emit errors. Transport completion alone does not own the session.
+        unless ($is_current->()) {
+            $done->(undef, 'discarded');
+            return;
+        }
         my $answer = _claude_accept_client_result($self, $p, $result);
         $done->(
             $answer,

@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1047 — Retire pending AI work when its conversation is cleared
+
+- Give each asynchronous Claude conversation a distinct request owner. Reset
+  and forget retire that owner immediately, allowing a fresh prompt without
+  waiting for the obsolete provider request to finish.
+- Reject obsolete success/error callbacks before history, cache, error delivery
+  or metrics can change. A late result cannot release a replacement request's
+  lock, even when both were started in the same second.
+- Accept each current callback at most once, preserving normal cache hits,
+  failure rollback, IRC pacing and plain-text operator output. Keep reset's
+  persona/pin preservation and forget's existing per-conversation clearing.
+- Add twenty-four native caller assertions; seventeen fail before correction.
+  The shared client retains worker cleanup/timeouts. Retiring an answer does
+  not abort an HTTP request already sent or promise provider billing cancellation.
+  No schema, configuration, dependency, model or provider routing change.
+
 ### MB1046 — Bind AI answer caching to the complete conversation request
 
 - Add an internal provider-neutral, canonical UTF-8 request fingerprint scoped
