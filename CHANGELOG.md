@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1034 — Keep one poll across channel letter case
+
+- Normalize the in-memory channel key consistently for poll creation, vote,
+  withdrawal, status, results, voter details, extension and closing. A poll
+  created on #TeSt no longer disappears when a command targets #test or #TEST;
+  creating through another spelling cannot leave a duplicate channel slot.
+- Preserve the original reply/audit target, Master checks, weighted scoring,
+  deadlines and independent channels. Keep the project's lc-based channel-cache
+  policy without guessing an unnegotiated punctuation mapping.
+- Add thirteen native command-registry assertions; eight reproduce the bug on
+  the unchanged source. No schema, configuration, provider or dependency change.
+
 ### MB1033 — Follow live shell observations and reuse filtered pages
 
 - Add bounded watch refreshes for cached read commands, owned by the native

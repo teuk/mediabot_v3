@@ -874,13 +874,16 @@ sub mbRemindCancel_ctx {
 # mbPollVoters_ctx --- !pollvoters  (EE7)
 # Show detailed vote breakdown. Requires Master level.
 # ---------------------------------------------------------------------------
+# MB1034: all poll operations share the lc-based channel-cache identity.
+# Keep the original target for replies/audit; do not guess a server's
+# negotiated punctuation mapping or merge unrelated channel names.
 sub mbPollVoters_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     return unless $ctx->require_level('Master');
-    my $poll = $self->{_polls}{$channel};
+    my $poll = $self->{_polls}{lc($channel // '')};
     unless ($poll && %{ $poll->{votes} // {} }) {
         botNotice($self, $nick, 'No poll or no votes on this channel.'); return 1;
     }
@@ -911,7 +914,7 @@ sub mbPollStatus_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
-    my $poll = $self->{_polls}{$channel};
+    my $poll = $self->{_polls}{lc($channel // '')};
     unless ($poll && $poll->{active}) {
         botPrivmsg($self, $channel, 'No active poll.'); return 1;
     }
@@ -967,7 +970,7 @@ sub mbUnvote_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
-    my $poll    = $self->{_polls}{$channel};
+    my $poll    = $self->{_polls}{lc($channel // '')};
     return if _expire_poll_if_due($self, $channel, $poll);
     unless ($poll && $poll->{active}) {
         botPrivmsg($self, $channel, 'No active poll.'); return 1;
@@ -990,7 +993,7 @@ sub mbPollExtend_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $extra   = ($args[0] // 0) =~ /^(\d+)$/ ? int($args[0]) : 60;
     $extra = 10 if $extra < 10; $extra = 600 if $extra > 600;
-    my $poll = $self->{_polls}{$channel};
+    my $poll = $self->{_polls}{lc($channel // '')};
     unless ($poll && $poll->{active}) {
         botPrivmsg($self, $channel, 'No active poll.'); return 1;
     }
@@ -1053,7 +1056,7 @@ sub mbPoll_ctx {
     }
     # mb84-B3: supprimé le double inc() de poll_created_total (était appelé avant et après @weighted_parts)
     $self->{metrics}->inc('mediabot_poll_created_total') if $self->{metrics};  # Z10
-    $self->{_polls}{$channel} = {
+    $self->{_polls}{lc($channel // '')} = {
         question => $question,
         options  => [ map { $_->{label}  } @weighted_parts ],
         weights  => [ map { $_->{weight} } @weighted_parts ],
@@ -1079,7 +1082,7 @@ sub mbVote_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    my $poll = $self->{_polls}{$channel};
+    my $poll = $self->{_polls}{lc($channel // '')};
     return if _expire_poll_if_due($self, $channel, $poll);
     unless ($poll && $poll->{active}) {
         botNotice($self, $nick, 'No active poll on this channel.'); return;
@@ -1141,7 +1144,7 @@ sub mbPollResult_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
 
-    my $poll = $self->{_polls}{$channel};
+    my $poll = $self->{_polls}{lc($channel // '')};
     unless ($poll) {
         botNotice($self, $nick, 'No poll found for this channel.'); return;
     }
@@ -1240,7 +1243,7 @@ sub mbPollStop_ctx {
 
     return unless $ctx->require_level('Master');
 
-    my $poll = $self->{_polls}{$channel};
+    my $poll = $self->{_polls}{lc($channel // '')};
     unless ($poll && $poll->{active}) {
         botNotice($self, $nick, 'No active poll.'); return;
     }
