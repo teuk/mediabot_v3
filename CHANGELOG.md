@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1042 — Keep AntiFlood drain ownership scoped to its target
+
+- Treat a reblocked item as head reinsertion only for the target currently being
+  drained. Output enqueued for another target by a reentrant callback now follows
+  its normal FIFO, thirty-item cap and timer-arm path.
+- Prevent a newly populated second queue from remaining unarmed, newer messages
+  overtaking its older work, or the cross-target enqueue bypassing its capacity.
+  Preserve same-target retry behavior, exact target keys and two-second pacing.
+- Add fifteen sender/logger/queue assertions; ten fail before correction. Cover
+  new, pending and full second queues, mixed PRIVMSG/ACTION output, same-target
+  reblocking and actual IO::Async countdown completion. No schema, configuration,
+  dependency, output-policy or timer-helper change.
+
 ### MB1041 — Reject external-script actions after signal termination
 
 - Distinguish a process killed by a signal from a normal exit code zero.

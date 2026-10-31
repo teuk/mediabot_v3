@@ -15,8 +15,9 @@ sub _defer_flooded_send {
 
     my $q = $self->{_flood_outq}{$to} //= { items => [], armed => 0 };
 
-    if ($self->{_flood_draining}) {
-        # Re-blocage pendant un drain : on reprend la tete, le drain rearme.
+    if (defined($self->{_flood_draining}) && $self->{_flood_draining} eq $to) {
+        # MB1042: only this target's reflood returns to its head. A callback
+        # enqueueing another target must keep its normal cap, FIFO and timer.
         unshift @{ $q->{items} }, [ $kind, $msg ];
         return undef;
     }
@@ -71,7 +72,7 @@ sub _drain_flood_queue {
     my $sent = eval {
         if ($item) {
             my ($kind, $msg) = @$item;
-            local $self->{_flood_draining} = 1;
+            local $self->{_flood_draining} = $to;
             if ($kind eq 'action') { botAction($self, $to, $msg) }
             else                   { botPrivmsg($self, $to, $msg) }
         }
