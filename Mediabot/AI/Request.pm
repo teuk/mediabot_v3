@@ -6,6 +6,8 @@ use warnings;
 use Carp qw(croak);
 use Exporter 'import';
 use Scalar::Util qw(looks_like_number);
+use Digest::SHA qw(sha256_hex);
+use JSON::PP ();
 
 use Mediabot::AI qw(normalize_provider);
 
@@ -207,6 +209,20 @@ sub request_summary {
         max_output_tokens => exists($request->{max_output_tokens})
             ? int($request->{max_output_tokens}) : undef,
     };
+}
+
+# Internal cache identity: hash the complete validated request and an opaque
+# caller-owned conversation scope. Preserve text case and message order; only
+# hash-key ordering is canonicalized. Never expose serialized prompt material.
+sub request_cache_key {
+    my ($request, $scope) = @_;
+    return undef unless _plain_scalar($scope) && length("$scope");
+    return undef if defined validate_request($request);
+    my $json = eval { JSON::PP->new->utf8->canonical->encode({
+        version => 1, scope => "$scope", request => $request,
+    }) };
+    return undef unless defined $json;
+    return 'ai1:' . sha256_hex($json);
 }
 
 1;

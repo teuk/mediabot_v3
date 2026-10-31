@@ -1585,14 +1585,6 @@ sub claudeAI {
         sys_prompt  => $sys_prompt,
         history     => $history,
         prompt      => $prompt,
-        prompt_key  => do {
-            require Digest::MD5;
-            # mb163-B2: include the EFFECTIVE system prompt (persona + pin)
-            # so prompt-cache entries cannot leak personalized context across
-            # users that happen to ask the same question.
-            Digest::MD5::md5_hex(encode('UTF-8',
-                lc($prompt // '') . "\x00" . ($sys_prompt // '')));
-        },
         wrap_bytes  => $wrap_bytes,
         max_privmsg => $max_privmsg,
         max_history => $max_history,
@@ -1693,6 +1685,7 @@ sub _claude_cache_hit {
     my $history     = $p->{history};
     my $max_history = $p->{max_history};
 
+    return 0 unless defined($prompt_key) && !ref($prompt_key);
     my $pcache = $self->{_claude_prompt_cache}{$prompt_key};
     return 0 unless $pcache && (time() - $pcache->{ts}) < 60;
 
@@ -1729,6 +1722,12 @@ sub _claude_build_client_request {
         return undef;
     }
 
+    # MB1046: cache only the exact validated context and generation settings,
+    # scoped like the existing conversation history. A repeated last prompt
+    # must not replay another turn, user's conversation or model's response.
+    $p->{prompt_key} = Mediabot::AI::Request::request_cache_key(
+        $request, ($p->{nick} // '') . "\x00" . ($p->{chan} // '__private__')
+    );
     return $request;
 }
 
@@ -1781,10 +1780,12 @@ sub _claude_accept_client_result {
     my $history = $p->{history};
     push @$history, { role => 'assistant', content => $answer };
 
-    $self->{_claude_prompt_cache}{$p->{prompt_key}} = {
-        ts     => time(),
-        answer => $answer,
-    };
+    if (defined($p->{prompt_key}) && !ref($p->{prompt_key})) {
+        $self->{_claude_prompt_cache}{$p->{prompt_key}} = {
+            ts     => time(),
+            answer => $answer,
+        };
+    }
 
     for my $k (keys %{ $self->{_claude_prompt_cache} // {} }) {
         delete $self->{_claude_prompt_cache}{$k}
@@ -1820,10 +1821,9 @@ sub _claude_can_async {
 sub _claude_send_and_parse {
     my ($self, $p) = @_;
 
-    return undef if _claude_cache_hit($self, $p);
-
     my $request = _claude_build_client_request($self, $p);
     return undef unless $request;
+    return undef if _claude_cache_hit($self, $p);
 
     _claude_log_request($self, $p);
 
@@ -1865,14 +1865,14 @@ sub _claude_send_and_parse_async {
         $on_complete->($answer, $state);
     };
 
-    if (_claude_cache_hit($self, $p)) {
-        $done->(undef, 'cache');
-        return 1;
-    }
-
     my $request = _claude_build_client_request($self, $p);
     unless ($request) {
         $done->(undef, 'failure');
+        return 1;
+    }
+
+    if (_claude_cache_hit($self, $p)) {
+        $done->(undef, 'cache');
         return 1;
     }
 

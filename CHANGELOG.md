@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1046 — Bind AI answer caching to the complete conversation request
+
+- Add an internal provider-neutral, canonical UTF-8 request fingerprint scoped
+  to its caller-owned conversation. Preserve exact text case, message order,
+  effective system instructions, model and generation parameters; expose only
+  a versioned SHA-256 key without changing the request or its public summary.
+- Build and validate Claude requests before cache lookup in both sync and async
+  paths. A repeated final prompt such as "continue" no longer replays an answer
+  from another history, user, channel, model or output budget.
+- Retain cache hits for identical valid requests, the sixty-second lifetime,
+  existing permission/rate gates, in-flight serialization and history completion.
+  Invalid requests cannot be rescued by an old cache entry.
+- Add twenty-two native caller/request assertions; fifteen fail before correction.
+  No provider routing, model defaults, configuration, schema or dependency change.
+
 ### MB1045 — Recognize Hailo nicknames under their existing IRC identity
 
 - Match the same punctuation equivalences already used by Hailo nickname
