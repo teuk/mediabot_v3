@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1037 — Confirm timer removal before stopping its runtime
+
+- Refuse `remtimer` inside a caller-owned database transaction, matching the
+  existing `addtimer` ownership guard. A later rollback can no longer restore
+  a stored timer after its runtime has been stopped and removal reported.
+- Contain DBI prepare/execute exceptions and missing database handles. Failed
+  deletion reports the existing database error without stopping/detaching the
+  timer or recording a successful removal.
+- Add nineteen command-registry assertions with real DBI/SQLite failures,
+  Periodic timers and event loops. Preserve Owner access, successful deletion,
+  already-absent row cleanup and unrelated timers. No schema/config change.
+
 ### MB1036 — Apply operator cooldown settings to the admitted command group
 
 - Share the existing news-alias identity between `.cmdcooldown` and the parent

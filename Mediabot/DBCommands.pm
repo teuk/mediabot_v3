@@ -495,10 +495,19 @@ sub mbRemTimer_ctx {
         return;
     }
 
+    # MB1037: do not stop a live timer for an uncommitted deletion owned by
+    # another caller. Its rollback would restore the row after our success.
+    # Match addtimer's ownership guard without committing or rolling back here.
+    my $dbh = $self->{dbh};
+    unless ($dbh && $dbh->{AutoCommit}) {
+        $self->botNotice($nick, "DB error while removing timer");
+        return;
+    }
+
     # Delete from DB first. If DB deletion fails, keep the runtime timer running
-    # so runtime and restart state do not diverge.
+    # so runtime and restart state do not diverge, including DBI RaiseError.
     my $sql_delete = "DELETE FROM TIMERS WHERE name = ?";
-    my $sth = $self->{dbh}->prepare($sql_delete);
+    my $sth = eval { $dbh->prepare($sql_delete) };
 
     unless ($sth) {
         $self->{logger}->log(1, "mbRemTimer_ctx() SQL delete prepare error: $DBI::errstr Query: $sql_delete")
@@ -507,10 +516,10 @@ sub mbRemTimer_ctx {
         return;
     }
 
-    unless ($sth->execute($name)) {
+    unless (eval { $sth->execute($name) }) {
         $self->{logger}->log(1, "mbRemTimer_ctx() SQL delete execute error: $DBI::errstr Query: $sql_delete")
             if $self->{logger};
-        $sth->finish;
+        eval { $sth->finish };
         $self->botNotice($nick, "DB error while removing timer");
         return;
     }
