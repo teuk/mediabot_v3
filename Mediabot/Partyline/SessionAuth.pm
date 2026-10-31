@@ -20,6 +20,7 @@ use IO::Async::Timer::Countdown;
 use POSIX qw(WNOHANG);
 use Socket qw(inet_aton AF_INET);
 use Mediabot::Partyline::Telnet qw(decode_input);
+use Mediabot::Partyline::ShellWatch ();
 
 our @EXPORT_OK = qw(
     _cancel_auth_timeout
@@ -78,6 +79,7 @@ sub _close_session {
     # mb147-B1: close/disconnect before auth must not leave the 60s DCC auth
     # timeout scheduled until expiry.
     $self->_cancel_auth_timeout($id) if $had_user;
+    Mediabot::Partyline::ShellWatch->stop($self,$id) if $had_user;
 
     if ($had_user && $self->{bot}->{metrics}) {
         my $current = $self->{bot}->{metrics}->get('mediabot_partyline_sessions_current');

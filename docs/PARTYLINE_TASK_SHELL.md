@@ -20,6 +20,54 @@ Chat mode. Type .command to return to the internal shell.
 
 Use actual IDs from your listing. `w12` and `s4` above are examples.
 
+## Live refresh and listing navigation
+
+MB1033 adds private live observation through the existing Scheduler:
+
+```text
+.command #radiocapsule
+mediabot[#radiocapsule]:/> watch 5 ps slow
+... refreshed observations every five seconds ...
+<Enter>
+Watch output stopped.
+mediabot[#radiocapsule]:/> who | sort -r
+mediabot[#radiocapsule]:/> next
+mediabot[#radiocapsule]:/> prev
+mediabot[#radiocapsule]:/> refresh
+```
+
+`watch [seconds] command` defaults to five seconds and permits 5–60. Supported
+commands are ps, jobs, ls, status, channels, channel, topic and who; their existing
+literal read filters work. The initial query is validated and rendered before
+registration. Mutations, nested watch, plugins/chansets/diagnose and arbitrary
+commands are rejected: no SQL/provider work is scheduled by watch.
+
+Only one watch belongs to a connection. It runs for at most five minutes, with
+an independent refresh-count budget and a 16 KiB UTF-8 frame cap. Any input stops
+it before ordinary dispatch and the rate limiter, including Enter or `watch off`.
+The next command then runs normally. A new watch replaces the old one. Expiry
+or observation failure stops the watch with a private fixed notice. There is no
+screen editor or redraw of partially typed client-side input; frames are labelled
+line-oriented output. Existing chat/console background suppression remains active.
+
+Each watch appears as `partyline.shell.watch.N` in global ps. Its lifetime uses
+the native Scheduler's timer and stop/remove operations, not a second timer
+framework. Stopping that schedule from another operator stops refresh; its
+registration is removed on the owning session's next input or disconnect.
+The watch never changes the inspected tasks. Cache/context/role/stream ownership
+is checked before rendering and again before delivery. Disconnect, role change,
+fd reuse or reentrant replacement cannot deliver an old private observation.
+Captured query data is released on teardown. If native scheduler removal fails,
+output is still revoked and the failure is logged privately; ps retains the
+native-owned registration for inspection rather than hiding a cleanup failure.
+
+`next`, `prev` and `refresh` reuse the last successful listing's command and
+literal filters. These are **live reads**, not immutable snapshots: changing
+nick/task counts can move rows or make a page unavailable. Use the original
+command to return to a valid page if the listing shrinks. Navigation is refused
+after changing directory or selected channel identity. It does not repeat task
+mutations. A resource ls listing is normalized to its equivalent ps command.
+
 MB1032 makes shell sessions quiet: incoming partyline broadcasts, chat,
 presence and generic command announcements are discarded until exit. Existing
 `.console` hooks also suspend delivery without changing the requested level.
@@ -87,6 +135,8 @@ reliable per-channel ownership metadata. The listing/help/context output says so
 | `plugins [page]`, `chansets [page]`, `diagnose [page]` | Existing safe channel observations and diagnostic catalogue |
 | `status` | Global process uptime, IRC connection, tracked worker/scheduler counts |
 | `cd -`, `clear`, `help [command]` | Previous successful directory, terminal clear, focused command help |
+| `watch [5..60] command`, `watch off` | Bounded cached observation; any input stops it |
+| `next`, `prev`, `refresh` | Reuse the last live listing, filters and context |
 | `exit` | Return to ordinary partyline chat without disconnecting |
 
 Quoted arguments and backslash escaping are supported. Read listings accept up

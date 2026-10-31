@@ -14,6 +14,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Partyline::TaskConsole ();
+use Mediabot::Partyline::ShellWatch ();
 
 our @EXPORT_OK = qw(
     _handle_line
@@ -23,6 +24,12 @@ sub _handle_line {
     my ($self, $stream, $id, $line) = @_;
 
     my $session = $self->{users}{$id};
+
+    # Input revokes a live view before authentication/rate-limit returns.
+    if (Mediabot::Partyline::ShellWatch->stop($self,$id)
+            && $session && $session->{authenticated} && $line !~ /\A\s*watch\s+off\s*\z/) {
+        $stream->write("Watch output stopped.\r\n");
+    }
 
     # ---- Rate limiting : max 10 commands per 5 seconds -------------------
     # Exempted during authentication: nick/pass prompts must not be throttled.

@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1033 — Follow live shell observations and reuse filtered pages
+
+- Add bounded watch refreshes for cached read commands, owned by the native
+  Scheduler and one authenticated shell connection. Any input, including a
+  throttled line, revokes refresh output; disconnect cleans up its registration.
+- Bound refreshes to 5–60 second intervals, five minutes, one job per session
+  and 16 KiB frames. Reject mutations and recurring SQL/provider diagnostics.
+  Revalidate session, stream, rights and context before asynchronous delivery.
+- Add exact callback-registration identity lookup to Scheduler so reentered
+  setup/cleanup cannot control a same-name replacement. Release captured render
+  data and suppress stale callbacks even if native cleanup reports a failure.
+- Add next/prev/refresh for the last live listing, preserving literal filters,
+  pagination, directory and channel identity. Do not silently reuse a listing
+  after its context changes. Add native timer/UTF-8 stream and lifecycle tests.
+  No schema, configuration, provider, dependency or version-policy changes.
+
 ### MB1032 — Keep the shell quiet and give it a channel context
 
 - Suppress partyline chat/presence/command broadcasts to command-mode sessions.

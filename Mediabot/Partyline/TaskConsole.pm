@@ -5,10 +5,12 @@ use utf8;
 use Encode qw(decode FB_CROAK);
 use Mediabot::AsyncWorker ();
 use Mediabot::Partyline::ShellContext ();
+use Mediabot::Partyline::ShellWatch ();
 
 sub _error {die bless {public=>$_[0]},__PACKAGE__.'::Usage'}
 my @COMMANDS=qw(help pwd cd ls ps jobs show cat kill stop start restart history complete
-    channels use context channel topic who plugins chansets diagnose status clear exit);
+    channels use context channel topic who plugins chansets diagnose status clear
+    watch next prev refresh exit);
 sub _text {
     my ($s,$limit)=@_;return '' unless defined($s) && !ref($s);
     $s=eval {decode('UTF-8',$s,FB_CROAK)} unless utf8::is_utf8($s);
@@ -97,6 +99,10 @@ sub _help {
         kill=>'kill <id> : cancel an owned worker or disable future scheduler ticks; global scope',
         history=>'history | history clear | !! | !number : private history; clear never reuses numbers',
         complete=>'complete [prefix] : commands, resource directories, IDs and registered channels',
+        watch=>'watch [5..60 seconds] <cached read command> : refresh for at most five minutes; any input stops; watch off also stops',
+        next=>'next / prev / refresh : rerun the last listing with its filters and context; these are live observations',
+        prev=>'prev : previous page of the last filtered listing in the same context/directory',
+        refresh=>'refresh : rerun the current page with the last listing filters and context',
     );
     if (defined $command) {
         _error("No detailed help for this command. Use help.\n") unless exists $help{$command};
@@ -113,13 +119,15 @@ sub _help {
         '  channel; topic; who; plugins; chansets; diagnose [page]',
         '  ps | grep [-i] "text" | head 5   also tail N, sort [-r]',
         '  history [clear]; !!; !number; complete [prefix]; help [command]; clear; exit',
+        '  next; prev; refresh   reuse the last listing filters in this context',
+        '  watch [5..60] ps slow   bounded live refresh; any input stops it',
         'Background broadcasts and .console logs are muted until exit; no replay.',
         'Channel context never narrows ps/kill/start/restart: task control is GLOBAL.',
         'Coverage: Scheduler and shared AsyncWorker. Times are elapsed/callback durations, not CPU.',
         'Synchronous Perl code blocking the event loop cannot be interrupted from this shell.');
 }
 sub _listing {
-    my ($out,$heading,$lines,$filters,$page,$next)=@_;
+    my ($out,$heading,$lines,$filters,$page,$next,$state)=@_;
     my @lines=map {_text($_,1000)} @$lines;
     for my $filter (@$filters) {
         my ($name,@args)=@$filter;
@@ -136,6 +144,9 @@ sub _listing {
     _write($out,$heading,@visible?@visible:('(no matching entries)'),
         "$count ".($next=~/\Aps /?'task(s)':'entry/entries').", page $page/$pages."
         .($page<$pages?" Next: $next ".($page+1).(@$filters?' (repeat filters)':''):''));
+    $state->{listing}={command=>$next,filters=>[map {[@$_]} @$filters],page=>$page,pages=>$pages,
+        channel=>$state->{channel}//'',channel_id=>$state->{channel_id}//'',cwd=>$state->{cwd}}
+        if $state;
 }
 sub _context_command {
     my ($p,$out,$state,$cmd,$args,$filters)=@_;
@@ -195,7 +206,7 @@ sub _context_command {
             $title="Diagnostic flag catalogue for $state->{channel}; database=$report->{database}; persisted observations";
         } else {@lines=@{$diagnostic->lines($report)};$title='Channel diagnostic (read-only)'}
     }
-    _listing($out,_text($title,400),\@lines,$filters,$page,$cmd);
+    _listing($out,_text($title,400),\@lines,$filters,$page,$cmd,$state);
 }
 sub _read {
     my ($p,$out,$state,$cmd,$args,$filters)=@_;
@@ -224,7 +235,13 @@ sub _read {
     @rows=sort {(($a->{type} eq 'worker'?0:1)<=>($b->{type} eq 'worker'?0:1)) || (($b->{elapsed_s}//$b->{last_duration_s}//0)<=>($a->{elapsed_s}//$a->{last_duration_s}//0)) || $a->{id} cmp $b->{id}} @rows;
     my @lines=map {sprintf('%-7s %-9s %-9s %8.3fs  %s',$_->{id},$_->{type},$_->{state},
         $_->{elapsed_s}//$_->{last_duration_s}//0,$_->{name})} @rows;
-    _listing($out,'ID      TYPE      STATE      AGE / LAST  NAME (GLOBAL)',\@lines,$filters,$page,"ps $kind");
+    _listing($out,'ID      TYPE      STATE      AGE / LAST  NAME (GLOBAL)',\@lines,$filters,$page,"ps $kind",$state);
+}
+sub _capture_query {
+    my ($p,$state,$parts)=@_;
+    my $buffer=bless {text=>''},__PACKAGE__.'::Frame';
+    _execute($p,$buffer,$state,$parts);
+    return $buffer->{text};
 }
 sub _execute {
     my ($p,$out,$state,$parts)=@_;my ($cmd,@a)=@{$parts->[0]};my @filters=@$parts[1..$#$parts];
@@ -235,7 +252,39 @@ sub _execute {
             || ($name=~/\A(?:head|tail)\z/ && @args==1 && $args[0]=~/\A[1-9][0-9]?\z/ && $args[0]<=50)
             || ($name eq 'sort' && (!@args || (@args==1 && $args[0] eq '-r')));
     }
-    _error("Filters apply only to read listings.\n") if @filters && $cmd!~/\A(?:ps|jobs|ls|channels|who|plugins|chansets|diagnose)\z/;
+    _error("Filters apply only to read listings.\n") if @filters && $cmd!~/\A(?:ps|jobs|ls|channels|who|plugins|chansets|diagnose|watch)\z/;
+    if ($cmd=~/\A(?:next|prev|refresh)\z/) {
+        _error("Usage: $cmd\n") if @a;
+        my $last=$state->{listing};
+        _error("No listing yet. Run ps, channels or who first.\n") unless $last;
+        _error("Listing context changed. Run the original command again.\n")
+            unless $last->{channel} eq ($state->{channel}//'')
+                && $last->{channel_id} eq ($state->{channel_id}//'') && $last->{cwd} eq $state->{cwd};
+        my $page=$last->{page}+($cmd eq 'next'?1:$cmd eq 'prev'?-1:0);
+        _error("First page reached.\n") if $page<1;
+        _error("Last page reached. Use refresh to update the listing.\n") if $page>$last->{pages};
+        my @base=_tokens($last->{command});
+        push @{$base[0]},$page;
+        push @base,map {[@$_]} @{$last->{filters}};
+        _execute($p,$out,$state,\@base);return;
+    }
+    if ($cmd eq 'watch') {
+        if (@a==1 && $a[0] eq 'off' && !@filters) {
+            Mediabot::Partyline::ShellWatch->stop($p,$state->{session_id}) if defined $state->{session_id};
+            _write($out,'Watch output stopped.');return;
+        }
+        my $interval=@a && $a[0]=~/\A[0-9]+\z/ ? shift(@a):5;
+        _error("Usage: watch [5..60] <ps|jobs|ls|status|channels|channel|topic|who>; watch off\n")
+            unless @a && $interval=~/\A[0-9]{1,2}\z/ && $interval>=5 && $interval<=60
+                && $a[0]=~/\A(?:ps|jobs|ls|status|channels|channel|topic|who)\z/;
+        my $read=[[@a],map {[@$_]} @filters];
+        my $frame=_capture_query($p,$state,$read); # validate/render before registering anything
+        my $id=$state->{session_id};
+        Mediabot::Partyline::ShellWatch->start($p,$id,$out,interval=>$interval,
+            render=>sub {my ($party,$context)=@_;return _capture_query($party,$context,$read)});
+        _write($out,"Watch every ${interval}s (maximum five minutes). Any input stops refresh.");
+        $out->write($frame);return;
+    }
     if ($cmd =~ /\A(?:ps|jobs|ls)\z/) {_read($p,$out,$state,$cmd,\@a,\@filters);return}
     if ($cmd =~ /\A(?:channels|use|context|channel|topic|who|plugins|chansets|diagnose|status)\z/) {
         _context_command($p,$out,$state,$cmd,\@a,\@filters);return;
@@ -313,6 +362,7 @@ sub handle_line {
         return 1;
     }
     my $state=$session->{command_shell}||={cwd=>'/',history=>[],serial=>0};
+    $state->{session_id}=$id;
     $state->{actor}=_text($session->{login},32);
     my $ok=eval {
         _error("Command is too long.\n") if length($raw)>1024;
@@ -353,10 +403,20 @@ sub handle_line {
         my $err=$@;
         my $public=ref($err) eq __PACKAGE__.'::Usage'
             || ref($err) eq 'Mediabot::Partyline::ShellContext::Usage'
+            || ref($err) eq 'Mediabot::Partyline::ShellWatch::Usage'
             ? _text($err->{public},160) : 'Operation failed. Inspect ps/show or use help.';
         _write($out,$public);
     }
     _prompt($out,$state) if $p->{users}{$id} && $p->{users}{$id}==$session && $session->{command_mode};
     return 1;
+}
+{
+    package Mediabot::Partyline::TaskConsole::Frame;
+    sub write {
+        my ($self,$text)=@_;
+        die bless {public=>'Watch frame exceeds 16 KiB.'},'Mediabot::Partyline::TaskConsole::Usage'
+            if length(Encode::encode('UTF-8',$self->{text}.$text))>16384;
+        $self->{text}.=$text;return 1;
+    }
 }
 1;

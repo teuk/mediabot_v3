@@ -464,6 +464,15 @@ sub task_names {
     return sort keys %{ $self->{_tasks} };
 }
 
+# A resource adapter may be reentered while add/start logs. Return only the
+# identity of its exact callback registration, never a same-name replacement.
+sub registration_id {
+    my ($self,$name,$callback)=@_;
+    my $task=$self->{_tasks}{$name} or return;
+    return unless ref($callback) eq 'CODE' && refaddr($task->{cb})==refaddr($callback);
+    return $task->{task_id};
+}
+
 sub task_info {
     my ($self, $name) = @_;
     my $task = $self->{_tasks}{$name} or return undef;
