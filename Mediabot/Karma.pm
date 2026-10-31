@@ -718,18 +718,22 @@ sub mbKarmaGraph_ctx {
     my $klog    = $self->{_karma_log}{$channel} // [];
     my $now     = time();
     my $days    = 7;
-    # Build a bucket per day (today=6, yesterday=5, ... 7 days ago=0)
+    # MB1035: count observations separately from their net change. Opposite
+    # votes still represent activity; the graph and net use one time window.
+    # Rolling 24-hour buckets: most recent=6, oldest included=0.
     my @buckets = (0) x $days;
+    my $observations = 0;
     for my $entry (@$klog) {
-        next unless lc($entry->{nick}) eq $target;
-        my $age_days = int(($now - $entry->{ts}) / 86400);
-        next if $age_days < 0;     # A16/fix: future ts (clock skew) → skip
-        next if $age_days >= $days;
-        my $bucket = $days - 1 - $age_days;  # most recent = rightmost
+        next unless lc($entry->{nick} // '') eq $target;
+        next unless defined $entry->{ts} && defined $entry->{delta};
+        my $age = $now - $entry->{ts};
+        # Check seconds before int(): -1 second would truncate to day zero.
+        next if $age < 0 || $age >= $days * 86400;
+        my $bucket = $days - 1 - int($age / 86400);
         $buckets[$bucket] += ($entry->{delta} eq '+1' ? 1 : -1);
+        ++$observations;
     }
-    # Check if any activity
-    unless (grep { $_ != 0 } @buckets) {
+    unless ($observations) {
         botPrivmsg($self, $channel,
             "$target: no karma activity in the last ${days} days.");
         return 1;
@@ -749,13 +753,8 @@ sub mbKarmaGraph_ctx {
             $spark .= $spark_pos[$idx];
         }
     }
-    # B5/fix: guard against undef delta in _karma_log entries
     my $total = 0;
-    $total += (($_ // '') eq '+1' ? 1 : -1)
-        for map { $_->{delta} } grep {
-            defined $_->{delta} && lc($_->{nick}) eq $target
-            && $now - ($_->{ts} // 0) < $days * 86400
-        } @$klog;
+    $total += $_ for @buckets;
     my $sign = $total >= 0 ? '+' : '';
     botPrivmsg($self, $channel,
         "karma graph $target (7d) $spark  net: ${sign}${total}");

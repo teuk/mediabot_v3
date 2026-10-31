@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1035 — Reconcile karma graphs with their observed votes
+
+- Keep `karmgraph` activity visible when positive and negative votes cancel.
+  A zero net now produces the seven-day graph instead of a false empty-history
+  message.
+- Exclude future timestamps before converting seconds to rolling-day buckets,
+  and derive the displayed net from those same buckets. Skip cached records
+  missing a timestamp or delta without producing warnings or phantom votes.
+- Add thirteen native command-registry assertions covering cancellation,
+  clock skew, seven-day/day boundaries, source-history preservation and scope.
+  No change to voting, persisted scores, SQL, configuration or dependencies.
+
 ### MB1034 — Keep one poll across channel letter case
 
 - Normalize the in-memory channel key consistently for poll creation, vote,
