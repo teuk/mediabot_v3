@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1045 — Recognize Hailo nicknames under their existing IRC identity
+
+- Match the same punctuation equivalences already used by Hailo nickname
+  deduplication and persistent bucket identities. Alternate spellings such as
+  Te[u]K and Te{u}K no longer leave raw nicknames in normalized training text.
+- Share the safe nickname fragment across mention substitution, copied-line
+  prefixes, leading bot addresses and visible-name restoration. Keep other
+  regex metacharacters quoted, word boundaries and Unicode case handling.
+- Add twenty native normalizer assertions; fourteen fail before correction.
+  Preserve existing bucket hashes, nick-switch placeholders, command rejection,
+  length limits, channel identity policy and Hailo activation rules. No brain
+  migration, schema, configuration or dependency change.
+
 ### MB1044 — Preserve every nickname in paginated channel listings
 
 - Pack complete nicknames within a 360-byte IRC payload budget before numbering

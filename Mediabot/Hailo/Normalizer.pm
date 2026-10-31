@@ -69,9 +69,24 @@ sub _nick_list {
         } @$values;
 }
 
+# MB1045: match the same IRC punctuation pairs already used by _irc_fold
+# for deduplication and persistent buckets. Quote every other character.
+sub _nick_literal_pattern {
+    my ($nick) = @_;
+    my %equivalent = (
+        '{' => '[\[{]', '}' => '[\]}]',
+        '|' => '[\\\\|]', '~' => '[\^~]',
+    );
+    my $literal = join '', map {
+        $equivalent{_irc_fold($_)} // quotemeta($_)
+    } split //, $nick;
+    return qr/$literal/iu;
+}
+
 sub _nick_pattern {
     my ($nick) = @_;
-    return qr/(?<![\p{L}\p{N}_])\Q$nick\E(?![\p{L}\p{N}_])/iu;
+    my $literal = _nick_literal_pattern($nick);
+    return qr/(?<![\p{L}\p{N}_])$literal(?![\p{L}\p{N}_])/u;
 }
 
 sub hailo_placeholder_for_nick {
@@ -99,7 +114,7 @@ sub _strip_paste_prefixes {
         $text =~ s/^\s*[<(][^<>()\r\n]{1,64}[>)]\s*//u;
 
         for my $nick (@$nicks) {
-            my $quoted = quotemeta($nick);
+            my $quoted = _nick_literal_pattern($nick);
             if ($text =~ s/^\s*\@?$quoted\s*(?:>+|[|:,~])\s*//iu) {
                 last;
             }
@@ -143,7 +158,7 @@ sub normalize_hailo_input {
 
     $text = _strip_paste_prefixes($text, \@nicks);
     if (length($bot_nick)) {
-        my $quoted = quotemeta($bot_nick);
+        my $quoted = _nick_literal_pattern($bot_nick);
         $text =~ s/^\s*\@?$quoted\s*(?:>+|[,:~.]|\s)\s*//iu;
     }
     $text =~ s/^\s+|\s+$//g;
