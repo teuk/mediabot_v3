@@ -10,6 +10,7 @@ use Digest::SHA qw(sha256_hex);
 use JSON::PP ();
 
 use Mediabot::AI qw(normalize_provider);
+use Mediabot::AI::Limits qw(REQUEST_TEXT_CHARS);
 
 our $VERSION = '1.0';
 our @EXPORT_OK = qw(
@@ -92,7 +93,9 @@ sub validate_request {
         unless ref($messages) eq 'ARRAY' && @$messages;
 
     my $expected_role = 'user';
-    my $total_chars = 0;
+    my $total_chars = defined($request->{system}) ? length($request->{system}) : 0;
+    return 'request content exceeds the provider-neutral safety ceiling'
+        if $total_chars > REQUEST_TEXT_CHARS;
     for my $idx (0 .. $#$messages) {
         my $message = $messages->[$idx];
         return "messages[$idx] must be a hash reference"
@@ -115,8 +118,8 @@ sub validate_request {
             if "$content" =~ /\x00/;
 
         $total_chars += length("$content");
-        return 'message content exceeds the provider-neutral safety ceiling'
-            if $total_chars > 250_000;
+        return 'request content exceeds the provider-neutral safety ceiling'
+            if $total_chars > REQUEST_TEXT_CHARS;
 
         $expected_role = $role eq 'user' ? 'assistant' : 'user';
     }

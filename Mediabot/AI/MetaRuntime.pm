@@ -219,11 +219,11 @@ sub _log_event {
         my $status=defined($event->{status}) && !ref($event->{status})
             && $event->{status}=~/\A[0-5]?\d{1,2}\z/?0+$event->{status}:0;
         my %errors=map {$_=>1} qw(http_error parse_error not_configured invalid_config invalid_request
-            provider_build_failed provider_failed async_unavailable worker_failed worker_launch_failed);
+            provider_build_failed provider_failed async_unavailable worker_failed worker_launch_failed response_too_large);
         my $error=$outcome eq 'usable' || $outcome eq 'empty_draft'?'none'
             :!ref($event->{error}) && $errors{$event->{error}//''}?$event->{error}:'unknown';
         my %categories=map {$_=>1} qw(quota access model request output_budget service_unavailable
-            server_error timeout tls dns connection transport empty_output);
+            server_error timeout tls dns connection transport empty_output response_size);
         my $category=$outcome eq 'usable' || $outcome eq 'empty_draft'?'none'
             :!ref($event->{failure_category}) && $categories{$event->{failure_category}//''}
                 ?$event->{failure_category}:'unknown';

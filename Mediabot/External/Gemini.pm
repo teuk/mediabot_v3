@@ -2,6 +2,7 @@ package Mediabot::External::Gemini;
 
 use strict;
 use warnings;
+use Mediabot::AI::Limits qw(response_size_message);
 use utf8;
 
 use Exporter 'import';
@@ -134,7 +135,8 @@ sub _accept_result {
             "geminiAI() AI::Client error: $error status=$status type=$type code=$code detail=$detail");
         _metric($self, 'mediabot_gemini_errors_total');
 
-        my $message = ref($result) eq 'HASH' && ($result->{provider} // '') eq 'gemini'
+        my $message = $error eq 'response_too_large' ? response_size_message()
+            : ref($result) eq 'HASH' && ($result->{provider} // '') eq 'gemini'
             ? Mediabot::AI::Provider::Gemini::user_error_message($status, $type, $code)
             : 'Sorry, Gemini did not answer.';
         Mediabot::Helpers::botPrivmsg(

@@ -34,6 +34,7 @@ use Mediabot::AI::IRCOutput qw(
     with_irc_output_instruction
 );
 use Mediabot::AI::Request qw(build_request);
+use Mediabot::AI::Limits qw(response_size_message);
 use Mediabot::AI::Provider::OpenAI ();
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes _irc_prefix_for_budget);
 
@@ -232,7 +233,8 @@ sub _chatgpt_accept_client_result {
             . ($detail ne '' ? " msg=$detail" : '')
         );
 
-        my $user_msg = $result->{provider} && $result->{provider} eq 'openai'
+        my $user_msg = $error eq 'response_too_large' ? response_size_message()
+            : $result->{provider} && $result->{provider} eq 'openai'
             ? _chatgpt_user_error_message($status, $type, $code)
             : 'Sorry, API did not answer.';
 
@@ -1767,7 +1769,8 @@ sub _claude_accept_client_result {
             "claudeAI() AI::Client error: $error status=$status reason=$reason model=$p->{model}");
         $self->{metrics}->inc('mediabot_claude_errors_total') if $self->{metrics};
         _claude_emit($self, $p,
-            "($p->{nick}) Sorry, Claude did not answer.");
+            "($p->{nick}) " . ($error eq 'response_too_large'
+                ? response_size_message() : 'Sorry, Claude did not answer.'));
         return undef;
     }
 

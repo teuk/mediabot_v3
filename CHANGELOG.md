@@ -1,5 +1,26 @@
 ## [Unreleased] — 3.8dev
 
+### MB1049 — Share coherent request, HTTP and worker limits across AI callers
+
+- Add one internal limit owner for aggregate request text, HTTP response bytes,
+  encoded result bytes and the existing worker ceiling. Count system text with
+  messages under the 250,000-character request contract. Provider adapters keep
+  using that same validator.
+- Give every AI HTTP factory the existing production 512 KiB cap, enforce it
+  for custom clients too and identify HTTP::Tiny's native size abort. Count
+  upgraded Unicode as UTF-8 bytes and discard oversized response bodies.
+- Bound the complete encoded success result to 240 KiB, reserving space inside
+  the unchanged 256 KiB worker pipe. Oversized results become response_too_large
+  / response_size failures in both sync and async paths, without trimming JSON
+  or starting pointless model/transient retries. Explicit providers stay strict;
+  auto retains its authorized provider fallback.
+- Explain the failure consistently on OpenAI, Claude and Gemini IRC surfaces;
+  retain its bounded category in MetaAI logs and degradation decisions.
+- Add thirty-six native assertions, including six real worker children and a
+  MetaAI collective using the real client with local HTTP. Twenty-four fail on
+  the original runtime. No old assertion, model, token budget, schema or
+  configuration change; no change to the separate non-AI HTTP consumers.
+
 ### MB1048 — Stop obsolete MetaAI stages before launching further work
 
 - Pass the runtime's current-conversation predicate through the collective AI

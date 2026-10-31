@@ -6,10 +6,11 @@ use warnings;
 use Carp qw(croak);
 use HTTP::Tiny;
 use Time::HiRes ();
-use JSON::PP qw(decode_json);
+use JSON::PP qw(decode_json encode_json);
 
 use Mediabot::AI qw(known_providers normalize_provider provider_configured);
 use Mediabot::AI::Request qw(validate_request);
+use Mediabot::AI::Limits qw(RESULT_JSON_BYTES WORKER_OUTPUT_BYTES);
 use Mediabot::AI::Transport ();
 use Mediabot::AI::Provider::Anthropic ();
 use Mediabot::AI::Provider::OpenAI ();
@@ -440,6 +441,7 @@ sub _prepare_plan {
 sub _openai_fallback_worthy {
     my ($res, $body) = @_;
     return 0 unless ref($res) eq 'HASH' && !$res->{success};
+    return 0 if ($res->{error}//'') eq 'response_too_large';
 
     my $status = $res->{status} // 0;
     my ($type, $code) = Mediabot::AI::Provider::OpenAI::extract_error($body // '');
@@ -470,6 +472,7 @@ sub _attempt {
         http_factory => $http_factory,
     );
         $body = Mediabot::AI::Transport::decode_content($res);
+        last if ($res->{error}//'') eq 'response_too_large';
         last unless $retry && !$turn && !$res->{success};
         my ($type,$code)=Mediabot::AI::Provider::Gemini::extract_error($body);
         my $category=Mediabot::AI::Provider::Gemini::failure_category($res->{status},$type,$code,$res->{reason},$body);
@@ -526,6 +529,13 @@ sub _failure_result {
         $result->{transient_retries}=0+($res->{transient_retries}//0);
         $result->{first_failure_category}=$res->{first_failure_category}//'none';
     }
+    if (($args{error}//'') eq 'response_too_large') {
+        $result->{failure_category}='response_size';
+        $result->{reason}='AI response exceeded size limit';
+        $result->{error_type}='RESPONSE_SIZE_LIMIT';
+        $result->{error_code}='RESPONSE_TOO_LARGE';
+        $result->{error_message}='AI response exceeded the shared size limit.';
+    }
 
     return $result;
 }
@@ -555,7 +565,7 @@ sub _run_plan {
                 if $res->{model_fallback};
             # MB870: adapters supply usable text, never containers or blank output.
             if ($res->{success} && defined($answer) && !ref($answer) && $answer =~ /\S/) {
-                return {
+                my $result = {
                     ok                => 1,
                     provider          => $provider,
                     model             => $res->{effective_model}//$attempt->{model},
@@ -570,9 +580,15 @@ sub _run_plan {
                         Mediabot::AI::Provider::OpenAI::extract_sources($body)
                     } ? (sources => Mediabot::AI::Provider::OpenAI::extract_sources($body)) : ()),
                 };
+                my $encoded=eval {encode_json($result)};
+                return $result if defined($encoded) && length($encoded)<=RESULT_JSON_BYTES;
+                # Never trim a JSON answer: MetaAI must receive either the
+                # complete structured text or a bounded explicit failure.
+                $res->{error}='response_too_large';
             }
 
-            my $error = $res->{success} ? 'parse_error' : 'http_error';
+            my $error = ($res->{error}//'') eq 'response_too_large'
+                ? 'response_too_large' : $res->{success} ? 'parse_error' : 'http_error';
             my ($error_type, $error_code, $error_message) = ('', '', '');
             if (!$res->{success} && $provider eq 'openai') {
                 ($error_type, $error_code, $error_message) =
@@ -705,7 +721,7 @@ sub submit {
             timeout     => $plan_timeout + 3,
             term_grace  => 0.2,
             force_grace => 2.0,
-            max_output  => 256 * 1024,
+            max_output  => WORKER_OUTPUT_BYTES,
             child       => sub { _run_plan($plan, $http_factory) },
             on_done     => $worker_done,
         );

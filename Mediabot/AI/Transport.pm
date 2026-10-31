@@ -6,6 +6,8 @@ use warnings;
 use Carp qw(croak);
 use Exporter 'import';
 use MIME::Base64 qw(encode_base64 decode_base64);
+use Encode qw(encode);
+use Mediabot::AI::Limits qw(HTTP_RESPONSE_BYTES);
 
 our $VERSION = '1.0';
 our @EXPORT_OK = qw(
@@ -61,6 +63,7 @@ sub post_json {
         $args{http_factory}->(
             timeout    => 0 + $args{timeout},
             verify_SSL => 1,
+            max_size   => HTTP_RESPONSE_BYTES,
         );
     };
     if (!$http || !eval { $http->can('request') }) {
@@ -99,6 +102,15 @@ sub post_json {
 
     my $content = $res->{content};
     $content = '' if !defined($content) || ref($content);
+    $content = encode('UTF-8', $content) if utf8::is_utf8($content);
+    # Also enforce the boundary for injected/custom clients. HTTP::Tiny
+    # reports its own max_size abort as 599 with this fixed diagnostic.
+    if (length($content) > HTTP_RESPONSE_BYTES
+        || (!$res->{success} && "$status" eq '599'
+            && $content =~ /\ASize of response body exceeds the maximum allowed of \d+\s*\z/)) {
+        return {success=>0,status=>"$status",reason=>'AI response exceeded size limit',
+            error=>'response_too_large',content_b64=>''};
+    }
 
     return {
         success     => $res->{success} ? 1 : 0,
