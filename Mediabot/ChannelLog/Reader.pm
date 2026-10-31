@@ -88,15 +88,26 @@ sub channel_log_gather {
             next;
         }
         my $source_rows = 0;
-        while (my $r = $sth->fetchrow_hashref) {
+        my $fetch_exception;
+        while (1) {
+            my $r;
+            # MB1039: RaiseError must follow the same live/archive policy as
+            # DBI's false-return/err path. Keep consumer callback errors outside
+            # this guard so they remain exceptions rather than optional SQL loss.
+            my $fetched = eval { $r = $sth->fetchrow_hashref; 1 };
+            unless ($fetched) {
+                $fetch_exception = $@ || 'fetch failed';
+                last;
+            }
+            last unless $r;
             $source_rows++;
             $st{rows}++;
             $row_cb->($r, $src);
         }
         # mb578-B1: une fin de lecture peut etre une ERREUR de fetch et non
         # une fin normale — DBI l'expose via $sth->err apres la boucle.
-        my $fetch_err = eval { $sth->err };
-        my $fetch_errstr = eval { $sth->errstr } || $fetch_err || 'unknown';
+        my $fetch_err = $fetch_exception || eval { $sth->err };
+        my $fetch_errstr = $fetch_exception || eval { $sth->errstr } || $fetch_err || 'unknown';
         eval { $sth->finish };
         if ($fetch_err) {
             if ($is_live) {

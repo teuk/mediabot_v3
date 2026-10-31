@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1039 — Contain history fetch exceptions without accepting partial results
+
+- Handle DBI fetch exceptions through the shared live/archive reader's existing
+  failure policy. A live failure still stops immediately; an archive failure
+  before any row preserves the live result, while a partial archive marks it
+  tainted and unusable.
+- Attempt statement cleanup before returning that decision. Keep row-callback
+  exceptions as exceptions; do not silently reinterpret consumer failures as
+  optional archive loss. Preserve SQL templates, bindings and streaming.
+- Add sixteen native DBI/SQLite reader and real wordcount assertions; seven
+  fail on unchanged code. No schema, configuration or dependency change.
+
 ### MB1038 — Refresh metrics snapshots after a clock rewind
 
 - Reject a future-dated Prometheus render cache instead of serving stale
