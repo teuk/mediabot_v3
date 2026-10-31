@@ -382,8 +382,10 @@ sub render_prometheus {
     # Cache the rendered output for 5 seconds to avoid redundant work on
     # fast Prometheus scrape intervals or concurrent HTTP clients.
     my $now = time();
-    if ($self->{_render_cache}
-        && ($now - ($self->{_render_cache_at} // 0)) < 5)
+    # MB1038: a wall-clock rewind must not extend a snapshot's lifetime until
+    # its former timestamp is reached again. Keep the normal five-second TTL.
+    my $cache_age = $now - ($self->{_render_cache_at} // 0);
+    if ($self->{_render_cache} && $cache_age >= 0 && $cache_age < 5)
     {
         return $self->{_render_cache};
     }

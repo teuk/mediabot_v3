@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1038 — Refresh metrics snapshots after a clock rewind
+
+- Reject a future-dated Prometheus render cache instead of serving stale
+  instrumentation until wall time catches up. A clock rewind now refreshes
+  the next metrics response and starts its ordinary five-second cache lifetime.
+- Preserve normal cache reuse, exact TTL expiry, forward-clock behavior, sample
+  values, histogram handling, UTF-8 HTTP encoding and the disabled response.
+- Add twelve native HTTP-router/renderer assertions with a controlled clock;
+  four fail on unchanged code. No new clock source, listener, dependency,
+  configuration or schema change.
+
 ### MB1037 — Confirm timer removal before stopping its runtime
 
 - Refuse `remtimer` inside a caller-owned database transaction, matching the
