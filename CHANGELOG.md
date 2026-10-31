@@ -1,5 +1,24 @@
 ## [Unreleased] — 3.8dev
 
+### MB1048 — Stop obsolete MetaAI stages before launching further work
+
+- Pass the runtime's current-conversation predicate through the collective AI
+  pipeline. Check it before contributor work, shared/native web research,
+  synthesis and evidence repair, and before accepting their delayed results.
+  Forgotten conversations, revoked channel policy, changed configuration or
+  replaced runtime generations no longer trigger further paid stages.
+- Give shared-conversation jobs a distinct owner. Forget releases that room
+  immediately; old provider, source-presentation and pacing callbacks cannot
+  publish into or unlock its replacement. Other channels and protected local
+  answers retain their existing scope.
+- Keep evidence validation, model selection, budgets, exact delivered-memory
+  commits, short URLs and output pacing. Running requests retain the shared
+  client's bounded cleanup; cancellation does not retract already-sent lines
+  or guarantee cancellation of provider charges.
+- Add twenty-eight native pipeline assertions; eighteen fail before correction.
+  Update the old-generation fixture to assert that no synthesis is launched,
+  retaining all existing assertions. No schema, configuration or dependency change.
+
 ### MB1047 — Retire pending AI work when its conversation is cleared
 
 - Give each asynchronous Claude conversation a distinct request owner. Reset

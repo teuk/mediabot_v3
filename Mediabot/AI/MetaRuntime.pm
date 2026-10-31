@@ -265,6 +265,12 @@ sub _ask {
             }
             1;
         };
+        # Forget invalidates the shared room ticket, including work that used
+        # another participant's retained context. Local protected replies do
+        # not use that memory and retain their separate delivery contract.
+        my $pending=$self->{jobs}{$key};
+        delete $self->{jobs}{$key} if $ok && ref($pending) eq 'HASH'
+            && ($pending->{kind}//'') eq 'conversation';
         $self->_notice($nick,$lang,$ok?'forgotten':'memory');return 1;
     }
     my $generation=eval {$bot->{wit_runtime_state}->capture_generation($channel)};
@@ -286,7 +292,14 @@ sub _ask {
     if ($ticket->{error}) {$self->_notice($nick,$lang,$ticket->{error});return 1}
     $ticket->{metaai_policy_epoch}=policy_epoch($bot,$channel);
     push @{$self->{rate}{$key}},$now;push @{$self->{rate}{__global__}},$now;
-    my $signature=$self->_signature($cfg);$self->{jobs}{$key}=1;
+    my $signature=$self->_signature($cfg);
+    my $owner={kind=>'conversation'};$self->{jobs}{$key}=$owner;
+    my $owns=sub {
+        my $current=$self->{jobs}{$key};
+        return ref($current) eq 'HASH' && $current==$owner;
+    };
+    my $release=sub {delete $self->{jobs}{$key} if $owns->()};
+    my $alive=sub {$owns->() && $self->_alive($channel,$generation,$signature,$memory,$ticket)};
     my %overrides=('openai.API_URL'=>'https://api.openai.com/v1/responses',
         'gemini.FALLBACK_MODEL'=>$cfg->{gemini_fallback},
         'openai.WEB_SEARCH'=>1,'openai.FALLBACK_MODEL'=>'','gemini.THINKING_LEVEL'=>'LOW',
@@ -295,7 +308,7 @@ sub _ask {
     my $client=eval {$self->{client_factory} ? $self->{client_factory}->(\%overrides,\@order)
         : Mediabot::AI::Client->new(conf=>$bot->{conf},loop_owner=>$bot,
             config_overrides=>\%overrides,provider_order=>\@order)};
-    unless ($client) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'failed');return 1}
+    unless ($client) {$release->();$self->_notice($nick,$lang,'failed');return 1}
     my $web=Mediabot::AI::MetaWeb->new(api_key=>eval {$bot->{conf}->get('tavily.API_KEY')} // '',
         domains=>$cfg->{domains},clock=>$self->{clock});
     my $web_start=$self->{web_start} || sub {
@@ -314,10 +327,9 @@ sub _ask {
     my $completed=0;
     my $done=sub {
         my ($result)=@_;return if $completed++;
-        my $alive=sub {$self->_alive($channel,$generation,$signature,$memory,$ticket)};
-        unless ($alive->()) {delete $self->{jobs}{$key};return}
+        unless ($alive->()) {$release->();return}
         unless (ref($result) eq 'HASH' && $result->{ok}) {
-            delete $self->{jobs}{$key};my $error=ref($result) eq 'HASH'?$result->{error}//'failed':'failed';
+            $release->();my $error=ref($result) eq 'HASH'?$result->{error}//'failed':'failed';
             my %known=map {$_=>1} qw(failed all_providers_failed web_disabled_for_current_question
                 web_unavailable synthesis_failed web_synthesis_failed web_missing_citations unsupported_web_answer
                 web_missing_evidence web_evidence_mismatch);
@@ -334,18 +346,18 @@ sub _ask {
         my $sources=ref($result->{sources}) eq 'ARRAY'?$result->{sources}:[];
         my $deliver=sub {
             my ($presentation)=@_;
-            unless ($alive->()) {delete $self->{jobs}{$key};return}
+            unless ($alive->()) {$release->();return}
             my $base=eval {$bot->{conf}->get('shorturl.PUBLIC_BASE_URL')}//'';
             my $urls=display_urls($sources,$presentation,$base);
             my $source_line=@$sources?_source_line($sources,$lang,$urls):undef;
-            if (@$sources && !defined($source_line)) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'web');return}
+            if (@$sources && !defined($source_line)) {$release->();$self->_notice($nick,$lang,'web');return}
             my $chunks=format_meta_reply($result->{answer});
-            unless (@$chunks) {delete $self->{jobs}{$key};$self->_notice($nick,$lang,'failed');return}
+            unless (@$chunks) {$release->();$self->_notice($nick,$lang,'failed');return}
             push @$chunks,$source_line if defined $source_line;
             $self->_emit($channel,$chunks,$cfg,$alive,sub {
                 my ($sent)=@_;
                 eval {$memory->commit_turn($ticket,$sent)} if defined $sent;
-                delete $self->{jobs}{$key};
+                $release->();
                 my $shortened=grep {$urls->{$_} ne $_} keys %$urls;
                 my $anchors=defined($result->{evidence_anchors}) && !ref($result->{evidence_anchors})
                     && $result->{evidence_anchors}=~/^[0-2]$/?$result->{evidence_anchors}:0;
@@ -356,7 +368,7 @@ sub _ask {
         else {$deliver->({})}
     };
     my $ok=eval {$engine->submit(messages=>$ticket->{messages},prompt=>$prompt,
-        language=>$lang,on_done=>$done);1};
+        language=>$lang,on_done=>$done,is_current=>$alive);1};
     $done->({ok=>0,error=>'failed'}) unless $ok;
     return 1;
 }

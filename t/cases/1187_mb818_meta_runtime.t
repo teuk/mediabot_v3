@@ -84,7 +84,8 @@ is(scalar(keys %{$runtime->{jobs}}),0,'delivery releases channel job');
 ask($bot,'Bob','#test','and for me?');
 like($client->{calls}[4]{request}{messages}[0]{content},qr/^speaker1 \(Alice\):/,'prior participant is labelled in shared context');
 like($client->{calls}[4]{request}{messages}[-1]{content},qr/^speaker2 \(Bob\):/,'different participant has a distinct stable label');
-$bot->{wit_runtime_state}{generation}=2;drafts($client,4,0);final($client,7,'Late answer',[1]);
+$bot->{wit_runtime_state}{generation}=2;drafts($client,4,0);
+is(scalar(@{$client->{calls}}),7,'old generation stops before launching a paid synthesis');
 is(scalar(@sent),2,'response from an old connection/channel generation is discarded');
 is(scalar(keys %{$runtime->{jobs}}),0,'discarded response releases its job');
 

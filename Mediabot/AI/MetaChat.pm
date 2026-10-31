@@ -45,6 +45,7 @@ sub _request {
 sub submit {
     my ($self,%args)=@_;my $done=$args{on_done};my $cfg=$self->{settings};
     die 'on_done required' unless ref($done) eq 'CODE';
+    die 'is_current must be a callback' if defined($args{is_current}) && ref($args{is_current}) ne 'CODE';
     my @providers=grep {provider_configured($self->{conf},$_)} @{$cfg->{providers}};
     if (@providers<$cfg->{min_providers}) {$done->({ok=>0,error=>'not_enough_providers'});return 0}
     my $date=strftime('%Y-%m-%d',gmtime($self->{clock}->()));
@@ -76,8 +77,19 @@ sub submit {
         $result{citation_repair}=$repair_attempted unless exists $result{citation_repair};
         $done->(\%result);
     };
+    # MB1048: validity belongs to the caller's live conversation, not to a
+    # completed HTTP request. Stop the chain before accepting or launching
+    # another stage; workers already running keep their existing cleanup.
+    my $continue=sub {
+        return 0 if $finished;
+        return 1 unless $args{is_current};
+        return 1 if eval {$args{is_current}->()};
+        $finish->({ok=>0,error=>'cancelled'});
+        return 0;
+    };
     my $after=sub {
         return if $finished || $launching || keys %pending;
+        return unless $continue->();
         unless (@drafts) {$finish->({ok=>0,error=>'all_providers_failed'});return}
         my %rank;@rank{@providers}=(0..$#providers);
         @drafts=sort {$rank{$a->{provider}}<=>$rank{$b->{provider}}} @drafts;
@@ -94,21 +106,24 @@ sub submit {
             my $web_completed=0;
             my $started=eval {$self->{web_start}->($query,sub {
                 my ($web)=@_;return if $web_completed++;
+                return unless $continue->();
                 if (ref($web) eq 'HASH' && $web->{ok} && ref($web->{sources}) eq 'ARRAY' && @{$web->{sources}}) {
                     my $sources=_dated_sources($web->{sources},$date);
-                    if (@$sources) {$self->_synthesize(\%args,\@drafts,\@failures,$sources,$date,$finish,\$repair_attempted)}
-                    else {$self->_native_web(\%args,\@drafts,\@failures,$date,$finish)}
+                    if (@$sources) {$self->_synthesize(\%args,\@drafts,\@failures,$sources,$date,$finish,\$repair_attempted,$continue)}
+                    else {$self->_native_web(\%args,\@drafts,\@failures,$date,$finish,$continue)}
                 }
-                else {$self->_native_web(\%args,\@drafts,\@failures,$date,$finish)}
+                else {$self->_native_web(\%args,\@drafts,\@failures,$date,$finish,$continue)}
             },$plan)};
-            $self->_native_web(\%args,\@drafts,\@failures,$date,$finish) unless $started || $web_completed;
+            $self->_native_web(\%args,\@drafts,\@failures,$date,$finish,$continue) unless $started || $web_completed;
         }
-        else {$self->_synthesize(\%args,\@drafts,\@failures,[],$date,$finish,\$repair_attempted)}
+        else {$self->_synthesize(\%args,\@drafts,\@failures,[],$date,$finish,\$repair_attempted,$continue)}
     };
     for my $provider (@providers) {
+        last unless $continue->();
         my $request=$self->_request($provider,'meta_draft',$system,$args{messages});
         my $callback=sub {
             my ($result)=@_;return if $finished || !delete($pending{$provider});
+            return unless $continue->();
             my $outcome='api_failure';
             if (ref($result) eq 'HASH' && $result->{ok}) {
                 my $parsed=parse_object($result->{answer});
@@ -135,7 +150,9 @@ sub submit {
     return 1;
 }
 sub _synthesize {
-    my ($self,$args,$drafts,$failures,$sources,$date,$finish,$repair_attempted)=@_;
+    my ($self,$args,$drafts,$failures,$sources,$date,$finish,$repair_attempted,$continue)=@_;
+    $continue//=sub {1};
+    return unless $continue->();
     my $cfg=$self->{settings};
     my $by_passage=@$sources && $self->{evidence_mode} eq 'passage_ids';
     my $catalogue=$by_passage?build_catalogue($sources):undef;
@@ -176,6 +193,7 @@ sub _synthesize {
     my $launch;
     $launch=sub {
         my ($provider,$repair,$reason)=@_;
+        unless ($continue->()) {$launch=undef;return}
         my $instructions=$system;
         if ($repair) {
             $$repair_attempted=1;
@@ -202,6 +220,7 @@ sub _synthesize {
         my $called=0;
         my $callback=sub {
             my ($result)=@_;return if $called++;
+            unless ($continue->()) {$launch=undef;return}
             my $parsed=ref($result) eq 'HASH' && $result->{ok} ? parse_object($result->{answer}):undef;
             my $answer=$parsed ? clean_answer($parsed->{answer},1600):'';
             my $fallback=0;
@@ -274,7 +293,9 @@ sub _synthesize {
     $launch->('auto',0);
 }
 sub _native_web {
-    my ($self,$args,$drafts,$failures,$date,$finish)=@_;
+    my ($self,$args,$drafts,$failures,$date,$finish,$continue)=@_;
+    $continue//=sub {1};
+    return unless $continue->();
     unless (provider_configured($self->{conf},'openai')) {
         $finish->({ok=>0,error=>'web_unavailable'});return;
     }
@@ -291,6 +312,7 @@ sub _native_web {
     my $request=$self->_request('openai','meta_web',$system,$args->{messages});
     my $called=0;my $callback=sub {
         my ($result)=@_;return if $called++;
+        return unless $continue->();
         my @sources;
         if (ref($result) eq 'HASH' && ref($result->{sources}) eq 'ARRAY') {
             @sources=@{_dated_sources($result->{sources},$date)};
