@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1040 — Preserve bounded HTTP responses across worker serialization
+
+- Size the plugin HTTP worker's pipe allowance for JSON escaping of the body
+  and bounded metadata. A valid 30,001-byte JSON document below the default
+  32 KiB HTTP limit no longer fails as worker_output_limit during transfer.
+- Preserve the caller's original raw HTTP byte cap and strict UTF-8 validation.
+  Keep native worker output bounded (400 KiB at the maximum 64 KiB HTTP body),
+  with existing cache, cancellation, concurrency and circuit policies unchanged.
+- Add sixteen native fork/pipe assertions; seven fail before correction. Cover
+  escaped/Unicode bodies, caching, real HTTP error statuses, exact and oversized
+  boundaries, invalid UTF-8, recovery and worker-slot cleanup. No dependency,
+  configuration or schema change.
+
 ### MB1039 — Contain history fetch exceptions without accepting partial results
 
 - Handle DBI fetch exceptions through the shared live/archive reader's existing

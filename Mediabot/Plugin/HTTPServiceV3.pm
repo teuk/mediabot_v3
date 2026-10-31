@@ -417,7 +417,11 @@ sub fetch {
         loop       => $self->{loop},
         label      => "plugin-http:$plugin",
         timeout    => $timeout,
-        max_output => $max_bytes + 8192,
+        # MB1040: the pipe carries a JSON result, not the raw HTTP body.
+        # A valid UTF-8 body byte can expand to six bytes (e.g. NUL -> \u0000).
+        # Reserve bounded space for URL/headers and the worker envelope too;
+        # _perform_request still enforces the caller's original HTTP byte cap.
+        max_output => 6 * $max_bytes + 16 * 1024,
         child      => sub {
             return _perform_request(
                 $self->{requester}, $self->{resolver}, $url,
