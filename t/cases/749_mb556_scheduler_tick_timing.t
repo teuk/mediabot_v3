@@ -113,7 +113,7 @@ return sub {
         my $helper_calls = () = $src =~ /->_run_task_callback\(/g;
         $assert->ok($helper_calls == 2, 'helper: appele par les deux modes (periodic + calendar)');
         $assert->like($src, qr/^sub _run_task_callback \{/m, 'helper: defini');
-        my $direct_evals = () = $src =~ /eval \{ \$(?:cb|current->\{cb\})->\(\) \}/g;
+        my $direct_evals = () = $src =~ /eval \{ \$(?:cb|current->\{cb\})->\(\)(?:;\s*1)? \}/g;
         $assert->ok($direct_evals == 1,
             'plus d\'eval direct du callback hors helper (le seul restant EST le helper)');
         $assert->like($src, qr/sub set_metrics/, 'set_metrics present');

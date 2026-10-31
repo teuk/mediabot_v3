@@ -1,5 +1,22 @@
 ## [Unreleased] — 3.8dev
 
+### MB1043 — Keep scheduled callback exceptions inside the runtime boundary
+
+- Decide callback success from eval completion rather than exception truthiness.
+  False-valued exception objects now count as failures for their owning task
+  lifecycle, while an ordinary callback returning zero remains successful.
+- Never invoke boolean or string overloads on exception objects while counting
+  or logging task errors. Emit a fixed scalar diagnostic for reference values;
+  preserve whitespace normalization for scalar errors and bound their payload
+  to 512 characters. A broken exception formatter can no longer escape the
+  callback guard and interrupt periodic work or calendar rearming.
+- Add eighteen native periodic/calendar assertions; fifteen fail before
+  correction. Cover healthy work, timing metrics, same-name replacement,
+  optional logging/metrics and bounded diagnostics. No schema, configuration,
+  dependency, timer policy or date-resolver change.
+  Adapt the existing single-eval source guard to recognize explicit completion;
+  keep its assertion and all existing runtime checks active.
+
 ### MB1042 — Keep AntiFlood drain ownership scoped to its target
 
 - Treat a reblocked item as head reinsertion only for the target currently being

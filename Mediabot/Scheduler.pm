@@ -34,7 +34,7 @@ sub _run_task_callback {
     my $t0 = [ Time::HiRes::gettimeofday() ];
     my $observed_task=$self->{_tasks}{$name};
     my $observed_generation=$observed_task ? $observed_task->{generation}:undef;
-    eval { $cb->() };
+    my $ok = eval { $cb->(); 1 };
     my $err = $@;
     my $elapsed = Time::HiRes::tv_interval($t0);
     my $current=$self->{_tasks}{$name};
@@ -44,7 +44,7 @@ sub _run_task_callback {
         $current->{max_duration_s} = $elapsed
             if $elapsed > ($current->{max_duration_s}//0);
     }
-    if ($err && $observed_task && $current && refaddr($observed_task)==refaddr($current)
+    if (!$ok && $observed_task && $current && refaddr($observed_task)==refaddr($current)
         && $current->{generation}==$observed_generation) {
         $current->{callback_exceptions}++;
         $current->{last_exception_at}=time();
@@ -57,9 +57,13 @@ sub _run_task_callback {
     if ($elapsed > 1.0) {
         $self->_log(3, sprintf("SLOW SCHEDULER: task '%s' took %.2fs", $name, $elapsed));
     }
-    if ($err) {
-        (my $clean = $err) =~ s/\s+/ /g;
-        $self->_log(1, "Scheduler: task '$name' error: $clean");
+    if (!$ok) {
+        # MB1043: exception objects may overload bool/string conversion, even
+        # by throwing again. Never coerce them outside the callback's guard.
+        my $clean = ref($err) ? 'non-scalar task exception'
+            : defined($err) && length($err) ? $err : 'unknown task exception';
+        $clean =~ s/\s+/ /g;
+        $self->_log(1, "Scheduler: task '$name' error: " . substr($clean, 0, 512));
     }
 
     return 1;
