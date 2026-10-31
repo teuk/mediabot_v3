@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1041 — Reject external-script actions after signal termination
+
+- Distinguish a process killed by a signal from a normal exit code zero.
+  A valid JSON response written before SIGTERM, SIGINT or SIGKILL no longer
+  makes a failed external script successful or authorizes its actions.
+- Keep the actual signal number, report no normal exit code for that case,
+  and provide a bounded numeric diagnostic. Preserve captured stdout/stderr
+  and parsed response for inspection; the existing action boundary stays closed.
+- Add eighteen native subprocess and real action-runner assertions; nine fail
+  before correction. Cover reply/log/storage suppression, clean and nonzero
+  exits, malformed JSON and timeout compatibility. No new dependency,
+  configuration, protocol, schema or signal-sending behavior in the runner.
+
 ### MB1040 — Preserve bounded HTTP responses across worker serialization
 
 - Size the plugin HTTP worker's pipe allowance for JSON escaping of the body

@@ -1090,8 +1090,10 @@ sub run_plan {
         }
     }
 
-    my $exit_code = $timed_out ? undef : (($wait_status >> 8) & 0xff);
     my $signal    = $timed_out ? undef : ($wait_status & 0x7f);
+    # MB1041: a signal termination has no normal exit code. Its zero high byte
+    # must not authorize actions from JSON written before the process died.
+    my $exit_code = ($timed_out || $signal) ? undef : (($wait_status >> 8) & 0xff);
 
     my $response = $timed_out
         ? { ok => 0, errors => [ 'script timed out' ], actions => [] }
@@ -1102,6 +1104,7 @@ sub run_plan {
         timeout          => $timed_out ? 1 : 0,
         exit_code        => $exit_code,
         signal           => $signal,
+        ($signal ? (error => "script terminated by signal $signal") : ()),
         stdout           => $stdout,
         stderr           => $stderr,
         stdout_truncated => $stdout_truncated ? 1 : 0,
