@@ -219,7 +219,7 @@ sub _handle_line {
     elsif ($line =~ /^\.floodset\s+(.*)/i) {
         $self->_cmd_floodset($stream, $id, $1);
     }
-    elsif ($line =~ /^\.cmdcooldown\s+(.*)/i) {
+    elsif ($line =~ /^\.cmdcooldown(?:\s+(.*?))?$/i) {
         $self->_cmd_cmdcooldown($stream, $id, $1);
     }
     elsif ($line =~ /^\.netsplit$/i) {

@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1036 — Apply operator cooldown settings to the admitted command group
+
+- Share the existing news-alias identity between `.cmdcooldown` and the parent
+  command guard. Changing or disabling `news`, `actu`, `actualite` or `actualites`
+  now updates and resets the group that actually admits those requests.
+- Use the same case-insensitive channel key when writing and reading overrides,
+  while preserving the operator's confirmation text. Keep defaults, explicit
+  caller overrides, range bounds and unrelated command/channel state unchanged.
+- Restore the already implemented no-argument `.cmdcooldown` listing through
+  the partyline dispatcher. Add sixteen native dispatcher/guard assertions;
+  ten fail on the unchanged source. No network, SQL or configuration migration.
+
 ### MB1035 — Reconcile karma graphs with their observed votes
 
 - Keep `karmgraph` activity visible when positive and negative votes cancel.

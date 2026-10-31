@@ -42,6 +42,16 @@ sub _af_conf_int {
     return $value;
 }
 
+# MB1036: the operator setter and admission guard must address one group.
+# Keep the existing paid-news aliases together; other commands retain lc names.
+sub _cooldown_command_key {
+    my ($cmd) = @_;
+    my $cooldown_cmd = lc $cmd;
+    $cooldown_cmd = 'actualites'
+        if $cooldown_cmd =~ /\A(?:actualites|actualite|actu|news)\z/;
+    return $cooldown_cmd;
+}
+
 sub checkCmdCooldown {
     my ($self, $channel, $cmd, $override_secs) = @_;
     return 0 unless defined $channel && $channel =~ /^#/ && defined $cmd;
@@ -66,17 +76,11 @@ sub checkCmdCooldown {
         actu       => 45,
         news       => 45,
     );
-    # mb616-B1: aliases of the same paid news command must share one bucket.
-    # Keeping the typed alias in the key would let a user rotate
-    # actualites -> news -> actu -> actualite and bypass the intended 45 s
-    # parent-side guard. Canonicalise before both config lookup and state key.
-    my $cooldown_cmd = lc $cmd;
-    $cooldown_cmd = 'actualites'
-        if $cooldown_cmd =~ /\A(?:actualites|actualite|actu|news)\z/;
-
+    # mb616-B1: aliases share one parent-side bucket and operator setting.
+    my $cooldown_cmd = _cooldown_command_key($cmd);
     # CC2: per-channel override via .cmdcooldown takes priority
     my $chan_conf = defined $channel
-        ? ($self->{_cmd_cooldown_conf}{$channel}{$cooldown_cmd} // undef)
+        ? ($self->{_cmd_cooldown_conf}{lc $channel}{$cooldown_cmd} // undef)
         : undef;
     my $cooldown = defined $override_secs ? $override_secs
                  : defined $chan_conf      ? $chan_conf

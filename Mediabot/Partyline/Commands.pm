@@ -17,6 +17,7 @@ use Exporter 'import';
 use Encode qw(encode);
 use Mediabot::IRC::Text qw(decode_irc_text);
 use Mediabot::Helpers ();
+use Mediabot::IRC::CommandThrottle ();
 use Mediabot::External ();
 
 our @EXPORT_OK = qw(
@@ -4514,6 +4515,11 @@ sub _cmd_cmdcooldown {
         return;
     }
     my ($chan, $cmd, $secs) = ($1, lc($2), int($3));
+    # MB1036: preserve the confirmation while configuring/resetting the exact
+    # same channel and alias group used by checkCmdCooldown.
+    my ($display_chan, $display_cmd) = ($chan, $cmd);
+    $chan = lc $chan;
+    $cmd = Mediabot::IRC::CommandThrottle::_cooldown_command_key($cmd);
     $secs = 0 if $secs < 0; $secs = 3600 if $secs > 3600;  # A-68-2: clamp range
     $bot->{_cmd_cooldown_conf}{$chan}{$cmd} = $secs;
     # Reset any active cooldown for this cmd+chan
@@ -4521,7 +4527,7 @@ sub _cmd_cmdcooldown {
     # HH16: human-readable confirmation
     my $secs_h = $secs >= 60 ? sprintf("%dm%02ds", int($secs/60), $secs%60) : "${secs}s";
     my $action_str = $secs == 0 ? "removed" : "set to $secs_h";
-    $stream->write("Cooldown for !$cmd on $chan $action_str.\r\n");
+    $stream->write("Cooldown for !$display_cmd on $display_chan $action_str.\r\n");
 }
 
 sub _cmd_netsplit {
