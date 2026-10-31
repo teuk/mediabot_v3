@@ -57,8 +57,12 @@ return sub {
         "au moins 11 troncatures de pagination \$line routées via truncate_utf8 (vu: $total_convert)");
 
     # --- 3. Comptes par module (mb455) ---------------------------------------
+    # MB1044: nicklist packs whole names within a wire-byte budget instead of
+    # truncating a ten-name slice. Only the other two ChannelCommands listings
+    # still need these truncation guards. Keep the repo-wide raw-substr ban and
+    # every assertion; case 1417 checks complete, bounded native nicklist output.
     my %expect = (
-        'ChannelCommands.pm' => 3,
+        'ChannelCommands.pm' => 2,
         'Helpers.pm'         => 3,
         'LoginCommands.pm'   => 1,
         'Partyline.pm'       => 1,

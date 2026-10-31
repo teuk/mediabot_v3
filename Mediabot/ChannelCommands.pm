@@ -24,6 +24,7 @@ use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
 use Mediabot::DynamicTemplate qw(normalize_name);
+use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
 our @EXPORT = qw(
     getChannel
@@ -3465,23 +3466,30 @@ sub channelNickList_ctx {
     my $count = scalar(@nicks);
     botNotice($self, $nick, "Users on $target_chan: $count result(s)");
 
-    my $per_line    = 10;
-    my $total_pages = int((scalar(@nicks) + $per_line - 1) / $per_line);
-    my $page        = 1;
-
-    while (@nicks) {
-        my @chunk = splice(@nicks, 0, $per_line);
-        my $line  = sprintf("nicklist[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
-
-        if (length($line) > 360) {
-            $line = truncate_utf8($line, 357);
+    my $per_line = 10;
+    # MB1044: pack whole nicknames before numbering pages. Truncating a
+    # ten-nick slice lost its tail; character length also missed UTF-8 bytes.
+    # At most $count pages are needed, so this label reserves enough digits.
+    my $body_budget = 360 - _irc_wire_bytes(sprintf('nicklist[%02d/%02d]: ', $count, $count));
+    my (@pages, @chunk);
+    for my $entry (@nicks) {
+        if (@chunk && (@chunk >= $per_line
+                || _irc_wire_bytes(join(' ', @chunk, $entry)) > $body_budget)) {
+            push @pages, join(' ', @chunk);
+            @chunk = ();
         }
-
+        push @chunk, $entry;
+    }
+    push @pages, join(' ', @chunk) if @chunk;
+    my $total_pages = scalar @pages;
+    my $page = 1;
+    for my $body (@pages) {
+        my $line = sprintf("nicklist[%02d/%02d]: %s", $page, $total_pages, $body);
         botNotice($self, $nick, $line);
         $page++;
     }
 
-    $self->{logger}->log(4, "nicklist $target_chan => " . scalar(@nicks) . " users");
+    $self->{logger}->log(4, "nicklist $target_chan => $count users");
     logBot($self, $ctx->message, undef, "nicklist", $target_chan);
 
     return 1;

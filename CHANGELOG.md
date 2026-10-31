@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1044 — Preserve every nickname in paginated channel listings
+
+- Pack complete nicknames within a 360-byte IRC payload budget before numbering
+  pages, retaining the ten-nickname maximum. Long nicknames no longer disappear
+  behind a truncated page, and Unicode output is measured in UTF-8 wire bytes.
+- Keep ordinary page formatting, cache order, channel fallback, authentication
+  and Administrator requirements unchanged. Log the original result count
+  rather than an already-consumed temporary list.
+- Add sixteen native-handler assertions for long ASCII, Unicode and raw UTF-8
+  names, more than 99 pages, ordinary output, empty/unknown channels, access
+  refusal, cache preservation and warning-free execution. No schema,
+  configuration or dependency change.
+- Adjust the historical truncation-site count for the two remaining channel
+  listings; retain every lint assertion and the repository-wide raw-substr ban.
+
 ### MB1043 — Keep scheduled callback exceptions inside the runtime boundary
 
 - Decide callback success from eval completion rather than exception truthiness.
