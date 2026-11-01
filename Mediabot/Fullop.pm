@@ -3,6 +3,8 @@ package Mediabot::Fullop;
 use strict;
 use warnings;
 use Mediabot::IRC::CaseMapping qw(fold_irc);
+use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
+use Protocol::IRC::Message ();
 use utf8;
 
 # +Fullop keeps a channel deliberately open while allowing every participant
@@ -789,6 +791,14 @@ sub handle_mode {
     };
 }
 
+sub _op_batch_fits {
+    my ($channel, @nicks) = @_;
+    my $message = Protocol::IRC::Message->new(
+        'MODE', undef, $channel, '+' . ('o' x @nicks), @nicks,
+    );
+    return _irc_wire_bytes($message->stream_to_line . "\r\n") <= 512;
+}
+
 sub _send_op_batches {
     my ($self, $channel, @nicks) = @_;
     my %seen;
@@ -801,8 +811,23 @@ sub _send_op_batches {
     $batch = 4 if $batch < 1 || $batch > 20;
     my $sent = 0;
 
-    while (@nicks) {
-        my @slice = splice(@nicks, 0, $batch);
+    # MODES limits the number of changes, not their serialized byte length.
+    # Keep complete nicknames and account for MODE, channel, +o, spaces and
+    # CRLF using the transport's serializer, including its trailing-arg syntax.
+    my @slice;
+    for my $nick (@nicks) {
+        unless (_op_batch_fits($channel, $nick)) {
+            $self->_log(1, 'Fullop: op target exceeds the IRC line budget; skipped');
+            next;
+        }
+        if (@slice && (@slice >= $batch || !_op_batch_fits($channel, @slice, $nick))) {
+            $self->_send('MODE', undef, $channel, '+' . ('o' x @slice), @slice);
+            $sent += @slice;
+            @slice = ();
+        }
+        push @slice, $nick;
+    }
+    if (@slice) {
         $self->_send('MODE', undef, $channel, '+' . ('o' x @slice), @slice);
         $sent += @slice;
     }

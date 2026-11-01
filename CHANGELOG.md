@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1055 — Keep Fullop operator batches inside the IRC wire budget
+
+- Pack op sweeps by both the advertised MODES count and the serialized
+  512-byte IRC line limit, including the channel, spaces and CRLF. Reuse the
+  native Protocol::IRC serializer instead of estimating argument framing.
+- Preserve complete nicknames, order, case-mapping deduplication and ordinary
+  short-name batches. An impossible single target is skipped with a bounded
+  diagnostic; following targets remain eligible and no nickname is truncated.
+- Add thirty-three native transport assertions; eleven fail before correction.
+  Keep Fullop admission, service authority and moderation rules unchanged.
+  No historical test, schema, configuration or dependency change.
+
 ### MB1054 — Extract pasted links without their surrounding markup or IRC style
 
 - Stop URL tokens at raw angle brackets and double quotes, so autolinks and
