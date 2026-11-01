@@ -64,6 +64,7 @@ sub setup_1349 {
     my $dsn='dbi:SQLite:dbname='.$tmp.'/'.++$serial.'.sqlite';
     my $db=DBI->connect($dsn,'','',{RootClass=>'MB973::DBI',RaiseError=>$raise,PrintError=>0,AutoCommit=>1});
     my $peer=DBI->connect($dsn,'','',{RaiseError=>1,PrintError=>0,AutoCommit=>1});
+    $peer->begin_work; # MB1058: fixture seed only, before native operations.
     $peer->do('CREATE TABLE CHANSET_LIST(id_chanset_list INTEGER,chanset TEXT)');
     $peer->do(q{CREATE TABLE FACTOID(id_factoid INTEGER PRIMARY KEY AUTOINCREMENT,
         id_channel INTEGER,keyword TEXT,value TEXT,created_by_nick TEXT,hits INTEGER,
@@ -71,6 +72,7 @@ sub setup_1349 {
     $peer->do(q{INSERT INTO FACTOID VALUES
         (10,1,'spell','Original text','Author',3),
         (20,2,'spell','Other channel','Other',50)});
+    $peer->commit;
     $db->{private_fault}=$fault; $db->{private_updates}=0; $db->{private_finished}=0;
     my $bot=bless {dbh=>$db,channels=>{'#test'=>bless({},'MB973::Channel')},
         logger=>bless({},'MB973::Log'),metrics=>bless({recalls=>0},'MB973::Metrics')},'Mediabot';
@@ -85,8 +87,9 @@ sub invoke_1349 {
     my $ok=eval {&{"${entry}::mbWhatis_ctx"}($ctx);1};
     return $ok?'':$@;
 }
-for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    # Full fault coverage belongs to the implementation; facades get wiring checks.
+# MB1058: aliases are proved in 1431; run each scenario once on its owner.
+for my $entry ('Mediabot::CommunityState') {
+    # Keep every original implementation fault, identity and healthy scenario.
     my $domain = $entry eq 'Mediabot::CommunityState';
     for my $raise ($domain ? (0,1) : (1)) {
         for my $quiet ($domain ? (0,1) : (0)) {

@@ -92,8 +92,9 @@ my @cases = (
     {label => 'invalid zero account id', user => user_1346(0,1), author => undef},
     {label => 'missing account id', user => user_1346(undef,1), author => undef},
 );
-for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    # Full fault coverage belongs to the implementation; facades get wiring checks.
+# MB1058: aliases are proved in 1431; run each scenario once on its owner.
+for my $entry ('Mediabot::CommunityState') {
+    # Keep every original implementation fault, identity and healthy scenario.
     my $domain = $entry eq 'Mediabot::CommunityState';
     for my $raise (1) {
         for my $case ($domain ? @cases : @cases[1,2]) {

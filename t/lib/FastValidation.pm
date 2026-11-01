@@ -61,10 +61,6 @@ my %SLOW_EXCLUSIONS = (
         => 'measured slow karma history contract',
     '707_mb497_seen_enriched.t'
         => 'measured slow seen enrichment contract',
-    '190_seen_respects_channel_scope.t'
-        => 'measured slow seen scope contract',
-    '192_seen_persisted_respects_channel_scope.t'
-        => 'measured slow persisted seen scope contract',
     '335_antiflood_chanflood_public_only.t'
         => 'measured slow antiflood timing contract',
     '55_usercommands_lookup_db_safety.t'
@@ -77,8 +73,6 @@ my %SLOW_EXCLUSIONS = (
         => 'measured slow exhaustive dispatch scan',
     '345_dcc_passive_token_redacted.t'
         => 'measured slow DCC contract',
-    '380_note_export_lc_key_and_limit.t'
-        => 'measured slow note export contract',
 );
 
 sub fast_lane_sentinels {

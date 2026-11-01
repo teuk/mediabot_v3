@@ -16,6 +16,10 @@ sub run_probe {
     my $client=Mediabot::AI::Client->new(conf=>$conf,
         config_overrides=>{'gemini.FALLBACK_MODEL'=>$fallback},
         http_factory=>sub {push @timeouts,$_[1];bless {},'MB825RecoveryHTTP'});
+    my $clock=1000;
+    no warnings 'redefine';
+    local *Time::HiRes::time=sub {$clock};
+    local *Time::HiRes::sleep=sub {$clock += $_[0];$_[0]};
     return $client->execute(build_request(provider=>'gemini',model=>'gemini-3.8-flash',purpose=>$purpose,
         messages=>[{role=>'user',content=>'OK'}],max_output_tokens=>1024,timeout_seconds=>5));
 }

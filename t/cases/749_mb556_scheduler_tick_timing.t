@@ -48,6 +48,13 @@ sub _slurp_749 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
 
 return sub {
     my ($assert) = @_;
+    my $clock=1000;
+    my $interval=\&Time::HiRes::tv_interval;
+    my $stamp=sub {my $seconds=int($clock);[$seconds,int(($clock-$seconds)*1_000_000)]};
+    no warnings 'redefine';
+    local *Time::HiRes::gettimeofday=sub {@{$stamp->()}};
+    local *Time::HiRes::tv_interval=sub {$interval->($_[0],$stamp->())};
+
 
     # ------------------------------------------------------------------
     # [1] Observation + SLOW
@@ -67,7 +74,7 @@ return sub {
             'rapide: duree observee avec le label task');
         $assert->ok(scalar($logger->at_level(3)) == 0, 'rapide: aucun log SLOW');
 
-        $sched->_run_task_callback('slow_task', sub { select(undef, undef, undef, 1.05); 1 });
+        $sched->_run_task_callback('slow_task', sub { $clock+=1.05; 1 });
         my ($l3) = $logger->at_level(3);
         $assert->like(($l3->[1] || ''),
             qr/^SLOW SCHEDULER: task 'slow_task' took 1\.\d+s$/,
@@ -101,7 +108,7 @@ return sub {
         my $sched = bless { logger => $logger }, 'Mediabot::Scheduler';
         my $ok = eval { $sched->_run_task_callback('plain', sub { 1 }); 1 };
         $assert->ok($ok, 'sans metrics: aucun crash');
-        $sched->_run_task_callback('plain_slow', sub { select(undef, undef, undef, 1.05); 1 });
+        $sched->_run_task_callback('plain_slow', sub { $clock+=1.05; 1 });
         $assert->ok(scalar($logger->at_level(3)) == 1, 'sans metrics: le log SLOW reste');
     }
 

@@ -160,6 +160,7 @@ sub run {
     my $dsn="dbi:SQLite:dbname=$dir/users.sqlite";
     my $db=DBI->connect($dsn,'','',{RaiseError=>$a{raise}//0,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1,RootClass=>'MB928::DBI'});
     $db->do('PRAGMA foreign_keys=ON');
+    $db->begin_work; # MB1058: commit the complete fixture before probing deletion.
     $db->do('CREATE TABLE USER (id_user INTEGER PRIMARY KEY, nickname TEXT UNIQUE)');
     $db->do('CREATE TABLE USER_CHANNEL (id_user INTEGER, id_channel INTEGER, level INTEGER)');
     $db->do('CREATE TABLE USER_HOSTMASK (id_user INTEGER, hostmask TEXT)');
@@ -178,6 +179,7 @@ sub run {
         $db->do("CREATE TRIGGER refuse_delete BEFORE DELETE ON $table WHEN $when BEGIN SELECT RAISE(ABORT, 'fixture refusal $table'); END");
     }
     if ($fault eq 'commit') {$db->do("INSERT INTO GUARD VALUES (7,'retain target')")}
+    $db->commit;
     my $peer=DBI->connect($dsn,'','',{RaiseError=>1,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
     my $before=snapshot($db);my @trace;$db->{private_mb928_trace}=\@trace;
     my $logger=bless({rows=>[]},'MB928::Logger');
@@ -225,7 +227,7 @@ sub run {
     return $result;
 }
 my @records;
-for my $entry (qw(module imported)) {
+for my $entry ('module') {
     for my $raise (0,1) {
         for my $fault (qw(delete:USER_CHANNEL delete:USER_HOSTMASK delete:USER_SEEN delete:USER commit begin)) {
             push @records,run(entry=>$entry,raise=>$raise,fault=>$fault);
@@ -246,8 +248,8 @@ MB928_NATIVE
     close $reader;
     my $status = $?;
     my $records = eval { JSON::PP::decode_json($raw) };
-    $assert->ok($status == 0 && ref($records) eq 'ARRAY' && @$records == 72,
-        'MB928: 72 native deluser scenarios completed through module and imported entry');
+    $assert->ok($status == 0 && ref($records) eq 'ARRAY' && @$records == 36,
+        'MB928: 36 native deluser scenarios completed; imported identity is checked in 1431');
     $records = [] unless ref($records) eq 'ARRAY';
     my $json = JSON::PP->new->canonical->utf8;
     my $same = sub { $json->encode($_[0]) eq $json->encode($_[1]) };
@@ -346,11 +348,11 @@ MB928_NATIVE
             && $same->($r->{pending},[sort @pending]) && !@{$r->{warnings}} && $r->{autocommit} == 1;
         push @nominal_errors, $label unless $ok;
     }
-    $assert->is($json->encode([$sql_count,\@sql_errors]), '[20,[]]',
+    $assert->is($json->encode([$sql_count,\@sql_errors]), '[10,[]]',
         'MB928: four SQL deletions and commit refuse atomically, stop immediately and retain diagnostics');
-    $assert->is($json->encode([$ownership_count,\@ownership_errors]), '[4,[]]',
+    $assert->is($json->encode([$ownership_count,\@ownership_errors]), '[2,[]]',
         'MB928: failed begin neither commits nor rolls back another caller transaction');
-    $assert->is($json->encode([$nominal_count,\@nominal_errors]), '[48,[]]',
+    $assert->is($json->encode([$nominal_count,\@nominal_errors]), '[24,[]]',
         'MB928: confirmation, exact 30s boundary, permissions, empty links and Unicode retain native contracts');
 
     # MB933: exercise actual userAdd/adduser/register against isolated DBI.

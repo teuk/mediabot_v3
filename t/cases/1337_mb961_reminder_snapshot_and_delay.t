@@ -70,7 +70,8 @@ sub deliver_1337 {
 
 # Two actual DBI connections: the snooze completes after delivery's SELECT,
 # before its conditional UPDATE. All three public function facades are real.
-for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
+# MB1058: aliases are proved in 1431; run each scenario once on its owner.
+for my $entry ('Mediabot::CommunityState') {
     for my $prefix ('', '[daily:09:00] ', '[weekly:1:09:00] ') {
         my ($bot, $db, $peer_bot, $peer) = setup_1337($prefix . '[at:100] Un café');
         $db->{private_mb961_claim} = sub {

@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1058 — Run implementation scenarios once and trim obsolete test contracts
+
+- Delete thirty historical source/prose cases; replace repeated extraction and
+  facade matrices with a fixed native alias identity inventory. Keep distinct
+  owner faults, permissions, calendar boundaries and registry integration.
+- Commit SQLite fixture seeds once before native operations, reuse one validated
+  French corpus, and remove idle policy/metrics waits with scoped virtual time.
+  Keep real async workers, sockets, subprocess timeout/termination and rollback.
+- Leave the default full runner and every mandatory fast sentinel unchanged;
+  remove three obsolete nonmandatory slow-metadata entries. No application,
+  VERSION, configuration, dependency or schema change.
+
+
 ### MB1057 — Validate DCC numeric fields before conversion or connection
 
 - Read IPv4 integers and active ports as exact bounded ASCII unsigned

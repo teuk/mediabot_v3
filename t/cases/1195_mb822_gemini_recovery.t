@@ -11,6 +11,10 @@ my $client=Mediabot::AI::Client->new(conf=>$conf,http_factory=>sub {
     push @timeouts,$_[1];bless {},'MB822GeminiHTTP'});
 sub probe {
     my ($purpose,@items)=@_;@responses=@items;@calls=();@timeouts=();
+    my $clock=1000;
+    no warnings 'redefine';
+    local *Time::HiRes::time=sub {$clock};
+    local *Time::HiRes::sleep=sub {$clock += $_[0];$_[0]};
     return $client->execute(build_request(provider=>'gemini',purpose=>$purpose,
         model=>'gemini-3.8-flash',messages=>[{role=>'user',content=>'Reply OK.'}],max_output_tokens=>1024,timeout_seconds=>5));
 }

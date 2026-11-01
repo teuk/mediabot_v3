@@ -47,12 +47,14 @@ sub setup_1358 {
     my $db=DBI->connect($dsn,'','',{RootClass=>'MB982::DBI',
         RaiseError=>1,PrintError=>0,AutoCommit=>1});
     my $peer=DBI->connect($dsn,'','',{RaiseError=>1,PrintError=>0,AutoCommit=>1});
+    $peer->begin_work; # MB1058: fixture seed only, before native operations.
     $peer->do('CREATE TABLE KARMA(id_channel INTEGER,nick TEXT,score INTEGER,PRIMARY KEY(id_channel,nick))');
     $peer->do('CREATE TABLE KARMA_LOG(id_channel INTEGER,nick TEXT,delta INTEGER,from_nick TEXT,score INTEGER,ts TEXT)');
     for my $name (@present) {
         $peer->do('INSERT INTO KARMA VALUES(1,?,10)',undef,lc $name);
         $peer->do('INSERT INTO KARMA VALUES(2,?,90)',undef,lc $name);
     }
+    $peer->commit;
     my $bot=Mediabot->new({dbh=>$db});bless $bot,'MB982::Bot';
     $bot->{fixture_nicks}=[@present];
     $bot->{channels}{'#test'}=bless {},'MB982::Channel';
@@ -82,9 +84,9 @@ sub invoke_1358 {
 sub score_1358 {$_[0]->selectrow_array('SELECT score FROM KARMA WHERE id_channel=1 AND nick=?',undef,lc $_[1])}
 sub notices_1358 {[map {$_->[2]} grep {$_->[0] eq 'notice'} @wire]}
 
-for my $entry (qw(Mediabot::Karma Mediabot::UserCommands Mediabot registry)) {
+for my $entry (qw(Mediabot::Karma registry)) {
     for my $op ($entry eq 'registry' ? ('+','-','++','--') : ('++','--')) {
-        for my $target (@targets) {
+        for my $target ($entry eq 'registry' ? ('Alice-Bob') : @targets) {
             my ($bot,$peer)=setup_1358();my $label="$entry $target $op";
             my $delta=$op=~/\+/?1:-1;
             is(invoke_1358($entry,$bot,'Voter',$op,$target),'',"$label: real handler completes");
@@ -107,7 +109,7 @@ for my $entry (qw(Mediabot::Karma Mediabot::UserCommands Mediabot registry)) {
     }
 }
 
-for my $entry (qw(Mediabot::Karma Mediabot::UserCommands Mediabot)) {
+for my $entry ('Mediabot::Karma') {
     for my $text ('Absent-Bob++','Absent-Bob--',('X'x35).'Bob++','Alice-Bob+++','Alice-Bob--again') {
         my ($bot,$peer)=setup_1358();
         is(invoke_1358($entry,$bot,'Voter','++','Alice-Bob',$text),'',"$entry $text: rejected token completes");

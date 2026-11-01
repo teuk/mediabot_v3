@@ -80,6 +80,7 @@ sub setup_1357 {
     my $peer=DBI->connect($dsn,'','',{RaiseError=>1,PrintError=>0,
         AutoCommit=>1,sqlite_unicode=>1});
     $db->do('PRAGMA foreign_keys=ON');$peer->do('PRAGMA foreign_keys=ON');
+    $peer->begin_work; # MB1058: fixture seed only, before native operations.
     $peer->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT)');
     $peer->do('CREATE TABLE USER(id_user INTEGER PRIMARY KEY,nickname TEXT)');
     $peer->do(q{CREATE TABLE QUOTES(id_quotes INTEGER PRIMARY KEY,
@@ -89,6 +90,7 @@ sub setup_1357 {
     $peer->do(q{INSERT INTO USER VALUES(7,'Alice'),(8,'Bob')});
     $peer->do(q{INSERT INTO QUOTES VALUES(1,1,7,?,5),(2,1,NULL,'Anonymous quote',2),
         (20,2,8,'Foreign quote',7)},undef,'Un été à Poudlard 🦉 'x30);
+    $peer->commit;
     $db->{private_fault}=$fault;
     for (qw(reads bumps finished)) {$db->{'private_'.$_}=0}
     my $bot=Mediabot->new({dbh=>$db});

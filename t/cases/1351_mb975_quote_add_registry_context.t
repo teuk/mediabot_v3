@@ -54,6 +54,7 @@ sub setup_1351 {
     my $peer = DBI->connect($dsn,'','',{RaiseError=>1,PrintError=>0,
         AutoCommit=>1,sqlite_unicode=>1});
     $peer->do('PRAGMA foreign_keys=ON'); $db->do('PRAGMA foreign_keys=ON');
+    $peer->begin_work; # MB1058: fixture seed only, before native operations.
     $peer->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT)');
     $peer->do('CREATE TABLE USER(id_user INTEGER PRIMARY KEY,nickname TEXT)');
     $peer->do(q{CREATE TABLE QUOTES(id_quotes INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,6 +64,7 @@ sub setup_1351 {
     $peer->do(q{INSERT INTO USER VALUES(7,'Account')});
     $peer->do(q{INSERT INTO QUOTES(id_quotes,id_channel,id_user,quotetext)
         VALUES(10,1,7,'Existing quote'),(20,2,7,'Other channel')});
+    $peer->commit;
     my $bot = Mediabot->new({dbh=>$db});
     $bot->{channels}{'#test'} = bless {},'MB975::Channel';
     $bot->{logger} = bless {},'MB975::Log';

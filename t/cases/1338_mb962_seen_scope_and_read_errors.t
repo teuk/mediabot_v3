@@ -94,7 +94,8 @@ sub stored_1338 {
     $db->do(q{INSERT INTO USER_SEEN VALUES(?,'#test','person!id@host','message',?,NULL,2000)}, undef, $nick, $text);
 }
 
-for my $entry (qw(Mediabot::Users::Seen Mediabot::UserCommands Mediabot)) {
+# MB1058: aliases are proved in 1431; run each scenario once on its owner.
+for my $entry ('Mediabot::Users::Seen') {
     {
         my ($bot, $db) = setup_1338();
         $db->do(q{INSERT INTO history.CHANNEL_LOG_ARCHIVE VALUES(9,'alice',1000,'alice!id@host','ARCHIVE_TARGET','public')});

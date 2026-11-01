@@ -86,8 +86,9 @@ sub fact_1348 {
     $_[0]->selectrow_hashref(q{SELECT * FROM FACTOID WHERE id_channel=1 AND keyword='spell'});
 }
 
-for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    # Full fault coverage belongs to the implementation; facades get wiring checks.
+# MB1058: aliases are proved in 1431; run each scenario once on its owner.
+for my $entry ('Mediabot::CommunityState') {
+    # Keep every original implementation fault, identity and healthy scenario.
     my $domain = $entry eq 'Mediabot::CommunityState';
     for my $raise ($domain ? (0,1) : (1)) {
         for my $fault ($domain ? qw(prepare execute after_commit) : ('execute')) {

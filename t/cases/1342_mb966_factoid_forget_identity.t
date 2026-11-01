@@ -71,6 +71,7 @@ sub setup_1342 {
     my $db = DBI->connect($dsn,'','',{RootClass=>'MB966::DBI',RaiseError=>$args{raise},
         PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
     my $peer = DBI->connect($dsn,'','',{RaiseError=>1,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
+    $db->begin_work; # MB1058: fixture seed only, before native operations.
     $db->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT)');
     $db->do(q{INSERT INTO CHANNEL VALUES(7,'#test'),(9,'#other')});
     $db->do('CREATE TABLE USER(id_user INTEGER PRIMARY KEY,nickname TEXT)');
@@ -84,6 +85,7 @@ sub setup_1342 {
     $db->do(q{INSERT INTO FACTOID VALUES(10,7,'cafe','Un café',?,?)},undef,
         exists($args{author})?$args{author}:7,exists($args{author_nick})?$args{author_nick}:'OldNick');
     $db->do(q{INSERT INTO FACTOID VALUES(20,9,'cafe','Other channel',8,'OtherNick')});
+    $db->commit;
     my $bot = bless {dbh=>$db,channels=>{'#test'=>bless({},'MB966::Channel')},
         metrics=>bless({forgot=>0},'MB966::Metrics'),logger=>bless({},'MB966::Log')},'Mediabot';
     my %account=(7=>'AuthorAccount',8=>'OtherAccount',9=>'OpAccount');
@@ -117,8 +119,9 @@ my @cases = (
     {label=>'invalid stored numeric author never falls back to nick',nick=>'OldNick',author=>0,allow=>0},
     {label=>'numeric author does not need a display nick',nick=>'NewNick',uid=>7,auth=>1,author_nick=>undef,allow=>1},
 );
-for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
-    # Full fault coverage belongs to the implementation; facades get wiring checks.
+# MB1058: aliases are proved in 1431; run each scenario once on its owner.
+for my $entry ('Mediabot::CommunityState') {
+    # Keep every original implementation fault, identity and healthy scenario.
     my $domain = $entry eq 'Mediabot::CommunityState';
     for my $raise ($domain ? (0,1) : (1)) {
         for my $case ($domain ? @cases : @cases[0,3]) {

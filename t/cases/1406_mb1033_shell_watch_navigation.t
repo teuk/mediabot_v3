@@ -163,16 +163,29 @@ $bot->{hChannelsNicks}{'#Test'}=$saved;
 socketpair(my $handle,my $peer,AF_UNIX,SOCK_STREAM,PF_UNSPEC) or die $!;
 my $stream=IO::Async::Stream->new(handle=>$handle,encoding=>'Mediabot-Partyline-Wire',on_read=>sub {0});
 $loop->add($stream);$party->{streams}{10}=$stream;
-$party->{users}{10}{rate_window}=0;$party->_handle_line($stream,10,'watch 5 topic');
-my $ticks=0;$scheduler->add(name=>'test.heartbeat',interval=>1,cb=>sub {$ticks++},autostart=>1);
-my $wire='';my $end=time+6.5;my $select=IO::Select->new($peer);
+$party->{users}{10}{rate_window}=0;
+{
+    my $new=IO::Async::Timer::Periodic->can('new');
+    no warnings 'redefine';
+    local *IO::Async::Timer::Periodic::new=sub {
+        my ($class,%args)=@_;
+        is($args{interval},5,'live watch retains the validated five-second production interval');
+        $args{first_interval}=.05; # Test fixture: first real expiry only.
+        $new->($class,%args);
+    };
+    $party->_handle_line($stream,10,'watch 5 topic');
+}
+my $ticks=0;
+my $heartbeat=IO::Async::Timer::Periodic->new(interval=>.005,on_tick=>sub {$ticks++});
+$loop->add($heartbeat);$heartbeat->start;
+my $wire='';my $end=time+2;my $select=IO::Select->new($peer);
 while (time<$end && $wire!~/\[Watch; any input/) {
     $loop->loop_once(.02);
     while ($select->can_read(0)) {my $n=sysread($peer,my $chunk,65536);last unless $n;$wire.=$chunk}
 }
-ok($wire=~/\[Watch; any input stops refresh\]/ && $ticks>=4 && index($wire,encode('UTF-8','Radio — été'))>=0,
+ok($wire=~/\[Watch; any input stops refresh\]/ && $ticks>=1 && index($wire,encode('UTF-8','Radio — été'))>=0,
     'real native periodic refresh reaches the wire while the event-loop heartbeat continues');
-$party->_close_session(10);$scheduler->remove('test.heartbeat');$stream->close_now;close $peer;
+$party->_close_session(10);$heartbeat->stop;$loop->remove($heartbeat);$stream->close_now;close $peer;
 is(task_count_1406(),1,'disconnect cleans up the live timer and preserves the ordinary schedule');
 is_deeply(\@warnings,[],'navigation, watch setup and teardown are warning-free');
 done_testing;

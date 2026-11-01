@@ -74,7 +74,8 @@ my @cases = (
     # A skipped local time rolls forward by the DST gap, preserving minutes.
     ['Europe/Paris', '2026-03-29 00:30:00', '02:30', 'sun', '2026-03-29 03:30:00'],
 );
-for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
+# MB1058: aliases are proved in 1431; run each scenario once on its owner.
+for my $entry ('Mediabot::CommunityState') {
     for my $case (@cases) {
         my ($zone, $start, $hhmm, $dow, $expected) = @$case;
         local $ENV{TZ} = $zone; POSIX::tzset();

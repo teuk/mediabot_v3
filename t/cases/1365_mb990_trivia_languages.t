@@ -14,8 +14,13 @@ use Mediabot::External::TriviaFR;
 use MockUser;
 
 my $json = JSON::PP->new->utf8;
-my $raw = do {open my $fh,'<:raw','Mediabot/Games/data/trivia-fr.json' or die $!;local $/;<$fh>};
-my $doc = Mediabot::External::TriviaFR::parse_catalog($raw);
+my $doc;
+{
+    my $parse=Mediabot::External::TriviaFR->can('parse_catalog');
+    no warnings 'redefine';
+    local *Mediabot::External::TriviaFR::parse_catalog=sub {$doc=$parse->(@_)};
+    die 'French catalogue did not load' unless Mediabot::External::TriviaFR::fetch(18,'easy')->{ok};
+}
 is(scalar @{$doc->{questions}},6044,'entire French corpus validates, including every answer and IRC budget');
 is(scalar @{$doc->{sources}},206,'all original quiz attributions retained');
 is($doc->{source_revision},'a16819964d171e40e6652368fc562f3bd27d0c5b','archival corpus has an exact reproducible source revision');

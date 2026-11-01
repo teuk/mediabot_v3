@@ -75,8 +75,8 @@ sub state_1359 { dclone({map {$_ => $_[0]{$_}} qw(_trivia _trivia_fetch metrics 
 sub persisted_1359 { $_[0]{dbh}->selectall_arrayref('SELECT * FROM TRIVIA_SCORES ORDER BY id_channel,nick') }
 sub text_1359 { join(' ', map {$_->[2]} @{$_[0]{wire}}) }
 
-for my $entry (qw(Mediabot::Games::Trivia Mediabot::UserCommands Mediabot registry)) {
-    for my $stage (qw(first_fetch next_fetch between timeout active)) {
+for my $entry (qw(Mediabot::Games::Trivia registry)) {
+    for my $stage ($entry eq 'registry' ? ('first_fetch') : qw(first_fetch next_fetch between timeout active)) {
         my $label = "$entry / $stage";
         my $bot = setup_1359();
         # Another channel has both a series and an outstanding request.
@@ -151,6 +151,7 @@ for my $entry (qw(Mediabot::Games::Trivia Mediabot::UserCommands Mediabot regist
         is_deeply(persisted_1359($bot), $persisted, "$label: cancellation and restart never erase earned DB points");
     }
 
+    next if $entry eq 'registry'; # Same stop implementation; wiring is exercised above.
     # Access control runs before request or series mutation.
     for my $user (undef, MockUser->new(level => 'Master', auth => 0),
             MockUser->new(level => 'User', auth => 1)) {
