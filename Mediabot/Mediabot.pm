@@ -1243,9 +1243,8 @@ sub getPidFile {
 # lock protocol.
 sub acquirePidFile {
     my ($self) = @_;
-    return 1 if $self->{pid_file_lock};
 
-    my $lock = Mediabot::ProcessLock->new(
+    my $lock = $self->{pid_file_lock} || Mediabot::ProcessLock->new(
         path => $self->getPidFile(),
         pid  => $$,
     );

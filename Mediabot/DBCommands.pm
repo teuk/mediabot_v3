@@ -15,6 +15,8 @@ use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
 use POSIX qw(strftime);
 use List::Util qw(min);
 use Scalar::Util qw(refaddr weaken);
+use IO::Async::Timer::Countdown;
+use Mediabot::IRC::DeliveryContext qw(capture_delivery_context delivery_context_current);
 use Exporter 'import';
 use Mediabot::Helpers;
 use Mediabot::SafeCalc qw(evaluate_expression format_result);
@@ -30,6 +32,7 @@ our @EXPORT = qw(
     delIgnore_ctx
     delResponder_ctx
     doResponder
+    scheduleResponder
     dumpCmd_ctx
     getCommandCategory
     getLastRandomQuote
@@ -136,6 +139,10 @@ sub _timer_irc_write {
 # Set IRC object
 sub onStartTimers {
     my $self = shift;
+
+    # A login/reconnect never inherits an automatic reply from the old session,
+    # even when reloading the independent DB timer set subsequently fails.
+    _release_pending_responder($self);
 
     # mb151-B1: build the fresh timer set first. Do not stop current runtime
     # timers before the DB load succeeds, otherwise a transient DB error during
@@ -2279,6 +2286,68 @@ sub checkResponder {
 	}
 	$sth->finish if $sth;
 	return 100;
+}
+
+sub _release_pending_responder {
+    my ($self, $pending) = @_;
+    $pending //= $self->{_responder_pending};
+    my $current = $self->{_responder_pending};
+    return 0 unless $pending && $current && refaddr($pending) == refaddr($current);
+    delete $self->{_responder_pending};
+    my $timer = delete $pending->{timer};
+    my $loop = delete $pending->{loop};
+    eval { $timer->stop } if $timer;
+    eval { $loop->remove($timer) } if $loop && $timer;
+    return 1;
+}
+
+# Responders share a ten-minute instance cooldown. Reserve before arming the
+# delay, retaining that reservation until delivery returns (including reentry).
+# The timer owns only weak references to its bot and reservation.
+sub scheduleResponder {
+    my ($self, $message, $nick, $channel, $text, @args) = @_;
+    return 0 if $self->{_responder_pending};
+    return 0 if time - ($self->getLastReponderTs() // 0) < 600;
+    my $loop = $self->{loop} or return 0;
+    my $binding = capture_delivery_context($self, $channel);
+    return 0 unless delivery_context_current($self, $binding);
+
+    my $pending = {loop => $loop};
+    $self->{_responder_pending} = $pending;
+    my ($weak_bot, $weak_pending) = ($self, $pending);
+    weaken($weak_bot); weaken($weak_pending);
+    my $ok = eval {
+        $pending->{timer} = IO::Async::Timer::Countdown->new(
+            delay => int(rand(8) + 2),
+            on_expire => sub {
+                my $bot = $weak_bot or return;
+                my $job = $weak_pending or return;
+                my $current = $bot->{_responder_pending};
+                return unless $current && refaddr($current) == refaddr($job);
+                return if $job->{fired}++;
+                my $delivered = eval {
+                    if (delivery_context_current($bot, $binding)
+                            && time - ($bot->getLastReponderTs() // 0) >= 600) {
+                        $bot->doResponder($message, $nick, $channel, $text, @args);
+                    }
+                    1;
+                };
+                _release_pending_responder($bot, $job);
+                eval { $bot->{logger}->log(1, 'Responder delivery failed') }
+                    if !$delivered && $bot->{logger};
+            },
+        );
+        $loop->add($pending->{timer});
+        $pending->{timer}->start;
+        1;
+    };
+    unless ($ok) {
+        _release_pending_responder($self, $pending);
+        eval { $self->{logger}->log(1, 'Responder scheduling failed') }
+            if $self->{logger};
+        return 0;
+    }
+    return 1;
 }
 
 sub doResponder {

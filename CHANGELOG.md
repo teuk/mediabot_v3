@@ -1,5 +1,33 @@
 ## [Unreleased] — 3.8dev
 
+### MB1063 — Keep PID file ownership inside its creating process
+
+- Bind each process-lock object to its real creating PID, independently of
+  the PID value written to disk. A forked child closes its inherited copy
+  without unlinking or explicitly unlocking the parent's live PID file.
+- Refuse inherited acquisition, including objects not yet acquired before
+  fork. Route repeated native bot acquisition through that same ownership
+  check; keep normal owner idempotence and fresh child-owned objects.
+- Add twelve native fork assertions to the existing ownership case, without
+  another test file. Preserve legacy live-PID checks, replacement-path
+  protection, stable PID aliases, VERSION and the private commit helper.
+
+
+### MB1062 — Own delayed responder delivery and enforce its cooldown
+
+- Reserve one automatic responder per instance before arming its native delay,
+  retaining ownership through delivery so bursts and callback reentry cannot
+  queue several replies inside the existing ten-minute cooldown.
+- Recheck the cooldown and shared IRC delivery context at expiry. Drop work
+  after transport replacement, disconnection, shutdown or channel departure/
+  rejoin; cancel pending work before login reloads the independent DB timers.
+- Retire owned countdowns on completion and partial setup failure. Weak owner
+  references, one-shot callbacks and bounded best-effort diagnostics preserve
+  recovery without retaining the bot or letting stale work consume a new slot.
+- Keep response probability, 2–9 second delay, templates and SQL schema intact.
+  Add one focused native regression case (25 assertions).
+
+
 ### MB1061 — Retire historical text pins and share behavioral setup
 
 - Delete sixty-five historical source/prose cases and 167 assertions requiring

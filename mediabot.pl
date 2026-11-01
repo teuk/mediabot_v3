@@ -4306,18 +4306,7 @@ sub _on_message_PRIVMSG_body {
                 $mediabot->{logger}->log(4,"Found responder [$where] for $what with luckyShot : $luckyShot");
                 $mediabot->{logger}->log(4,"I have a lucky shot to answer for $what");
                 $mediabot->{logger}->log(4,"time : " . time . " getLastReponderTs() " . $mediabot->getLastReponderTs() . " delta " . (time - $mediabot->getLastReponderTs()));
-                if ((time - $mediabot->getLastReponderTs()) >= 600 ) {
-                    # Non-blocking delay: schedule response via IO::Async timer
-                    my $resp_delay = int(rand(8) + 2);
-                    my $resp_timer = IO::Async::Timer::Countdown->new(
-                        delay     => $resp_delay,
-                        on_expire => sub {
-                            $mediabot->doResponder($message,$who,$where,$what,@tArgs);
-                        },
-                    );
-                    $loop->add($resp_timer);
-                    $resp_timer->start;
-                }
+                $mediabot->scheduleResponder($message,$who,$where,$what,@tArgs);
             }
             # mb373-B1: match du pseudo LITTÉRAL (\Q..\E) — un pseudo IRC peut
             # contenir des métacaractères regex ([ ] \ ` ^ { } |), qui faussaient

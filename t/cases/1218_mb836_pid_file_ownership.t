@@ -4,6 +4,7 @@ use Test::More;
 use File::Temp qw(tempdir);
 use Fcntl qw(:DEFAULT :flock);
 use POSIX qw(_exit);
+use Text::Balanced qw(extract_codeblock);
 use Mediabot::ProcessLock;
 
 my $dir=tempdir(CLEANUP=>1);
@@ -68,4 +69,71 @@ my $reader=\&Mediabot::ProcessLock::_read_pid_from_fh;
     is((stat($path))[2]&0777,0600,'failed acquire preserves replacement mode');
     ok($raced->release,'failed acquire leaves no owned descriptor');
 }
+
+# Exercise the native bot entry point without loading the entire runtime.
+my $core=read_file('Mediabot/Mediabot.pm');
+$core =~ /sub acquirePidFile\s*(\{)/g or die 'acquirePidFile missing';
+my ($body)=extract_codeblock(substr($core,$-[1]));
+die 'acquirePidFile incomplete' unless $body;
+eval "package PIDFork::Bot; sub acquirePidFile $body; 1" or die $@;
+{
+    package PIDFork::Log;
+    sub log {push @{$_[0]{lines}},$_[2]}
+}
+sub child_result {
+    my ($code)=@_;
+    my $child=fork();die $! unless defined $child;
+    if (!$child) {
+        my $result=eval {$code->()};
+        _exit($@ ? 127 : $result);
+    }
+    local $SIG{ALRM}=sub {kill 'KILL',$child;waitpid($child,0);die 'PID child timed out'};
+    alarm 5;
+    waitpid($child,0)==$child or die $!;
+    my $status=$?;
+    alarm 0;
+    return $status;
+}
+
+unlink $path or die $!;
+my $parent=Mediabot::ProcessLock->new(path=>$path);
+$parent->acquire or die $parent->error;
+my $original=read_file($path);
+my @identity=stat($path);
+is(child_result(sub {$parent->release ? 0:1}),0,'child cleanup closes its inherited descriptor successfully');
+ok(-f $path,'child cleanup keeps the live parent PID path');
+is((-f $path?read_file($path):''),$original,'child cleanup leaves parent PID bytes intact');
+is_deeply([(-f $path?stat($path):())[0,1]],[@identity[0,1]],'child cleanup preserves the locked directory entry');
+is(child_result(sub {
+    my $other=Mediabot::ProcessLock->new(path=>$path);
+    my $acquired=$other->acquire;
+    $other->release if $acquired;
+    return $acquired?1:0;
+}),0,'a fresh process remains blocked after child cleanup');
+ok($parent->release && !-e $path,'parent alone can remove its own PID path');
+
+my $held=Mediabot::ProcessLock->new(path=>$path);
+$held->acquire or die $held->error;
+my $logger=bless {lines=>[]},'PIDFork::Log';
+my $bot=bless {pid_file_lock=>$held,logger=>$logger},'PIDFork::Bot';
+ok($bot->acquirePidFile,'native acquire remains idempotent in the owning process');
+is(child_result(sub {
+    return 1 if $bot->acquirePidFile;
+    return 2 unless @{$logger->{lines}}==1 && $logger->{lines}[0] =~ /another process/;
+    return 3 if $held->{fh};
+    return 4 if $held->acquire;
+    return 0;
+}),0,'native bot acquire refuses the inherited object, reports ownership and drops only the child handle');
+ok($held->release && !-e $path,'refused child acquire leaves the owner able to release normally');
+
+my $unheld=Mediabot::ProcessLock->new(path=>$path);
+is(child_result(sub {return $unheld->acquire?1:0}),0,'an object made before fork cannot write the parent PID from the child');
+ok(!-e $path,'refused inherited acquire does not create a PID file');
+unlink $path if -f $path;
+is(child_result(sub {
+    my $own=Mediabot::ProcessLock->new(path=>$path);
+    return 1 unless $own->acquire;
+    return 2 unless read_file($path) eq "$$\n";
+    return $own->release && !-e $path ? 0:3;
+}),0,'a new child-owned object can acquire and release with its own PID');
 done_testing;

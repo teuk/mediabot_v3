@@ -9,6 +9,7 @@ sub new {
     return bless {
         path  => $args{path},
         pid   => defined $args{pid} ? $args{pid} : $$,
+        owner_pid => $$,
         fh    => undef,
         error => undef,
     }, $class;
@@ -43,6 +44,13 @@ sub _path_matches_handle {
 
 sub acquire {
     my ($self) = @_;
+    # A fork inherits both this object and its open file description. It does
+    # not transfer ownership of the parent's PID path to the child.
+    if ($self->{owner_pid} != $$) {
+        $self->release();
+        $self->{error} = 'PID lock object belongs to another process';
+        return 0;
+    }
     return 1 if $self->{fh};
 
     my $path = $self->{path};
@@ -123,6 +131,14 @@ sub release {
     my $fh = delete $self->{fh};
     my $entry = delete $self->{path_entry};
     return 1 unless $fh;
+
+    # Close only our inherited descriptor; LOCK_UN would also unlock the
+    # parent's shared file description. Never inspect or unlink its PID path.
+    if ($self->{owner_pid} != $$) {
+        close $fh;
+        $self->{error} = undef;
+        return 1;
+    }
 
     my $path  = $self->{path};
     my $owned = 0;
