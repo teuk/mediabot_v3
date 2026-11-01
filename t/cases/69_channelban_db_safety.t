@@ -225,6 +225,7 @@ use Mediabot::Mediabot;
     }
     package MB922::IRC;
     sub nick_folded {'mediabot'}
+    sub is_connected {1}
     sub send_message {my ($s, @args) = @_; push @{$s->{sent}}, \@args; 1}
     package MB922::Bot; our @ISA = ('Mediabot');
     sub gethChannelsNicksOnChan {'mediabot'}

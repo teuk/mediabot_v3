@@ -4392,6 +4392,9 @@ sub process_expired_channel_bans {
 
     return 0 unless $self->{channel_ban};
     return 0 unless $self->{irc};
+    # A nick list can survive a disconnect. Do not retire persistent bans
+    # while the transport cannot deliver their IRC removal.
+    return 0 unless eval { $self->{irc}->is_connected };
 
     my @expired = eval { $self->{channel_ban}->expired_bans };
     if ($@) {
@@ -4432,33 +4435,28 @@ sub process_expired_channel_bans {
             next BAN;
         }
 
-        $self->{logger}->log(2, "channelban: expiring ban #$id_ban on $channel_name mask=$mask");
-
-        # Verify the bot is actually present in the channel before sending MODE -b.
-        # If not, skip the IRC command but still mark the ban removed in DB so it
-        # does not pile up — the IRC ban either expired naturally or the bot was
-        # absent when it was set.
+        # Absence does not prove that the IRC ban has gone. Keep this row
+        # pending so a later tick after rejoining can still remove it.
         my $bot_nick = eval { $self->{irc}->nick_folded } // '';
         my @chan_nicks = $self->gethChannelsNicksOnChan($channel_name);
         my $bot_on_chan = grep { lc($_) eq lc($bot_nick) } @chan_nicks;
 
-        my $mode_ok;
-        if ($bot_on_chan) {
-            $mode_ok = eval {
-                $self->{irc}->send_message("MODE", undef, ($channel_name, "-b", $mask));
-                1;
-            };
-
-            unless ($mode_ok) {
-                my $err = $@ || 'unknown error';
-                $err =~ s/\s+/ /g;
-                $self->{logger}->log(1, "channelban: MODE -b failed for expired ban #$id_ban on $channel_name $mask: $err");
-                next BAN;
-            }
+        unless ($bot_on_chan) {
+            $self->{logger}->log(3, "channelban: bot not on $channel_name -- deferring expired ban #$id_ban");
+            next BAN;
         }
-        else {
- $self->{logger}->log(2, "channelban: bot not on $channel_name -- skipping MODE -b for expired ban #$id_ban, marking removed in DB");
-            $mode_ok = 1;   # proceed to DB cleanup
+
+        $self->{logger}->log(2, "channelban: expiring ban #$id_ban on $channel_name mask=$mask");
+
+        my $mode_ok = eval {
+            $self->{irc}->send_message("MODE", undef, ($channel_name, "-b", $mask));
+            1;
+        };
+        unless ($mode_ok) {
+            my $err = $@ || 'unknown error';
+            $err =~ s/\s+/ /g;
+            $self->{logger}->log(1, "channelban: MODE -b failed for expired ban #$id_ban on $channel_name $mask: $err");
+            next BAN;
         }
 
         my ($rows, $err) = eval {
@@ -4482,6 +4480,10 @@ sub process_expired_channel_bans {
             $self->{logger}->log(1, "channelban: DB mark_removed error for expired ban #$id_ban: $err");
             next BAN;
         }
+
+        # DBI's successful zero-row value can be the truthy string "0E0".
+        # Count a removal only when an active row actually changed.
+        next BAN unless defined($rows) && $rows > 0;
 
         $done++;
         if ($self->{metrics}) {

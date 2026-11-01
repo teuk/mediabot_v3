@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1050 — Retry expired channel bans after IRC absence
+
+- Keep expired persistent bans active while IRC is disconnected or the bot is
+  absent from their channel. A later scheduler tick after rejoining retries the
+  original MODE -b instead of silently abandoning the server-side ban.
+- Retain per-channel progress, SQL audit fields and the existing dispatch-then-
+  update order. Count successful expiration only after an active SQL row changes;
+  a truthy DBI zero-row result no longer increments the success counter.
+- Add thirty native expiry assertions with a real local SQLite repository and
+  local IRC/metrics sinks; twenty fail before correction. Extend the historical
+  reconnect fixture with explicit connected IRC state, retaining all assertions.
+  No schema, configuration, dependency or command change.
+
 ### MB1049 — Share coherent request, HTTP and worker limits across AI callers
 
 - Add one internal limit owner for aggregate request text, HTTP response bytes,
