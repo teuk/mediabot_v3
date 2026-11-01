@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1066 — Keep plugin event queues draining after object exceptions
+
+- Preserve dispatch and defer exception objects without invoking their boolean
+  or string overloads. An exception formatter cannot strand the active drain
+  flag, bypass error reporting or retain a failed scheduling reservation.
+- Keep bounded batches, FIFO, backpressure, clear/restart generations and
+  observer isolation. Failed defer still propagates the original exception;
+  accepted work remains recoverable and old callbacks cannot consume it.
+- Retry an unarmed full queue after scheduling recovers, while still rejecting
+  the incoming event. Repeated defer failures can no longer strand a full backlog.
+- Exercise the real PluginManager bridge and failure ledger as well as native
+  queue recovery. Replace the existing sixteen checks with sixteen assertions,
+  retaining capacity, scalar-failure, cancellation and counter coverage.
+  No new case, schema, configuration, dependency or VERSION change.
+
+
 ### MB1065 — Confirm partyline identity reads before authenticating
 
 - Admit only the existing Owner/Master values 0 and 1. Negative, empty or

@@ -51,6 +51,10 @@ sub enqueue {
         $self->{dropped}++;
         eval { $self->{on_drop}->($event, $self->{dropped}) }
             if $self->{on_drop};
+        # A failed defer may have filled the queue while leaving no arm.
+        # Keep rejecting the new event, but let accepted work recover.
+        $self->_schedule if @{ $self->{queue} }
+            && !$self->{scheduled} && !$self->{draining};
         return 0;
     }
 
@@ -74,7 +78,9 @@ sub _schedule {
         1;
     };
     unless ($ok) {
-        my $error = $@ || "EventQueueV3: defer failed\n";
+        my $error = $@;
+        $error = "EventQueueV3: defer failed\n"
+            unless defined($error) && (ref($error) ne '' || length($error));
         # A defer callback can finish inline and arm its successor before
         # throwing. Its old failure does not own the new scheduled flag.
         $self->{scheduled} = 0 if $token == $self->{generation};
@@ -97,7 +103,11 @@ sub _drain {
         my $event = shift @{ $self->{queue} };
         my $ok = eval { $self->{dispatch}->($event); 1 };
         if (!$ok && $self->{on_error}) {
-            my $error = $@ || 'event dispatch failed';
+            # Do not ask an exception object for its truth value or text.
+            # Either overload may throw and strand the active drain flag.
+            my $error = $@;
+            $error = 'event dispatch failed'
+                unless defined($error) && (ref($error) ne '' || length($error));
             eval { $self->{on_error}->($event, $error) };
         }
         $self->{processed}++;
