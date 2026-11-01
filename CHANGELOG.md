@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1056 — Share channel flood protection across letter casing
+
+- Use one lowercase AF4 channel key for the sliding window, active silence,
+  notification cooldown and partyline overrides. Changing the case of a
+  channel name no longer starts another counter or misses its configured limit.
+- Make .floodset replace/reset that same channel key while keeping the
+  operator's spelling in its confirmation. Preserve warn-only behavior,
+  thresholds, clamping, exact expiry and unrelated channel state.
+- Add thirty-three native dispatcher/admission assertions; twenty-two fail
+  before correction. No historical test, authorization, output AntiFlood,
+  nickname mute, schema, configuration or dependency change.
+
 ### MB1055 — Keep Fullop operator batches inside the IRC wire budget
 
 - Pack op sweeps by both the advertised MODES count and the serialized

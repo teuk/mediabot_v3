@@ -111,16 +111,19 @@ sub checkChanFlood {
     my ($self, $channel) = @_;
     return 0 unless defined $channel && $channel =~ /^#/;
 
+    # One channel owns one window, silence and operator override regardless
+    # of letter casing. Keep the caller spelling for diagnostics.
+    my $channel_key = lc $channel;
     my $now       = time();
     # CC2: per-channel overrides set by .floodset take priority
-    my $conf_ov   = $self->{_chan_flood_conf}{$channel} // {};
+    my $conf_ov   = $self->{_chan_flood_conf}{$channel_key} // {};
     # B-68-3/fix: clamp CC2 overrides to sane minimums (0 would cause logic errors)
     my $window    = do { my $v = $conf_ov->{window};  defined($v) ? (int($v) >= 1 ? int($v) : 1) : _conf_int($self, 'CHANFLOOD_WINDOW', 10, 1, 3600) };
     my $max_cmds  = do { my $v = $conf_ov->{max};     defined($v) ? (int($v) >= 1 ? int($v) : 1) : _conf_int($self, 'CHANFLOOD_MAX_COMMANDS', 8, 1, 1000) };
     my $silence   = do { my $v = $conf_ov->{silence}; defined($v) ? (int($v) >= 1 ? int($v) : 1) : _conf_int($self, 'CHANFLOOD_SILENCE', 30, 1, 86400) };
     my $notify_cd = _conf_int($self, 'CHANFLOOD_NOTIFY_COOLDOWN', 60, 1, 86400);
 
-    my $st = $self->{_chan_flood}{$channel} //= {
+    my $st = $self->{_chan_flood}{$channel_key} //= {
         hits          => [],
         silenced_until => 0,
         notified_at   => 0,
@@ -145,7 +148,7 @@ sub checkChanFlood {
 
     if ($count > $max_cmds) {
         # FF6: warn-only mode — notify but do not actually silence
-        my $warn_only = $self->{_chan_flood_conf}{$channel}{warn_only} // 0;
+        my $warn_only = $conf_ov->{warn_only} // 0;
         $st->{silenced_until} = $warn_only ? 0 : ($now + $silence);
         # B4/fix: log message reflects actual mode (warn-only vs silencing)
         $self->{logger}->log(1,

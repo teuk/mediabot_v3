@@ -4458,7 +4458,8 @@ sub _cmd_floodset {
         $stream->write("  Example: .floodset #quebec 10 4 60\r\n");
         return;
     }
-    my ($chan, $window, $max, $silence) = ($1, $2, $3, $4);
+    my ($display_chan, $window, $max, $silence) = ($1, $2, $3, $4);
+    my $chan = lc $display_chan; # Same channel key as the AF4 admission guard.
     # Store overrides in memory — used by checkChanFlood via _chan_flood_conf
     # A-68-1: clamp override values to sane minimums (matches checkChanFlood)
     my $safe_window  = defined $window  ? (int($window)  >= 1 ? int($window)  : 1) : undef;
@@ -4482,7 +4483,7 @@ sub _cmd_floodset {
     my $m = $conf->{max}     // '(default)';
     my $s = $conf->{silence} // '(default)';
     my $wo = $bot->{_chan_flood_conf}{$chan}{warn_only} ? ' warn-only' : '';
-    $stream->write("CC2: floodset $chan — window=$w max=$m silence=$s${wo}\r\n");
+    $stream->write("CC2: floodset $display_chan — window=$w max=$m silence=$s${wo}\r\n");
     $stream->write("Current flood state reset.\r\n");
 }
 
