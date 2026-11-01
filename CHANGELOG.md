@@ -1,5 +1,19 @@
 ## [Unreleased] — 3.8dev
 
+### MB1068 — Reject lossy integers before plugin configuration is installed
+
+- Require decimal integer conversion to round-trip exactly before accepting
+  channel values, schema defaults or minimum/maximum bounds. Oversized input
+  cannot silently become a rounded floating-point value or infinity in JSON.
+- Preserve exact native signed/unsigned integers and normalize -0 to zero,
+  without imposing an unrelated fixed-width or JavaScript numeric limit.
+- Exercise the shared validator through schemas, manifest validation and
+  channel policies. A rejected update leaves the previous policy intact.
+  Keep ten assertions in the existing typed-config case by grouping the
+  existing default checks; no new test file or assertion growth.
+- No database schema, dependency, configuration file or manual VERSION change.
+
+
 ### MB1067 — Count Unicode words consistently across DBI encodings
 
 - Decode valid UTF-8 once through the shared IRC text boundary, normalize

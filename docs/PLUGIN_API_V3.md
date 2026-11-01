@@ -110,6 +110,10 @@ unknown configured values and implicit string-to-number/boolean coercion fail
 before plugin code runs. One effective channel configuration is capped at 4096
 encoded bytes.
 
+Integer values, defaults and bounds must survive native numeric conversion
+without rounding or overflow. Exact signed/unsigned integers remain supported,
+and `-0` normalizes to zero. This avoids non-finite or rounded JSON values.
+
 Defaults and operator overrides are normalized by the core. Every invocation
 receives a detached snapshot through `config()` and `config_value($name)`; a
 plugin cannot mutate the stored policy by changing that snapshot.

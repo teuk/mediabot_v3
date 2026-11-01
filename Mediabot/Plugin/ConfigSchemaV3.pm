@@ -32,7 +32,12 @@ sub _integer {
     my ($value) = @_;
     return undef unless defined($value) && !ref($value)
         && "$value" =~ /\A-?(?:0|[1-9][0-9]*)\z/;
-    return 0 + $value;
+    my $number = 0 + $value;
+    # Decimal syntax alone permits rounding to an NV or even infinity. Keep
+    # only lossless native integers, including UVs; -0 normalizes to zero.
+    # Apply this once for values, defaults and both schema bounds.
+    return undef unless "$number" eq "$value" || "$value" eq '-0';
+    return $number;
 }
 
 sub _validate_value {
