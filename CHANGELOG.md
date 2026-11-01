@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1053 — Keep historical radar charts faithful to their calendar window
+
+- Define radar Nd as exactly N SQL-session calendar dates including today.
+  Use a bounded timestamp range instead of a rolling cutoff spanning N+1 dates,
+  and exclude later dates. Retain zero-activity dates in the sparkline, average
+  and worst-day selection. Break best/worst ties by earliest date.
+- Read the SQL calendar anchor with the grouped rows and use existing DateTime
+  date arithmetic, independent of the host timezone. Confirm the complete read
+  before rendering; failed/partial reads now report a database error.
+- Add twenty-five native SQL/handler assertions; twenty-four fail before the
+  correction. Update the historical load-order fixture for calendar bindings,
+  complete-read status and distinct empty/error outcomes, retaining its checks.
+  Keep the realtime radar path,
+  live-log scope, output format, schema, configuration and dependencies intact.
+
 ### MB1052 — Avoid unbounded shared-state lock waits during URL presentation
 
 - Acquire the private ShortURL and legacy TinyURL state locks without waiting.

@@ -36,6 +36,7 @@ return sub {
             }
             my (@out,@sql,@bind,@chansets,@metrics);
             my $fail_prepare=0;
+            my $empty_history=0;
             no warnings 'redefine';
             local *Mediabot::UserCommands::botPrivmsg=sub {push @out,['message',$_[1],$_[2]];1};
             local *Mediabot::UserCommands::botNotice=sub {push @out,['notice',$_[1],$_[2]];1};
@@ -48,13 +49,16 @@ return sub {
                 die 'view introduced non-read SQL' unless $query=~/\A\s*SELECT\b/;
                 die 'history event filter lost' unless $query=~/event_type IN \('public','action'\)/;
                 my $rows=$query=~/DATE\(cl.ts\)/
-                    ? [{d=>'2026-10-20',c=>4},{d=>'2026-10-21',c=>11}]
+                    ? ($empty_history ? [] : [
+                        {d=>'2026-10-20',c=>4,today=>'2026-10-21'},
+                        {d=>'2026-10-21',c=>11,today=>'2026-10-21'}])
                     : [{msgs=>41,nicks=>3}];
                 return bless {rows=>$rows},'MB958Cold::STH';
             };
             local *MB958Cold::STH::execute=sub {shift;push @bind,[@_];1};
             local *MB958Cold::STH::fetchrow_hashref=sub {shift @{$_[0]{rows}}};
             local *MB958Cold::STH::finish=sub {1};
+            local *MB958Cold::STH::err=sub {0};
             local *MB958Cold::Conf::get=sub {'off'};
             local *MB958Cold::Metrics::inc=sub {shift;push @metrics,[@_]};
             my $bot=bless {dbh=>bless({},'MB958Cold::DB'),conf=>bless({},'MB958Cold::Conf'),
@@ -87,12 +91,21 @@ return sub {
             $fail_prepare=1;@out=();$call->('mbObservatory_ctx','#empty');
             die 'unavailable activity fallback changed' unless @out==2 && $out[1][2]=~/energy silent/;
             $fail_prepare=0;@out=();$call->('mbRadar_ctx','#history','999d');
-            die 'history window is not capped' unless $sql[-1]=~/INTERVAL 30 DAY/ && $bind[-1][0] eq '#history';
+            # MB1053: thirty calendar dates start 29 days before CURDATE;
+            # the exclusive upper bound is tomorrow. Keep scope parameterized.
+            die 'history window is not capped' unless $sql[-1]=~/CURDATE\(\) - INTERVAL \? DAY/
+                && $sql[-1]=~/cl\.ts < CURDATE\(\) \+ INTERVAL 1 DAY/
+                && $bind[-1][0] eq '#history' && $bind[-1][1]==29;
             die 'history route or formatter changed' unless @out==3
                 && !grep {$_->[0] ne 'message' || $_->[1] ne '#history'} @out;
             die 'history total changed' unless $out[1][2]=~/total n\(15\) msgs/;
+            @out=();$call->('mbRadar_ctx','#history','0d');
+            die 'minimum history window lost' unless $bind[-1][0] eq '#history'
+                && $bind[-1][1]==0 && $out[0][2]=~/last 1d/;
             $fail_prepare=1;@out=();$call->('mbRadar_ctx','#empty','0d');
-            die 'minimum history window lost' unless $sql[-1]=~/INTERVAL 1 DAY/;
+            die 'history failure is not reported privately' unless @out==1
+                && $out[0][0] eq 'notice' && $out[0][1] eq 'Émilie' && $out[0][2] eq 'Database error.';
+            $fail_prepare=0;$empty_history=1;@out=();$call->('mbRadar_ctx','#empty','0d');
             die 'history empty fallback changed' unless @out==1 && $out[0][2]=~/no data in last 1d/;
             print 'checked';
         };

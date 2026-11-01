@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use DateTime ();
 
 our @EXPORT_OK = qw(mbRadar_ctx);
 
@@ -43,27 +44,53 @@ sub mbRadar_ctx {
     my @lines;
 
     if (defined $hist_days) {
-        # Mode historique : sparkline d'activité quotidienne sur N jours + extrêmes
-        my $sth_d = $dbh->prepare(qq{
-            SELECT DATE(cl.ts) AS d, COUNT(*) AS c
+        # One SQL-session calendar window, including today. A rolling N*24h
+        # cutoff can span N+1 dates; sparse GROUP BY rows also omit quiet days.
+        my ($sth_d, $today, %by_day, @sorted_days);
+        my $history_ok = eval {
+            $sth_d = $dbh->prepare(q{
+            SELECT DATE(cl.ts) AS d, COUNT(*) AS c, CURDATE() AS today
             FROM CHANNEL_LOG cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ?
               AND cl.event_type IN ('public','action')
-              AND cl.ts >= NOW() - INTERVAL $hist_days DAY
+              AND cl.ts >= CURDATE() - INTERVAL ? DAY
+              AND cl.ts < CURDATE() + INTERVAL 1 DAY
             GROUP BY DATE(cl.ts)
             ORDER BY d
-        });
-        my %by_day;
-        if ($sth_d && $sth_d->execute($channel)) {
-            while (my $r = $sth_d->fetchrow_hashref) { $by_day{$r->{d}} = $r->{c}; }
-            $sth_d->finish;
+            }) or die "radar_history_prepare\n";
+            $sth_d->execute($channel, $hist_days - 1) or die "radar_history_execute\n";
+            while (my $r = $sth_d->fetchrow_hashref) {
+                $by_day{$r->{d}} = $r->{c};
+                $today //= $r->{today};
+            }
+            die "radar_history_fetch\n" if $sth_d->err;
+            if (%by_day) {
+                die "radar_history_calendar\n" unless defined($today)
+                    && $today =~ /\A([0-9]{4})-([0-9]{2})-([0-9]{2})\z/;
+                # UTC is only a date-arithmetic carrier. The database's
+                # CURDATE(), not the host clock/timezone, owns these labels.
+                my $day = DateTime->new(year=>$1, month=>$2, day=>$3, time_zone=>'UTC');
+                $day->subtract(days=>$hist_days - 1);
+                for (1 .. $hist_days) {
+                    push @sorted_days, $day->ymd;
+                    $by_day{$day->ymd} //= 0;
+                    $day->add(days=>1);
+                }
+            }
+            1;
+        };
+        # Check EOF before finish can clear DBI's read status. Cleanup must
+        # not replace a failed read or discard a completely fetched chart.
+        eval { $sth_d->finish } if $sth_d;
+        unless ($history_ok) {
+            botNotice($self, $nick, 'Database error.');
+            return;
         }
         unless (%by_day) {
             botPrivmsg($self, $channel, "\x{1F4E1} \x02Radar\x02 $channel: no data in last ${hist_days}d");
             return 1;
         }
-        my @sorted_days = sort keys %by_day;
         my @counts      = map { $by_day{$_} } @sorted_days;
         my $max = (sort { $b <=> $a } @counts)[0] || 1;
         my $sum = 0; $sum += $_ for @counts;
@@ -76,8 +103,8 @@ sub mbRadar_ctx {
             $spark .= $glyphs[$idx];
         }
         # Best & worst day
-        my ($best_d) = sort { $by_day{$b} <=> $by_day{$a} } keys %by_day;
-        my ($worst_d) = sort { $by_day{$a} <=> $by_day{$b} } keys %by_day;
+        my ($best_d) = sort { $by_day{$b} <=> $by_day{$a} || $a cmp $b } @sorted_days;
+        my ($worst_d) = sort { $by_day{$a} <=> $by_day{$b} || $a cmp $b } @sorted_days;
         botPrivmsg($self, $channel, "\x{1F4E1} \x02Radar\x02 $channel (last ${hist_days}d):");
         botPrivmsg($self, $channel,
             sprintf("  \x{1F4C8} %s  \x{B7}  total %s msgs  \x{B7}  avg %.0f/d",
