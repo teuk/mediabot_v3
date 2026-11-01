@@ -167,7 +167,13 @@ sub _with_locked_state {
     sysopen(my $lock_fh, $lock_path, O_RDWR | O_CREAT, 0600)
         or return (undef, 'state_lock_open');
     chmod 0600, $lock_path;
-    flock($lock_fh, LOCK_EX) or do { close $lock_fh; return (undef, 'state_lock') };
+    # Another worker may retain this lock throughout its HTTP request. URL
+    # presentation must not wait outside the caller's network timeout.
+    unless (flock($lock_fh, LOCK_EX | LOCK_NB)) {
+        my $busy = $!{EAGAIN} || $!{EWOULDBLOCK};
+        close $lock_fh;
+        return (undef, $busy ? 'state_lock_busy' : 'state_lock');
+    }
 
     my ($state, $read_error) = _read_state($path);
     if ($read_error) {
@@ -342,6 +348,9 @@ sub format_event {
     if ($kind eq 'state_error') {
         return 'TinyURL: shared cache/circuit state unavailable; using safe URL fallback';
     }
+    if ($kind eq 'state_busy') {
+        return 'TinyURL: shared state busy; using original URL';
+    }
     return "TinyURL: $kind ($category)";
 }
 
@@ -433,8 +442,10 @@ sub _stateful_shorten {
     });
 
     if ($state_error) {
+        my $busy = $state_error eq 'state_lock_busy';
         _emit($opts{on_event}, {
-            kind => 'state_error', level => 1, category => $state_error, status => 0,
+            kind => $busy ? 'state_busy' : 'state_error',
+            level => $busy ? 3 : 1, category => $state_error, status => 0,
         });
         return $wrapped->{result}
             if ref($wrapped) eq 'HASH' && defined($wrapped->{result});

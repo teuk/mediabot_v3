@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1052 — Avoid unbounded shared-state lock waits during URL presentation
+
+- Acquire the private ShortURL and legacy TinyURL state locks without waiting.
+  Another worker can hold the lock throughout HTTP; contention now preserves
+  the exact original URL instead of waiting outside the network timeout.
+- Keep all HTTP/cache/circuit work behind the exclusive lock. Ordinary lock
+  contention emits a bounded debug event, leaves the owner's state intact and
+  never opens a provider-failure circuit. Later requests recover normally.
+- Add thirty-five native assertions with real fork/pipe/flock contention for
+  both clients; eight fail before correction. No historical test is changed.
+  No state-format, schema, configuration, dependency or endpoint change.
+
 ### MB1051 — Preserve seen lookup scope for every supported IRC channel prefix
 
 - Resolve the requested/current channel once for both exact and wildcard seen
