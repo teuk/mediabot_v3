@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1064 — Show the latest matching karma history
+
+- Keep persistent history newest-first, with the existing primary key breaking
+  same-second ties. Bind the optional nick filter before the twenty-row SQL
+  limit, so other players' activity cannot hide the requested player's history.
+- Sort memory fallbacks by timestamp before taking five entries, including
+  private history merged across channels. Preserve reverse insertion order for
+  equal timestamps within a ring and address unmatched private replies to the caller.
+- Accept persistent rows only after a completed fetch; discard partial reads
+  and retain the labeled memory fallback. Cleanup errors do not overwrite the
+  read result. No schema, vote policy, cooldown, configuration or VERSION change.
+- Replace fourteen source-text checks in the existing history case with fourteen
+  native SQLite/registry assertions; keep suite file and assertion counts stable.
+
+
 ### MB1063 — Keep PID file ownership inside its creating process
 
 - Bind each process-lock object to its real creating PID, independently of

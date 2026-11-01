@@ -403,67 +403,71 @@ sub mbKarmaHist_ctx {
     my $filter  = @args ? lc($args[0]) : undef;
 
     # I8: try DB first, fall back to in-memory ring buffer
-    my @db_entries;
-    eval {
+    my (@db_entries, $sth_hl);
+    my $read_ok = eval {
         # mb414-R1: id canal via le helper central (cache d'abord, mb411).
         my $cid_kl = Mediabot::Helpers::channel_id_cached($self, $channel);
-        {
-            my $rc = defined($cid_kl) ? { id_channel => $cid_kl } : undef;
-            if ($rc) {
-                my $sth_hl = $self->{dbh}->prepare(q{
-                    SELECT nick, delta, from_nick, score,
-                           UNIX_TIMESTAMP(ts) AS ts
-                    FROM KARMA_LOG WHERE id_channel = ?
-                    ORDER BY ts DESC LIMIT 20
-                });
-                if ($sth_hl && $sth_hl->execute($rc->{id_channel})) {
-                    while (my $r = $sth_hl->fetchrow_hashref) {
-                        push @db_entries, {
-                            nick  => $r->{nick},
-                            delta => ($r->{delta} > 0 ? '+1' : '-1'),
-                            from  => $r->{from_nick},
-                            score => $r->{score},
-                            ts    => $r->{ts},
-                        };
-                    }
-                    $sth_hl->finish;
-                }
+        if (defined $cid_kl) {
+            my @bind = ($cid_kl);
+            push @bind, $filter if $filter;
+            $sth_hl = $self->{dbh}->prepare(q{
+                SELECT nick, delta, from_nick, score,
+                       UNIX_TIMESTAMP(ts) AS ts
+                FROM KARMA_LOG WHERE id_channel = ?
+            } . ($filter ? ' AND nick = ? ' : '') . q{
+                ORDER BY ts DESC, id_karma_log DESC LIMIT 20
+            });
+            die "prepare failed\n" unless $sth_hl;
+            die "execute failed\n" unless $sth_hl->execute(@bind);
+            while (my $r = $sth_hl->fetchrow_hashref) {
+                push @db_entries, {
+                    nick  => $r->{nick},
+                    delta => ($r->{delta} > 0 ? '+1' : '-1'),
+                    from  => $r->{from_nick},
+                    score => $r->{score},
+                    ts    => $r->{ts},
+                };
             }
+            die "fetch failed\n" if $sth_hl->err;
         }
+        1;
     };  # silently fall back to in-memory if KARMA_LOG not available
+    eval { $sth_hl->finish } if $sth_hl;
+    @db_entries = () unless $read_ok;
     # KH1/fix: in PM, search in-memory log across all channels
     my $kh_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
     my @klog_mem_entries;
     if ($kh_chan) {
         @klog_mem_entries = @{ $self->{_karma_log}{$kh_chan} // [] };
     } else {
-        for my $ch (keys %{ $self->{_karma_log} // {} }) {
+        for my $ch (sort keys %{ $self->{_karma_log} // {} }) {
             push @klog_mem_entries, @{ $self->{_karma_log}{$ch} // [] };
         }
     }
-    my @klog_combined = @db_entries ? @db_entries : @klog_mem_entries;
-    my $klog = \@klog_combined;
+    # SQL is already newest-first. Memory rings are appended oldest-first;
+    # merge their timestamps explicitly, including across channels in PM.
+    my @entries = @db_entries ? @db_entries
+        : sort { ($b->{ts} // 0) <=> ($a->{ts} // 0) } reverse @klog_mem_entries;
     my $kh_reply = $kh_chan // $nick;
-    unless (@$klog) {
+    # U4/fix: use $kh_chan (not $channel which is nick in PM)
+    my $on_str = $kh_chan ? " on $kh_chan" : '';
+    unless (@entries) {
         botPrivmsg($self, $kh_reply,
-            "$nick: no karma history yet" . ($kh_chan ? " on $channel" : '') . ".");
+            "$nick: no karma history yet$on_str.");
         return 1;
     }
 
     my $kh_source = @db_entries ? '' : ' [memory]';
-    my @entries = reverse @$klog;  # most recent first
     if ($filter) {
         @entries = grep { lc($_->{nick}) eq $filter } @entries;
         unless (@entries) {
-            botPrivmsg($self, $kh_reply, "$nick: no karma history for '$filter' on $channel.");
+            botPrivmsg($self, $kh_reply, "$nick: no karma history for '$filter'$on_str.");
             return 1;
         }
     }
     @entries = @entries[0..4] if @entries > 5;  # show last 5
 
     my $label = $filter ? "karma history for $filter" : "recent karma changes";
-    # U4/fix: use $kh_chan (not $channel which is nick in PM)
-    my $on_str = $kh_chan ? " on $kh_chan" : '';
     # GG1: add +/- vote summary in header
     my $kh_pos = scalar grep { ($_->{delta}//"") eq "+1" } @entries;
     my $kh_neg = scalar(@entries) - $kh_pos;
