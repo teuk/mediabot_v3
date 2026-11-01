@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1054 — Extract pasted links without their surrounding markup or IRC style
+
+- Stop URL tokens at raw angle brackets and double quotes, so autolinks and
+  copied href text do not send surrounding markup to preview providers.
+- Peel terminal IRC style/color, punctuation and quote layers while preserving
+  balanced parentheses/brackets and percent-encoded bytes. Internal controls
+  are not rewritten into a different destination; downstream policy is intact.
+- Add thirty native extraction/routing assertions; nineteen fail before the
+  correction. Keep generic, MixCloud and YouTube opt-ins and private-host guards.
+  Replace one historical regex-spelling check with its native first-URL behavior
+  assertion. No test is removed; no schema, configuration or dependency change.
+
 ### MB1053 — Keep historical radar charts faithful to their calendar window
 
 - Define radar Nd as exactly N SQL-session calendar dates including today.

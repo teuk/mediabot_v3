@@ -58,9 +58,11 @@ return sub {
         '_extract_url body found'
     );
 
-    $assert->like(
-        $extract_url // '',
-        qr/\(https\?:\/\/\\S\+\)/,
+    # Exercise the capture contract instead of requiring one regex spelling.
+    require Mediabot::External::URL;
+    $assert->is(
+        Mediabot::External::URL::_extract_url('first https://first.example/path then http://second.example/'),
+        'https://first.example/path',
         '_extract_url captures first HTTP(S) URL'
     );
 

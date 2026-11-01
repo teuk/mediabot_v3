@@ -102,7 +102,9 @@ sub _extract_url {
 
     # Keep the first HTTP(S) URL found in the message.
     # Then strip common punctuation that users often type just after a link.
-    return undef unless $text =~ m{(https?://\S+)}i;
+    # Raw angle brackets and double quotes delimit pasted autolinks/markup.
+    # Their percent-encoded forms remain ordinary URL bytes.
+    return undef unless $text =~ m{(https?://[^\s<>"]+)}i;
 
     my $url = $1;
 
@@ -117,19 +119,27 @@ sub _extract_url {
     # une parenthèse LÉGITIME (…/Talos_(mythologie)) : l'ancien strip aveugle
     # la coupait -> mauvaise page / 404. On strippe la ponctuation pure, puis
     # on ne consomme les fermantes finales que tant qu'elles sont en excès.
-    $url =~ s/[.,!?;:]+$//;
-    while ($url =~ /[)\]]$/) {
-        my $last = substr($url, -1);
-        my ($open, $close) = $last eq ')' ? ('(', ')') : ('[', ']');
-        my $n_open  = () = $url =~ /\Q$open\E/g;
-        my $n_close = () = $url =~ /\Q$close\E/g;
-        last if $n_close <= $n_open;   # appariée -> elle fait partie de l'URL
-        chop $url;
+    while (1) {
+        my $before = $url;
+        # Strip only terminal IRC styling. Do not rewrite internal controls
+        # into a different destination; ordinary validation remains downstream.
+        $url =~ s/(?:\x03[0-9]{0,2}(?:,[0-9]{1,2})?|\x04[0-9a-f]{6}(?:,[0-9a-f]{6})?|[\x02\x0f\x11\x16\x1d\x1e\x1f])+\z//i;
         $url =~ s/[.,!?;:]+$//;
-    }
+        while ($url =~ /[)\]]$/) {
+            my $last = substr($url, -1);
+            my ($open, $close) = $last eq ')' ? ('(', ')') : ('[', ']');
+            my $n_open  = () = $url =~ /\Q$open\E/g;
+            my $n_close = () = $url =~ /\Q$close\E/g;
+            last if $n_close <= $n_open;   # appariée -> elle fait partie de l'URL
+            chop $url;
+            $url =~ s/[.,!?;:]+$//;
+        }
 
-    # If the URL is wrapped in a single trailing quote, remove it.
-    $url =~ s/["']+$//;
+        # If the URL is wrapped in a single trailing quote, remove it.
+        $url =~ s/["']+$//;
+        # Styling and punctuation can alternate; peel each terminal layer.
+        last if $url eq $before;
+    }
 
     return $url;
 }
