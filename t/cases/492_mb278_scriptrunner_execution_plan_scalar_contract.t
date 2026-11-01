@@ -92,9 +92,6 @@ my $source = do {
     <$sfh>;
 };
 
-like($source, qr/mb278-B1/, 'ScriptRunner source contains mb278 scalar helper marker');
-like($source, qr/mb278-B2/, 'ScriptRunner source contains mb278 execution identity marker');
-like($source, qr/mb278-B3/, 'ScriptRunner source contains mb278 argv marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb278 execution-plan guard does not introduce shell execution');
 
 done_testing();

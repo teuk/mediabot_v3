@@ -54,5 +54,4 @@ return sub {
     # $norm_mask reste utilisé pour le MODE +b.
     $assert->like($code, qr/'\+b', \$norm_mask/, '$norm_mask reste le masque posé (+b)');
 
-    $assert->like($src, qr/mb440-B1/, 'tag mb440-B1');
 };

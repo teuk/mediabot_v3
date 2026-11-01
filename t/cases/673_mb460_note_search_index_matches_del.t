@@ -70,7 +70,6 @@ return sub {
         'search conserve l\'index complet de chaque hit');
     $assert->like($blk, qr/\[" \. \(\$idx \+ 1\) \. "\]/,
         'search affiche [idx+1] = index de la liste complète (mb460)');
-    $assert->like($blk, qr/mb460-B1/, 'tag mb460-B1 présent');
     $assert->unlike($blk, qr/for my \$i \(0\.\.\$#hits\)/,
         'ancien indexage positionnel sur les hits supprimé');
 

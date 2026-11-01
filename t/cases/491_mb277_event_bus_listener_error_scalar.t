@@ -35,7 +35,6 @@ ok(length($long_error->{error}) <= 240, 'long scalar exception is capped');
 unlike($long_error->{error}, qr/HASH\(|ARRAY\(/, 'listener diagnostics do not expose stringified refs');
 
 my $source = do { local (@ARGV, $/) = ('Mediabot/EventBus.pm'); <> };
-like($source, qr/mb277-B1/, 'EventBus source contains mb277 listener error scalar marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb277 EventBus listener error guard does not introduce shell execution');
 
 done_testing();

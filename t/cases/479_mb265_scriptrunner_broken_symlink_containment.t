@@ -60,7 +60,6 @@ my $source = do {
     local $/;
     <$fh>;
 };
-like($source, qr/mb265-B1/, 'ScriptRunner source contains mb265 broken symlink marker');
 unlike($source, qr/\bsystem\s*\(/, 'mb265 containment guard does not introduce system()');
 
 done_testing();

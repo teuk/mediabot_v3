@@ -347,7 +347,6 @@ MB525_FIXTURE
     # ------------------------------------------------------------------
     {
         my $runner_src = _slurp_725(File::Spec->catfile('.', 'Mediabot', 'ScriptActionRunner.pm'));
-        $assert->like($runner_src, qr/mb525-B1/, 'marqueur mb525 present dans ScriptActionRunner');
         $assert->like($runner_src, qr/timer chaining is not allowed/, 'garde de chaine cablee');
         $assert->like($runner_src, qr/too many pending timers/, 'plafond cable');
         $assert->like($runner_src, qr/sub release_timer/, 'liberation de slot exposee');

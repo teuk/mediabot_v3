@@ -84,7 +84,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb247-B1: direct register_plugin/, 'PluginManager source contains mb247 direct replace marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'PluginManager direct replace cleanup does not introduce shell execution');
 
 # Package without unregister, intentionally empty.

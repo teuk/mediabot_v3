@@ -86,8 +86,6 @@ ok(!$custom->{object}->plugin_enabled, 'custom-named plugin honours disabled fla
 my $plugin_src = do { open my $fh, '<:encoding(UTF-8)', "$Bin/../../Mediabot/Plugin/ScriptDryRun.pm" or die $!; local $/; <$fh> };
 my $pm_src     = do { open my $fh, '<:encoding(UTF-8)', "$Bin/../../Mediabot/PluginManager.pm" or die $!; local $/; <$fh> };
 
-like($plugin_src, qr/mb245-B1/, 'ScriptDryRun source contains mb245 enabled-state marker');
-like($pm_src, qr/mb245-B2/, 'PluginManager source contains mb245 plugin-name marker');
 unlike($plugin_src . $pm_src, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb245 enabled guard does not introduce shell execution');
 
 done_testing();

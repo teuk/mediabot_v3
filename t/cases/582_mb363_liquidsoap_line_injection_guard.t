@@ -89,8 +89,6 @@ return sub {
         'empty-command error remains unchanged');
 
     my $src = _slurp_582(File::Spec->catfile('.', 'Mediabot', 'Liquidsoap.pm'));
-    $assert->like($src, qr/mb363-B1/,
-        'tag mb363-B1 is present in Liquidsoap.pm');
     $assert->like($src, qr/if \$command =~ \/\[\\r\\n\\x00\]\//,
         'central command guard checks CR, LF and NUL');
 

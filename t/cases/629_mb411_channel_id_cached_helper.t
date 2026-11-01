@@ -96,5 +96,4 @@ return sub {
     $assert->ok($nplcalls >= 4, 'Partyline: les 4 sites utilisent le helper');
 
     $assert->like($h, qr/mb411-R1/, 'tag mb411-R1');
-    $assert->like($h, qr/mb416-B3/, 'tag mb416-B3');
 };

@@ -92,7 +92,6 @@ my $source = do {
     <$sfh>;
 };
 
-like($source, qr/mb288-B1: run_plan\(\) is the last boundary before open3\(\)/, 'ScriptRunner source contains mb288 stdin JSON-object marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb288 stdin JSON-object guard does not introduce shell execution');
 
 done_testing();

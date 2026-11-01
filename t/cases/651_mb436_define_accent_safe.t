@@ -64,5 +64,4 @@ return sub {
         'uri_escape sur octets (plus uri_escape_utf8)');
     $assert->unlike($scode, qr/uri_escape_utf8\(\$word\)/, 'plus de uri_escape_utf8($word)');
 
-    $assert->like($src, qr/mb436-B1/, 'tag mb436-B1');
 };

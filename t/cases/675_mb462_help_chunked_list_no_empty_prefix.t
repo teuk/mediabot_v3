@@ -77,5 +77,4 @@ return sub {
     $sub //= '';
     $assert->like($sub, qr/push \@lines, \$line if \$line ne \$prefix;/,
         'le push conditionnel (mb462) est présent dans la boucle');
-    $assert->like($sub, qr/mb462-B1/, 'tag mb462-B1 présent');
 };

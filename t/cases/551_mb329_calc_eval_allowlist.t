@@ -48,5 +48,4 @@ return sub {
     $assert->like($db, qr/use Mediabot::SafeCalc/, 'DBCommands imports SafeCalc');
     $assert->unlike($db, qr/eval\s+\$expr\b/, 'DBCommands no longer string-evals calc input');
     $assert->unlike($safe, qr/eval\s+\$\w+\b/, 'SafeCalc contains no string eval');
-    $assert->like($db, qr/mb330-B1/, 'mb330 migration marker is present');
 };

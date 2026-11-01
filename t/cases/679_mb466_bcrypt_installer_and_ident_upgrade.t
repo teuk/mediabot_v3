@@ -99,8 +99,6 @@ return sub {
     # Chemin `ident` : checkAuthByUser délègue aussi (nouveauté mb466).
     my $lsrc = _slurp_679(File::Spec->catfile('.', 'Mediabot', 'LoginCommands.pm'));
     my ($cabu) = $lsrc =~ /(sub checkAuthByUser \{.*?\n\}\n)/s; $cabu //= '';
-    $assert->like($cabu, qr/mb466-B2/,
-        'checkAuthByUser: chemin ident documenté mb466-B2');
     $assert->like($cabu, qr/maybe_upgrade_hash\(/,
         'checkAuthByUser (ident): appelle maybe_upgrade_hash');
     # Il faut le $why du matcher pour gater : la capture doit être en liste.

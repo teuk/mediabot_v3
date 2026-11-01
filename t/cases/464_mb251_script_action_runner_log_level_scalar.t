@@ -46,7 +46,6 @@ ok($level_valid->{ok}, 'valid scalar log level is accepted');
 is($level_valid->{planned}[0]{level}, 'warn', 'valid scalar log level is normalized');
 
 my $source = do { local $/; open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die $!; <$fh> };
-like($source, qr/mb251-B1/, 'ScriptActionRunner source contains mb251 log level scalar marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb251 log level scalar guard does not introduce shell execution');
 
 done_testing();

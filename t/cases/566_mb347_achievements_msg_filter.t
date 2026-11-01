@@ -89,5 +89,4 @@ return sub {
     $assert->unlike($sql_only, qr/publictext IS NOT NULL/,
                     'check_msg: plus de publictext IS NOT NULL dans le SQL');
 
-    $assert->like($cm, qr/mb347-B1/, 'tag mb347-B1 présent');
 };

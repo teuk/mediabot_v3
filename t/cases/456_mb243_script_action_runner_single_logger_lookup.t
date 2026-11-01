@@ -54,7 +54,6 @@ my $source = do {
 
 my $decl_count = () = $source =~ /my \$hash_logger = eval \{ \$bot->\{logger\} \};/g;
 is($decl_count, 1, 'ScriptActionRunner has exactly one hash_logger lexical declaration');
-like($source, qr/mb243-B1/, 'ScriptActionRunner source contains mb243 single logger lookup marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb243 cleanup does not introduce shell execution');
 
 done_testing();

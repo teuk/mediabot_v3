@@ -55,5 +55,4 @@ return sub {
     $assert->like($wcode, qr/_uri_escape_bytes\(\$format\)/, 'format encodé byte-safe');
     $assert->unlike($wcode, qr/uri_escape_utf8\(\$location\)/, 'plus de uri_escape_utf8 sur location');
 
-    $assert->like($src, qr/mb438-B1/, 'tag mb438-B1');
 };

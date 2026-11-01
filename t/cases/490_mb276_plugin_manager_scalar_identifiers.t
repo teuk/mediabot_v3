@@ -83,8 +83,6 @@ my $source = do {
     local $/;
     <$src>;
 };
-like($source, qr/mb276-B1/, 'PluginManager source contains mb276 plugin-name scalar marker');
-like($source, qr/mb276-B2/, 'PluginManager source contains mb276 module-name scalar marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb276 PluginManager identifier guard does not introduce shell execution');
 
 done_testing();

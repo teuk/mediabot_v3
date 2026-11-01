@@ -48,7 +48,6 @@ is($stdin->{event}, 'unknown', 'run_dry sanitizes non-scalar event before stdin 
 is(ref($stdin->{event}), '', 'stdin JSON event is scalar');
 
 my $src = do { local (@ARGV, $/) = ('Mediabot/ScriptRunner.pm'); <> };
-like($src, qr/mb271-B1/, 'ScriptRunner source contains mb271 event scalar marker');
 unlike($src, qr/\b(system|qx)\s*(?:\(|\/|\{)/, 'mb271 event guard does not introduce shell execution');
 
 done_testing();

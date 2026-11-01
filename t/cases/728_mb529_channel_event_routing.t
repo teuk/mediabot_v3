@@ -390,11 +390,9 @@ return sub {
     # ------------------------------------------------------------------
     {
         my $core_src = _slurp_728(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-        $assert->like($core_src, qr/mb529-B1/, 'marqueur mb529 dans Mediabot.pm');
         $assert->like($core_src, qr/sub observe_channel_event/, 'point d\'entree coeur present');
 
         my $plugin_src = _slurp_728(File::Spec->catfile('.', 'Mediabot', 'Plugin', 'ScriptDryRun.pm'));
-        $assert->like($plugin_src, qr/mb529-B1/, 'marqueur mb529 dans ScriptDryRun');
         $assert->unlike($plugin_src, qr/`[^`]+`/, 'aucun backtick apparie (garde mb203)');
 
         my $sample = _slurp_728(File::Spec->catfile('.', 'mediabot.sample.conf'));

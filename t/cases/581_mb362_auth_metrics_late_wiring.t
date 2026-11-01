@@ -101,8 +101,6 @@ return sub {
     $assert->like($auth_src,
         qr/\$self->set_metrics\(\$args\{metrics\}\) if \$args\{metrics\}/,
         'constructeur Auth initialise aussi la jauge quand Metrics existe déjà');
-    $assert->like($auth_src, qr/mb362-B1/,
-        'tag mb362-B1 présent dans Auth.pm');
 
     my $main_src = _slurp_581(File::Spec->catfile('.', 'mediabot.pl'));
     my $auth_pos    = index($main_src, '$mediabot->init_auth();');
@@ -116,8 +114,6 @@ return sub {
         'Auth est raccordé après la création réelle de Metrics');
     $assert->ok($start_pos > $wire_pos,
         'jauge Auth synchronisée avant le démarrage de l’endpoint Metrics');
-    $assert->like($main_src, qr/mb362-B1/,
-        'tag mb362-B1 présent dans le démarrage principal');
 
     my @constructor_files = (
         File::Spec->catfile('.', 'Mediabot', 'LoginCommands.pm'),

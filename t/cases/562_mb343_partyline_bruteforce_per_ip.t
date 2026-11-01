@@ -88,5 +88,4 @@ return sub {
     my $records = () = $login =~ /_pl_bf_record\(\$bf_map/g;
     $assert->is($records, 3, '_do_login: record sur les 3 chemins d\'échec');
     $assert->like($login, qr/_pl_bf_clear\(\$bf_map/, '_do_login: clear au succès');
-    $assert->like($login, qr/mb343-B1/, 'tag mb343-B1 présent');
 };

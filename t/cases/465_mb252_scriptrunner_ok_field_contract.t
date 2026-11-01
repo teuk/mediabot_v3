@@ -66,7 +66,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb252-B1/, 'ScriptRunner source contains mb252 ok field marker');
 unlike($source, qr/\bsystem\s*(?:\(| )|\bqx\s*(?:\/|\(|\{)|`[^`]+`/, 'mb252 ok field guard does not introduce shell execution');
 
 done_testing();

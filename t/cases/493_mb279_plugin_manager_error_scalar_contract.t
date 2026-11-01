@@ -62,8 +62,6 @@ my $src = do {
     local $/;
     <$fh>;
 };
-like($src, qr/mb279-B1/, 'PluginManager source contains mb279 scalar error marker');
-like($src, qr/mb279-B2/, 'PluginManager source contains mb279 register boundary marker');
 unlike($src, qr/\$err\s*=\s*\$@\s*\|\|\s*'unknown plugin load error';\s*\$err\s*=~\s*s/s, 'old configured-load stringification block is gone');
 unlike($src, qr/failed to load \$module: \$@/, 'raw require error interpolation is gone');
 unlike($src, qr/system\s*\(|exec\s*\(|`/, 'mb279 guard does not introduce shell execution');

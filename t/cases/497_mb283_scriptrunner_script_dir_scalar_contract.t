@@ -62,7 +62,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb283-B1/, 'ScriptRunner source contains mb283 constructor script_dir scalar marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb283 constructor guard does not introduce shell execution');
 
 done_testing();

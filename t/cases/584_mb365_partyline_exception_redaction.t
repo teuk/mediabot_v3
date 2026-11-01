@@ -180,8 +180,6 @@ return sub {
         'logger or stream failures do not rethrow the original Partyline exception');
 
     my $src = _slurp_584("$Bin/../../Mediabot/Partyline/Transport.pm");
-    $assert->like($src, qr/mb365-B1/,
-        'mb365-B1 marker is present');
     $assert->like(
         $src,
         qr/_dispatch_line_safely\(\$stream, \$id, \$line, 'DCC CHAT'\)/,

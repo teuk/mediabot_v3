@@ -59,14 +59,12 @@ my $source_runner = do {
     local $/;
     <$fh>;
 };
-like($source_runner, qr/mb237-B1/, 'ScriptRunner source contains mb237 marker');
 
 my $source_action = do {
     open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die $!;
     local $/;
     <$fh>;
 };
-like($source_action, qr/mb237-B2/, 'ScriptActionRunner source contains mb237 marker');
 
 unlike($source_runner . $source_action, qr/\bsystem\s*(?:\(| )|\bqx\s*(?:\/|\(|\{)|`[^`]+`/, 'mb237 action-count guard does not introduce shell execution');
 

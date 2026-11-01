@@ -97,5 +97,4 @@ return sub {
                   '_do_login lit explicitement la borne configurée');
     my $wired = () = $login =~ /_pl_bf_record\(\$bf_map, \$bf_ip, \$bf_now, \$bf_window, \$bf_entries\)/g;
     $assert->is($wired, 3, '_do_login passe la borne sur les trois chemins d’échec');
-    $assert->like($src, qr/mb352-B1/, 'tag mb352-B1 présent');
 };

@@ -76,7 +76,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb289-B1/, 'ScriptRunner source contains mb289 event data marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb289 event-data guard does not introduce shell execution');
 
 done_testing();

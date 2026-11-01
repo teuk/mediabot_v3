@@ -58,5 +58,4 @@ return sub {
     # tokenisation des mots toujours byte-safe (mb427)
     $assert->like($code, qr/split \/\[\^0-9A-Za-z_\\x80-\\xFF\]\+\//, 'tokenisation mots byte-safe conservée');
 
-    $assert->like($src, qr/mb446-B1/, 'tag mb446-B1');
 };

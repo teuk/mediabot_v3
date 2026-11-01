@@ -39,10 +39,6 @@ unlike($cpan_src, qr/\b(?:apt|apt-get|dpkg|dnf|yum)\b/,
 like($configure_src,
     qr/sudo "\$INSTALL_DIR\/cpan_install\.sh".*?"\$INSTALL_DIR\/cpan_install\.sh" --verify-only/s,
     'configure verifies modules again as the non-root caller after sudo CPAN');
-like($configure_src, qr/mb381-B1/,
-    'configure carries the MB381 runtime-user verification marker');
-like($cpan_src, qr/mb381-B1/,
-    'CPAN installer carries the MB381 permission marker');
 
 my $tmp = tempdir(CLEANUP => 1);
 my $install = "$tmp/install";

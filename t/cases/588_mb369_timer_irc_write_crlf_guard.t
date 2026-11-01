@@ -78,5 +78,4 @@ return sub {
     $assert->like($dump, qr/\{irc\}->write\("\$cmd\\x0d/,
                   'dumpCmd_ctx (.dump): write direct préservé (outil raw volontaire)');
 
-    $assert->like($src, qr/mb369-B1/, 'tag mb369-B1 présent');
 };

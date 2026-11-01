@@ -86,7 +86,6 @@ return sub {
     # and store that same direct percentage rather than inverting it again.
     $assert->unlike($h, qr/100\s*-\s*\$stored_ratio/, 'query path does not re-invert the stored percentage');
     $assert->unlike($h, qr/100\s*-\s*\$ratio/, 'set path does not re-invert the requested percentage');
-    $assert->like($h, qr/mb370-B1/, 'tag mb370-B1 (Hailo)');
 
     # --- 4. Scan câblage mediabot.pl -------------------------------------
     my $main = _slurp_589(File::Spec->catfile('.', 'mediabot.pl'));

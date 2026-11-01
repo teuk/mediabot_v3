@@ -271,7 +271,6 @@ return sub {
         $plugin->unregister;
 
         my $ar_src = _slurp_742(File::Spec->catfile('.', 'Mediabot', 'ScriptActionRunner.pm'));
-        $assert->like($ar_src, qr/mb545-B1/, 'marqueur mb545 dans le runner');
         $assert->unlike($ar_src, qr/`[^`]+`/, 'runner: aucun backtick apparie (garde mb203)');
         my $plugin_src = _slurp_742(File::Spec->catfile('.', 'Mediabot', 'Plugin', 'ScriptDryRun.pm'));
         $assert->unlike($plugin_src, qr/`[^`]+`/, 'plugin: aucun backtick apparie');

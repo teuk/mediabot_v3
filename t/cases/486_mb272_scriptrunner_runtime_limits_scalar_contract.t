@@ -68,7 +68,6 @@ my $source = do {
     <$sfh>;
 };
 
-like($source, qr/mb272-B1: runtime execution limits are part of the run_plan contract/, 'ScriptRunner source contains mb272 runtime limit marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb272 runtime limit guard does not introduce shell execution');
 
 done_testing();

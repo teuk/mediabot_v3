@@ -55,5 +55,4 @@ return sub {
     $assert->ok($n >= 2, 'les 2 définitions de $nick_char sont byte-safe');
     $assert->unlike($src, qr/my \$nick_char = qr\/\[A-Za-z0-9\\\[\\\]\\\\\^_`\{\}\|\\-\]\//,
         'plus de $nick_char ASCII seul');
-    $assert->like($src, qr/mb445-B1/, 'tag mb445-B1');
 };

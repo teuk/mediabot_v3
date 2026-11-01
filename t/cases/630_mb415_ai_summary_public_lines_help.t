@@ -89,5 +89,4 @@ return sub {
         'help ai: syntaxe summary à jour');
 
     $assert->like($src, qr/mb415-R1/, 'tag mb415-R1');
-    $assert->like($src, qr/mb416-B2/, 'tag mb416-B2');
 };

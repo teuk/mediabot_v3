@@ -220,7 +220,6 @@ open my $cmdfh, '<', "$Bin/../../Mediabot/Partyline/Commands.pm" or die $!;
 $party_src .= "\n" . <$cmdfh>;
 close $cmdfh;
 
-like($conf_src, qr/mb368-B1/, 'MB368 marker is present in Mediabot::Conf');
 like($conf_src, qr/sub reload\s*\{/, 'Mediabot::Conf exposes the real reload method');
 like($party_src, qr/sub _reload_configuration_file\s*\{/, 'Partyline uses one shared checked reload path');
 unlike($party_src, qr/\$bot->\{conf\}->load\s*\(/, 'Partyline no longer calls the non-existent load method');

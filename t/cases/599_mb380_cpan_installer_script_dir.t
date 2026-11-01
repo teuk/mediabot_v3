@@ -37,8 +37,6 @@ for my $cmd (qw(cpan make gcc)) {
     like($configure_src, qr/need_cmd \Q$cmd\E\b/, "configure checks $cmd before fresh install");
 }
 like($configure_src, qr/command -v curl.*command -v wget/s, 'configure accepts curl or wget as download tool');
-like($configure_src, qr/mb380-B1/, 'MB380 marker is present in configure');
-like($cpan_src, qr/mb380-B1/, 'MB380 marker is present in CPAN installer');
 
 my $tmp = tempdir(CLEANUP => 1);
 my $install = "$tmp/install";

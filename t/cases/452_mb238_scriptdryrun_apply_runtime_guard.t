@@ -99,7 +99,6 @@ is($action_ok->{calls}, 1, 'successful apply-mode route applies action plan once
 is($r3->{ok}, 1, 'successful apply-mode result remains ok');
 
 my $src = do { local $/; open my $fh, '<', 'Mediabot/Plugin/ScriptDryRun.pm' or die $!; <$fh> };
-like($src, qr/mb238-B1/, 'ScriptDryRun source contains mb238 apply runtime guard marker');
 unlike($src, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb238 guard does not introduce shell execution');
 
 done_testing();

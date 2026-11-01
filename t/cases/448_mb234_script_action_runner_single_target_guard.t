@@ -110,7 +110,6 @@ open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die "cannot read ScriptAct
 my $src = do { local $/; <$fh> };
 close $fh;
 
-like($src, qr/mb234-B1: keep the destination to one IRC recipient/, 'ScriptActionRunner source contains mb234 single-target marker');
 unlike($src, qr/dbh->|prepare\(|INSERT|UPDATE|DELETE|system\s*\(|qx\//, 'mb234 guard does not introduce DB writes or shell execution');
 
 done_testing();

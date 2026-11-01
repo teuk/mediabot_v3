@@ -56,5 +56,4 @@ return sub {
     $assert->like($code, qr/'birthday = \? OR birthday LIKE \?'/,
         'match MM-DD et YYYY-MM-DD préservé');
 
-    $assert->like($src, qr/mb433-B1/, 'tag mb433-B1');
 };

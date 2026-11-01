@@ -159,8 +159,6 @@ like($scheduler_src, qr/\$current->\{generation\} == \$generation/,
     'calendar callback verifies lifecycle generation');
 like($scheduler_src, qr/return 0 if \$task->\{started\} && !\$self->stop\(\$name\)/,
     'remove refuses to orphan a timer after stop failure');
-like($scheduler_src, qr/mb356-B1/,
-    'Scheduler carries the mb356 marker');
 
 my $partyline_src = slurp('Mediabot/Partyline.pm')
     . "\n" . slurp('Mediabot/Partyline/Commands.pm');
@@ -170,7 +168,5 @@ like($partyline_src, qr/is already running/,
     'Partyline distinguishes already-running tasks');
 like($partyline_src, qr/is already stopped/,
     'Partyline distinguishes already-stopped tasks');
-like($partyline_src, qr/mb356-B2/,
-    'Partyline carries the mb356 marker');
 
 done_testing();

@@ -81,8 +81,6 @@ my $source = do {
     local $/;
     <$fh>;
 };
-like($source, qr/mb290-B1/, 'ScriptActionRunner source contains mb290 diagnostic marker');
-like($source, qr/mb290-B2/, 'ScriptActionRunner source contains mb290 failure marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb290 top-level error guard does not introduce shell execution');
 
 done_testing();

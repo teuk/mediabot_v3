@@ -62,7 +62,6 @@ return sub {
     (my $add_sql = $add) =~ s/^\s*#.*$//mg;
     $assert->unlike($add_sql, qr/\$args\{expires_at\}/,
                     'add_ban: ne binde plus la chaîne expires_at pré-formatée');
-    $assert->like($add, qr/mb350-B1/, 'tag mb350-B1 présent');
 
     # --- 3. Scan des appelants -------------------------------------------
     my $cc = _slurp_569(File::Spec->catfile('.', 'Mediabot', 'ChannelCommands.pm'));

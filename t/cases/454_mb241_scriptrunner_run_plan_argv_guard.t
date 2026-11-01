@@ -87,7 +87,6 @@ my $source = do {
     <$sfh>;
 };
 
-like($source, qr/mb241-B1: run_plan is an execution boundary/, 'ScriptRunner source contains mb241 argv guard marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb241 run_plan guard does not introduce shell execution');
 
 done_testing();

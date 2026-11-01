@@ -74,8 +74,6 @@ return sub {
     $assert->like($hailo_src,
         qr/\$self->\{hailo_registry\}\s*=\s*\$registry;.*?delete \$self->\{_hailo_runtime_unavailable_logged\}/s,
         'une initialisation du registre réarme le diagnostic');
-    $assert->like($hailo_src, qr/mb361-B1/,
-        'tag mb361-B1 présent dans Hailo.pm');
 
     # --- 3. Trois chemins legacy protégés -------------------------------
     my $main = _slurp_580(File::Spec->catfile('.', 'mediabot.pl'));
@@ -95,8 +93,6 @@ return sub {
     my $guards = () = $runtime_block =~ /if \(\$hailo\) \{/g;
     $assert->is($guards, 3,
         'chaque chemin legacy vérifie le cerveau avant usage');
-    $assert->like($runtime_block, qr/mb361-B1/,
-        'tag mb361-B1 présent dans mediabot.pl');
 
     # --- 4. Fallback moderne protégé avant métriques ---------------------
     my $mediabot_src = _slurp_580(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
@@ -111,8 +107,6 @@ return sub {
         index($nick_block, 'get_hailo_runtime($self, $sChannel)')
             < index($nick_block, "mediabot_hailo_learn_reply_total"),
         'disponibilité vérifiée avant la métrique learn_reply');
-    $assert->like($nick_block, qr/mb361-B1/,
-        'tag mb361-B1 présent dans Mediabot.pm');
 
     # --- 5. Ratio HailoChatter direct après mb370/mb371 -----------------
     my $user_chance = 97;

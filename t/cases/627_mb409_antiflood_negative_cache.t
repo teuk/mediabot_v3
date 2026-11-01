@@ -50,5 +50,4 @@ return sub {
         'absence de CHANNEL_FLOOD mémorisée avec TTL');
     $assert->like($code, qr/return 0 if \$pc->\{unconfigured\};/,
         'chemin chaud: court-circuit sans SQL');
-    $assert->like($src, qr/mb409-B1/, 'tag mb409-B1');
 };

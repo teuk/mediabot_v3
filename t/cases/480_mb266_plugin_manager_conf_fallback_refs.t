@@ -90,8 +90,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb266-B1/, 'PluginManager source contains mb266 list-ref guard marker');
-like($source, qr/mb266-B2/, 'PluginManager source contains mb266 fallback guard marker');
 unlike($source, qr/system\s*\(/, 'mb266 PluginManager config guard does not introduce system()');
 
 done_testing();

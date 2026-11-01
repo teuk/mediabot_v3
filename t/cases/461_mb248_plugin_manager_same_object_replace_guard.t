@@ -92,7 +92,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb248-B1: a same-object replace is a metadata refresh/, 'PluginManager source contains mb248 same-object marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'same-object replace guard does not introduce shell execution');
 
 done_testing();

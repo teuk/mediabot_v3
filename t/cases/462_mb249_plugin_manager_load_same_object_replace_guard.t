@@ -67,7 +67,6 @@ my $source = do {
     local $/;
     <$sfh>;
 };
-like($source, qr/mb249-B1/, 'PluginManager source contains mb249 load same-object guard marker');
 unlike($source, qr/\b(?:system|exec)\s*\(|`[^`]+`|\bqx\s*(?:\/|\(|\{)/, 'PluginManager load same-object guard does not introduce shell execution');
 
 done_testing();

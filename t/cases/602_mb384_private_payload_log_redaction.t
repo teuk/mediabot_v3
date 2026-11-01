@@ -158,6 +158,4 @@ return sub {
         'legacy private payload hex marker is gone');
     $assert->unlike($main, qr/\[CTCP_DCC_DEBUG\]\s+raw_message_hex=/,
         'legacy raw DCC message hex marker is gone');
-    $assert->like($main, qr/mb384-B1/,
-        'MB384 private-log redaction marker is present');
 };

@@ -60,7 +60,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb253-B1/, 'ScriptRunner source contains mb253 protocol marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb253 protocol guard does not introduce shell execution');
 
 done_testing();

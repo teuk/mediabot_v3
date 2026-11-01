@@ -119,7 +119,6 @@ return sub {
 
     # Le helper factorisé porte désormais le contrat B3 (gating + UPDATE).
     my ($mu) = $asrc =~ /(sub maybe_upgrade_hash \{.*?\n\}\n)/s; $mu //= '';
-    $assert->like($mu, qr/mb466-B2/, 'maybe_upgrade_hash: helper factorisé présent');
     $assert->like($mu, qr/\$why ne 'bcrypt'/,
         'maybe_upgrade_hash: re-hash seulement pour un hash NON-bcrypt');
     $assert->like($mu, qr/UPDATE USER SET password = \? WHERE id_user = \?/,
@@ -141,8 +140,6 @@ return sub {
         'checkAuthByUser: l\'égalité SQL (cassée avec bcrypt) est supprimée');
 
     my ($ca) = $lsrc =~ /(sub checkAuth \{.*?\n\}\n)/s; $ca //= '';
-    $assert->like($ca, qr/mb465-B5/,
-        'checkAuth: fallback legacy déterministe conservé et documenté');
     $assert->like($ca, qr/Digest::SHA::sha1_hex\(Digest::SHA::sha1\(/,
         'checkAuth: hash legacy calculé inline (indépendant de make_password_hash)');
 };

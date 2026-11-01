@@ -53,5 +53,4 @@ return sub {
     $assert->like($src, qr/Modulo requires integer operands/, 'garde présente');
     $assert->like($src, qr/\$value != int\(\$value\) \|\| \$right != int\(\$right\)/,
         'détection des opérandes non entiers');
-    $assert->like($src, qr/mb442-B1/, 'tag mb442-B1');
 };

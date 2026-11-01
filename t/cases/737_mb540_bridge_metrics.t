@@ -322,7 +322,6 @@ return sub {
     # ------------------------------------------------------------------
     {
         my $plugin_src = _slurp_737(File::Spec->catfile('.', 'Mediabot', 'Plugin', 'ScriptDryRun.pm'));
-        $assert->like($plugin_src, qr/mb540-B1/, 'marqueur mb540 dans ScriptDryRun');
         $assert->unlike($plugin_src, qr/`[^`]+`/, 'aucun backtick apparie (garde mb203)');
         my @metric_conf_keys = $plugin_src =~ /'plugins\.ScriptDryRun\.([A-Z_]+)'/g;
         my %known = map { $_ => 1 } qw(SCRIPT COMMANDS ROUTES ACTION_MODE ALLOW_IRC

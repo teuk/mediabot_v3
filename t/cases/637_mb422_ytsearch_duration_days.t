@@ -51,5 +51,4 @@ return sub {
     $assert->like($code, qr/_yt_parse_duration\(\$dur\)/, 'ytSearch réutilise le parseur partagé');
     $assert->like($code, qr/\$h \+= \$dd \* 24;/,          'jours repliés dans les heures');
     $assert->unlike($code, qr/my \(\$h\) = \(\$dur =~/,    'plus de parsing H inline');
-    $assert->like($src, qr/mb422-B1/, 'tag mb422-B1');
 };

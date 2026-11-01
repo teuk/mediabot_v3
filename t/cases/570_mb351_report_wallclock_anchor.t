@@ -88,5 +88,4 @@ return sub {
                   'daily_channel_report utilise le réarmement calendaire mb353');
     $assert->like($weekly_blk, qr/next_run_cb\s*=>\s*sub\s*\{\s*_next_weekly_epoch\(/,
                   'weekly_channel_report utilise le réarmement calendaire mb353');
-    $assert->like($main, qr/mb353-B1/, 'tag mb353-B1 présent');
 };

@@ -67,8 +67,6 @@ is_deeply([ map { $_->{error} } @{ $plan_nested_only->{errors} } ], [ 'script re
 my $source_runner = do { local $/; open my $fh, '<', 'Mediabot/ScriptRunner.pm' or die $!; <$fh> };
 my $source_action = do { local $/; open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die $!; <$fh> };
 
-like($source_runner, qr/mb256-B1/, 'ScriptRunner source contains mb256 scalar error marker');
-like($source_action, qr/mb256-B2/, 'ScriptActionRunner source contains mb256 scalar error marker');
 unlike($source_runner . $source_action, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb256 scalar error guard does not introduce shell execution');
 
 done_testing();

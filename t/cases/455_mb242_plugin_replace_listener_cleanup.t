@@ -56,9 +56,6 @@ my $source_eventbus = do { local (@ARGV, $/) = ('Mediabot/EventBus.pm'); <> };
 my $source_plugin   = do { local (@ARGV, $/) = ('Mediabot/Plugin/ScriptDryRun.pm'); <> };
 my $source_manager  = do { local (@ARGV, $/) = ('Mediabot/PluginManager.pm'); <> };
 
-like($source_eventbus, qr/mb242-B1/, 'EventBus source contains mb242 off marker');
-like($source_plugin, qr/mb242-B2/, 'ScriptDryRun source contains mb242 unregister marker');
-like($source_manager, qr/mb242-B3/, 'PluginManager source contains mb242 replace cleanup marker');
 unlike($source_eventbus . $source_plugin . $source_manager, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb242 cleanup does not introduce shell execution');
 
 done_testing();

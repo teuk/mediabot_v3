@@ -297,7 +297,6 @@ return sub {
         $assert->unlike($plugin_src, qr/`[^`]+`/, 'aucun backtick apparie (garde mb203)');
 
         my $party_src = _slurp_735(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')) . "\n" . _slurp_735(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
-        $assert->like($party_src, qr/mb537-B1/, 'marqueur mb537 dans Partyline');
         $assert->like($party_src, qr/show external script bridge status and last run/,
             'contrat mb291 conserve');
 

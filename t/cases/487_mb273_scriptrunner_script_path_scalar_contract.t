@@ -52,7 +52,6 @@ my $source = do {
     local $/;
     <$fh>;
 };
-like($source, qr/mb273-B1/, 'ScriptRunner source contains mb273 script path scalar marker');
 unlike($source, qr/`[^`]+`/, 'mb273 script path guard does not introduce backtick execution');
 unlike($source, qr/system\s*\(/, 'mb273 script path guard does not introduce system()');
 

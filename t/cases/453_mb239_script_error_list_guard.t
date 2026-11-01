@@ -52,8 +52,6 @@ ok(!scalar(grep { length($_->{error}) > 240 } @{ $plan->{errors} }), 'ScriptActi
 my $source_runner = do { local $/; open my $fh, '<', 'Mediabot/ScriptRunner.pm' or die $!; <$fh> };
 my $source_action = do { local $/; open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die $!; <$fh> };
 
-like($source_runner, qr/mb239-B1/, 'ScriptRunner source contains mb239 bounded error marker');
-like($source_action, qr/mb239-B2/, 'ScriptActionRunner source contains mb239 bounded error marker');
 unlike($source_runner . $source_action, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb239 bounded error guard does not introduce shell execution');
 
 done_testing();

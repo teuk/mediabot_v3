@@ -62,5 +62,4 @@ return sub {
     # --- câblage : les deux fonctions passent par le parseur partagé --------
     $assert->like($fmt_text,  qr/_yt_parse_duration\(/, 'format délègue au parseur partagé');
     $assert->like($secs_text, qr/_yt_parse_duration\(/, 'seconds délègue au parseur partagé');
-    $assert->like($src, qr/mb398-B1/, 'tag mb398-B1');
 };

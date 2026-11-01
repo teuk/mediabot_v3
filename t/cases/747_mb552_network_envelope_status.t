@@ -218,7 +218,6 @@ return sub {
         $assert->like($party_src, qr/tv_interval\(\$t0_552\)/, 'partyline: chrono HiRes reel');
 
         my $runner_src = _slurp_747(File::Spec->catfile('Mediabot', 'ScriptRunner.pm'));
-        $assert->like($runner_src, qr/mb552-B1/, 'runner: marqueur mb552');
         $assert->unlike($runner_src, qr/`[^`]+`/, 'runner: aucun backtick apparie');
 
         my $readme = _slurp_747(File::Spec->catfile('plugins', 'scripts', 'README.md'));

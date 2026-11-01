@@ -54,5 +54,4 @@ return sub {
         $assert->is($fn->($msg), $want, $name);
     }
 
-    $assert->like($src, qr/mb405-B1/, 'tag mb405-B1');
 };

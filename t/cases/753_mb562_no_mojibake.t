@@ -49,5 +49,4 @@ return sub {
         '8ball FR: accents simples corrects');
     $assert->like($uc, qr/Definitivamente s\x{00ED}\./,
         '8ball ES: accents simples corrects');
-    $assert->like($uc, qr/mb562-B1/, 'marqueur mb562 present');
 };

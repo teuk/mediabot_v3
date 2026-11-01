@@ -39,7 +39,6 @@ return sub {
     $assert->ok($load_pos < $cap_pos, 'load occurs before the add cap');
     my $load_count = () = $note =~ /_notes_ensure_loaded\(\$self, \$nick\);/g;
     $assert->is($load_count, 1, 'one shared load call covers all note branches');
-    $assert->like($note, qr/mb456-B1/, 'notes audit tag present');
 
     my $main = _slurp_669('mediabot.pl');
     $assert->like($main, qr/my \$self_source = __FILE__;/,
@@ -54,7 +53,6 @@ return sub {
         'old fail-open $0 scan removed');
     $assert->unlike($main, qr/unless \(open my \$fh_self/,
         'filehandle is not scoped only to the open condition');
-    $assert->like($main, qr/mb456-B2/, 'integrity audit tag present');
 
     my $life = _slurp_669(File::Spec->catfile('.', 't', 'live', 'lifecycle_check.sh'));
     $assert->like($life,
@@ -65,5 +63,4 @@ return sub {
         'shutdown exit code captured safely under set -e');
     $assert->unlike($life, qr/wait "\$\{BOT2_PID\}" 2>\/dev\/null; local rc2=/,
         'unsafe plain wait pattern removed');
-    $assert->like($life, qr/mb456-B3/, 'lifecycle audit tag present');
 };

@@ -48,5 +48,4 @@ return sub {
     $assert->like($code, qr/split \/\[\^0-9A-Za-z_\\x80-\\xFF\]\+\//,
         'wordcount utilise le split byte-safe');
     $assert->unlike($code, qr/split \/\\W\+\//, 'plus de split \W+ dans wordcount');
-    $assert->like($src, qr/mb426-B1/, 'tag mb426-B1');
 };

@@ -155,10 +155,8 @@ return sub {
             . "\n" . _slurp_741(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
         $assert->like($party_src, qr/\.lusers \[refresh\]\s+- show network stats from LUSERS/,
             'aide: .lusers documente');
-        $assert->like($party_src, qr/mb544-B1/, 'marqueur mb544 dans Partyline');
 
         my $core_src = _slurp_741(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
-        $assert->like($core_src, qr/mb544-B1/, 'marqueur mb544 dans le coeur');
         $assert->like($core_src, qr/log\(3, "LUSERS \$numeric: \$detail"\)/,
             'coeur: details logges niveau 3');
         $assert->like($core_src, qr/log\(3, 'LUSERS refresh requested'\)/,

@@ -74,7 +74,6 @@ my $source = do {
     local $/;
     <$fh>;
 };
-like($source, qr/mb226-B1/, 'ScriptRunner source contains mb226 marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb226 does not introduce shell-oriented execution');
 
 done_testing();

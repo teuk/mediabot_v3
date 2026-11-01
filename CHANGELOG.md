@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1061 — Retire historical text pins and share behavioral setup
+
+- Delete sixty-five historical source/prose cases and 167 assertions requiring
+  literal MBxxx-Bn comments. Keep native permission, SQL failure, process,
+  byte-budget and release checks; do not replace behavior with source scans.
+- Run twenty-five AI/provider regression fragments in two isolated suites,
+  retaining all 1,480 ordinary assertions and their scoped fixtures. Cold-load
+  probes still launch fresh children. Reverse-order and injected-failure
+  checks qualify the shared setup and preserve nonzero failure propagation.
+- Keep the full default runner, monotonic ETA, Chromium signal fix, application,
+  VERSION, dependencies, configuration and database schema unchanged.
+
+
 ### MB1060 — Stabilize Chromium probes and display a progress ETA
 
 - Reset inherited TERM handling in the signal fixture and write its diagnostic

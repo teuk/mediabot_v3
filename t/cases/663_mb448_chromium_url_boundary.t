@@ -44,5 +44,4 @@ return sub {
     my $open3_pos = index($code, 'open3(');
     $assert->ok($guard_pos >= 0 && $open3_pos > $guard_pos,
         'garde évaluée avant open3()');
-    $assert->like($src, qr/mb448-B1/, 'tag mb448-B1');
 };

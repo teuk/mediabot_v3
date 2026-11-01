@@ -96,5 +96,4 @@ return sub {
 
     # Scan de source : la branche IPv6 est bien présente.
     $assert->like($sub_src, qr/Socket::AF_INET6/, 'le helper gère AF_INET6');
-    $assert->like($sub_src, qr/mb340-B1/, 'tag mb340-B1 présent');
 };

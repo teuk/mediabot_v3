@@ -56,5 +56,4 @@ return sub {
         $assert->unlike($body, qr/\[\^\\w\\s\\x\{00C0\}/,
             "$sub: plus de motif x{00C0}-x{017F} non sûr");
     }
-    $assert->like($src, qr/mb427-B1/, 'tag mb427-B1');
 };

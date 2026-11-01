@@ -24,8 +24,6 @@ local $/;
 my $source = <$cfh>;
 close $cfh;
 
-like($source, qr/mb297-B1: keep the staged-secret scanner precise/, 'commit.sh contains MB297 marker');
-like($source, qr/mb379-B1: allow recognised runtime-generated credentials/, 'commit.sh contains MB379 runtime-generation marker');
 like($source, qr/runtime_generated_credential_re\s*=\s*re\.compile/, 'scanner has narrow runtime-generated credential matcher');
 like($source, qr/credential_key_re\s*=\s*re\.compile/, 'scanner has dedicated credential-key matcher');
 like($source, qr/Match credential \*key endings\*/, 'scanner documents exact key-ending behavior');

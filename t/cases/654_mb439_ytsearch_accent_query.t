@@ -48,5 +48,4 @@ return sub {
     $assert->like($yt, qr/uri_escape_utf8\(\$_\) \} \@vid_ids/,
         'IDs vidéo ASCII inchangés (hors périmètre)');
 
-    $assert->like($src, qr/mb439-B1/, 'tag mb439-B1');
 };

@@ -195,7 +195,6 @@ my $auth_src  = read_file("$Bin/../../Mediabot/Auth.pm");
 my $login_src = read_file("$Bin/../../Mediabot/LoginCommands.pm");
 my $help_src  = read_file("$Bin/../../Mediabot/Helpers.pm");
 
-like($auth_src, qr/mb372-B1/, 'MB372 marker is present in Auth');
 like($auth_src, qr/sub logout\s*\{.*?_set_db_auth\(\$uid, 0\)/s,
     'logout persists auth=0 when the last session disappears');
 like($auth_src, qr/sub set_session_user\s*\{.*?irc_nick/s,

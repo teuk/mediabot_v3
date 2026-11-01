@@ -221,10 +221,6 @@ return sub {
     my $src = _slurp_585("$Bin/../../Mediabot/Partyline.pm")
         . "\n" . _slurp_585("$Bin/../../Mediabot/Partyline/Transport.pm")
         . "\n" . _slurp_585("$Bin/../../Mediabot/Partyline/SessionAuth.pm");
-    $assert->like($src, qr/mb366-B1/,
-        'mb366-B1 input-bound marker is present');
-    $assert->like($src, qr/mb366-B2/,
-        'mb366-B2 idempotent-close marker is present');
     my $extract_calls = () = $src =~ /->_extract_input_lines\((?:\$buffref|\\\$input)\)/g;
     $assert->is($extract_calls, 2,
         'Telnet and DCC both use the shared bounded extractor');

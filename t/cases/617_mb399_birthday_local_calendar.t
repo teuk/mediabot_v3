@@ -70,5 +70,4 @@ return sub {
     $assert->unlike($ahead, qr/\bgmtime\(/,      'plus de gmtime dans le helper');
     $assert->like($ahead, qr/\+ 0\.5\)/,         'arrondi DST-safe');
     $assert->like($src, qr/use Time::Local qw\(timegm timelocal\);/, 'import timelocal');
-    $assert->like($src, qr/mb399-B1/, 'tag mb399-B1');
 };

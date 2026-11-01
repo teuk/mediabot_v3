@@ -45,5 +45,4 @@ return sub {
     $assert->is($safe[-2], '--',        "'--' précède immédiatement la requête");
     $assert->is($safe[-1], $malicious,  'la requête reste un argument positionnel');
 
-    $assert->like($src, qr/mb417-B1/, 'tag mb417-B1');
 };

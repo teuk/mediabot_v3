@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use utf8;
 
-use Test::More tests => 14;
+use Test::More tests => 13;
 use lib '.';
 
 BEGIN { use_ok('Mediabot::Plugin::ScriptDryRun') }
@@ -88,7 +88,5 @@ my $src = do {
     <$fh>;
 };
 
-like($src, qr/mb268-B1/,
-    'ScriptDryRun source contains mb268 command scalar marker');
 unlike($src, qr/system\s*\(|qx\//,
     'mb268 command scalar guard does not introduce shell execution');

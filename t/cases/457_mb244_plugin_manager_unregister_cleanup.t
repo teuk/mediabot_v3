@@ -74,7 +74,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb244-B1: explicit plugin unregister/, 'PluginManager source contains mb244 unregister cleanup marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'PluginManager unregister cleanup does not introduce shell execution');
 
 done_testing();

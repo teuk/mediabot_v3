@@ -61,5 +61,4 @@ return sub {
     # (le LCG local), pas sur l'alignement vertical du bloc.
     $assert->like($code, qr/\$chance\s+= 35 \+ \(\$next->\(\) % 60\)/, 'chance via LCG local');
 
-    $assert->like($src, qr/mb444-B1/, 'tag mb444-B1');
 };

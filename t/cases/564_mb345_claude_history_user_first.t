@@ -83,5 +83,4 @@ return sub {
     $assert->like($claude,
         qr/shift\s+\@\$history\s+while\s+\@\$history\s+&&\s+\(\$history->\[0\]\{role\}\s*\/\/\s*''\)\s*ne\s*'user'/,
         'garde-fou user-first présent dans claudeAI');
-    $assert->like($claude, qr/mb345-B1/, 'tag mb345-B1 présent');
 };

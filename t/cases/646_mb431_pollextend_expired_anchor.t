@@ -52,5 +52,4 @@ return sub {
     $assert->unlike($code, qr/\$poll->\{deadline\} = \(\$poll->\{deadline\} \/\/ time\(\)\) \+ \$extra;/,
         'plus d\'ajout inconditionnel');
 
-    $assert->like($src, qr/mb431-B1/, 'tag mb431-B1');
 };

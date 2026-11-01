@@ -91,7 +91,6 @@ my $source = do {
     local $/;
     <$fh>;
 };
-like($source, qr/mb270-B1/, 'ScriptActionRunner source contains mb270 context-target marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb270 context target guard does not introduce shell execution');
 
 done_testing();

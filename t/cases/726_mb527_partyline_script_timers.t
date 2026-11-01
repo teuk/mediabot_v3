@@ -297,12 +297,10 @@ MB527_FIXTURE
     # ------------------------------------------------------------------
     {
         my $plugin_src = _slurp_726(File::Spec->catfile('.', 'Mediabot', 'Plugin', 'ScriptDryRun.pm'));
-        $assert->like($plugin_src, qr/mb527-B1/, 'marqueur mb527 dans ScriptDryRun');
         $assert->like($plugin_src, qr/sub script_timer_list/, 'liste en lecture seule presente');
         $assert->like($plugin_src, qr/sub cancel_script_timer\b/, 'annulation ciblee presente');
 
         my $party_src = _slurp_726(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')) . "\n" . _slurp_726(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
-        $assert->like($party_src, qr/mb527-B1/, 'marqueur mb527 dans Partyline');
         $assert->like($party_src, qr/show external script bridge status and last run/,
             'contrat mb291 de la ligne d\'aide conserve');
 

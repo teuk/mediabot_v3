@@ -63,7 +63,6 @@ like(extract_sub($main, '_local_epoch_for_day_offset'),
 like(extract_sub($main, '_local_epoch_for_day_offset'),
     qr/mktime\s*\(/,
     'calendar helper normalises with mktime');
-like($main, qr/mb355-B1/, 'mb355 marker is present');
 
 {
     local $ENV{TZ} = 'Europe/Paris';

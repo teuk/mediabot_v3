@@ -78,5 +78,4 @@ return sub {
     $assert->ok($check_pos >= 0 && ($loop_pos < 0 || $check_pos < $loop_pos),
         'contrôle exécuté avant loop->run');
 
-    $assert->like($src, qr/mb449-B1/, 'tag mb449-B1');
 };

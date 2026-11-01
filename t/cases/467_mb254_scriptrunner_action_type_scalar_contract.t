@@ -35,7 +35,6 @@ is_deeply($hash_type->{actions}, [], 'object action type exposes no actions');
 like(join(' ', @{ $hash_type->{errors} }), qr/type must be scalar/, 'object action type reports scalar contract error');
 
 my $src = do { local $/; open my $fh, '<', 'Mediabot/ScriptRunner.pm' or die $!; <$fh> };
-like($src, qr/mb254-B1: keep action type itself in the JSON scalar contract/, 'ScriptRunner source contains mb254 marker');
 unlike($src, qr/\bsystem\s*(?:\(| )|\bqx\s*(?:\/|\(|\{)|`[^`]+`/, 'mb254 action type scalar guard does not introduce shell execution');
 
 done_testing();

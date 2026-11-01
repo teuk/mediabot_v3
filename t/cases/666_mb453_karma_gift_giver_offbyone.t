@@ -100,7 +100,6 @@ return sub {
     $assert->like($pk,
         qr/my \$given_pos = \(\$op eq '\+\+'\) \? 1 : 0;/,
         'processKarma: given_pos amorcé selon le vote courant (mb453-B1)');
-    $assert->like($pk, qr/mb453-B1/, 'tag mb453-B1 présent');
 
     # Non-régression : le seuil et l'appel check_karma sont inchangés.
     $assert->like($pk, qr/check_karma\(\s*\$target,\s*\$channel,\s*\$score,\s*\$nick,\s*\$given_pos\s*\)/,

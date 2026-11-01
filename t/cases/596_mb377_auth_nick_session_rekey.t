@@ -138,7 +138,6 @@ my $main_src = do {
     <$fh>;
 };
 
-like($auth_src, qr/mb377-B1/, 'Auth contains the MB377 marker');
 like(
     $main_src,
     qr/on_message_NICK.*?rename_session\s*\(/s,

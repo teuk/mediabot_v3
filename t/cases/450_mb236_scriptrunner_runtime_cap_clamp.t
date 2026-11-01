@@ -58,7 +58,6 @@ my $source = do {
     <$sfh>;
 };
 
-like($source, qr/mb236-B1: clamp runtime output caps/, 'ScriptRunner source contains mb236 marker');
 like($source, qr/\$max_stdout\s*=\s*1048576\s+if\s+\$max_stdout\s*>\s*1048576;/, 'run_plan clamps max_stdout upper bound');
 like($source, qr/\$max_stderr\s*=\s*1048576\s+if\s+\$max_stderr\s*>\s*1048576;/, 'run_plan clamps max_stderr upper bound');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb236 cap fix does not introduce shell execution');

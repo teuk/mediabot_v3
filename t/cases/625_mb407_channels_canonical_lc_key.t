@@ -58,5 +58,4 @@ return sub {
     $assert->is($channels{ lc('#TEUK') }, 'from-db', 'lookup MAJUSCULES -> trouvé');
     $assert->is(scalar(keys %channels), 1, 'une seule clé pour un canal (pas de doublon)');
 
-    $assert->like($med, qr/mb407-B1/, 'tag mb407-B1');
 };

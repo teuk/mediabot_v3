@@ -58,7 +58,6 @@ is(scalar @{ $response_hash->{planned} || [] }, 0, 'response ok HASH plans no ac
 like($response_hash->{errors}[0]{error}, qr/response ok must be a JSON boolean or 0\/1 scalar/, 'response ok HASH reports scalar contract');
 
 my $src = do { local (@ARGV, $/) = ('Mediabot/ScriptActionRunner.pm'); <> };
-like($src, qr/mb259-B1/, 'ScriptActionRunner source contains mb259 ok flag contract marker');
 unlike($src, qr/\b(system|qx)\s*(?:\(|\/|\{)/, 'mb259 ok flag contract does not introduce shell execution');
 
 done_testing();

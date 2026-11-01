@@ -305,7 +305,6 @@ return sub {
     # ------------------------------------------------------------------
     {
         my $plugin_src = _slurp_730(File::Spec->catfile('.', 'Mediabot', 'Plugin', 'ScriptDryRun.pm'));
-        $assert->like($plugin_src, qr/mb531-B1/, 'marqueur mb531 dans ScriptDryRun');
         $assert->unlike($plugin_src, qr/`[^`]+`/, 'aucun backtick apparie (garde mb203)');
 
         my $runner_src = _slurp_730(File::Spec->catfile('.', 'Mediabot', 'ScriptRunner.pm'));

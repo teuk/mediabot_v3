@@ -58,5 +58,4 @@ return sub {
     $assert->is($db_info{lc('#GLAMOUR')}->{name}, '#Glamour',
         'semantic guard: arbitrary IRC case resolves to the DB row');
 
-    $assert->like($refresh, qr/mb482-B1/, 'mb482 marker is present');
 };

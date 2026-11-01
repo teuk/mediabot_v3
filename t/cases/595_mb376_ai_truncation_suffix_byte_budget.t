@@ -157,5 +157,4 @@ return sub {
         'plus de calcul de budget du suffixe en caractères');
     $assert->unlike($src, qr/substr\(\$chunk\[\$last\], 0, \$allow\)/,
         'plus de troncature finale char-based');
-    $assert->like($src, qr/mb376-B1/, 'tag mb376-B1 présent');
 };

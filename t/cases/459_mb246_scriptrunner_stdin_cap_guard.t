@@ -68,7 +68,6 @@ my $source = do {
     <$sfh>;
 };
 
-like($source, qr/mb246-B1/, 'ScriptRunner source contains mb246 stdin cap marker');
 unlike($source, qr/\bsystem\s*(?:\(| )|\bqx\s*(?:\/|\(|\{)|`[^`]+`/, 'stdin cap guard does not introduce shell execution');
 
 done_testing();

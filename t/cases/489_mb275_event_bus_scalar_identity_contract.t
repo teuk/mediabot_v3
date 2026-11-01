@@ -59,7 +59,6 @@ is($bus->emit('once_identity_event'), 2, 'once identity test emits both same-str
 is($bus->listener_count('once_identity_event'), 0, 'once cleanup removes all emitted once entries by refaddr identity');
 
 my $source = do { local (@ARGV, $/) = ('Mediabot/EventBus.pm'); <> };
-like($source, qr/mb275-B1/, 'EventBus source contains mb275 scalar event marker');
 like($source, qr/refaddr/, 'EventBus source uses refaddr for listener identity');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb275 EventBus hardening does not introduce shell execution');
 

@@ -90,5 +90,4 @@ return sub {
     # plus aucun usage NON échappé du pseudo comme motif.
     $assert->unlike($main, qr/=~ \/\$sCurrentNick\/i/,   'plus de détection non échappée');
     $assert->unlike($main, qr/s\/\$sCurrentNick\/\/g/,   'plus de retrait non échappé');
-    $assert->like($main, qr/mb373-B1/, 'tag mb373-B1 présent');
 };

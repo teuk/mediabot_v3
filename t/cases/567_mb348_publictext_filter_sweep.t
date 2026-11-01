@@ -84,7 +84,6 @@ return sub {
                 'UserCommands + SocialHistory + Stats: >= 27 requêtes conservent le filtre public/action');
     $assert->ok(_count_sql($sh, "event_type IN ('public','action')") > 0,
                 'SocialHistory: les requêtes extraites conservent le filtre public/action');
-    $assert->like($uc, qr/mb348-B1/, 'UserCommands: tag mb348-B1');
 
     # --- External/Claude.pm : contexte IA balayé -------------------------
     my $cl = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'External', 'Claude.pm'));
@@ -92,7 +91,6 @@ return sub {
                 'Claude: plus aucun publictext IS NOT NULL en SQL');
     $assert->ok(_count_sql($cl, "event_type IN ('public','action')") >= 2,
                 'Claude: contexte IA filtre event_type');
-    $assert->like($cl, qr/mb348-B1/, 'Claude: tag mb348-B1');
 
     # --- Partyline.pm : _cmd_ai balayé, .logs (_cmd_chanlog) PRÉSERVÉ -----
     my $pl = _slurp_567(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm'))
@@ -115,5 +113,4 @@ return sub {
     # plus aucune occurrence SQL de publictext IS NOT NULL dans Partyline
     $assert->is(_count_sql($pl, 'publictext IS NOT NULL'), 0,
                 'Partyline: plus aucun publictext IS NOT NULL en SQL');
-    $assert->like($pl, qr/mb348-B1/, 'Partyline: tag mb348-B1');
 };

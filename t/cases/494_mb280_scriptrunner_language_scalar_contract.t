@@ -60,8 +60,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb280-B1/, 'ScriptRunner source contains mb280 language scalar marker');
-like($source, qr/mb280-B2/, 'ScriptRunner source contains mb280 interpreter scalar marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb280 language guard does not introduce shell execution');
 
 done_testing();

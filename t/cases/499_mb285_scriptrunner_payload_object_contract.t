@@ -71,7 +71,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb285-B1/, 'ScriptRunner source contains mb285 payload object marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb285 payload guard does not introduce shell execution');
 
 done_testing();

@@ -107,6 +107,5 @@ sub slurp { my ($p) = @_; open my $fh, '<:encoding(UTF-8)', $p or die $!; local 
 my $src = slurp('Mediabot/Conf.pm');
 like($src, qr/sub _get_int_diag/,        'helper de diagnostic présent');
 like($src, qr/_get_int_diag_seen/,       'déduplication par signature présente');
-like($src, qr/mb358-B1/,                 'tag mb358-B1 présent');
 
 done_testing();

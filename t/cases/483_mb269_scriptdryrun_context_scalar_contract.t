@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use utf8;
 
-use Test::More tests => 23;
+use Test::More tests => 20;
 use lib '.';
 
 BEGIN { use_ok('Mediabot::Plugin::ScriptDryRun') }
@@ -115,11 +115,5 @@ my $src = do {
     <$fh>;
 };
 
-like($src, qr/mb269-B1/,
-    'ScriptDryRun source contains mb269 command fallback marker');
-like($src, qr/mb269-B2/,
-    'ScriptDryRun source contains mb269 scalar context marker');
-like($src, qr/mb269-B3/,
-    'ScriptDryRun source contains mb269 args scalar marker');
 unlike($src, qr/system\s*\(|qx\//,
     'mb269 context scalar guard does not introduce shell execution');

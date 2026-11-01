@@ -85,5 +85,4 @@ return sub {
     # car le corps est désormais sous eval (next dans eval = warning/bug).
     $assert->unlike($daily, qr/\n\s*next unless \@top_msgs/, 'daily: plus de "next" sous eval');
 
-    $assert->like($main, qr/mb357-B1/, 'tag mb357-B1 présent');
 };

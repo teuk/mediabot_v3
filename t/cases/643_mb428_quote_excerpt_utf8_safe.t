@@ -69,5 +69,4 @@ return sub {
     $assert->unlike($code, qr/substr\(\$text, 0, 300\) \. '\.\.\.'/,
         'plus de substr brut sur text');
 
-    $assert->like($src, qr/mb428-B1/, 'tag mb428-B1');
 };

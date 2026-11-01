@@ -66,7 +66,6 @@ my $source = do {
     <$fh>;
 };
 
-like($source, qr/mb287-B1/, 'ScriptRunner source contains mb287 encoder object marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb287 encoder guard does not introduce shell execution');
 
 done_testing();

@@ -84,5 +84,4 @@ return sub {
         qr/lc\(\$text\)\s*=~\s*\/\\Q\$trivia->\{answer\}\\E\//,
         'checkTrivia n\'a plus le match sous-chaîne nu'
     );
-    $assert->like($src, qr/mb339-B1/, 'tag mb339-B1 présent');
 };

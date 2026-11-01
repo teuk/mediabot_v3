@@ -83,7 +83,6 @@ open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die "cannot read ScriptAct
 my $src = do { local $/; <$fh> };
 close $fh;
 
-like($src, qr/mb235-B1: timer action names are future runtime identifiers/, 'ScriptActionRunner source contains mb235 timer guard marker');
 unlike($src, qr/dbh->|prepare\(|INSERT|UPDATE|DELETE|system\s*\(|qx\//, 'mb235 timer guard does not introduce DB writes or shell execution');
 
 done_testing();

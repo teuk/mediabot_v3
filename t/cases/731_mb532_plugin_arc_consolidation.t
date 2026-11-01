@@ -230,6 +230,5 @@ return sub {
         $assert->like($remind_src, qr/mb532/, 'marqueur mb532 dans remind.pl');
 
         my $party_src = _slurp_731(File::Spec->catfile('.', 'Mediabot', 'Partyline.pm')) . "\n" . _slurp_731(File::Spec->catfile('.', 'Mediabot', 'Partyline', 'Commands.pm'));
-        $assert->like($party_src, qr/mb532-B1/, 'marqueur mb532 dans Partyline');
     }
 };

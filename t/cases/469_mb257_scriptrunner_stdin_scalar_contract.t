@@ -60,7 +60,6 @@ my $source = do {
     <$sfh>;
 };
 
-like($source, qr/mb257-B1: stdin is part of the internal execution-plan contract/, 'ScriptRunner source contains mb257 stdin scalar marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(|\s)/, 'mb257 stdin scalar guard does not introduce shell execution');
 
 done_testing();

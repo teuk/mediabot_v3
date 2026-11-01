@@ -64,5 +64,4 @@ return sub {
     $assert->like($load, qr/\$ts < \$self->\{data\}\{\$new_k\}\{\$id\}/,
         'fusion : garde le timestamp le plus ancien');
 
-    $assert->like($src, qr/mb430-B1/, 'tag mb430-B1');
 };

@@ -285,8 +285,6 @@ return sub {
         '.ai provider details remain in the server log');
 
     my $src = _slurp_586("$Bin/../../Mediabot/Partyline.pm") . "\n" . _slurp_586("$Bin/../../Mediabot/Partyline/Transport.pm") . "\n" . _slurp_586("$Bin/../../Mediabot/Partyline/Commands.pm");
-    $assert->like($src, qr/mb367-B1/,
-        'mb367-B1 marker is present');
 
     my $report_calls = () = $src =~ /->_report_operation_error\(/g;
     $assert->is($report_calls, 8,

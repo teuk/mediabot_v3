@@ -77,8 +77,6 @@ my $source = do {
     local $/;
     <$fh>;
 };
-like($source, qr/mb267-B1/, 'ScriptActionRunner source contains mb267 diagnostic marker');
-like($source, qr/mb267-B2/, 'ScriptActionRunner source contains mb267 failure marker');
 unlike($source, qr/system\s*\(/, 'mb267 response.errors guard does not introduce system()');
 
 done_testing();

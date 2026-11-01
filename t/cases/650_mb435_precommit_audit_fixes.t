@@ -85,8 +85,6 @@ return sub {
     $assert->is($aggregate->channel_unlock_count('#TeUk'), 2,
         'mixed-case live channel still finds canonical achievements');
 
-    $assert->like($helpers, qr/mb435-B1/, 'mb435-B1 tag present');
-    $assert->like($hailo,   qr/mb435-B2/, 'mb435-B2 tag present');
     $assert->ok(
         $social =~ /channel_unlock_count\(\$channel\)/
             && $social =~ /top_on_channel\(\$channel,\s*3\)/,

@@ -332,7 +332,6 @@ return sub {
         $assert->like($readme, qr/gatekeeper\.pl/, 'README: exemple reference');
 
         my $ar_src = _slurp_748(File::Spec->catfile('Mediabot', 'ScriptActionRunner.pm'));
-        $assert->like($ar_src, qr/mb554-B1/, 'marqueur mb554');
         $assert->unlike($ar_src, qr/`[^`]+`/, 'runner: aucun backtick apparie (garde mb203)');
     }
 };

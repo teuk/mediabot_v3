@@ -51,7 +51,6 @@ return sub {
                   '.logs filtre event_type IN (public,action)');
     $assert->unlike($logs_sql, qr/publictext IS NOT NULL/,
                   '.logs : plus de publictext IS NOT NULL en SQL');
-    $assert->like($logs, qr/mb349-B1/, 'tag mb349-B1 présent');
 
     # Balayage 100 % : plus aucune occurrence SQL dans tout l'arbre Mediabot.
     my @files;

@@ -63,8 +63,6 @@ return sub {
     $assert->like($url_code,
         qr/if \(\$url =~ m\{\\Ahttps\?\:\/\/(?:\(\?:www\\\.\)\?)?\(\?:x\|twitter\)\\\.com/,
         'route X/Twitter du dispatcher ancrée en début d URL (mb416)');
-    $assert->like($url_src, qr/mb416-B1/, 'tag mb416-B1 (URL.pm)');
-    $assert->like($url_src, qr/mb406-B1/, 'tag mb406-B1 (URL.pm)');
 
     my $yt_src = _slurp_624(File::Spec->catfile('.', 'Mediabot', 'External', 'YouTube.pm'));
     my ($is_yt) = $yt_src =~ /(sub _is_youtube_url \{.*?\n\}\n)/s; $is_yt //= '';
@@ -72,5 +70,4 @@ return sub {
     my $unanchored = () = $is_yt =~ /m\{https\?:\/\//g;
     $assert->ok($anchored >= 5,   'les motifs YouTube sont ancrés (\A)');
     $assert->is($unanchored, 0,   'aucun motif YouTube non ancré restant');
-    $assert->like($yt_src, qr/mb406-B1/, 'tag mb406-B1 (YouTube.pm)');
 };

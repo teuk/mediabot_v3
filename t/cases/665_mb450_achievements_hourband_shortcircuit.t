@@ -121,5 +121,4 @@ return sub {
     my $n_evt = () = $sql_only =~ /event_type IN \('public','action'\)/g;
     $assert->is($n_evt, 3, 'check_msg: toujours 3 requêtes filtrant event_type (non-régression mb347)');
 
-    $assert->like($cm, qr/mb450-B1/, 'tag mb450-B1 présent');
 };

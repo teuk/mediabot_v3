@@ -142,7 +142,6 @@ local $/;
 my $source = <$fh>;
 close $fh;
 
-like($source, qr/mb371-B1/, 'MB371 marker is present');
 unlike($source, qr/100\s*-\s*\$stored_ratio/,
     'query source contains no stored-ratio inversion');
 unlike($source, qr/100\s*-\s*\$ratio/,

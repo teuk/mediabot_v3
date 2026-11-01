@@ -50,7 +50,6 @@ is(scalar @{ $valid->{planned} || [] }, 4, 'all valid scalar actions are preserv
 is($valid->{planned}[3]{delay}, 30, 'numeric timer delay string is normalized to integer');
 
 my $source = do { local $/; open my $fh, '<', 'Mediabot/ScriptActionRunner.pm' or die $!; <$fh> };
-like($source, qr/mb250-B1/, 'ScriptActionRunner source contains mb250 scalar contract marker');
 unlike($source, qr/`[^`]+`|\bqx\s*(?:\/|\(|\{)|\bsystem\s*(?:\(| )/, 'mb250 scalar contract does not introduce shell execution');
 
 done_testing();

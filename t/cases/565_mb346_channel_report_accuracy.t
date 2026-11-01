@@ -131,5 +131,4 @@ return sub {
     $assert->like($weekly, qr/kl\.ts >= NOW\(\) - INTERVAL 7 DAY/,  'weekly karma: fenêtre 7j');
     $assert->unlike($weekly, qr/SELECT k\.nick, k\.score FROM KARMA k/, 'weekly karma: plus de cumul all-time');
 
-    $assert->like($src, qr/mb346-B1/, 'tag mb346-B1 présent');
 };

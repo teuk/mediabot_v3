@@ -48,7 +48,6 @@ return sub {
     $assert->like($src,
         qr/\(\?<!\[A-Za-z0-9\\x80-\\xFF(?:\\p\{[LNM]\})*\]\)\\Q\$answer\\E\(\?!\[A-Za-z0-9\\x80-\\xFF(?:\\p\{[LNM]\})*\]\)/,
         'checkTrivia utilise des frontières byte-safe');
-    $assert->like($src, qr/mb443-B1/, 'tag mb443-B1');
 
     # MB920: real game entry points, incoming decoder, DBI/SQLite and timers.
     # The private SQL bridge supplies RAND and translates only the trivia upsert.

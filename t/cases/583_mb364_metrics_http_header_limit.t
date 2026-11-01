@@ -136,8 +136,6 @@ return sub {
 
     my $src = _slurp_583("$Bin/../../Mediabot/Metrics.pm");
 
-    $assert->like($src, qr/mb364-B1/,
-        'mb364-B1 marker is present');
     $assert->like($src, qr/use constant MAX_HTTP_HEADER_BYTES => 16 \* 1024;/,
         'source declares the 16 KiB hard limit');
     $assert->like(

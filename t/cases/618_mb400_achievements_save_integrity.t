@@ -61,5 +61,4 @@ return sub {
     $assert->like($save, qr/unlink \$tmp/,                'tmp incomplet supprimé, jamais renommé');
     my ($load) = $src =~ /(sub _load \{.*?\n\}\n)/s; $load //= '';
     $assert->like($load, qr/\.corrupt-/,                  '_load préserve le fichier illisible');
-    $assert->like($src, qr/mb400-B1/, 'tag mb400-B1');
 };
