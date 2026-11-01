@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1051 — Preserve seen lookup scope for every supported IRC channel prefix
+
+- Resolve the requested/current channel once for both exact and wildcard seen
+  lookups using the shared IRC target classifier. Channels beginning with &,
+  ! or + no longer silently widen to global online, persisted or archived data.
+- Use that same classifier for the best-effort activity hint. Preserve explicit
+  channel precedence, reply destinations, wildcard escaping, #channel behavior
+  and historical private lookups with no channel.
+- Add thirty-seven native assertions covering all four channel prefixes with
+  real local SQL and archive data; twenty-five fail before correction. No
+  historical test is edited. No schema, configuration or dependency change.
+
 ### MB1050 — Retry expired channel bans after IRC absence
 
 - Keep expired persistent bans active while IRC is disconnected or the bot is

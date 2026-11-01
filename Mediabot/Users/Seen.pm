@@ -51,6 +51,16 @@ sub mbSeen_ctx {
 
     my $targetNick = lc($target_input);  # normalize for USER_SEEN PK lookup
 
+    # Resolve scope once for exact and wildcard lookups. Use the same channel
+    # classifier as Context/output, so &, ! and + never become global queries.
+    my $chan_for_part;
+    if (@args && Mediabot::Helpers::isIrcChannelTarget($args[0])) {
+        $chan_for_part = shift @args;
+    } else {
+        my $cc = $ctx->channel // '';
+        $chan_for_part = $cc if Mediabot::Helpers::isIrcChannelTarget($cc);
+    }
+
     # mb86-IMP1: wildcard support — seen teu* → liste jusqu'à 5 nicks correspondants
     if ($target_input =~ /[*?]/) {
         my $is_private = !defined($ctx->channel) || $ctx->channel eq '';
@@ -67,13 +77,7 @@ sub mbSeen_ctx {
             elsif ($ch eq '_') { $like_pat .= '!_'; }
             else               { $like_pat .= $ch;  }
         }
-        my $chan_for_wc;
-        if (@args && defined $args[0] && $args[0] =~ /^#/) {
-            $chan_for_wc = shift @args;
-        } else {
-            my $cc = $ctx->channel // '';
-            $chan_for_wc = ($cc =~ /^#/) ? $cc : undef;
-        }
+        my $chan_for_wc = $chan_for_part;
         my ($sql_wc, @bind_wc);
         if ($chan_for_wc) {
             $sql_wc = q{
@@ -110,14 +114,6 @@ sub mbSeen_ctx {
         }
         logBot($self, $ctx->message, ($is_private ? undef : $dest), 'seen', $target_input);
         return 1;
-    }
-
-    my $chan_for_part;
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
-        $chan_for_part = shift @args;
-    } else {
-        my $cc = $ctx->channel // '';
-        $chan_for_part = ($cc =~ /^#/) ? $cc : undef;
     }
 
     my $is_private = !defined($ctx->channel) || $ctx->channel eq '';
@@ -387,7 +383,7 @@ sub mbSeen_ctx {
     if ($msg !~ /^I don't remember/) {
         my $act_chan = $chan_for_part
             || ($seen_row ? $seen_row->{channel} : undef);
-        if (defined $act_chan && $act_chan =~ /^[#&]/) {
+        if (Mediabot::Helpers::isIrcChannelTarget($act_chan)) {
             my $chan_obj = $self->{channels}{lc $act_chan};
             my $id_channel = $chan_obj ? eval { $chan_obj->get_id } : undef;
             if (defined $id_channel) {
