@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1067 — Count Unicode words consistently across DBI encodings
+
+- Decode valid UTF-8 once through the shared IRC text boundary, normalize
+  canonical accents and lowercase characters before counting word keys.
+  Raw DBI bytes and decoded rows now agree on accented and non-Latin words.
+- Treat Unicode punctuation and emoji as separators. Retain letters, attached
+  marks, numbers and underscores; standalone marks or variation selectors do
+  not become words. Preserve the shared decoder's legacy-byte fallback.
+- Keep existing SQL scope, limits, streaming all mode, activity rank and
+  achievement delivery. Stored messages and the other history commands are
+  unchanged. No schema, configuration, dependency or VERSION change.
+- Replace nine mirrored/source checks with nine native registry/SQLite checks.
+  Remove the obsolete wordcount tokenizer pin from the archive case, retaining
+  its other checks and the unchanged compat guard. One fewer assertion overall.
+
+
 ### MB1066 — Keep plugin event queues draining after object exceptions
 
 - Preserve dispatch and defer exception objects without invoking their boolean

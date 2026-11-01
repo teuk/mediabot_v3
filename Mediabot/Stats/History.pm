@@ -5,6 +5,8 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Helpers ();
+use Mediabot::IRC::Text qw(decode_irc_text);
+use Unicode::Normalize qw(NFC);
 use Time::Piece ();
 
 our @EXPORT_OK = qw(
@@ -108,16 +110,16 @@ sub mbWordCount_ctx {
     my $rows_read = 0;
     my @wc_texts;
     my $wc_count_text = sub {
+        use feature 'unicode_strings';
         my ($text) = @_;
         $rows_read++;
-        # mb426-B1: la connexion DBI ne décode pas l'UTF-8 (pas de mariadb_utf8,
-        # seulement SET NAMES) -> publictext arrive en OCTETS UTF-8. Un split
-        # sur \W+ coupait sur chaque octet d'accent (café -> caf, réponse ->
-        # r+ponse), faussant le comptage sur un canal francophone. On splitte
-        # de façon byte-safe : les octets >= 0x80 (continuation/amorce des
-        # séquences UTF-8 multi-octets) comptent comme des lettres, donc les
-        # mots accentués restent entiers.
-        $words{lc $_}++ for split /[^0-9A-Za-z_\x80-\xFF]+/, ($text // '');
+        # DBI may return UTF-8 bytes or characters. Decode once before case
+        # conversion, and give canonically equivalent accents one word key.
+        # Letters/marks/numbers/underscore retain words; punctuation and emoji
+        # separate them instead of becoming part of a UTF-8 byte token.
+        my $characters = NFC(decode_irc_text($text // ''));
+        $words{lc $1}++
+            while $characters =~ /([\p{L}\p{N}_][\p{L}\p{M}\p{N}_]*)/g;
     };
     my $wc_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, qq{
         SELECT publictext FROM __CLSRC__ cl

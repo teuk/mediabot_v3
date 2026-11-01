@@ -58,9 +58,10 @@ return sub {
     $assert->ok(defined $mood && $mood !~ /channel_log_gather/,
         'mood: fenetres recentes, vif seulement');
 
-    # [4] tokenisation byte-safe conservee (wordcount et compat)
+    # Wordcount's byte/character normalization is exercised natively by 641.
+    # Keep the unchanged compat tokenizer's historical guard here.
     my $compat = _sub_src_764($src, 'mbCompat_ctx');
-    for my $pair ([wordcount => $wc], [compat => $compat]) {
+    for my $pair ([compat => $compat]) {
         my ($n, $b) = @$pair;
         $assert->like($b, qr/\[\^0-9A-Za-z_\\x80-\\xFF\]\+/,
             "$n: split byte-safe mb426/mb427 conserve");
