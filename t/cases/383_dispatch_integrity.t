@@ -60,7 +60,7 @@ my @important_cmds = qw(
     obs
 );
 
-my $planned = 18 + scalar(@important_cmds);
+my $planned = 19 + scalar(@important_cmds);
 say "1..$planned";
 
 my $tests = 0;
@@ -109,6 +109,18 @@ ok(!@dups, 'no duplicate public command keys');
 if (@dups) {
     say "# duplicate keys: " . join(', ', sort @dups);
 }
+
+# MB1059: keep the essential private-key collision guard formerly in 84.
+# Function existence is covered by the native export/startup integrity checks;
+# searching every module for an unqualified name is no longer repeated here.
+my ($private_body) = $mb =~
+    /sub\s+_builtin_private_command_handlers\s*\{\s*return\s*\((.*?)\n\s*\);\s*\}/s;
+my @private_keys = ($private_body // '') =~ /^\s*'?([A-Za-z0-9_]+)'?\s*=>/gm;
+my %private_seen;
+my @private_duplicates = grep {$private_seen{$_}++} @private_keys;
+ok(defined($private_body) && @private_keys > 50 && !@private_duplicates,
+    'private registry retains a nonempty catalogue without duplicate command keys');
+say '# duplicate private keys: '.join(', ',@private_duplicates) if @private_duplicates;
 
 # mb630-B1: les regexp passees directement comme premier argument a ok()
 # etaient evaluees en contexte de LISTE. Un match rate rend alors une liste

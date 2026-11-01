@@ -23,6 +23,7 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use TestLoopWait qw(wait_for);
 use File::Temp qw(tempdir);
 
 use Mediabot::ScriptRunner;
@@ -295,7 +296,7 @@ MB525_FIXTURE
         $assert->ok(@{ $irc->sent } == 0, 'aucune sortie IRC avant expiration');
 
         # Attendre l'expiration (delay=1) sur la vraie boucle.
-        $loop->delay_future(after => 1.6)->get;
+        wait_for($loop,sub {!$action_runner->pending_timer_count && !$plugin->active_script_timer_count});
 
         $assert->ok(@{ $irc->sent } == 1, 'une sortie IRC apres expiration');
         my $sent = $irc->sent->[0] || [];

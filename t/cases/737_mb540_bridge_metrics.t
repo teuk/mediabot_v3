@@ -26,6 +26,7 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use TestLoopWait qw(wait_for);
 use File::Temp qw(tempdir);
 
 use Mediabot::EventBus;
@@ -179,7 +180,7 @@ return sub {
             'gauge: 1 apres armement');
 
         # Livraison: delivered + run timer/ok + gauge=0.
-        $loop->delay_future(after => 1.6)->get;
+        wait_for($loop,sub {$m->gauge('mediabot_scriptbridge_pending_timers') == 0});
         $assert->ok($m->count('mediabot_scriptbridge_timers_total', 'outcome=delivered') == 1,
             'timers: delivered compte');
         $assert->ok($m->count('mediabot_scriptbridge_runs_total', 'origin=timer,result=ok') == 1,
@@ -210,7 +211,7 @@ return sub {
             'gauge: timer arme avant rappel saute');
         $bot->{conf}{'plugins.ScriptDryRun.ACTION_MODE'} = 'dry-run';
         $plugin->refresh_from_conf;
-        $loop->delay_future(after => 1.6)->get;
+        wait_for($loop,sub {$m->gauge('mediabot_scriptbridge_pending_timers') == 0});
         $assert->ok($m->gauge('mediabot_scriptbridge_pending_timers') == 0,
             'gauge: zero meme quand le rappel est saute');
         $assert->ok($m->count('mediabot_scriptbridge_timers_total', 'outcome=delivered') == 1,

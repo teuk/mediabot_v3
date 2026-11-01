@@ -25,6 +25,7 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use TestLoopWait qw(wait_for);
 
 use Mediabot::EventBus;
 use Mediabot::ScriptRunner;
@@ -157,7 +158,7 @@ return sub {
             && $bot->script_action_runner->pending_timer_count == 1,
             'gate ouverte: silence immediat, rappel arme');
 
-        $loop->delay_future(after => 1.2)->get;
+        wait_for($loop,sub {!$bot->script_action_runner->pending_timer_count});
         $assert->ok(@{ $irc->sent } == 1
             && $irc->sent->[0][0] eq 'TOPIC'
             && ($irc->sent->[0][2] || '') eq '#mb546'
@@ -172,7 +173,7 @@ return sub {
         $bus2->emit_report('channel_topic_observed',
             { event_type => 'topic', channel => '#mb546', nick => 'teuk',
               topic => 'blocked', is_self => 0 });
-        $loop2->delay_future(after => 1.2)->get;
+        wait_for($loop2,sub {!$bot2->script_action_runner->pending_timer_count});
         my $lr = $plugin2->last_result || {};
         my @errs = @{ ($lr->{action_plan} || {})->{apply_errors} || [] };
         $assert->ok(!$lr->{ok}

@@ -35,7 +35,10 @@ if ($mode eq 'closed-pipes') {
     POSIX::_exit(99);
 }
 if ($mode eq 'signal') {
-    print STDERR "fixture signal diagnostic\n";
+    # exec preserves ignored signals. Make this probe independent of the runner.
+    $SIG{TERM} = 'DEFAULT';
+    my $diagnostic="fixture signal diagnostic\n";
+    syswrite(STDERR,$diagnostic) == length($diagnostic) or die "write diagnostic: $!";
     kill 'TERM', $$;
     POSIX::_exit(99);
 }
@@ -95,6 +98,8 @@ sub native_results {
     my $run = sub {
         my ($mode, %options) = @_;
         MB889ChromiumFixture::run_fixture($fixture, $fetch, $mode, $url,
+            # The native wrapper uses integer time(): 1s can leave almost no
+            # startup budget at a second boundary. Keep at least a full second.
             alarm_timeout => 2, virtual_time_budget => 4100,
             lang => 'en-GB', user_agent => 'fixture agent with spaces', %options);
     };

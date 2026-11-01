@@ -1,5 +1,30 @@
 ## [Unreleased] — 3.8dev
 
+### MB1060 — Stabilize Chromium probes and display a progress ETA
+
+- Reset inherited TERM handling in the signal fixture and write its diagnostic
+  before the real self-signal. Restore the browser test's two-second margin
+  around its integer-clock deadline, keeping native kill/reap assertions.
+- Show a monotonic, run-local approximate ETA in --progress, with unknown
+  timing before the first completed file and zero remaining at completion.
+  Tighten the existing progress integration assertions without adding cases.
+- Preserve the pending MB1059 pruning and moved sources in the operator
+  continuation/commit scope. No application or production-timeout change.
+
+
+### MB1059 — Keep behavior coverage and amortize regression startup
+
+- Remove twenty-five historical source/prose cases and per-module style pins;
+  preserve duplicate definitions, exports, private/public dispatch keys and
+  native security/startup checks.
+- Run twenty-three regression sources in three isolated domain suites, with
+  every ordinary assertion still counted. Remove proven warm-state/import
+  repetitions while retaining distinct driver faults and registry integration.
+- Stop bridge test waits on actual native timer completion; use supported
+  one-second real subprocess timeouts instead of two-second fixture budgets.
+  No application, runner, VERSION, configuration, dependency or schema change.
+
+
 ### MB1058 — Run implementation scenarios once and trim obsolete test contracts
 
 - Delete thirty historical source/prose cases; replace repeated extraction and

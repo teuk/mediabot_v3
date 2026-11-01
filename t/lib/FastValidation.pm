@@ -69,8 +69,6 @@ my %SLOW_EXCLUSIONS = (
         => 'measured slow but mandatory runner sentinel',
     '219_usercommands_trivia_guard.t'
         => 'measured slow trivia guard contract',
-    '84_dispatch_dead_handlers.t'
-        => 'measured slow exhaustive dispatch scan',
     '345_dcc_passive_token_redacted.t'
         => 'measured slow DCC contract',
 );

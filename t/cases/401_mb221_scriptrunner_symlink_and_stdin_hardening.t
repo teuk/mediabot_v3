@@ -98,7 +98,7 @@ my $case = sub {
     # Script normal pour la non-regression et le test "etat non casse".
     $write->("$script_dir/plain.pl", 'print q({"actions":[]});' . "\n");
 
-    my $timeout = 2;
+    my $timeout = 1; # Minimal supported real timeout; the child still hangs.
     my $sr2 = Mediabot::ScriptRunner->new(
         script_dir       => $script_dir,
         timeout          => $timeout,

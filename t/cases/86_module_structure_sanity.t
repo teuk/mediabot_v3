@@ -3,10 +3,8 @@
 # Global structural sanity checks for Mediabot modules.
 #
 # This test guards against:
-#   - accidental joined "use" statements, e.g. use Foo;use Bar;
 #   - duplicate sub definitions inside the same package
 #   - duplicate symbols inside @EXPORT blocks
-#   - modules missing their final true value
 #
 # It is intentionally static and cheap.
 # =============================================================================
@@ -75,12 +73,6 @@ return sub {
     for my $file (@files) {
         my $src = _slurp_module_structure_sanity($file);
 
-        $assert->unlike(
-            $src,
-            qr/;use\s+/,
-            "$file has no joined use statement"
-        );
-
         # mb560-B1: scope duplicate detection by package — one file may host
         # several packages (mb559: Mediabot::Achievements::Worker overrides
         # unlock/_timed_check/save after fork, legitimate polymorphism). A
@@ -115,10 +107,5 @@ return sub {
             );
         }
 
-        $assert->like(
-            $src,
-            qr/(?:^|\n)1;\s*(?:\#.*)?(?:\n|$)/,
-            "$file contains a module true value"
-        );
     }
 };

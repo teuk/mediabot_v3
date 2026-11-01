@@ -9,6 +9,9 @@ use Mediabot::Partyline;
 # A removed alias must fail. Implementation matrices run on the owner once;
 # these references prove that calling an alias executes that exact same code.
 for my $row (
+    ['Mediabot::Quotes', 'Mediabot', [qw(
+        mbQuoteAdd mbQuoteCount_ctx mbQuoteStats mbQuoteSearch mbQuoteView mbTopQuote_ctx
+    )]],
     ['Mediabot::UserCommands', 'Mediabot', [qw(addUser_ctx delUser_ctx)]],
     ['Mediabot::CommunityState', 'Mediabot::UserCommands', [qw(
         mbRemind_ctx mbRemindList_ctx mbRemindCancel_ctx mbRemindSnooze_ctx deliverReminders

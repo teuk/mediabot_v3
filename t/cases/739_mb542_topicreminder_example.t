@@ -22,6 +22,7 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use TestLoopWait qw(wait_for);
 
 use Mediabot::EventBus;
 use Mediabot::ScriptRunner;
@@ -170,7 +171,7 @@ return sub {
 
         # Second topic pendant le pending : l'armement echoue, run non-ok,
         # le rappel ORIGINAL reste arme — la limitation documentee, prouvee.
-        select(undef, undef, undef, 1.05);  # laisser passer le cooldown 1s
+        select(undef, undef, undef, 1.05);  # conserver le vrai cooldown minimum de 1s
         $bus->emit_report('channel_topic_observed',
             { event_type => 'topic', channel => '#mb542', nick => 'other',
               topic => 'changed again', is_self => 0 });
@@ -178,7 +179,7 @@ return sub {
         $assert->ok(!$lr->{ok} && $bot->script_action_runner->pending_timer_count == 1,
             'pipeline: second armement refuse (un pending par nom), l\'original conserve');
 
-        $loop->delay_future(after => 1.2)->get;
+        wait_for($loop,sub {!$bot->script_action_runner->pending_timer_count});
         $assert->ok(@{ $irc->sent } == 1
             && ($irc->sent->[0][2] || '') eq '#mb542'
             && ($irc->sent->[0][3] || '') =~ /topic reminder: meeting at nine \(set by Te\[u\]K\)/,

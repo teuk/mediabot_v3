@@ -73,27 +73,27 @@ return sub {
         'mb679-871: filtered progress run exits successfully');
     $assert->like(
         $out,
-        qr/\r\[[=> ]{20}\]\s+50%\s+\[1\/2 files \| \d+ tests\]/,
-        'mb679-871: progress updates in place with exact selected-file percentage',
+        qr/\r\[[=> ]{20}\]\s+50%\s+\[1\/2 files \| \d+ tests\] \| ETA ~[0-9]{2,}:[0-9]{2}:[0-9]{2}/,
+        'mb679-871: progress updates in place with exact selected-file percentage and a numeric approximate ETA',
     );
     $assert->like(
         $out,
-        qr/\r\[[=> ]{20}\]\s+0%\s+\[0\/2 files \| \d+ tests\] \| running: 717_mb507_schema_drift_indexes\.t/,
-        'mb679-871: progress identifies the currently running test file',
+        qr/\r\[[=> ]{20}\]\s+0%\s+\[0\/2 files \| \d+ tests\] \| ETA ~--:--:-- \| running: 717_mb507_schema_drift_indexes\.t/,
+        'mb679-871: progress initially identifies the running file and waits for timing evidence',
     );
     $assert->like(
         $out,
-        qr/\r\[={20}\]\s+100%\s+\[2\/2 files \| \d+ tests\]/,
-        'mb679-871: final progress line reaches 100 percent',
+        qr/\r\[={20}\]\s+100%\s+\[2\/2 files \| \d+ tests\] \| ETA ~00:00:00/,
+        'mb679-871: final progress line reaches 100 percent with zero time remaining',
     );
     $assert->unlike(
         $out,
-        qr/\r\[={20}\]\s+100%\s+\[2\/2 files \| \d+ tests\] \| running:/,
+        qr/\r\[={20}\]\s+100%\s+\[2\/2 files \| \d+ tests\] \| ETA ~[^\r\n]* \| running:/,
         'mb679-871: completed progress line does not report a test as still running',
     );
     $assert->like(
         $out,
-        qr/\r\[={20}\]\s+100%\s+\[2\/2 files \| \d+ tests\] +\r\[={20}\]\s+100%\s+\[2\/2 files \| \d+ tests\]\n/,
+        qr/\r\[={20}\]\s+100%\s+\[2\/2 files \| \d+ tests\] \| ETA ~00:00:00 +\r\[={20}\]\s+100%\s+\[2\/2 files \| \d+ tests\] \| ETA ~00:00:00\n/,
         'mb679-871: shorter completion line erases stale running-test text on a terminal',
     );
     $assert->unlike(
@@ -124,7 +124,7 @@ return sub {
     );
     $assert->unlike(
         $plain,
-        qr/\r\[[=> ]{20}\]/,
+        qr/\r\[[=> ]{20}\]|ETA/,
         'mb679-871: progress output remains strictly opt-in',
     );
 
@@ -168,7 +168,7 @@ FAIL_CASE
         'mb679-871: failing progress run preserves non-zero verdict');
     $assert->like(
         $fail_out,
-        qr/\r\[={20}\]\s+100%.*?Failed test files \(1\).*?not ok 2 - synthetic progress failure/s,
+        qr/\r\[={20}\]\s+100%[^\r\n]*ETA ~00:00:00.*?Failed test files \(1\).*?not ok 2 - synthetic progress failure/s,
         'mb688-871: compact failure detail is deferred until after the final progress update',
     );
     $assert->like(

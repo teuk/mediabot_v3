@@ -61,7 +61,7 @@ my $case = sub {
     # Script 3 : repond normalement et vite (non-regression)
     $write->('normal.pl', 'print q({"actions":[{"type":"reply","text":"hi"}]});' . "\n");
 
-    my $timeout = 2;
+    my $timeout = 1; # Minimal supported real timeout; the child still hangs.
     my $sr = Mediabot::ScriptRunner->new(script_dir => $script_dir, timeout => $timeout);
 
     # -------------------------------------------------------------------------

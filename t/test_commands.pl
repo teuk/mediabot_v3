@@ -91,7 +91,7 @@ Usage: $0 [options]
   --list-selected         Lister les tests selectionnes/classes sans les lancer
   --fast                  Lane de validation rapide: PURE + sentinelles critiques
                           (ne remplace PAS la suite complete)
-  --progress              Barre de progression compacte sur une seule ligne
+  --progress              Barre compacte et ETA approximatif sur une seule ligne
                           (pourcentage par fichiers, compteur d'assertions reel)
   Classes: PURE, FILESYSTEM, PROCESS, DB, NETWORK
 USAGE
@@ -680,6 +680,19 @@ my @progress_failure_details;
 my ($progress_console_out, $progress_console_err, $progress_capture_fh);
 my $progress_done = 0;
 my $progress_render_width = 0;
+my $progress_started;
+
+# File durations vary: this is a run-local mean, not a promised deadline.
+# A monotonic clock prevents wall-clock/timezone adjustments changing the ETA.
+sub _progress_eta {
+    my ($done,$total)=@_;
+    return '00:00:00' if $total > 0 && $done >= $total;
+    return '--:--:--' unless $done > 0 && defined $progress_started;
+    my $elapsed=Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC())-$progress_started;
+    $elapsed=0 if $elapsed<0;
+    my $seconds=POSIX::ceil($elapsed*($total-$done)/$done);
+    return sprintf '%02d:%02d:%02d',int($seconds/3600),int($seconds/60)%60,$seconds%60;
+}
 
 sub _progress_render {
     my (%args) = @_;
@@ -711,8 +724,8 @@ sub _progress_render {
         $bar = ' ' x $width;
     }
 
-    my $line = sprintf "[%s] %3d%% [%d/%d files | %d tests]%s",
-        $bar, $percent, $done, $total, $tests,
+    my $line = sprintf "[%s] %3d%% [%d/%d files | %d tests] | ETA ~%s%s",
+        $bar, $percent, $done, $total, $tests, _progress_eta($done,$total),
         length($current) ? " | running: $current" : "";
 
     my $padding = $progress_render_width > length($line)
@@ -766,6 +779,7 @@ sub _progress_begin {
     open STDERR, '>&', $progress_capture_fh
         or die "Cannot redirect STDERR for progress mode: $!\n";
 
+    $progress_started=Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
     _progress_render(
         done  => 0,
         total => scalar(@test_files),
