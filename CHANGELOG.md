@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1065 — Confirm partyline identity reads before authenticating
+
+- Admit only the existing Owner/Master values 0 and 1. Negative, empty or
+  malformed role values cannot gain access through numeric coercion.
+- Guard identity prepare/execute/fetch, inspect fetch errors before cleanup,
+  and preserve a completed read even if finish throws. Identity backend faults
+  neither authenticate nor increment session/IP brute-force counters.
+- Contain exceptions from the shared credential verifier and emit one fixed
+  diagnostic without raw backend details. Keep genuine unknown-user, password
+  rejection and insufficient-role accounting, auth timeout and success hooks.
+- Replace eight source checks in the existing login case with eight native
+  SQLite/partyline assertions. No additional case, assertion, schema,
+  dependency, credential format, configuration or VERSION change.
+
+
 ### MB1064 — Show the latest matching karma history
 
 - Keep persistent history newest-first, with the existing primary key breaking

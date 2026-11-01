@@ -602,22 +602,33 @@ sub _do_login {
         return;
     }
 
-    my $sth = $dbh->prepare(
-        "SELECT u.id_user, u.nickname, ul.level, ul.description
-         FROM USER u
-         JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
-         WHERE u.nickname = ?"
-    );
-
-    unless ($sth && $sth->execute($login)) {
-        $bot->{logger}->log(1, "Partyline: SQL error on login query: " . $DBI::errstr);
+    my $unavailable = sub {
+        eval { $bot->{logger}->log(1, 'Partyline: authentication backend unavailable') }
+            if $bot->{logger};
         $stream->write("Internal error during authentication.\r\n");
-        $sth->finish if $sth;
         return;
-    }
+    };
 
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
+    my ($sth, $row);
+    my $read_ok = eval {
+        $sth = $dbh->prepare(
+            "SELECT u.id_user, u.nickname, ul.level, ul.description
+             FROM USER u
+             JOIN USER_LEVEL ul ON ul.id_user_level = u.id_user_level
+             WHERE u.nickname = ?"
+        );
+        die "prepare failed\n" unless $sth;
+        die "execute failed\n" unless $sth->execute($login);
+        $row = $sth->fetchrow_hashref;
+        die "fetch failed\n" if $sth->err;
+        1;
+    };
+    # Capture the result before finish can clear the DBI error state. Backend
+    # faults must not consume password attempts or the address-wide allowance.
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
+        return $unavailable->();
+    }
 
     unless ($row) {
         $bot->{logger}->log(2, "Partyline: unknown user '$login' (fd=$id)");
@@ -627,7 +638,13 @@ sub _do_login {
         return;
     }
 
-    unless ($bot->{auth}->verify_credentials($row->{id_user}, $login, $password)) {
+    my $verified;
+    my $verification_ok = eval {
+        $verified = $bot->{auth}->verify_credentials($row->{id_user}, $login, $password);
+        1;
+    };
+    return $unavailable->() unless $verification_ok;
+    unless ($verified) {
         $bot->{logger}->log(2, "Partyline: bad password for '$login' (fd=$id)");
         $self->{users}{$id}{login_failures}++;
         _pl_bf_record($bf_map, $bf_ip, $bf_now, $bf_window, $bf_entries) if $bf_ip ne '';   # mb343-B1
@@ -635,8 +652,10 @@ sub _do_login {
         return;
     }
 
-    # Minimum level : Master (Owner=0, Master=1 => level <= 1)
-    unless (defined($row->{level}) && $row->{level} <= 1) {
+    # Only the two existing privileged roles are admitted. Numeric coercion
+    # would also accept negative, empty or malformed role values as Owner.
+    unless (defined($row->{level}) && !ref($row->{level})
+            && "$row->{level}" =~ /\A[01]\z/) {
         $bot->{logger}->log(2, "Partyline: '$login' level=" . ($row->{level} // 'undef') . " insufficient (fd=$id)");
         $self->{users}{$id}{login_failures}++;
         _pl_bf_record($bf_map, $bf_ip, $bf_now, $bf_window, $bf_entries) if $bf_ip ne '';   # mb343-B1
