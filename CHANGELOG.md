@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1057 — Validate DCC numeric fields before conversion or connection
+
+- Read IPv4 integers and active ports as exact bounded ASCII unsigned
+  decimals. Reject Unicode digits, trailing line endings, references and
+  overflow before numeric conversion; preserve ordinary leading-zero inputs.
+- Select passive DCC only for literal ASCII zero fields in both the parser
+  and native handler. Keep structural parsing, raw fields and opaque tokens
+  intact while the existing target validator rejects malformed active offers.
+- Bound refusal-port diagnostics in the handler and native connection sink.
+  Add thirty native parser/handler/sink assertions; twelve fail before the
+  correction. No historical test, privilege policy, address-class rule,
+  schema, configuration or dependency change.
+
 ### MB1056 — Share channel flood protection across letter casing
 
 - Use one lowercase AF4 channel key for the sliding window, active silence,

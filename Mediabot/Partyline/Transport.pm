@@ -71,7 +71,9 @@ sub accept_dcc_chat {
 
     unless ($target_ok) {
         my $safe_ip   = defined($ip)   ? $ip   : 'invalid';
-        my $safe_port = defined($port) ? $port : 'undef';
+        my $safe_port = !defined($port) ? 'undef'
+            : !ref($port) && length($port) <= 16 && $port =~ /\A[0-9]+\z/
+            ? $port : 'invalid';
         $bot->{logger}->log(
             1,
             "DCC CHAT: refusing unsafe target for $nick at "

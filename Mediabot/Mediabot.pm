@@ -4598,8 +4598,8 @@ sub _handle_dcc_chat_request {
 
     # ── Detect passive DCC CHAT (ip=0 port=0 token=opaque-safe-id) ───────────────────────
     # mb142-B2: token alphanumerique accepte, pas seulement numerique
-    my $is_passive = (defined $ip_int && $ip_int == 0
-                   && defined $port   && $port   == 0
+    my $is_passive = (defined $ip_int && !ref($ip_int) && $ip_int =~ /\A0+\z/
+                   && defined $port && !ref($port) && $port =~ /\A0+\z/
                    && defined $token  && length($token) > 0
                    && $token =~ /^[A-Za-z0-9._-]+$/);
 
@@ -4614,7 +4614,9 @@ sub _handle_dcc_chat_request {
 
         unless ($active_target_ok) {
             my $safe_ip = defined($active_ip) ? $active_ip : 'invalid';
-            my $safe_port = defined($port) ? $port : 'undef';
+            my $safe_port = !defined($port) ? 'undef'
+                : !ref($port) && length($port) <= 16 && $port =~ /\A[0-9]+\z/
+                ? $port : 'invalid';
             $logger->log(
                 1,
                 "DCC CHAT from $nick: rejected active target "

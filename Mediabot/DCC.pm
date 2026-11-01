@@ -162,7 +162,10 @@ sub parse_dcc_chat_payload {
     # usually present). A non-zero ip/port with a trailing token is NOT passive
     # — it is a malformed or extended active offer; treat it as active.
     my $mode = 'active';
-    if (defined($ip_int) && defined($port) && $ip_int == 0 && $port == 0) {
+    # Structural parsing retains the original fields for endpoint validation.
+    # Only literal ASCII zero selects passive mode; never coerce Unicode
+    # decimal glyphs or a numeric prefix into a different request.
+    if ($ip_int =~ /\A0+\z/ && $port =~ /\A0+\z/) {
         $mode = 'passive';
     }
 
@@ -200,15 +203,25 @@ sub is_dcc_passive {
 }
 
 
+# Read an exact bounded ASCII unsigned integer before any numeric operation.
+# Strip leading zeros locally so long zero prefixes retain compatibility
+# without sending arbitrarily large decimal strings through Perl conversion.
+sub _ascii_uint {
+    my ($value, $max) = @_;
+    return undef unless defined($value) && !ref($value)
+        && $value =~ /\A[0-9]+\z/;
+    $value =~ s/\A0+(?=[0-9])//;
+    return undef if length($value) > length($max)
+        || (length($value) == length($max) && $value gt "$max");
+    return 0 + $value;
+}
+
 sub ip_int_to_ipv4 {
     my ($ip_int) = @_;
 
-    return undef unless defined $ip_int;
-    return undef unless $ip_int =~ /^\d+$/;
-
     # Keep this conservative. DCC IPv4 integers are unsigned 32-bit values.
-    return undef if $ip_int < 0;
-    return undef if $ip_int > 4294967295;
+    $ip_int = _ascii_uint($ip_int, 4294967295);
+    return undef unless defined $ip_int;
 
     return join(
         '.',
@@ -235,12 +248,9 @@ sub validate_dcc_active_target {
     my $ip = ip_int_to_ipv4($ip_int);
     return (0, undef, 'invalid_ipv4_integer') unless defined $ip;
 
+    my $port_number = _ascii_uint($port, 65535);
     return (0, $ip, 'invalid_port')
-        unless defined($port)
-            && !ref($port)
-            && $port =~ /^\d+$/
-            && $port >= 1024
-            && $port <= 65535;
+        unless defined($port_number) && $port_number >= 1024;
 
     my @octet = split /\./, $ip;
     return (0, $ip, 'invalid_ipv4') unless @octet == 4;
