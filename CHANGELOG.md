@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1076 — Stop console hooks from feeding their own logger
+
+- Keep a dynamically scoped console-dispatch guard per logger. When a console
+  transport, hook or its exception handler logs again, retain the nested record
+  in stdout and the logfile without recursively redistributing it to hooks.
+- Restore console dispatch for the next ordinary record, including after a
+  throwing hook. Preserve other hook delivery, thresholds, removal, rotation,
+  Unicode handling and independent logger instances; add no buffering or wait.
+- Replace five redundant assertion boundaries with grouped checks retaining
+  their conditions, and add three native regressions in the existing logger
+  case. Two fewer assertions, no new test file or delay.
+- No schema, dependency, configuration or manual VERSION change; previously
+  qualified fixes remain intact.
+
+
 ### MB1075 — Give each script timer its own revocable occurrence
 
 - Bind native countdown callbacks to one active record and the original action

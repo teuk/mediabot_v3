@@ -154,7 +154,12 @@ sub log {
     # Dispatch to partyline console hooks
     # Each hook: { level => N, cb => sub { } }
     # The logline sent to partyline strips trailing \n and uses \r\n
-    if ($self->{_console_hooks} && %{ $self->{_console_hooks} }) {
+    if (!$self->{_dispatching_console_hooks}
+        && $self->{_console_hooks} && %{ $self->{_console_hooks} }) {
+        # A console transport/hook may itself log (including from __DIE__).
+        # Keep that nested record in stdout/the file, but do not feed it back
+        # into console delivery. Dynamic scope restores dispatch after errors.
+        local $self->{_dispatching_console_hooks} = 1;
         my $pl_line = $logline;
         $pl_line =~ s/\n$//;
         for my $id (keys %{ $self->{_console_hooks} }) {
