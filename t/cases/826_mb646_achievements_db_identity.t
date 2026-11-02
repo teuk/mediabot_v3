@@ -22,21 +22,14 @@ return sub {
     require Mediabot::Achievements;
 
     # [1] Pure identity compatibility rules.
-    $assert->ok(
+    my @compatible=(
         Mediabot::Achievements::_userhost_compatible('~teuk@host.example', 'teuk@host.example'),
-        'mb646-826: ident ~ variation is compatible');
-    $assert->ok(
         Mediabot::Achievements::_userhost_compatible('teuk@old.example', 'teuk@new.example'),
-        'mb646-826: same ident can follow a host change');
-    $assert->ok(
         Mediabot::Achievements::_userhost_compatible('oldident@host.example', 'newident@host.example'),
-        'mb646-826: same host can follow an ident change');
-    $assert->ok(
         !Mediabot::Achievements::_userhost_compatible('alice@one.example', 'bob@two.example'),
-        'mb646-826: unrelated userhosts are not merged');
-    $assert->ok(
-        Mediabot::Achievements::_userhost_compatible('', 'teuk@host.example'),
-        'mb646-826: legacy JSON empty userhost can attach on first live sighting');
+        Mediabot::Achievements::_userhost_compatible('', 'teuk@host.example'));
+    $assert->is(join(',',map {$_?1:0} @compatible),'1,1,1,1,1',
+        'mb646-826: preserve all five ident/host/legacy compatibility and unrelated-identity cases');
 
     # [2] Legacy/no-DB mode remains functional for old installations/tests.
     my $dir = tempdir(CLEANUP => 1);
@@ -56,10 +49,9 @@ return sub {
         ACHIEVEMENT_PROFILE ACHIEVEMENT_IDENTITY
         ACHIEVEMENT_UNLOCK ACHIEVEMENT_PROGRESS
     )) {
-        $assert->like($schema, qr/CREATE TABLE `\Q$table\E`/,
-            "mb646-826: reference schema contains $table");
-        $assert->like($mig, qr/CREATE TABLE IF NOT EXISTS `\Q$table\E`/,
-            "mb646-826: migration creates $table idempotently");
+        $assert->ok($schema =~ /CREATE TABLE `\Q$table\E`/
+            && $mig =~ /CREATE TABLE IF NOT EXISTS `\Q$table\E`/,
+            "mb646-826: schema and idempotent migration retain $table");
     }
     $assert->like($schema,
         qr/UNIQUE KEY `uq_achievement_identity_triplet` \(`id_channel`, `nick`, `userhost`\)/,
@@ -97,12 +89,10 @@ return sub {
 
     # [7] Public contract: DB first, JSON guarded fallback/import.
     my $ach = slurp826('Mediabot/Achievements.pm');
-    $assert->like($ach, qr/sub _db_schema_available \{/,
-        'mb646-826: DB schema capability is detected at runtime');
-    $assert->like($ach, qr/sub _import_legacy_json_if_present \{/,
-        'mb646-826: legacy state has an explicit DB importer');
-    $assert->like($ach, qr/sub observe_identity \{/,
-        'mb646-826: durable identity observation exists');
+    $assert->ok($ach =~ /sub _db_schema_available \{/
+        && $ach =~ /sub _import_legacy_json_if_present \{/
+        && $ach =~ /sub observe_identity \{/,
+        'mb646-826: public storage contract retains schema probe, legacy importer and identity observation');
 
     # [8] The production Mediabot object is a blessed HASH. Schema probing must
     # accept that real runtime shape instead of requiring ref($bot) eq 'HASH'.
@@ -181,7 +171,7 @@ return sub {
     my $raw = do { local $/; <$probe> };
     my $closed = close $probe;
     my $results = eval { JSON::PP->new->utf8->decode($raw // '') };
-    $assert->ok($closed && ref($results) eq 'ARRAY' && @$results == 11,
+    $assert->ok($closed && ref($results) eq 'ARRAY' && @$results == 15,
         'mb932: isolated native achievement transaction probe completed');
     for my $result (@{ref($results) eq 'ARRAY' ? $results : []}) {
         $assert->ok($result->{ok},

@@ -6,6 +6,9 @@ use JSON::PP;
 use File::Temp qw(tempdir);
 use File::Path qw(make_path);
 use Cwd qw(getcwd);
+# Confine the deterministic clock to this already isolated probe process.
+BEGIN { *CORE::GLOBAL::time = sub () { defined($MB932AchievementFixture::now)
+    ? $MB932AchievementFixture::now : CORE::time() } }
 use Mediabot::Achievements;
 
 # Execute the production methods through native DBI. Only MySQL's DELETE JOIN,
@@ -40,10 +43,29 @@ use Mediabot::Achievements;
             && $sql =~ /INSERT INTO \Q$s->{private_mb932_prepare_fail}\E\b/) {
             $sql = 'SELECT * FROM mb932_nonexistent_table';
         }
-        return $s->SUPER::prepare($sql,@rest);
+        my ($touch) = $sql =~ /UPDATE\s+(ACHIEVEMENT_(?:IDENTITY|PROFILE))\s+SET\s+(?:last_seen_at|display_nick)\s*=/;
+        $s->{private_touch_prepare}{$touch}++ if $touch;
+        my $sth = $s->SUPER::prepare($sql,@rest);
+        $sth->{private_touch_table} = $touch if $sth && $touch;
+        return $sth;
     }
     package MB932::DBI::st;
     our @ISA = ('DBI::st');
+    sub execute {
+        my ($sth,@bind) = @_;
+        my $table = $sth->{private_touch_table};
+        $sth->{Database}{private_touch_bind}{$table} = \@bind if $table;
+        return $sth->SUPER::execute(@bind);
+    }
+    sub finish {
+        my ($sth) = @_;
+        my $table = $sth->{private_touch_table};
+        $sth->{Database}{private_touch_finish}{$table}++ if $table;
+        my $rv = $sth->SUPER::finish;
+        die "fixture touch cleanup failure\n"
+            if $table && $sth->{Database}{private_touch_cleanup_failure};
+        return $rv;
+    }
     package MB932::Logger;
     sub log { push @{$_[0]{rows}}, $_[2]; 1 }
 }
@@ -70,7 +92,7 @@ sub setup {
     my $dir=tempdir(CLEANUP=>1);
     my $db=DBI->connect("dbi:SQLite:dbname=$dir/ach.sqlite",'','',
         {RaiseError=>$raise,PrintError=>0,AutoCommit=>1,RootClass=>'MB932::DBI'});
-    $db->sqlite_create_function('NOW',0,sub {1000});
+    $db->sqlite_create_function('NOW',0,sub {defined($MB932AchievementFixture::now) ? $MB932AchievementFixture::now : 1000});
     $db->sqlite_create_function('UNIX_TIMESTAMP',1,sub {$_[0]});
     $db->sqlite_create_function('FROM_UNIXTIME',1,sub {$_[0]});
     $db->do('PRAGMA foreign_keys=ON');
@@ -280,6 +302,92 @@ sub run_checks {
         my $error=$@;chdir $cwd or die $!;die $error unless $ok;
         open my $fh,'<:raw',$archive or die $!;local $/;check(<$fh> eq $bytes,'historical bytes changed');
         check($a->{_progress_by_profile}{msg_count}{2}==25,'archive merit duplicated or lost');
+    });
+    $group->('confirmed alias touches publish cache once and retain the hourly throttle boundary',sub {
+        local $MB932AchievementFixture::now=10000;
+        my ($a,$db)=setup(1);my $key="1\0keep\0k\@h";
+        $a->{_profiles}{1}{display_nick}='cached old display';
+        check($a->observe_identity('Keep','#ONE','k@h')==1,'recognized identity changed');
+        check($a->{_identity_touch_ts}{$key}==10000 && $a->{_profiles}{1}{display_nick} eq 'Keep','confirmed cache publication');
+        check($db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_IDENTITY WHERE id_achievement_identity=1')==10000,'identity timestamp');
+        check($db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile=1')==10000,'profile timestamp');
+        check($json->encode($db->{private_touch_bind}) eq $json->encode({ACHIEVEMENT_IDENTITY=>[1,'Keep','k@h'],ACHIEVEMENT_PROFILE=>['Keep',1]}),'exact touch bindings');
+        for my $table (qw(ACHIEVEMENT_IDENTITY ACHIEVEMENT_PROFILE)) {
+            check($db->{private_touch_prepare}{$table}==1 && $db->{private_touch_finish}{$table}==1,'statement lifecycle');
+        }
+        $MB932AchievementFixture::now=13599;
+        $a->observe_identity('Keep','#one','k@h');
+        check($a->{_identity_touch_ts}{$key}==10000 && $db->{private_touch_prepare}{ACHIEVEMENT_PROFILE}==1,'premature hourly write');
+        $MB932AchievementFixture::now=13600;
+        $a->observe_identity('Keep','#one','k@h');
+        check($a->{_identity_touch_ts}{$key}==13600 && $db->{private_touch_prepare}{ACHIEVEMENT_PROFILE}==2,'exact hourly boundary');
+        check($db->{AutoCommit} && $db->{RaiseError}==1,'DBI attributes changed');
+    });
+    $group->('native alias prepare/execute failures retain cache and retry both idempotent writes immediately',sub {
+        for my $raise (0,1) {
+            for my $phase (qw(prepare execute)) {
+                for my $table (qw(ACHIEVEMENT_IDENTITY ACHIEVEMENT_PROFILE)) {
+                    local $MB932AchievementFixture::now=10000;
+                    my ($a,$db)=setup($raise);my $key="1\0keep\0k\@h";
+                    $a->{_identity_touch_ts}{$key}=1000;$a->{_profiles}{1}{display_nick}='cached old display';
+                    my $other=$json->encode([map {my $where=/\A(?:ACHIEVEMENT_PROFILE|ACHIEVEMENT_IDENTITY)\z/ ? " WHERE id_achievement_profile!=1" : ""; $db->selectall_arrayref("SELECT * FROM $_".$where." ORDER BY 1,2")} qw(ACHIEVEMENT_PROFILE ACHIEVEMENT_IDENTITY ACHIEVEMENT_UNLOCK ACHIEVEMENT_PROGRESS)]);
+                    if ($phase eq 'prepare') {
+                        $db->sqlite_set_authorizer(sub {$_[0]==23 && $_[1] eq $table ? 1 : 0});
+                    } else {
+                        trigger($db,$table,'UPDATE','1',"SELECT RAISE(ABORT,'touch rejected')");
+                    }
+                    my $pid;my $ok=eval {$pid=$a->observe_identity('Keep','#one','k@h');1};
+                    check($ok && $pid==1,"identity lookup escaped on $phase/$table RaiseError=$raise");
+                    check($a->{_identity_touch_ts}{$key}==1000 && $a->{_profiles}{1}{display_nick} eq 'cached old display','failed touch cached as successful');
+                    my $expected_identity=$table eq 'ACHIEVEMENT_PROFILE'?10000:200;
+                    check($db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_IDENTITY WHERE id_achievement_identity=1')==$expected_identity,'unexpected partial-write state');
+                    check($db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile=1')==($table eq 'ACHIEVEMENT_IDENTITY'?10000:100),'unexpected profile partial-write state');
+                    my $first_finished=$table eq 'ACHIEVEMENT_PROFILE' || $phase eq 'execute'?1:0;
+                    my $second_finished=$table eq 'ACHIEVEMENT_PROFILE' && $phase eq 'prepare'?0:1;
+                    check(($db->{private_touch_finish}{ACHIEVEMENT_IDENTITY}//0)==$first_finished && ($db->{private_touch_finish}{ACHIEVEMENT_PROFILE}//0)==$second_finished,'failed statement cleanup');
+                    check(($db->{private_touch_prepare}{ACHIEVEMENT_PROFILE}//0)==1,'both best-effort writes were not attempted');
+                    $db->sqlite_set_authorizer(undef);
+                    $db->do('DROP TRIGGER fail_write') if $phase eq 'execute';
+                    $MB932AchievementFixture::now=10001;
+                    check($a->observe_identity('Keep','#one','k@h')==1,'retry identity');
+                    check($a->{_identity_touch_ts}{$key}==10001 && $a->{_profiles}{1}{display_nick} eq 'Keep','retry was suppressed for an hour');
+                    check($db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_IDENTITY WHERE id_achievement_identity=1')==10001 && $db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile=1')==10001,'retry did not persist both writes');
+                    check($other eq $json->encode([map {my $where=/\A(?:ACHIEVEMENT_PROFILE|ACHIEVEMENT_IDENTITY)\z/ ? " WHERE id_achievement_profile!=1" : ""; $db->selectall_arrayref("SELECT * FROM $_".$where." ORDER BY 1,2")} qw(ACHIEVEMENT_PROFILE ACHIEVEMENT_IDENTITY ACHIEVEMENT_UNLOCK ACHIEVEMENT_PROGRESS)]),'another identity or merit changed');
+                    check($db->{AutoCommit} && $db->{RaiseError}==$raise,'DBI error mode changed');
+                }
+            }
+        }
+    });
+    $group->('touch cleanup exceptions preserve confirmed outcomes and cannot publish failed profile writes',sub {
+        for my $raise (0,1) {
+            for my $fail (0,1) {
+                local $MB932AchievementFixture::now=10000;
+                my ($a,$db)=setup($raise);my $key="1\0keep\0k\@h";
+                $a->{_identity_touch_ts}{$key}=1000;$a->{_profiles}{1}{display_nick}='cached old display';
+                $db->{private_touch_cleanup_failure}=1;
+                trigger($db,'ACHIEVEMENT_PROFILE','UPDATE','1',"SELECT RAISE(ABORT,'touch rejected')") if $fail;
+                my $rv;my $ok=eval {$rv=$a->_touch_seen_alias(1,1,'Keep','k@h');1};
+                check($ok && $rv==($fail?0:1),'cleanup changed primary outcome');
+                check($a->{_identity_touch_ts}{$key}==($fail?1000:10000) && $a->{_profiles}{1}{display_nick} eq ($fail?'cached old display':'Keep'),'cleanup changed cache publication');
+                check($db->{private_touch_finish}{ACHIEVEMENT_IDENTITY}==1 && $db->{private_touch_finish}{ACHIEVEMENT_PROFILE}==1,'cleanup was not attempted');
+            }
+        }
+    });
+    $group->('clock rewind rearms alias persistence without sharing stamps across identities or channels',sub {
+        local $MB932AchievementFixture::now=10000;
+        my ($a,$db)=setup(1);my $keep="1\0keep\0k\@h";my $drop="1\0drop\0d\@h";
+        $a->observe_identity('Keep','#one','k@h');
+        $MB932AchievementFixture::now=9900;
+        $a->observe_identity('Keep','#one','k@h');
+        check($a->{_identity_touch_ts}{$keep}==9900 && $db->{private_touch_prepare}{ACHIEVEMENT_PROFILE}==2,'future cached stamp stalled touch');
+        $MB932AchievementFixture::now=9901;
+        check($a->_touch_seen_alias(2,1,'Drop','d@h')==1,'independent alias touch');
+        check($a->{_identity_touch_ts}{$keep}==9900 && $a->{_identity_touch_ts}{$drop}==9901,'alias stamps mixed');
+        $MB932AchievementFixture::now=9902;
+        $a->observe_identity('Keep','#one','k@h');
+        check($db->{private_touch_prepare}{ACHIEVEMENT_PROFILE}==3,'rewind bypassed subsequent normal throttle');
+        check($db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile=1')==9900 && $db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile=2')==9901,'per-profile timestamps');
+        check($db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_PROFILE WHERE id_achievement_profile=3')==300 && $db->selectrow_array('SELECT last_seen_at FROM ACHIEVEMENT_IDENTITY WHERE id_achievement_identity=3')==200,'other channel changed');
     });
     return \@results;
 }

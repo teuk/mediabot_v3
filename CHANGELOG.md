@@ -1,5 +1,23 @@
 ## [Unreleased] — 3.8dev
 
+### MB1078 — Retry achievement identity touches after failed persistence
+
+- Publish an alias's hourly touch stamp and cached display only after both
+  identity/profile timestamp writes succeed. A failed prepare/execute can no
+  longer consume the hour and suppress the next observation's retry.
+- Keep both idempotent writes best-effort, contain DBI exceptions, inspect err
+  before cleanup and finish acquired statements. Partial SQL success remains
+  possible; the next observation retries both without inventing cache success.
+- Re-arm a touch after a civil-clock rewind instead of retaining a future
+  cache stamp. Preserve the normal 3 600-second boundary and per-alias scope.
+- Extend the existing isolated native achievement probe with prepare/execute
+  failures, recovery, cleanup and clock/scope regressions. Group redundant
+  identity/schema contract boundaries while retaining every condition: six
+  fewer assertions, no new test file, wait or probe process.
+- No schema, dependency, configuration, merit data or manual VERSION change;
+  identity recognition and previously qualified fixes remain intact.
+
+
 ### MB1077 — Replace user authority only after a confirmed role read
 
 - Clear a User object's previously loaded role before refreshing USER_LEVEL.

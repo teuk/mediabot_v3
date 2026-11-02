@@ -1092,23 +1092,38 @@ sub _touch_seen_alias {
     my ($self, $pid, $channel_id, $nick, $userhost) = @_;
     my $key = _identity_cache_key($channel_id, $nick, $userhost);
     my $now = time();
-    my $last = $self->{_identity_touch_ts}{$key} // 0;
-    return 1 if ($now - $last) < 3600;
+    my $last = $self->{_identity_touch_ts}{$key};
+    return 1 if defined($last) && $now >= $last && ($now - $last) < 3600;
 
     my $dbh = $self->{bot}{dbh};
-    my $sth_i = $dbh->prepare(q{
-        UPDATE ACHIEVEMENT_IDENTITY
-        SET last_seen_at = NOW()
-        WHERE id_channel = ? AND nick = ? AND userhost = ?
-    });
-    eval { $sth_i->execute($channel_id, $nick, $userhost) } if $sth_i;
-
-    my $sth_p = $dbh->prepare(q{
-        UPDATE ACHIEVEMENT_PROFILE
-        SET display_nick = ?, last_seen_at = NOW()
-        WHERE id_achievement_profile = ?
-    });
-    eval { $sth_p->execute($nick, $pid) } if $sth_p;
+    return 0 unless $dbh;
+    # Attempt both idempotent writes as before. Either one may persist while
+    # the other fails; only their combined success can consume the cache's
+    # hourly slot. Otherwise retry both on the next observation.
+    my $all_ok = 1;
+    for my $write (
+        [q{
+            UPDATE ACHIEVEMENT_IDENTITY
+            SET last_seen_at = NOW()
+            WHERE id_channel = ? AND nick = ? AND userhost = ?
+        }, [$channel_id, $nick, $userhost]],
+        [q{
+            UPDATE ACHIEVEMENT_PROFILE
+            SET display_nick = ?, last_seen_at = NOW()
+            WHERE id_achievement_profile = ?
+        }, [$nick, $pid]],
+    ) {
+        my $sth;
+        my $ok = eval {
+            $sth = $dbh->prepare($write->[0]) or die "identity touch prepare failed\n";
+            $sth->execute(@{$write->[1]}) or die "identity touch execute failed\n";
+            die "identity touch write failed\n" if $sth->err;
+            1;
+        };
+        eval { $sth->finish } if $sth;
+        $all_ok = 0 unless $ok;
+    }
+    return 0 unless $all_ok;
 
     $self->{_profiles}{$pid}{display_nick} = $nick
         if $self->{_profiles}{$pid};
