@@ -20,7 +20,7 @@ sub active_workers {
         next unless $w->{owner_pid} == $$ && ref($w->{loop})
             && refaddr($w->{loop}) == refaddr($loop);
         push @rows, { id=>$id, label=>$w->{label}, pid=>$w->{pid},
-            elapsed_s=>Time::HiRes::time()-$w->{started_at}, timeout=>$w->{timeout},
+            elapsed_s=>$w->_elapsed_s(), timeout=>$w->{timeout},
             state=>$w->{cancelled} || $w->{timed_out} ? 'stopping' : 'running',
             progress_count=>$w->{progress_count} };
     }
@@ -70,6 +70,7 @@ sub start {
         max_output    => _bounded_integer($args{max_output},
             $DEFAULT_MAX_OUTPUT, $MIN_MAX_OUTPUT, $MAX_MAX_OUTPUT),
         started_at    => Time::HiRes::time(),
+        started_monotonic => Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()),
         buffer        => '',
         bytes         => 0,
         final_record  => undef,
@@ -530,6 +531,18 @@ sub _maybe_finish {
     $self->_complete($result);
 }
 
+# One duration source for live inspection and terminal metadata. Keep the
+# epoch timestamp for compatibility, but never subtract it for new workers.
+sub _elapsed_s {
+    my ($self) = @_;
+    my $elapsed = defined($self->{started_monotonic})
+        ? Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) - $self->{started_monotonic}
+        # ACTIVE survives an in-process module reload. An old worker has no
+        # monotonic start; retain its historical estimate, bounded below by 0.
+        : Time::HiRes::time() - $self->{started_at};
+    return $elapsed > 0 ? $elapsed : 0;
+}
+
 sub _build_result {
     my ($self) = @_;
 
@@ -551,7 +564,7 @@ sub _build_result {
         kill_sent      => $self->{kill_sent} ? 1 : 0,
         bytes          => 0 + ($self->{bytes} // 0),
         progress_count => 0 + ($self->{progress_count} // 0),
-        elapsed_s      => Time::HiRes::time() - $self->{started_at},
+        elapsed_s      => $self->_elapsed_s(),
     );
 
     if ($self->{cancelled}) {

@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1072 — Measure task cost independently of civil clock changes
+
+- Use the monotonic clock for scheduler callback durations and worker elapsed
+  time. Clock corrections can no longer create negative durations or false
+  hour-long task costs in profiles, ps and terminal worker metadata.
+- Keep scheduler epochs, calendar resolution, intervals, worker timeouts,
+  cancellation/escalation and public result fields unchanged. Live and final
+  worker observations share one duration helper. Existing pre-reload workers
+  retain their historical estimate, clamped at zero, until completion.
+- Replace seventeen timing/wiring checks with ten native scheduler assertions,
+  including real histogram output and both timer callback paths. Strengthen
+  existing shell/worker checks without adding assertions or cases: seven fewer
+  assertions overall. No schema, dependency, configuration or manual VERSION
+  change; previously qualified changes remain intact.
+
+
 ### MB1071 — Share predictable hostmask compilation with authentication
 
 - Remove the independent backtracking glob compiler from Auth. Stored hostmasks

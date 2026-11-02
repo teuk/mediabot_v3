@@ -81,13 +81,40 @@ $p->{users}{one}{level}=0;line_1404('.command');
  $p->{users}{one}=$saved;
 }
 my @done;
+my $native_wall_1404=\&Time::HiRes::time;
+my $native_result_1404=Mediabot::AsyncWorker->can('_build_result');
+# Restrict the simulated wall jump to result construction. The real event
+# loop and its cancellation/escalation timers retain their clocks.
+no warnings 'redefine';
+local *Mediabot::AsyncWorker::_build_result=sub {
+ local *Time::HiRes::time=sub {$native_wall_1404->()+3600};
+ return $native_result_1404->(@_);
+};
 my $w=Mediabot::AsyncWorker->start(loop=>$loop,label=>'slow radio lookup',timeout=>3,term_grace=>0.05,
  child=>sub {$SIG{TERM}='IGNORE';sleep 5;return 'late'},on_done=>sub {push @done,shift});
 my ($row)=Mediabot::AsyncWorker->active_workers($loop);my $id=$row->{id};
 is_deeply([scalar(Mediabot::AsyncWorker->active_workers($other)),Mediabot::AsyncWorker->cancel_worker($other,$id)],
  [0,0],'workers are visible and cancellable only through their owning event loop');
 $row->{label}='mutated';my ($actual)=Mediabot::AsyncWorker->active_workers($loop);
-is($actual->{label},'slow radio lookup','operator snapshots cannot mutate live worker state');
+my $start_epoch_1404=$w->{started_at};
+my @elapsed_1404;
+for my $jump (-3600,3600) {
+ local *Time::HiRes::time=sub {$native_wall_1404->()+$jump};
+ my ($view)=Mediabot::AsyncWorker->active_workers($loop);
+ push @elapsed_1404,$view->{elapsed_s}>=0 && $view->{elapsed_s}<3 ? 1:0;
+}
+# ACTIVE deliberately survives a module reload. Exercise the old in-flight
+# shape without changing the live worker's marker or cancellation lifecycle.
+my $legacy_1404;
+{
+ local $w->{started_monotonic};
+ local *Time::HiRes::time=sub {$start_epoch_1404-3600};
+ my ($view)=Mediabot::AsyncWorker->active_workers($loop);
+ $legacy_1404=$view->{elapsed_s};
+}
+is_deeply([$actual->{label},\@elapsed_1404,$legacy_1404,$w->{started_at}],
+ ['slow radio lookup',[1,1],0,$start_epoch_1404],
+ 'detached ps snapshots survive backward/forward clock jumps, retain epoch identity and handle pre-reload workers');
 like(line_1404("show $id"),qr/PID:.*timeout:/,'live async worker exposes elapsed time, deadline and PID as information');
 my @probe;
 my $inspector=Mediabot::AsyncWorker->start(loop=>$loop,timeout=>2,child=>sub {
@@ -101,7 +128,8 @@ like(line_1404("kill $id"),qr/Cancellation requested/,'worker kill requests canc
 $end=time+3;$loop->loop_once(0.02) while !@done && time<$end;
 $loop->loop_once(0.01) for 1..3;
 is_deeply([scalar(@done),$done[0]{cancelled},$done[0]{kill_sent},waitpid($w->pid,WNOHANG),
- scalar(Mediabot::AsyncWorker->active_workers($loop)),Mediabot::AsyncWorker->cancel_worker($loop,$id)],
- [1,1,1,-1,0,0],'resistant child is terminated/reaped once, disappears from ps and cannot be killed through its stale ID');
+ scalar(Mediabot::AsyncWorker->active_workers($loop)),Mediabot::AsyncWorker->cancel_worker($loop,$id),
+ $done[0]{elapsed_s}>=0 && $done[0]{elapsed_s}<3 ? 1:0],
+ [1,1,1,-1,0,0,1],'resistant child is reaped once, leaves ps and retains a measured terminal duration despite a wall jump');
 is_deeply(\@warnings,[],'shell, snapshots and cancellation are free from warnings');
 done_testing;

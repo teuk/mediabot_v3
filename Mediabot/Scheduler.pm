@@ -31,12 +31,14 @@ sub set_metrics {
 sub _run_task_callback {
     my ($self, $name, $cb) = @_;
 
-    my $t0 = [ Time::HiRes::gettimeofday() ];
+    # Scheduling dates remain wall-clock epochs. Callback cost must not change
+    # when NTP or an operator adjusts the system clock during execution.
+    my $t0 = Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
     my $observed_task=$self->{_tasks}{$name};
     my $observed_generation=$observed_task ? $observed_task->{generation}:undef;
     my $ok = eval { $cb->(); 1 };
     my $err = $@;
-    my $elapsed = Time::HiRes::tv_interval($t0);
+    my $elapsed = Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) - $t0;
     my $current=$self->{_tasks}{$name};
     if ($observed_task && $current && refaddr($observed_task)==refaddr($current)) {
         $current->{last_duration_s} = $elapsed;

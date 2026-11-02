@@ -1,150 +1,96 @@
-# t/cases/749_mb556_scheduler_tick_timing.t
-# =============================================================================
-# mb556 — le quadriptyque de traçage se ferme : les ticks nommés du scheduler
-# gagnent le même chrono que PRIVMSG (mb548), l'event loop (mb550) et la
-# partyline (mb552) — plus AUCUN chemin ne peut traîner en silence.
-#
-# Contrats :
-#   [1] _run_task_callback : durée observée dans le histogram {task} à
-#       chaque exécution ; tâche > 1 s -> ligne SLOW SCHEDULER niveau 3
-#       avec nom et durée ; tâche rapide -> observation seule, pas de log ;
-#   [2] les erreurs gardent leur sémantique : un callback qui die logge
-#       toujours « Scheduler: task 'x' error » niveau 1 (message nettoyé),
-#       ET sa durée est observée quand même ;
-#   [3] best-effort : sans metrics, seuls les logs restent, rien ne casse ;
-#   [4] les DEUX modes (periodic + calendar) passent par le helper (gardes
-#       statiques : plus aucun eval direct du callback hors helper) ;
-#   [5] câblage : histogram déclaré dans Metrics, set_metrics injecté dans
-#       mediabot.pl, panel p95 par tâche au dashboard (couvert aussi par le
-#       contrat 740).
-# =============================================================================
-
+# Native callback timing, clock changes and both scheduler dispatch paths.
 use strict;
 use warnings;
-BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
-use File::Spec;
-
+use Test::More;
+use IO::Async::Loop;
+use Time::HiRes ();
 use Mediabot::Scheduler;
-
-sub _slurp_749 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; local $/; <$fh> }
-
+use Mediabot::Metrics;
 {
-    package L749;
-    sub new { bless { lines => [] }, shift }
-    sub log { my ($self, $level, $msg) = @_; push @{ $self->{lines} }, [ $level, $msg ]; 1 }
-    sub at_level { my ($self, $level) = @_; grep { $_->[0] == $level } @{ $_[0]->{lines} } }
+    package MB1072::Log;
+    sub log {push @{$_[0]{rows}},[$_[1],$_[2]];1}
+    package MB1072::BrokenMetrics;
+    sub observe {die "metrics unavailable\n"}
 }
-
-{
-    package M749;
-    sub new { bless { observed => [] }, shift }
-    sub can { 1 }
-    sub observe {
-        my ($self, $name, $value, $labels) = @_;
-        push @{ $self->{observed} }, [ $name, $value, { %{ $labels || {} } } ];
-        return 1;
-    }
-}
-
-return sub {
-    my ($assert) = @_;
-    my $clock=1000;
-    my $interval=\&Time::HiRes::tv_interval;
-    my $stamp=sub {my $seconds=int($clock);[$seconds,int(($clock-$seconds)*1_000_000)]};
+my @warnings;
+local $SIG{__WARN__}=sub {push @warnings,@_};
+my $loop=IO::Async::Loop->really_new;
+my $logger=bless {rows=>[]},'MB1072::Log';
+my $metrics=Mediabot::Metrics->new(enabled=>1);
+my $s=Mediabot::Scheduler->new(loop=>$loop,logger=>$logger);
+ok($s->set_metrics($metrics) && $s->{metrics}==$metrics,
+    'native scheduler attaches the metrics projection');
+$s->add(name=>'clock',interval=>3600,cb=>sub {});
+my ($wall,$mono)=(10000,1000);
+my $native_interval=\&Time::HiRes::tv_interval;
+my $native_clock=\&Time::HiRes::clock_gettime;
+my $stamp=sub {my $n=int($wall);[$n,int(($wall-$n)*1_000_000)]};
+sub timed_749 {
+    my ($cb)=@_;
     no warnings 'redefine';
+    # Change only the observation clocks during the native callback. Timer
+    # setup, loop dispatch and civil dates retain their actual clocks.
     local *Time::HiRes::gettimeofday=sub {@{$stamp->()}};
-    local *Time::HiRes::tv_interval=sub {$interval->($_[0],$stamp->())};
-
-
-    # ------------------------------------------------------------------
-    # [1] Observation + SLOW
-    # ------------------------------------------------------------------
-    {
-        my $logger = L749->new;
-        my $m = M749->new;
-        my $sched = bless { logger => $logger }, 'Mediabot::Scheduler';
-        $assert->ok($sched->set_metrics($m) && $sched->{metrics} == $m,
-            'set_metrics: projection attachee au scheduler');
-
-        $sched->_run_task_callback('fast_task', sub { 1 });
-        $assert->ok(@{ $m->{observed} } == 1
-            && $m->{observed}[0][0] eq 'mediabot_scheduler_tick_seconds'
-            && $m->{observed}[0][2]{task} eq 'fast_task'
-            && $m->{observed}[0][1] < 1,
-            'rapide: duree observee avec le label task');
-        $assert->ok(scalar($logger->at_level(3)) == 0, 'rapide: aucun log SLOW');
-
-        $sched->_run_task_callback('slow_task', sub { $clock+=1.05; 1 });
-        my ($l3) = $logger->at_level(3);
-        $assert->like(($l3->[1] || ''),
-            qr/^SLOW SCHEDULER: task 'slow_task' took 1\.\d+s$/,
-            'lent: ligne SLOW avec nom et duree');
-        $assert->ok($m->{observed}[1][1] > 1.0, 'lent: duree observee aussi');
-    }
-
-    # ------------------------------------------------------------------
-    # [2] Erreurs préservées
-    # ------------------------------------------------------------------
-    {
-        my $logger = L749->new;
-        my $m = M749->new;
-        my $sched = bless { logger => $logger, metrics => $m }, 'Mediabot::Scheduler';
-
-        $sched->_run_task_callback('boom', sub { die "kaboom\nline two\n" });
-        my ($l1) = $logger->at_level(1);
-        $assert->like(($l1->[1] || ''),
-            qr/^Scheduler: task 'boom' error: kaboom line two/,
-            'die: erreur logguee niveau 1, message nettoye');
-        $assert->ok(@{ $m->{observed} } == 1
-            && $m->{observed}[0][2]{task} eq 'boom',
-            'die: la duree est observee malgre l\'erreur');
-    }
-
-    # ------------------------------------------------------------------
-    # [3] Sans metrics
-    # ------------------------------------------------------------------
-    {
-        my $logger = L749->new;
-        my $sched = bless { logger => $logger }, 'Mediabot::Scheduler';
-        my $ok = eval { $sched->_run_task_callback('plain', sub { 1 }); 1 };
-        $assert->ok($ok, 'sans metrics: aucun crash');
-        $sched->_run_task_callback('plain_slow', sub { $clock+=1.05; 1 });
-        $assert->ok(scalar($logger->at_level(3)) == 1, 'sans metrics: le log SLOW reste');
-    }
-
-    # ------------------------------------------------------------------
-    # [4] Les deux modes passent par le helper
-    # ------------------------------------------------------------------
-    {
-        my $src = _slurp_749(File::Spec->catfile('Mediabot', 'Scheduler.pm'));
-        my $helper_calls = () = $src =~ /->_run_task_callback\(/g;
-        $assert->ok($helper_calls == 2, 'helper: appele par les deux modes (periodic + calendar)');
-        $assert->like($src, qr/^sub _run_task_callback \{/m, 'helper: defini');
-        my $direct_evals = () = $src =~ /eval \{ \$(?:cb|current->\{cb\})->\(\)(?:;\s*1)? \}/g;
-        $assert->ok($direct_evals == 1,
-            'plus d\'eval direct du callback hors helper (le seul restant EST le helper)');
-        $assert->like($src, qr/sub set_metrics/, 'set_metrics present');
-    }
-
-    # ------------------------------------------------------------------
-    # [5] Câblage
-    # ------------------------------------------------------------------
-    {
-        my $metrics_src = _slurp_749(File::Spec->catfile('Mediabot', 'Metrics.pm'));
-        $assert->like($metrics_src, qr/'mediabot_scheduler_tick_seconds', 'histogram'/,
-            'Metrics: histogram declare');
-
-        my $main_src = _slurp_749('mediabot.pl');
-        my $assign_pos = index($main_src, '$mediabot->{scheduler} = $scheduler;');
-        my $inject_pos = index($main_src,
-            '$scheduler->set_metrics($mediabot->{metrics})');
-        $assert->ok($assign_pos >= 0 && $inject_pos > $assign_pos,
-            'mediabot.pl: injection metrics apres construction du scheduler');
-        $assert->unlike($main_src,
-            qr/\$mediabot->\{scheduler\}->set_metrics\(\$mediabot->\{metrics\}\)/,
-            'mediabot.pl: aucune injection morte avant construction');
-
-        my $ov = _slurp_749(File::Spec->catfile('contrib', 'grafana', 'grafana_mediabot_overview_v1.json'));
-        $assert->like($ov, qr/scheduler_tick_seconds_bucket/, 'overview: panel p95 par tache');
-    }
-};
+    local *Time::HiRes::tv_interval=sub {$native_interval->($_[0],$stamp->())};
+    local *Time::HiRes::clock_gettime=sub {
+        $_[0]==Time::HiRes::CLOCK_MONOTONIC() ? $mono : $native_clock->(@_)
+    };
+    return $cb->();
+}
+sub slow_749 {return [map {$_->[1]} grep {$_->[0]==3 && $_->[1]=~/^SLOW SCHEDULER:/} @{$logger->{rows}}]}
+for my $step (
+    [-3600,.25,.25,.25,.25,[]],
+    [7200,.125,.125,.375,.25,[]],
+    [0,1.25,1.25,1.625,1.25,["SLOW SCHEDULER: task 'clock' took 1.25s"]],
+) {
+    timed_749(sub {$s->_run_task_callback('clock',sub {$wall+=$step->[0];$mono+=$step->[1];0})});
+    my $i=$s->task_info('clock');
+    is_deeply([@$i{qw(last_duration_s total_duration_s max_duration_s callback_exceptions)},slow_749()],
+        [@$step[2,3,4],0,$step->[5]],
+        "wall adjustment $step->[0]s: actual elapsed duration drives profile and slow warnings");
+}
+my $before=CORE::time();
+timed_749(sub {$s->_run_task_callback('clock',sub {$wall-=7200;$mono+=.5;die "known\nfailure\n"})});
+my $i=$s->task_info('clock');
+is_deeply([@$i{qw(last_duration_s total_duration_s max_duration_s callback_exceptions)},
+    $i->{last_exception_at}>=$before && $i->{last_exception_at}<=CORE::time()?1:0,
+    [map {$_->[1]} grep {$_->[0]==1} @{$logger->{rows}}]],
+    [.5,2.125,1.25,1,1,["Scheduler: task 'clock' error: known failure "]],
+    'exceptions still record measured cost, existing diagnostic text and a civil timestamp');
+my $exposition=$metrics->render_prometheus;
+ok($exposition=~/^mediabot_scheduler_tick_seconds_sum\{task="clock"\} 2\.125$/m
+    && $exposition=~/^mediabot_scheduler_tick_seconds_count\{task="clock"\} 4$/m
+    && $exposition=~/^mediabot_scheduler_tick_seconds_bucket\{task="clock",le="0\.25"\} 2$/m,
+    'real Prometheus histogram exposes all four nonnegative samples in the correct buckets');
+my @optional;
+for my $projection (undef,bless({},'MB1072::BrokenMetrics')) {
+    my $plain=Mediabot::Scheduler->new(loop=>$loop);
+    $plain->set_metrics($projection) if $projection;
+    $plain->add(name=>'optional',interval=>3600,cb=>sub {});
+    my $ok=eval {timed_749(sub {$plain->_run_task_callback('optional',sub {$mono+=.125;0})});1};
+    push @optional,[$ok?1:0,$plain->task_info('optional')->{last_duration_s}];
+    $plain->remove('optional');
+}
+is_deeply(\@optional,[[1,.125],[1,.125]],
+    'no metrics and a failing projection preserve successful callback execution and duration');
+for my $mode (qw(periodic calendar)) {
+    my $runs=0;
+    $s->add(name=>$mode,interval=>3600,
+        ($mode eq 'calendar' ? (next_run_cb=>sub {CORE::time()+60}) : ()),
+        cb=>sub {$runs++;$wall+=7200;$mono+=.375},autostart=>1);
+    my $timer=$s->{_tasks}{$mode}{timer};
+    timed_749(sub {$timer->invoke_event($mode eq 'calendar' ? 'on_expire' : 'on_tick')});
+    my $state=$s->task_info($mode);
+    my $hist=$metrics->get('mediabot_scheduler_tick_seconds',{task=>$mode});
+    is_deeply([$runs,@$state{qw(ticks last_duration_s total_duration_s max_duration_s)},
+        $hist->{count},$hist->{sum},
+        $state->{start_time}>=$before && $state->{start_time}<=CORE::time()?1:0,
+        $state->{last_tick}>=$before && $state->{last_tick}<=CORE::time()?1:0,
+        $state->{next_run}>CORE::time()?1:0],
+        [1,1,.375,.375,.375,1,.375,1,1,1],
+        "$mode: native timer dispatch measures duration while retaining epoch dates and rearming");
+    $s->remove($mode);
+}
+$s->remove('clock');
+is_deeply(\@warnings,[],'native timing, metrics and cleanup are warning-free');
+done_testing;
