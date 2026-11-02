@@ -2,6 +2,7 @@ package Mediabot::ChannelBan;
 
 use strict;
 use warnings;
+use Mediabot::IRC::Glob qw(glob_pattern);
 use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
             # Sans cela ils sont des OCTETS, et interpoler une variable
             # venue d'IRC (mediabot.pl decode les messages entrants) fait
@@ -293,21 +294,8 @@ sub _mask_matches_irc {
     my ($self, $pattern, $hostmask) = @_;
     return 0 unless defined $pattern && defined $hostmask;
 
-    # Collapse star runs and commit each interior fixed piece at its earliest
-    # match. Later failure must not retry every distribution of earlier stars:
-    # eval catches an exception, but cannot bound regex backtracking CPU time.
-    # Keep the original quoted literals, single-character ?, /i and anchors.
-    my @pieces = map {
-        my $fixed = quotemeta($_);
-        $fixed =~ s/\\\?/./g;
-        $fixed;
-    } split /\*+/, $pattern, -1;
-    my $re = shift(@pieces) // '';
-    if (@pieces) {
-        my $last = pop @pieces;
-        $re .= '(?>.*?' . $_ . ')' for @pieces;
-        $re .= '.*' . $last;
-    }
+    # Shared wildcard compilation; keep this caller's existing /i and anchors.
+    my $re = glob_pattern($pattern);
 
     my $ok = eval { $hostmask =~ /^$re$/i };
     return 0 if $@;

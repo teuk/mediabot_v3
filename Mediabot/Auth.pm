@@ -1,6 +1,7 @@
 package Mediabot::Auth;
 use strict;
 use warnings;
+use Mediabot::IRC::Glob qw(glob_pattern);
 use Digest::SHA qw(sha1 sha1_hex);
 my $HAVE_BCRYPT = eval { require Crypt::Bcrypt; 1 } ? 1 : 0;
 use Scalar::Util qw(blessed);
@@ -835,13 +836,8 @@ sub maybe_upgrade_hash {
 sub _glob_to_re {
     my ($glob) = @_;
 
-    # Escape regex metacharacters first, then translate glob wildcards:
-    #   *  -> .*
-    #   ?  -> .
-    my $re = quotemeta($glob // '');
-    $re =~ s/\\\*/.*/g;
-    $re =~ s/\\\?/./g;
-
+    # Share predictable wildcard matching without relaxing Auth's strict end.
+    my $re = glob_pattern($glob);
     return qr/^$re\z/i;
 }
 

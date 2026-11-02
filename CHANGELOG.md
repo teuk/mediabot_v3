@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1071 — Share predictable hostmask compilation with authentication
+
+- Remove the independent backtracking glob compiler from Auth. Stored hostmasks
+  can no longer stall hostmask selection/autologin while trying many star splits.
+- Give Auth and ChannelBan one small IRC glob compiler, retaining caller-owned
+  anchors and case policy. Auth keeps its strict string end; ChannelBan keeps
+  its existing end behavior. No new mask rejection cap or authentication policy.
+- Keep hostmask candidates, specificity/tie selection, password verification,
+  autologin flags, SQL and sessions unchanged. Native SQLite checks cover
+  allowed and refused autologin after the problematic non-match is skipped.
+- Group three construction/API smoke checks into one and add two native
+  scenarios in the existing Auth case: fourteen assertions remain, no new case.
+  The existing module-structure test adds one check for the shared compiler.
+  No database schema, configuration, dependency or manual VERSION change.
+
+
 ### MB1070 — Keep wildcard bans from stalling IRC joins
 
 - Match ban globs without retrying every distribution of earlier stars when

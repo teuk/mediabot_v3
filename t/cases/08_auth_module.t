@@ -9,6 +9,9 @@
 
 use strict;
 use warnings;
+use utf8;
+use DBI;
+use JSON::PP ();
 
 BEGIN {
     use FindBin qw($Bin);
@@ -17,6 +20,7 @@ BEGIN {
 }
 
 use Mediabot::Auth;
+use Mediabot::ChannelBan;
 use Mediabot::Log;
 
 {
@@ -75,9 +79,8 @@ return sub {
     my $logger = Mediabot::Log->new(debug_level => -1);
 
     my $no_db = Mediabot::Auth->new(logger => $logger, dbh => undef);
-    $assert->ok($no_db, 'Mediabot::Auth object can be created without DB handle');
-    $assert->ok($no_db->can('verify_credentials'), 'Auth exposes verify_credentials');
-    $assert->ok($no_db->can('maybe_autologin'), 'Auth exposes maybe_autologin');
+    $assert->ok($no_db && $no_db->can('verify_credentials') && $no_db->can('maybe_autologin'),
+        'Auth can be created without DB and exposes password and autologin APIs');
 
     $assert->ok(
         !$no_db->verify_credentials(1, 'teuk', 'anything'),
@@ -170,4 +173,53 @@ return sub {
         $assert->ok(!$ok, '#AUTOLOGIN# does not bypass a failed hostmask check');
         $assert->is($reason, 'no_mask_matched', 'failed hostmask returns explicit reason');
     }
+    # Exercise native mask selection and autologin with real SQLite writes.
+    # A generous test-only alarm detects a regressed matcher without hanging
+    # the suite. The application has no added timeout or mask rejection cap.
+    my $bounded = sub {
+        my ($cb)=@_;my ($result,$expired,$error)=(undef,0,'');
+        local $SIG{ALRM}=sub {$expired=1;die "auth matching budget\n"};
+        my $ok=eval {alarm 5;$result=$cb->();1};
+        $error=$@ unless $ok;alarm 0;
+        return {expired=>$expired,error=>$error,result=>$result};
+    };
+    my $db=DBI->connect('dbi:SQLite:dbname=:memory:','','',{
+        RaiseError=>1,PrintError=>0,sqlite_unicode=>1});
+    $db->sqlite_create_function('NOW',0,sub {'2026-11-02 12:00:00'});
+    $db->do('CREATE TABLE USER(id_user INTEGER PRIMARY KEY,nickname TEXT,auth INTEGER,last_login TEXT)');
+    $db->do("INSERT INTO USER VALUES(91,'Registered',0,NULL),(92,'Other',0,NULL)");
+    my $native=Mediabot::Auth->new(dbh=>$db,logger=>$logger);
+    my $host='a'x70;
+    my $hard='*!*@'.('*a'x25).'b';
+    my $specific='Live!ident@'.$host;
+    my $user={id_user=>91,nickname=>'Registered',username=>'#AUTOLOGIN#',auth=>0,
+        hostmasks=>join(',', $hard,'*!*@'.$host,$specific,'LIVE!IDENT@'.$host)};
+    my $json=JSON::PP->new->canonical;
+    my $match=$bounded->(sub {
+        my ($ok,$mask,$rx,$score)=$native->hostmask_matches($user,'Live!~ident@'.$host);
+        my $literal=Mediabot::Auth::_glob_to_re('N[ic]k!*@host.example');
+        my $question=Mediabot::Auth::_glob_to_re('?ser!*@host');
+        my $strict=Mediabot::Auth::_glob_to_re('*!*@host');
+        my $ban=Mediabot::ChannelBan->new(dbh=>$db);
+        return [$ok,$mask,$score,('LiVe!ident@'.$host)=~$rx?1:0,
+            'n[IC]K!x@HOST.EXAMPLE'=~$literal?1:0,'nick!x@host.example'=~$literal?1:0,
+            'Éser!x@host'=~$question?1:0,'ssÉser!x@host'=~$question?1:0,
+            "nick!x\@host\n"=~$strict?1:0,$ban->_mask_matches_irc('*!*@host',"nick!x\@host\n")];
+    });
+    $assert->is($json->encode($match),$json->encode({expired=>0,error=>'',
+        result=>[1,$specific,91,1,1,0,1,0,0,1]}),
+        'native Auth skips the hostile non-match, retains specificity/ties and legacy candidates, literals and caller-specific anchors');
+    my $login=$bounded->(sub {
+        my ($ok,$reason)=$native->maybe_autologin($user,'Live!~ident@'.$host);
+        my ($denied,$why)=$native->maybe_autologin({id_user=>92,nickname=>'Other',
+            username=>'#AUTOLOGIN#',auth=>0,hostmasks=>$hard},'Other!ident@'.$host);
+        my $row=$db->selectall_arrayref('SELECT id_user,auth,last_login FROM USER ORDER BY id_user');
+        return [$ok,$reason,$native->{sessions}{live}{id_user},$native->is_logged_in_id(91),
+            $denied,$why,exists($native->{sessions}{other})?1:0,$row];
+    });
+    $assert->is($json->encode($login),$json->encode({expired=>0,error=>'',
+        result=>[1,'flag+hostmask:'.$specific,91,1,0,'no_mask_matched',0,
+            [[91,1,'2026-11-02 12:00:00'],[92,0,undef]]]}),
+        'native autologin still authenticates the matching account and leaves a nonmatching account and session untouched');
+    $db->disconnect;
 };
