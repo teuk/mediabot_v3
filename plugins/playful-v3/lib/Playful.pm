@@ -83,10 +83,11 @@ sub command_roll {
     my ($self, $context, $invocation) = @_;
     my @args = @{ $invocation->args };
     my $channel = $invocation->channel;
+    my $channel_key = lc($channel // '');
     my $nick = $invocation->nick;
 
     if (@args && lc($args[0]) eq 'history') {
-        my $history = $self->{roll_history}{$channel} || [];
+        my $history = $self->{roll_history}{$channel_key} || [];
         return $context->reply($invocation,
             @$history ? 'Last rolls: ' . join('  |  ', reverse @$history)
                      : "$nick: no roll history on $channel.");
@@ -144,7 +145,7 @@ sub command_roll {
         $out = sprintf('%s rolled %s: [%s]%s',
             $nick, $label, join(', ', @rolls), $mod);
     }
-    my $history = $self->{roll_history}{$channel} ||= [];
+    my $history = $self->{roll_history}{$channel_key} ||= [];
     push @$history, $out;
     splice @$history, 0, @$history - 5 if @$history > 5;
     return $context->reply($invocation, $out);
@@ -154,7 +155,8 @@ sub command_flip {
     my ($self, $context, $invocation) = @_;
     my @args = @{ $invocation->args };
     my ($channel, $nick) = ($invocation->channel, $invocation->nick);
-    my $stats = $self->{flip_stats}{$channel} ||= { h => 0, t => 0 };
+    my $channel_key = lc($channel // '');
+    my $stats = $self->{flip_stats}{$channel_key} ||= { h => 0, t => 0 };
     if (@args && lc($args[0]) eq 'stats') {
         my $total = $stats->{h} + $stats->{t};
         return $context->reply($invocation,
@@ -185,14 +187,15 @@ sub command_choose {
     my ($self, $context, $invocation) = @_;
     my @args = @{ $invocation->args };
     my ($channel, $nick) = ($invocation->channel, $invocation->nick);
+    my $channel_key = lc($channel // '');
     if (@args && lc($args[0]) eq 'history') {
-        my $history = $self->{choose_history}{$channel} || [];
+        my $history = $self->{choose_history}{$channel_key} || [];
         return $context->reply($invocation,
             @$history ? 'Last choices: ' . join(' | ', reverse @$history)
                      : "$nick: no choice history on $channel.");
     }
     if (@args && lc($args[0]) eq 'last') {
-        my $last = $self->{choose_last}{$channel};
+        my $last = $self->{choose_last}{$channel_key};
         return $context->reply($invocation, defined($last)
             ? "$nick: last choice was: $last"
             : "$nick: no previous choice on this channel.");
@@ -223,8 +226,8 @@ sub command_choose {
         'Only one option left after deduplication — nothing to choose from.')
         unless keys(%labels) >= 2;
     my $choice = $pool[ $self->_rand_index(scalar @pool) ];
-    $self->{choose_last}{$channel} = $choice;
-    my $history = $self->{choose_history}{$channel} ||= [];
+    $self->{choose_last}{$channel_key} = $choice;
+    my $history = $self->{choose_history}{$channel_key} ||= [];
     push @$history, $choice;
     splice @$history, 0, @$history - 5 if @$history > 5;
     return $context->reply($invocation,

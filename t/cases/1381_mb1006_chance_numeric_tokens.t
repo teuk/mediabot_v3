@@ -28,20 +28,21 @@ local *Mediabot::UserCommands::logBot=sub {push @audit,[@_[2..$#_]];1};
 my $authority=Mediabot::PluginContext->new(plugin=>'playful-v3',
     requested=>[qw(irc.reply irc.notice)],granted=>[qw(irc.reply irc.notice)]);
 sub run_1381 {
-    my ($kind,$command,$args,$draws)=@_;
-    my $bot=Mediabot->new({});
-    my $plugin=Mediabot::Plugin::Playful->new(context=>$authority);
+    my ($kind,$command,$args,$draws,$channel,$bot,$plugin)=@_;
+    $channel //= '#test';
+    $bot //= Mediabot->new({});
+    $plugin //= Mediabot::Plugin::Playful->new(context=>$authority);
     @wire=(); @audit=(); @LIMITS=(); @DRAWS=@$draws;
     my (@warnings,$input,$call);
     if ($kind eq 'native') {
-        $input=Mediabot::Context->new(bot=>$bot,nick=>'Alice',channel=>'#test',
+        $input=Mediabot::Context->new(bot=>$bot,nick=>'Alice',channel=>$channel,
             command=>$command,args=>[@$args]);
         $call=sub {$bot->command_registry->handler_for($command,'public')->($input)};
     } else {
-        $input=Mediabot::Plugin::InvocationV3->new(nick=>'Alice',channel=>'#test',
+        $input=Mediabot::Plugin::InvocationV3->new(nick=>'Alice',channel=>$channel,
             command=>$command,args=>$args,source=>'public',is_private=>0,
             authority=>$authority,activation=>'on',config=>{},
-            reply_sink=>sub {push @wire,['public','#test',$_[0]];1},
+            reply_sink=>sub {push @wire,['public',$channel,$_[0]];1},
             notice_sink=>sub {push @wire,['notice','Alice',$_[0]];1});
         my $method='command_'.$command;
         $call=sub {$plugin->$method($authority,$input)};
@@ -67,6 +68,8 @@ sub expected_1381 {
         warnings=>[],args=>$args,audit=>$kind eq 'native'?[['#test',$command,$value]]:[],record=>$record};
 }
 my $default='Alice rolled 1d6: 4';
+{
+my (@all_actual,@all_expected);
 for my $group (
     ['dice count',[['٢d8'],['1٢d8'],['２d8']]],
     ['dice sides',[['2d٨'],['2d8٢'],['2d８']]],
@@ -80,8 +83,12 @@ for my $group (
             push @expected,expected_1381($kind,'roll',$args,[6],$default,'1d6',{'#test'=>[$default]});
         }
     }
-    is_deeply(\@actual,\@expected,"$label: Unicode and mixed digits retain the existing default roll without partial conversion");
+    push @all_actual,[$label,\@actual];push @all_expected,[$label,\@expected];
 }
+is_deeply(\@all_actual,\@all_expected,
+    "Unicode dice counts, sides and shorthand remain whole-token defaults without partial conversion");
+}
+
 {
     my (@actual,@expected);
     my $text="Alice rolled 1d6 (adv): [5, \x1e1\x0f]  → 5";
@@ -154,5 +161,93 @@ for my $group (
         }
     }
     is_deeply(\@actual,\@expected,'existing unrecognized-token fallback and subsequent valid modifiers remain unchanged');
+}
+# Reuse each actual native/plugin instance across differently cased messages.
+# Fixed draws check state identity/order without reseeding or random thresholds.
+sub compact_1074 {
+    my ($r)=@_;
+    return {map {$_=>$r->{$_}} qw(error wire limits remaining warnings args audit)};
+}
+sub expected_step_1074 {
+    my ($kind,$command,$channel,$args,$limits,$text,$value)=@_;
+    return {error=>'',wire=>[['public',$channel,$text]],limits=>$limits,remaining=>[],
+        warnings=>[],args=>$args,audit=>$kind eq 'native' && defined($value)
+            ? [[$channel,$command,$value]] : []};
+}
+{
+    my (@actual,@expected);
+    for my $kind (qw(native plugin)) {
+        my $bot=Mediabot->new({});my $plugin=Mediabot::Plugin::Playful->new(context=>$authority);
+        my (@got,@want,@rolls,@choices);
+        my @channels=('#MiXeD','#mixed','#MIXED');
+        for my $n (1..6) {
+            my $channel=$channels[($n-1)%3];my $text="Alice rolled 1d6: $n";
+            my $r=run_1381($kind,'roll',[],[($n-.5)/6],$channel,$bot,$plugin);
+            push @rolls,$text;push @got,compact_1074($r);
+            push @want,expected_step_1074($kind,'roll',$channel,[],[6],$text,'1d6');
+        }
+        my @last_rolls=@rolls[1..5];
+        for my $row (['#mIxEd','Last rolls: '.join('  |  ',reverse @last_rolls)],
+                     ['#Other','Alice: no roll history on #Other.']) {
+            my ($channel,$text)=@$row;
+            push @got,compact_1074(run_1381($kind,'roll',['history'],[],$channel,$bot,$plugin));
+            push @want,expected_step_1074($kind,'roll',$channel,['history'],[],$text,undef);
+        }
+        for my $n (0..5) {
+            my $label=('0','café','alpha','beta','gamma','delta')[$n];
+            my $channel=$channels[$n%3];
+            my $args=$n==1?['café:2','|','water']:[$label,'|','water'];
+            my $limits=$n==1?[3]:[2];
+            my $text="Alice: I choose... $label!".($n==1?' (1 of 3 options)':'');
+            push @choices,$label;
+            push @got,compact_1074(run_1381($kind,'choose',$args,[0],$channel,$bot,$plugin));
+            push @want,expected_step_1074($kind,'choose',$channel,$args,$limits,$text,$label);
+            if ($n==0) {
+                push @got,compact_1074(run_1381($kind,'choose',['last'],[],'#mixed',$bot,$plugin));
+                push @want,expected_step_1074($kind,'choose','#mixed',['last'],[],
+                    'Alice: last choice was: 0',undef);
+            }
+        }
+        my @last_choices=@choices[1..5];
+        for my $row (['last','#mIxEd','Alice: last choice was: delta'],
+                     ['history','#MIXED','Last choices: '.join(' | ',reverse @last_choices)],
+                     ['last','#Other','Alice: no previous choice on this channel.'],
+                     ['history','#Other','Alice: no choice history on #Other.']) {
+            my ($arg,$channel,$text)=@$row;
+            push @got,compact_1074(run_1381($kind,'choose',[$arg],[],$channel,$bot,$plugin));
+            push @want,expected_step_1074($kind,'choose',$channel,[$arg],[],$text,undef);
+        }
+        my $state=$kind eq 'native' ? [$bot->{_roll_history},$bot->{_choose_last},$bot->{_choose_history}]
+            : [$plugin->{roll_history},$plugin->{choose_last},$plugin->{choose_history}];
+        push @actual,[$kind,\@got,$state];push @expected,[$kind,\@want,
+            [{'#mixed'=>\@last_rolls},{'#mixed'=>'delta'},{'#mixed'=>\@last_choices}]];
+    }
+    is_deeply(\@actual,\@expected,
+        'native/plugin histories share channel case identity, keep five real results, preserve zero/Unicode/weights and never draw or audit on recall');
+}
+{
+    my (@actual,@expected);
+    for my $kind (qw(native plugin)) {
+        my $bot=Mediabot->new({});my $plugin=Mediabot::Plugin::Playful->new(context=>$authority);
+        my (@got,@want);
+        for my $row (['#MiXeD',.1,'Heads!','H'],['#mixed',.9,'Tails!','T'],['#Other',.1,'Heads!','H']) {
+            my ($channel,$draw,$word,$value)=@$row;
+            push @got,compact_1074(run_1381($kind,'flip',[],[$draw],$channel,$bot,$plugin));
+            push @want,expected_step_1074($kind,'flip',$channel,[],[$kind eq 'native'?1:2],
+                "Alice flipped a coin: $word",$value);
+        }
+        for my $row (['#MIXED','1 Heads (50%)  1 Tails (50%)  — 2 total'],
+                     ['#oThEr','1 Heads (100%)  0 Tails (0%)  — 1 total']) {
+            my ($channel,$suffix)=@$row;
+            push @got,compact_1074(run_1381($kind,'flip',['stats'],[],$channel,$bot,$plugin));
+            push @want,expected_step_1074($kind,'flip',$channel,['stats'],[],
+                "Alice flip stats on $channel: $suffix",undef);
+        }
+        my $stats=$kind eq 'native'?$bot->{_flip_stats}:$plugin->{flip_stats};
+        push @actual,[$kind,\@got,$stats];push @expected,[$kind,\@want,
+            {'#mixed'=>{h=>1,t=>1},'#other'=>{h=>1,t=>0}}];
+    }
+    is_deeply(\@actual,\@expected,
+        'native/plugin flip stats accumulate across channel casing, isolate other channels and preserve reply/audit spelling without extra draws');
 }
 done_testing;

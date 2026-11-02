@@ -167,11 +167,14 @@ sub mbRoll_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my $channel_key = lc($channel // '');
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    # State follows the existing lc channel identity; replies/audit retain the
+    # original spelling. These caches are transient and rebuilt on restart.
     # mb85-IMP2: !roll history — show last 5 rolls on this channel
     if (@args && lc($args[0]) eq 'history') {
-        my $hist = $self->{_roll_history}{$channel} // [];
+        my $hist = $self->{_roll_history}{$channel_key} // [];
         unless (@$hist) {
             botPrivmsg($self, $channel, "$nick: no roll history on $channel."); return 1;
         }
@@ -241,7 +244,7 @@ sub mbRoll_ctx {
     }
 
     # mb85-IMP2: keep rolling history (last 5 per channel)
-    my $rh = $self->{_roll_history}{$channel} //= [];
+    my $rh = $self->{_roll_history}{$channel_key} //= [];
     push @$rh, $out;
     splice @$rh, 0, @$rh - 5 if @$rh > 5;
 
@@ -260,11 +263,12 @@ sub mbFlip_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my $channel_key = lc($channel // '');
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # mb85-IMP3: !flip stats — show heads/tails counts on this channel
     if (@args && lc($args[0]) eq 'stats') {
-        my $fs = $self->{_flip_stats}{$channel} // { h => 0, t => 0 };
+        my $fs = $self->{_flip_stats}{$channel_key} // { h => 0, t => 0 };
         my $total = $fs->{h} + $fs->{t};
         unless ($total) {
             botPrivmsg($self, $channel, "$nick: no flips yet on $channel."); return 1;
@@ -285,7 +289,7 @@ sub mbFlip_ctx {
     }
 
     my @results;
-    my $fs = $self->{_flip_stats}{$channel} //= { h => 0, t => 0 };
+    my $fs = $self->{_flip_stats}{$channel_key} //= { h => 0, t => 0 };
     for (1..$n) {
         my $r = rand() < 0.5 ? 'H' : 'T';
         push @results, $r;
@@ -316,11 +320,12 @@ sub mbChoose_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my $channel_key = lc($channel // '');
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $raw = join(' ', @args);
     # Y8: !choose history — show last 5 choices
     if (@args && lc($args[0]) eq 'history') {
-        my $hist = $self->{_choose_history}{$channel} // [];
+        my $hist = $self->{_choose_history}{$channel_key} // [];
         unless (@$hist) {
             botPrivmsg($self, $channel, "$nick: no choice history on $channel."); return 1;
         }
@@ -330,7 +335,7 @@ sub mbChoose_ctx {
 
     # X4: !choose last — recall the last choice made on this channel
     if (@args && lc($args[0]) eq 'last') {
-        my $last = $self->{_choose_last}{$channel};
+        my $last = $self->{_choose_last}{$channel_key};
         # Zero is a valid option label; only undef means no prior choice.
         if (defined $last) {
             botPrivmsg($self, $channel, "$nick: last choice was: $last");
@@ -379,9 +384,9 @@ sub mbChoose_ctx {
         return;
     }
     my $choice = $opts[int(rand(scalar @opts))];
-    $self->{_choose_last}{$channel} = $choice;  # X4: remember last choice
+    $self->{_choose_last}{$channel_key} = $choice;  # X4: remember last choice
     # Y8: keep rolling history of 5 choices
-    my $ch = $self->{_choose_history}{$channel} //= [];
+    my $ch = $self->{_choose_history}{$channel_key} //= [];
     push @$ch, $choice;
     splice @$ch, 0, @$ch - 5 if @$ch > 5;
     # V3: show number of options for context

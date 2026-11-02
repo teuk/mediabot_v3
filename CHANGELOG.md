@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1074 — Keep chance-game history under one channel case identity
+
+- Key native and playful-v3 roll/choose history, last choice and flip counters
+  by the existing lowercased channel identity. Messages addressed to #test and
+  #TEST no longer split one channel's transient history or statistics.
+- Keep the original target spelling in replies and native audit records.
+  Preserve random draws, dice/modifier limits, weights, zero/Unicode labels,
+  five-result histories and separation between different channels.
+- Extend the existing native/plugin case with sequential mixed-case commands,
+  recall and statistics. Group its three Unicode dice-position checks without
+  removing conditions: ten assertions remain, no new case or count increase.
+- No schema, persistent data, dependency, configuration, command metadata or
+  manual VERSION change. In-memory state is rebuilt by the normal dev restart;
+  previously split mixed-case buckets are not merged during an in-process reload.
+
+
 ### MB1073 — Keep confirmed badword rules when refresh reads fail
 
 - Share one badword-cache reader between outgoing PRIVMSG and ACTION paths.
