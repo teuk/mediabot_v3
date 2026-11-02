@@ -1,5 +1,19 @@
 ## [Unreleased] — 3.8dev
 
+### MB1070 — Keep wildcard bans from stalling IRC joins
+
+- Match ban globs without retrying every distribution of earlier stars when
+  a later piece fails. Collapse consecutive stars and use atomic interior
+  matches; the previous eval guard could not bound regex backtracking time.
+- Preserve literal escaping, single-character question marks, case-insensitive
+  matching and the existing anchors. Ban selection, SQL, raw JOIN hostmasks and
+  normalized MODE masks remain unchanged; no valid mask is refused by a new cap.
+- Keep seven assertions in the existing case: exercise the native matcher and
+  SQLite lookup, including adversarial failure and positive matching. Consolidate
+  the four JOIN source pins into one guard. No new test file or assertion growth.
+- No database schema, configuration, dependency or manual VERSION change.
+
+
 ### MB1069 — Enforce private command cooldowns before dispatch
 
 - Pass the private actor to the parent-side admission guard. Repeated expensive

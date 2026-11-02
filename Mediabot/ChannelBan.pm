@@ -293,12 +293,22 @@ sub _mask_matches_irc {
     my ($self, $pattern, $hostmask) = @_;
     return 0 unless defined $pattern && defined $hostmask;
 
-    # Convert IRC glob to Perl regex
-    my $re = quotemeta($pattern);
-    $re =~ s/\\\*/.*/g;   # * -> .*
-    $re =~ s/\\\?/./g;    # ? -> .
+    # Collapse star runs and commit each interior fixed piece at its earliest
+    # match. Later failure must not retry every distribution of earlier stars:
+    # eval catches an exception, but cannot bound regex backtracking CPU time.
+    # Keep the original quoted literals, single-character ?, /i and anchors.
+    my @pieces = map {
+        my $fixed = quotemeta($_);
+        $fixed =~ s/\\\?/./g;
+        $fixed;
+    } split /\*+/, $pattern, -1;
+    my $re = shift(@pieces) // '';
+    if (@pieces) {
+        my $last = pop @pieces;
+        $re .= '(?>.*?' . $_ . ')' for @pieces;
+        $re .= '.*' . $last;
+    }
 
-    # B4: wrap in eval to catch catastrophic backtracking on malformed masks
     my $ok = eval { $hostmask =~ /^$re$/i };
     return 0 if $@;
     return $ok ? 1 : 0;
