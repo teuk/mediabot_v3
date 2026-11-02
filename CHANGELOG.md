@@ -1,5 +1,23 @@
 ## [Unreleased] — 3.8dev
 
+### MB1077 — Replace user authority only after a confirmed role read
+
+- Clear a User object's previously loaded role before refreshing USER_LEVEL.
+  A missing role, missing database/role ID or failed SQL read can no longer
+  retain old Owner/Master/Administrator authority on that object.
+- Publish the replacement only after a successful fetch with no DBI error.
+  Contain prepare/execute/fetch exceptions, finish acquired statements and
+  decide read status before cleanup can clear err. Report only a fixed stage.
+- Preserve account identity, authentication, the four rank mappings, the bound
+  lookup and stored/explicit DBH API. A later confirmed read can recover with
+  the current downgraded role; no session or schema changes are introduced.
+- Replace four role-reader source pins with five native SQLite/DBI scenarios,
+  and group ten existing create-error checks into two without dropping labels.
+  The existing case has 13 assertions instead of 20, with no new test file.
+- No dependency, configuration, persistent data or manual VERSION change;
+  previously qualified fixes remain intact.
+
+
 ### MB1076 — Stop console hooks from feeding their own logger
 
 - Keep a dynamically scoped console-dispatch guard per logger. When a console

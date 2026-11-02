@@ -128,7 +128,10 @@ sub set_dbh {
 =head2 load_level([$dbh])
 
 Loads the user's privilege level and description from the USER_LEVEL table.
-Will use stored DBH if available.
+Will use stored DBH if available. Previous role authority is cleared before
+the read; a confirmed row publishes the replacement and returns 1. Missing
+roles, missing prerequisites and SQL failures return 0 without retaining the
+previous role. Authentication and account identity are not changed.
 
 =cut
 
@@ -136,32 +139,35 @@ sub load_level {
     my ($self, $dbh) = @_;
     $dbh //= $self->{dbh};
 
+    # A failed/empty refresh must not keep previously loaded authority. Keep
+    # authentication and account identity separate from the role read below.
+    @{$self}{qw(level level_desc)} = (undef, undef);
     return 0 unless $dbh && defined $self->{level_id};
 
     my $sql = "SELECT level, description FROM USER_LEVEL WHERE id_user_level = ?";
-    my $sth = $dbh->prepare($sql);
-
-    unless ($sth) {
-        carp "load_level() SQL prepare error: $DBI::errstr";
+    my ($sth, $row);
+    my $stage = 'prepare';
+    my $ok = eval {
+        $sth = $dbh->prepare($sql) or die "role prepare failed\n";
+        $stage = 'execute';
+        $sth->execute($self->{level_id}) or die "role execute failed\n";
+        $stage = 'fetch';
+        $row = $sth->fetchrow_hashref;
+        die "role fetch failed\n" if $sth->err;
+        die "invalid role row\n" if defined($row) && ref($row) ne 'HASH';
+        1;
+    };
+    # Decide before finish can clear a DBI error. Cleanup must also run after
+    # RaiseError exceptions, without turning them into stale cached privileges.
+    eval { $sth->finish } if $sth;
+    unless ($ok) {
+        carp "load_level() SQL $stage error";
         return 0;
     }
+    return 0 unless $row;
 
-    unless ($sth->execute($self->{level_id})) {
-        carp "load_level() SQL execute error: $DBI::errstr";
-        $sth->finish;
-        return 0;
-    }
-
-    my $loaded = 0;
-
-    if (my $ref = $sth->fetchrow_hashref) {
-        $self->{level}      = $ref->{level};
-        $self->{level_desc} = $ref->{description};
-        $loaded = 1;
-    }
-
-    $sth->finish;
-    return $loaded;
+    @{$self}{qw(level level_desc)} = @{$row}{qw(level description)};
+    return 1;
 }
 
 
