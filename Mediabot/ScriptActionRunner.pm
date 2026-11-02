@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use utf8;
 
-use Scalar::Util qw(looks_like_number);
+use Scalar::Util qw(looks_like_number refaddr);
 use Encode qw(encode);
 use JSON::PP ();   # mb601-B1: bornes canoniques de l'action store
 
@@ -125,13 +125,33 @@ sub timer_pending {
     return exists $self->{pending_timers}{$name} ? 1 : 0;
 }
 
-# mb525-B1: liberer un slot de timer. Appele par l'ordonnanceur injecte quand
-# le timer expire ou est annule (dechargement du plugin). Retourne 1 si le nom
-# etait effectivement en attente.
-sub release_timer {
+# Private ownership handle for the native script-timer bridge.
+sub _timer_reservation {
     my ($self, $name) = @_;
-    return 0 unless defined $name && !ref $name && length $name;
-    return delete $self->{pending_timers}{$name} ? 1 : 0;
+    return unless defined $name && !ref $name && length $name;
+    return $self->{pending_timers}{$name};
+}
+
+# One-argument release remains compatible; internal cleanup supplies its
+# occurrence token so a stale failure cannot remove a same-name successor.
+sub release_timer {
+    my ($self, $name, $expected) = @_;
+    return 0 unless defined $name && !ref $name && length $name
+        && exists $self->{pending_timers}{$name};
+    if (@_ > 2) {
+        my $current = $self->{pending_timers}{$name};
+        if (ref($current) || ref($expected)) {
+            return 0 unless ref($current) && ref($expected)
+                && refaddr($current) == refaddr($expected);
+        }
+        else {
+            # Keep reservations created before an in-process module reload
+            # releasable, without letting them remove a new reference token.
+            return 0 unless defined($current) && defined($expected) && $current eq $expected;
+        }
+    }
+    delete $self->{pending_timers}{$name};
+    return 1;
 }
 
 sub allowed_action_types {
@@ -1050,7 +1070,8 @@ sub apply_actions {
             # Reserver le slot AVANT d'armer: l'ordonnanceur (et son rappel)
             # doit voir un etat coherent. En cas d'echec d'armement, le slot
             # est libere immediatement.
-            $self->{pending_timers}{$name} = 1;
+            my $reservation = {};
+            $self->{pending_timers}{$name} = $reservation;
 
             my ($sched_ok, $sched_err);
             {
@@ -1075,7 +1096,7 @@ sub apply_actions {
                 };
             }
             else {
-                $self->release_timer($name);
+                $self->release_timer($name, $reservation);
                 push @apply_errors, {
                     index => $idx,
                     type  => 'timer',

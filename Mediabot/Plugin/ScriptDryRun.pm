@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use utf8;
 use Time::HiRes qw(time);
+use Scalar::Util qw(refaddr weaken);
 
 our $VERSION = '0.001';
 
@@ -916,102 +917,117 @@ sub active_script_timer_count {
     return scalar keys %{ $self->{active_timers} || {} };
 }
 
+sub _script_timer_is_current {
+    my ($self, $name, $record) = @_;
+    my $current = $self->{active_timers}{$name};
+    return ref($current) eq 'HASH' && ref($record) eq 'HASH'
+        && refaddr($current) == refaddr($record);
+}
+
+sub _release_script_timer_slot {
+    my ($self, $name, $record) = @_;
+    my $captured = ref($record) eq 'HASH' && exists($record->{runner});
+    my $runner = $captured ? $record->{runner} : eval {
+        my $bot = $self->{bot};
+        $bot && $bot->can('script_action_runner') ? $bot->script_action_runner : undef;
+    };
+    return unless $runner;
+    eval {
+        my @reservation = $captured && exists($record->{reservation})
+            ? ($record->{reservation}) : ();
+        $runner->release_timer($name, @reservation);
+        1;
+    };
+}
+
 sub _schedule_script_timer {
     my ($self, $script_path, $data, $planned, $context) = @_;
 
     return (0, 'planned timer is not a hash') unless ref($planned) eq 'HASH';
-
-    my $name  = $planned->{name};
+    my $name = $planned->{name};
     my $delay = $planned->{delay};
     return (0, 'planned timer is missing name or delay')
         unless defined $name && length $name && defined $delay;
-
+    return (0, 'timer name is already active') if exists $self->{active_timers}{$name};
     my $loop = $self->_script_timer_loop;
     return (0, 'bot loop is unavailable') unless $loop;
-
     my $io_async_ok = eval { require IO::Async::Timer::Countdown; 1 };
     return (0, 'IO::Async timer support is unavailable') unless $io_async_ok;
 
-    # Copie defensive des donnees d'origine: le contexte du rappel differe ne
-    # doit pas pouvoir etre mute par la suite du traitement de la commande.
     my %snapshot = %{ ref($data) eq 'HASH' ? $data : {} };
     $snapshot{args} = [ @{ ref($snapshot{args}) eq 'ARRAY' ? $snapshot{args} : [] } ];
-
-    my %planned_copy = ( name => "$name", delay => $delay );
-
+    my $runner = eval {
+        my $bot = $self->{bot};
+        $bot && $bot->can('script_action_runner') ? $bot->script_action_runner : undef;
+    };
+    my $now = time();
+    my $record = {
+        name => "$name", delay => $delay, armed_at => $now, expires_at => $now + $delay,
+        channel => $snapshot{channel}, nick => $snapshot{nick}, command => $snapshot{command},
+        script => $script_path, snapshot => \%snapshot,
+        planned => {name => "$name", delay => $delay}, runner => $runner,
+    };
+    $record->{reservation} = $runner->_timer_reservation($name)
+        if $runner && $runner->can('_timer_reservation');
+    weaken($record->{runner}) if ref($record->{runner});
+    # Publish ownership before native add/start can invoke callbacks. A weak
+    # callback cannot keep cancelled payloads or a discarded plugin alive.
+    $self->{active_timers}{$name} = $record;
+    $record->{loop} = $loop;
+    weaken($record->{loop});
+    my ($weak_self, $weak_record, $weak_loop) = ($self, $record, $loop);
+    weaken($weak_self); weaken($weak_record); weaken($weak_loop);
     my $timer;
     my $armed = eval {
         $timer = IO::Async::Timer::Countdown->new(
-            delay     => $delay,
+            delay => $delay,
             on_expire => sub {
                 my ($expired) = @_;
-
-                # Nettoyage AVANT le rappel: le slot doit etre libre pendant
-                # l'execution differee (etat coherent, pas de fuite si le
-                # rappel meurt).
-                delete $self->{active_timers}{ $planned_copy{name} };
-                eval { $loop->remove($expired); 1 };
-                eval {
-                    my $bot = $self->{bot};
-                    my $runner = $bot && $bot->can('script_action_runner')
-                        ? $bot->script_action_runner
-                        : undef;
-                    $runner->release_timer($planned_copy{name}) if $runner;
-                    1;
-                };
-                # mb543-B1: le slot est deja libere ici. Mettre le gauge a jour
-                # avant le rappel garantit sa justesse meme si le rappel est
-                # saute (plugin desactive, mode dry-run, runner absent) ou meurt.
-                $self->_note_pending_timers_metric;
-
+                my $plugin = $weak_self or return;
+                my $owned = $weak_record or return;
+                return unless $plugin->_script_timer_is_current($name, $owned)
+                    && ref($expired) && $owned->{timer}
+                    && refaddr($expired) == refaddr($owned->{timer});
+                # Revoke before cleanup or script code can reenter this name.
+                delete $plugin->{active_timers}{$name};
+                $plugin->_release_script_timer_slot($name, $owned);
+                my $owner_loop = $weak_loop;
+                eval { $owner_loop->remove($expired); 1 } if $owner_loop;
+                $plugin->_note_pending_timers_metric;
                 my $fired_ok = eval {
-                    $self->_fire_script_timer($script_path, \%planned_copy, \%snapshot);
+                    $plugin->_fire_script_timer($owned->{script}, $owned->{planned}, $owned->{snapshot});
                     1;
                 };
                 unless ($fired_ok) {
-                    my $err = $@ || 'unknown error';
+                    my $error = $@;
+                    my $err = ref($error) ? 'timer callback failed'
+                        : defined($error) && length($error) ? $error : 'unknown error';
                     $err =~ s/[\r\n]+/ /g;
-                    $self->_log_bot(1, "PUBLIC(scriptdryrun): timer callback failed name=$planned_copy{name} error=$err");
+                    $plugin->_log_bot(1, "PUBLIC(scriptdryrun): timer callback failed name=$name error=$err");
                 }
-
-                return;
             },
         );
-
+        $record->{timer} = $timer;
         $loop->add($timer);
-        $timer->start;
+        $timer->start if $self->_script_timer_is_current($name, $record);
         1;
     };
-
     unless ($armed) {
-        my $err = $@ || 'failed to arm timer';
+        my $error = $@;
+        my $err = ref($error) ? 'failed to arm timer'
+            : defined($error) && length($error) ? $error : 'failed to arm timer';
         $err =~ s/[\r\n]+/ /g;
+        delete $self->{active_timers}{$name} if $self->_script_timer_is_current($name, $record);
+        $self->_release_script_timer_slot($name, $record);
         if ($timer) {
-            eval { $timer->stop;         1 };
+            eval { $timer->stop; 1 };
             eval { $loop->remove($timer); 1 };
         }
         return (0, $err);
     }
-
-    $self->{active_timers}{"$name"} = {
-        # mb527-B1: garder les metadonnees du timer avec l'objet IO::Async,
-        # pour la visibilite partyline (.scriptdryrun timers) et l'annulation
-        # ciblee. L'objet timer lui-meme n'est jamais expose hors du plugin.
-        timer      => $timer,
-        name       => "$name",
-        delay      => $delay,
-        armed_at   => time(),
-        expires_at => time() + $delay,
-        channel    => $snapshot{channel},
-        nick       => $snapshot{nick},
-        command    => $snapshot{command},
-        script     => $script_path,
-    };
     $self->_log_bot(4, "PUBLIC(scriptdryrun): timer armed name=$name delay=$delay script=$script_path");
-
     $self->_bridge_metric('inc', 'mediabot_scriptbridge_timers_total', { outcome => 'armed' });
     $self->_note_pending_timers_metric;
-
     return (1, undef);
 }
 
@@ -1154,15 +1170,11 @@ sub cancel_script_timer {
     # ancien format (objet timer nu) reste annulable.
     my $timer = ref($rec) eq 'HASH' ? $rec->{timer} : $rec;
 
-    my $loop = $self->_script_timer_loop;
-    my $bot  = $self->{bot};
-    my $runner = eval {
-        $bot && $bot->can('script_action_runner') ? $bot->script_action_runner : undef;
-    };
-
+    my $loop = ref($rec) eq 'HASH' && exists($rec->{loop})
+        ? $rec->{loop} : $self->_script_timer_loop;
+    $self->_release_script_timer_slot($name, $rec);
     eval { $timer->stop; 1 } if $timer;
     eval { $loop->remove($timer); 1 } if $timer && $loop;
-    eval { $runner->release_timer($name); 1 } if $runner;
 
     $self->_log_bot(4, "PUBLIC(scriptdryrun): timer cancelled name=$name");
     $self->_bridge_metric('inc', 'mediabot_scriptbridge_timers_total', { outcome => 'cancelled' });

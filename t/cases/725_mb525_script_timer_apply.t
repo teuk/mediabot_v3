@@ -342,49 +342,187 @@ MB525_FIXTURE
             'aucun rappel differe apres annulation');
     }
 
-    # ------------------------------------------------------------------
-    # Gardes de source et de documentation
-    # ------------------------------------------------------------------
-    {
-        my $runner_src = _slurp_725(File::Spec->catfile('.', 'Mediabot', 'ScriptActionRunner.pm'));
-        $assert->like($runner_src, qr/timer chaining is not allowed/, 'garde de chaine cablee');
-        $assert->like($runner_src, qr/too many pending timers/, 'plafond cable');
-        $assert->like($runner_src, qr/sub release_timer/, 'liberation de slot exposee');
-        $assert->unlike($runner_src, qr/not implemented yet/, 'plus de stub not-implemented');
-
-        my $plugin_src = _slurp_725(File::Spec->catfile('.', 'Mediabot', 'Plugin', 'ScriptDryRun.pm'));
-        $assert->like($plugin_src, qr/IO::Async::Timer::Countdown/, 'plugin arme un timer IO::Async');
-        $assert->like($plugin_src, qr/sub cancel_script_timers/, 'annulation au dechargement presente');
-        $assert->like($plugin_src, qr/timer_depth => 1/, 'rappel differe execute en profondeur 1');
-
-        my $sample_src = _slurp_725(File::Spec->catfile('.', 'mediabot.sample.conf'));
-        $assert->like($sample_src, qr/timer re-runs the SAME script/, 'sample conf documente le comportement applique');
-        $assert->unlike($sample_src, qr/is not applied yet/, 'sample conf ne pretend plus que timer est inapplique');
-
-        my $readme_src = _slurp_725(File::Spec->catfile('.', 'plugins', 'scripts', 'README.md'));
-        $assert->like($readme_src, qr/### Timer actions/, 'README documente les actions timer');
-        $assert->unlike($readme_src, qr/not implemented for application yet/, 'README ne pretend plus que timer est inapplique');
-
-        $assert->ok(!-e File::Spec->catfile('.', 't', 'tmp_mb525_scripts', 'timer_echo.pl'),
-            'aucune fixture mb525 suivie sous t/tmp_mb*_scripts');
-        my $test_src = _slurp_725(File::Spec->catfile('.', 't', 'cases', '725_mb525_script_timer_apply.t'));
-        $assert->like($test_src, qr/tempdir\('mediabot_mb525_/, 'fixture mb525 creee dans un repertoire temporaire');
-
-        # mb525-B2: les fallbacks de test doivent etre des assignations de
-        # globs A L'EXECUTION. Un `sub` nomme dans un bloc `package` stub est
-        # compile inconditionnellement et ecrasait les VRAIS
-        # IO::Async::Timer::Countdown::new/start/stop pour toute la suite
-        # partagee (ce qui tuait silencieusement les timers reels de mb525).
-        for my $guarded (
-            '606_mb388_release_version_identity.t',
-            '607_mb389_local_startup_semantic_version_compare.t',
-            '609_mb391_core_command_release_contract.t',
-        ) {
-            my $tsrc = _slurp_725(File::Spec->catfile('.', 't', 'cases', $guarded));
-            $assert->unlike($tsrc, qr/package\s+IO::Async::Timer::Countdown;/,
-                "$guarded: plus de package stub compile inconditionnellement");
-            $assert->like($tsrc, qr/\Q*{'IO::Async::Timer::Countdown::new'}\E/,
-                "$guarded: stub Countdown installe par glob a l'execution");
+    # Native lifecycle regressions replace redundant production-source pins.
+    if ($have_loop) {
+        require Scalar::Util;
+        require IO::Async::Timer::Countdown;
+        my $native_new=IO::Async::Timer::Countdown->can('new');
+        my $native_start=IO::Async::Timer::Countdown->can('start');
+        my $native_add=IO::Async::Loop->can('add');
+        my @fired;
+        require JSON::PP;
+        my $json=JSON::PP->new->canonical;
+        my $deep=sub {my ($got,$want,$desc)=@_;$assert->is($json->encode($got),$json->encode($want),$desc)};
+        no warnings qw(redefine once);
+        local *Mediabot::Plugin::ScriptDryRun::_fire_script_timer=sub {
+            my ($p,$path,$planned,$data)=@_;
+            push @fired,$path;
+            return 1;
+        };
+        my $fresh=sub {
+            my $loop=IO::Async::Loop->really_new;
+            my $runner=Mediabot::ScriptActionRunner->new;
+            my $bot=Bot725->new(loop=>$loop,script_action_runner=>$runner);
+            my $p=bless {bot=>$bot,active_timers=>{}},'Mediabot::Plugin::ScriptDryRun';
+            return ($p,$runner,$loop,$bot);
+        };
+        my $arm=sub {
+            my ($p,$runner,$path,$name,$data)=@_;
+            $data//={channel=>'#mb525',nick=>'teuk',command=>'timer',args=>['original']};
+            return $runner->apply_actions($timer_result->(name=>$name,delay=>60),{channel=>'#mb525'},
+                apply=>1,schedule_timer=>sub {$p->_schedule_script_timer($path,$data,@_)});
+        };
+        my $same=sub {Scalar::Util::refaddr($_[0])==Scalar::Util::refaddr($_[1])};
+        {
+            @fired=();my ($p,$r,$loop)=$fresh->();
+            $arm->($p,$r,'cancelled','same');my $old=$p->{active_timers}{same}{timer};
+            my $cancel=$p->cancel_script_timer('same');
+            $arm->($p,$r,'replacement','same');my $next=$p->{active_timers}{same}{timer};
+            $old->invoke_event('on_expire') for 1..2;
+            my $held=$p->active_script_timer_count==1 && $r->pending_timer_count==1
+                && $p->{active_timers}{same} && $same->($p->{active_timers}{same}{timer},$next);
+            $next->invoke_event('on_expire') for 1..2;
+            $deep->([$cancel,$held?1:0,[@fired],$p->active_script_timer_count,
+                $r->pending_timer_count,scalar($loop->notifiers)],
+                [1,1,['replacement'],0,0,0],
+                'cancel/reuse: retained old callbacks cannot fire or remove their successor; live expiry runs once');
         }
+        {
+            my (@got,@want);
+            for my $stage (qw(constructor add start)) {
+                @fired=();my ($p,$r,$loop)=$fresh->();my @retained;
+                my $failed;
+                {
+                    local *IO::Async::Timer::Countdown::new=sub {
+                        die "fixture constructor failure\n" if $stage eq 'constructor';
+                        my $t=$native_new->(@_);push @retained,$t;return $t;
+                    };
+                    local *IO::Async::Loop::add=sub {
+                        my $rv=$native_add->(@_);
+                        die "fixture add failure after native add\n" if $stage eq 'add';return $rv;
+                    };
+                    local *IO::Async::Timer::Countdown::start=sub {
+                        my $rv=$native_start->(@_);
+                        die "fixture start failure after native start\n" if $stage eq 'start';return $rv;
+                    };
+                    $failed=$arm->($p,$r,'failed','recover');
+                }
+                my $empty=[$p->active_script_timer_count,$r->pending_timer_count,scalar($loop->notifiers)];
+                $arm->($p,$r,'recovered','recover');my $next=$p->{active_timers}{recover}{timer};
+                $_->invoke_event('on_expire') for @retained;
+                my $held=$p->active_script_timer_count==1 && $r->pending_timer_count==1;
+                $next->invoke_event('on_expire');
+                push @got,[$stage,$failed->{applied_ok}?1:0,$empty,$held?1:0,[@fired],
+                    $p->active_script_timer_count,$r->pending_timer_count,scalar($loop->notifiers)];
+                push @want,[$stage,0,[0,0,0],1,['recovered'],0,0,0];
+            }
+            $deep->(\@got,\@want,
+                'native constructor/add/start failures leave no ownership or notifier and cannot fire after retry');
+        }
+        {
+            @fired=();my ($p,$r,$loop)=$fresh->();my ($retained,$once);
+            my $plan;
+            {
+                local *IO::Async::Timer::Countdown::start=sub {
+                    my $rv=$native_start->(@_);
+                    unless ($once++) {$retained=$_[0];$retained->invoke_event('on_expire')}
+                    return $rv;
+                };
+                $plan=$arm->($p,$r,'inline','inline');
+            }
+            my $immediate=[$p->active_script_timer_count,$r->pending_timer_count,scalar($loop->notifiers)];
+            $retained->invoke_event('on_expire');
+            $deep->([$plan->{applied_ok}?1:0,$immediate,[@fired],$p->active_script_timer_count,
+                $r->pending_timer_count,scalar($loop->notifiers)], [1,[0,0,0],['inline'],0,0,0],
+                'inline native expiry is already owned and cannot be republished as a phantom active timer');
+        }
+        {
+            @fired=();my ($p,$r,$loop)=$fresh->();my ($old,$next,$once,$successor);
+            my $plan;
+            {
+                local *IO::Async::Timer::Countdown::start=sub {
+                    my $rv=$native_start->(@_);
+                    unless ($once++) {
+                        $old=$_[0];$old->invoke_event('on_expire');
+                        $successor=$arm->($p,$r,'second','reentrant');
+                        $next=$p->{active_timers}{reentrant}{timer};
+                        die "fixture start failure after inline expiry and replacement\n";
+                    }
+                    return $rv;
+                };
+                $plan=$arm->($p,$r,'first','reentrant');
+            }
+            $old->invoke_event('on_expire');
+            my $held=$p->{active_timers}{reentrant} && $same->($p->{active_timers}{reentrant}{timer},$next)
+                && $r->pending_timer_count==1;
+            $next->invoke_event('on_expire');
+            $deep->([$plan->{applied_ok}?1:0,$successor->{applied_ok}?1:0,$held?1:0,
+                [@fired],$p->active_script_timer_count,$r->pending_timer_count,scalar($loop->notifiers)],
+                [0,1,1,['first','second'],0,0,0],
+                'an old start failure and runner rollback cannot remove a reentrantly armed same-name reservation');
+        }
+        {
+            @fired=();my ($p,$old,$loop,$bot)=$fresh->();
+            $arm->($p,$old,'original runner','owned');my $timer=$p->{active_timers}{owned}{timer};
+            my $new=Mediabot::ScriptActionRunner->new;
+            $new->apply_actions($timer_result->(name=>'owned'),{},apply=>1,schedule_timer=>sub {(1,undef)});
+            $bot->{script_action_runner}=$new;
+            $timer->invoke_event('on_expire');
+            $deep->([$old->pending_timer_count,$new->pending_timer_count,[@fired],
+                $p->active_script_timer_count,scalar($loop->notifiers)],
+                [0,1,['original runner'],0,0],
+                'expiry releases its captured runner reservation while a replacement runner retains its own name');
+            $new->release_timer('owned');
+        }
+        {
+            @fired=();my ($p,$r,$loop,$bot)=$fresh->();
+            my $payload={private_payload=>'original context'};my $weak_payload=$payload;
+            Scalar::Util::weaken($weak_payload);
+            my $data={channel=>'#mb525',args=>[],config=>$payload};
+            $arm->($p,$r,'discarded','lifetime',$data);
+            my $retained=$p->{active_timers}{lifetime}{timer};
+            undef $data;undef $payload;
+            $p->cancel_script_timer('lifetime');
+            my $weak_plugin=$p;Scalar::Util::weaken($weak_plugin);
+            my $weak_loop=$loop;Scalar::Util::weaken($weak_loop);
+            undef $p;delete $bot->{loop};undef $loop;undef $bot;
+            $retained->invoke_event('on_expire');
+            $deep->([defined($weak_payload)?1:0,defined($weak_plugin)?1:0,
+                defined($weak_loop)?1:0,[@fired],$r->pending_timer_count], [0,0,0,[],0],
+                'a retained cancelled timer owns neither its payload, plugin nor loop and remains harmless');
+        }
+        {
+            @fired=();my ($p,$r,$loop)=$fresh->();my @retained;
+            for my $name (qw(first second)) {
+                $arm->($p,$r,$name,$name);push @retained,$p->{active_timers}{$name}{timer};
+            }
+            my $count=$p->cancel_script_timers;
+            $_->invoke_event('on_expire') for @retained;
+            $deep->([$count,[@fired],$p->active_script_timer_count,
+                $r->pending_timer_count,scalar($loop->notifiers)], [2,[],0,0,0],
+                'bulk cancellation revokes each native occurrence before retained callbacks can execute');
+        }
+        {
+            my ($p,$r,$loop)=$fresh->();
+            my $timer=IO::Async::Timer::Countdown->new(delay=>60,on_expire=>sub {});
+            $loop->add($timer);$timer->start;
+            $p->{active_timers}{legacy}=$timer;$r->{pending_timers}{legacy}=1;
+            my $cancel=$p->cancel_script_timer('legacy');
+            $deep->([$cancel,$p->active_script_timer_count,$r->pending_timer_count,
+                scalar($loop->notifiers)], [1,0,0,0],
+                'legacy raw-timer records and scalar reservations remain cancellable');
+        }
+    }
+
+    # Keep user-facing docs and fixture hygiene in compact checks. Native
+    # policy and lifecycle tests above replace the former production-source pins.
+    {
+        my $sample=_slurp_725('mediabot.sample.conf');
+        my $readme=_slurp_725('plugins/scripts/README.md');
+        $assert->ok($sample=~/timer re-runs the SAME script/ && $sample!~/is not applied yet/
+            && $readme=~/### Timer actions/ && $readme!~/not implemented for application yet/,
+            'sample and script documentation retain the applied same-script timer contract');
+        $assert->ok(!-e File::Spec->catfile('.', 't', 'tmp_mb525_scripts', 'timer_echo.pl'),
+            'the executable fixture remains temporary rather than tracked generated state');
     }
 };

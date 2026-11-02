@@ -1,5 +1,23 @@
 ## [Unreleased] — 3.8dev
 
+### MB1075 — Give each script timer its own revocable occurrence
+
+- Bind native countdown callbacks to one active record and the original action
+  runner reservation. A retained cancelled/expired callback cannot run again,
+  erase a same-name successor or release a replacement runner's pending slot.
+- Publish ownership before native add/start and revoke it before cleanup and
+  script execution. Constructor/add/start failures and inline expiry cannot
+  leave phantom active records or roll back a reentrant successor reservation.
+- Keep callback ownership weak so cancelled native timers cannot retain their
+  script payload, plugin or loop. Preserve timer policy, payloads, deferred
+  script gates, metrics, shell list projection and legacy record cancellation.
+- Replace redundant source/documentation pins in the existing timer case with
+  native lifecycle regressions. Keep the executable-script round trip and
+  policy checks: nine fewer assertions, no new test case or wait.
+- No schema, dependency, configuration or manual VERSION change; previous
+  qualified fixes remain intact. Normal dev restart renews existing callbacks.
+
+
 ### MB1074 — Keep chance-game history under one channel case identity
 
 - Key native and playful-v3 roll/choose history, last choice and flip counters
