@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1069 — Enforce private command cooldowns before dispatch
+
+- Pass the private actor to the parent-side admission guard. Repeated expensive
+  private commands no longer bypass cooldown because their channel is undef.
+  Keep each IRC nickname separate from other users and from public channels.
+- Use monotonic expiry and IRC nickname folding, round remaining time up, and
+  keep blocked requests from extending a reservation. Bound private state to
+  1024 entries, reclaim expired entries and preserve active ones at capacity.
+- Share the ai/claude cooldown identity in public/private admission and the
+  native partyline setter. Their common handler cannot bypass the existing
+  ten-second default by changing aliases.
+- Keep authentication/account administration outside channel/nick flood gates.
+  Replace thirteen source pins with thirteen native dispatcher/guard assertions;
+  no new test file, database schema, dependency or manual VERSION change.
+
+
 ### MB1068 — Reject lossy integers before plugin configuration is installed
 
 - Require decimal integer conversion to round-trip exactly before accepting

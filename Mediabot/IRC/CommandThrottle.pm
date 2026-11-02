@@ -4,8 +4,11 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use Mediabot::IRC::CaseMapping qw(fold_irc);
+use Time::HiRes ();
 
 our @EXPORT_OK = qw(_af_conf_int checkCmdCooldown checkChanFlood checkNickFlood);
+our $MAX_PRIVATE_COOLDOWNS = 1024;
 
 # Existing parent-side command admission policies; state stays in the bot.
 # Output AntiFlood, CHANNEL_FLOOD and deferred delivery remain with their owners.
@@ -42,19 +45,52 @@ sub _af_conf_int {
     return $value;
 }
 
-# MB1036: the operator setter and admission guard must address one group.
-# Keep the existing paid-news aliases together; other commands retain lc names.
+# The operator setter and admission guard must address one handler group.
+# Paid-news aliases and ai/claude share groups; other commands retain lc names.
 sub _cooldown_command_key {
     my ($cmd) = @_;
     my $cooldown_cmd = lc $cmd;
     $cooldown_cmd = 'actualites'
         if $cooldown_cmd =~ /\A(?:actualites|actualite|actu|news)\z/;
+    $cooldown_cmd = 'ai' if $cooldown_cmd eq 'claude';
     return $cooldown_cmd;
 }
 
+sub _private_cooldown_wait {
+    my ($self, $nick, $cmd, $cooldown) = @_;
+    my $now = Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
+    my $slots = $self->{_private_cmd_cooldown} //= {};
+    # Private nicknames are unbounded input, unlike the configured channels.
+    # Retire expired reservations and never evict a still-protected caller.
+    delete $slots->{$_} for grep { $slots->{$_} <= $now } keys %$slots;
+    my $key = $cmd . ':' . fold_irc($nick);
+    my $deadline = $slots->{$key};
+    if (!defined($deadline)) {
+        if (keys(%$slots) < $MAX_PRIVATE_COOLDOWNS) {
+            $slots->{$key} = $now + $cooldown;
+            return 0;
+        }
+        # Admission resumes at the earliest expiry, without growing the map
+        # or allowing a new nickname to replace an active reservation.
+        for my $expires (values %$slots) {
+            $deadline = $expires if !defined($deadline) || $expires < $deadline;
+        }
+    }
+    my $remaining = $deadline - $now;
+    my $wait = int($remaining);
+    ++$wait if $wait < $remaining;
+    return $wait;
+}
+
 sub checkCmdCooldown {
-    my ($self, $channel, $cmd, $override_secs) = @_;
-    return 0 unless defined $channel && $channel =~ /^#/ && defined $cmd;
+    my ($self, $channel, $cmd, $override_secs, $private_nick) = @_;
+    # The optional private actor is explicit: an old call without a channel
+    # must not create a shared global private bucket by accident.
+    my $private = !defined($channel) && defined($private_nick)
+        && !ref($private_nick) && length($private_nick) >= 1
+        && length($private_nick) <= 128 && $private_nick !~ /[\x00-\x20\x7f]/;
+    return 0 unless defined($cmd) && !ref($cmd)
+        && ($private || (defined($channel) && !ref($channel) && $channel =~ /^#/));
 
     # Default cooldowns per command (seconds)
     my %defaults = (
@@ -79,7 +115,7 @@ sub checkCmdCooldown {
     # mb616-B1: aliases share one parent-side bucket and operator setting.
     my $cooldown_cmd = _cooldown_command_key($cmd);
     # CC2: per-channel override via .cmdcooldown takes priority
-    my $chan_conf = defined $channel
+    my $chan_conf = !$private
         ? ($self->{_cmd_cooldown_conf}{lc $channel}{$cooldown_cmd} // undef)
         : undef;
     my $cooldown = defined $override_secs ? $override_secs
@@ -87,23 +123,33 @@ sub checkCmdCooldown {
                  : ($defaults{$cooldown_cmd} // 0);
     return 0 if $cooldown <= 0;
 
-    my $now = time();
-    my $key = $cooldown_cmd . ':' . lc($channel);
-    my $last = $self->{_cmd_cooldown}{$key} // 0;
-    my $elapsed = $now - $last;
+    my $wait_cd;
+    if ($private) {
+        $wait_cd = _private_cooldown_wait($self, $private_nick, $cooldown_cmd, $cooldown);
+    }
+    else {
+        my $now = time();
+        my $key = $cooldown_cmd . ':' . lc($channel);
+        my $last = $self->{_cmd_cooldown}{$key} // 0;
+        my $elapsed = $now - $last;
+        if ($elapsed >= $cooldown) {
+            $self->{_cmd_cooldown}{$key} = $now;
+            return 0;
+        }
+        $wait_cd = $cooldown - $elapsed;
+    }
 
-    if ($elapsed < $cooldown) {
+    if ($wait_cd > 0) {
         # A-68-3: track cooldown blocks in Prometheus
         $self->{metrics}->inc('mediabot_cmdcooldown_blocks_total')
             if $self->{metrics};
         # CC16: debug log when cooldown blocks a command
-        my $wait_cd = $cooldown - $elapsed;
+        my $where = $private ? 'in private' : "on $channel";
         $self->{logger}->log(3,
-            "checkCmdCooldown() blocking !$cmd on $channel — ${wait_cd}s remaining")
+            "checkCmdCooldown() blocking !$cmd $where — ${wait_cd}s remaining")
             if $self->{logger};
         return $wait_cd;
     }
-    $self->{_cmd_cooldown}{$key} = $now;
     return 0;
 }
 

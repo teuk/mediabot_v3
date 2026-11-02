@@ -3873,7 +3873,7 @@ sub mbCommandPrivate {
 
     # CC1: per-command cooldown for expensive commands
     {
-        my $wait = checkCmdCooldown($self, undef, $sCommand);
+        my $wait = checkCmdCooldown($self, undef, $sCommand, undef, $sNick);
         if ($wait > 0) {
             # IMP11
             my $wait_str2 = $wait >= 60
