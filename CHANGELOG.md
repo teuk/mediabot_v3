@@ -1,5 +1,22 @@
 ## [Unreleased] — 3.8dev
 
+### MB1073 — Keep confirmed badword rules when refresh reads fail
+
+- Share one badword-cache reader between outgoing PRIVMSG and ACTION paths.
+  Publish a replacement only after prepare, execute and every fetch succeed;
+  a failure or partial result cannot erase the last confirmed rules for 5 min.
+- Preserve the previous cache and its age on failure, retry on the next send,
+  contain DBI exceptions and finish statements without losing the read status.
+  A successful empty result still replaces old rules. With no previous cache,
+  keep the historical diagnostic-and-send policy without caching the failure.
+- Preserve target bindings, literal matching, case handling, TTL, cache
+  invalidation, NoColors, AntiFlood, private output, history and wire envelopes.
+- Strengthen the existing native output-policy case with SQLite/DBI failures,
+  recovery and empty-result checks. Group related old assertions: 128 instead
+  of 137, no new test case. No schema, dependency, configuration or manual
+  VERSION change; earlier qualified fixes remain intact.
+
+
 ### MB1072 — Measure task cost independently of civil clock changes
 
 - Use the monotonic clock for scheduler callback durations and worker elapsed

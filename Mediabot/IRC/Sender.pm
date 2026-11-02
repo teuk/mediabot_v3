@@ -19,6 +19,48 @@ sub noticeConsoleChan { return Mediabot::Helpers::noticeConsoleChan(@_); }
 sub logBotAction { return Mediabot::Helpers::logBotAction(@_); }
 sub _defer_flooded_send { return Mediabot::Helpers::_defer_flooded_send(@_); }
 
+# Publish only a complete successful read. Message and ACTION output share
+# the same cache and fallback policy, so a refresh cannot erase known rules.
+sub _badwords_for_channel {
+    my ($self, $target) = @_;
+    my $now = time();
+    my $cache = $self->{_badword_cache}{$target};
+    return $cache->{words} // []
+        if $cache && ($now - ($cache->{ts} // 0)) <= 300;
+
+    my ($sth, @words);
+    my $complete = eval {
+        $sth = $self->{dbh}->prepare(
+            "SELECT badword FROM CHANNEL"
+            . " JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel"
+            . " WHERE CHANNEL.name = ?"
+        ) or die "badword_prepare\n";
+        $sth->execute($target) or die "badword_execute\n";
+        while (my $row = $sth->fetchrow_hashref) {
+            die "badword_row\n" unless ref($row) eq 'HASH';
+            next unless defined $row->{badword};
+            die "badword_value\n" if ref($row->{badword});
+            push @words, lc($row->{badword});
+        }
+        die "badword_fetch\n" if $sth->err;
+        1;
+    };
+    # Capture success before finish(), which may clear a driver's error flag.
+    eval { $sth->finish } if $sth;
+    if ($complete) {
+        $self->{_badword_cache}{$target} = { ts => $now, words => \@words };
+        return \@words;
+    }
+
+    eval { $self->{logger}->log(1, 'Outgoing badword lookup failed; last confirmed rules retained')
+        if $self->{logger} };
+    eval { $self->{metrics}->inc('mediabot_db_query_errors_total') if $self->{metrics} };
+    # Preserve the historical diagnostic-and-send behavior if no rules have
+    # ever been loaded. Never cache that failure or a partial list as success;
+    # the next send retries, while an existing cache keeps its original age.
+    return $cache ? ($cache->{words} // []) : [];
+}
+
 sub botPrivmsg {
     my ($self, $sTo, $sMsg, $send_options) = @_;
 
@@ -73,33 +115,10 @@ sub botPrivmsg {
         # Badword filtering — B1/A1: cache per channel (TTL 5 min)
         # Avoids one SQL query per outgoing message on busy channels.
         {
-            my $now     = time();
-            my $ttl     = 300;   # 5 minutes
-            my $cache   = $self->{_badword_cache}{$sTo};
-
-            if (!$cache || ($now - ($cache->{ts} // 0)) > $ttl) {
-                my $sth = $self->{dbh}->prepare(
-                    "SELECT badword FROM CHANNEL"
-                    . " JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel"
-                    . " WHERE CHANNEL.name = ?"
-                );
-                my @words;
-                if ($sth && $sth->execute($sTo)) {
-                    while (my $ref = $sth->fetchrow_hashref) {
-                        push @words, lc($ref->{badword}) if defined $ref->{badword};
-                    }
-                    $sth->finish;
-                } else {
-                    $self->{logger}->log(1, "botPrivmsg() Badword SQL Error: $DBI::errstr");
-                    $self->{metrics}->inc('mediabot_db_query_errors_total') if $self->{metrics};
-                    $sth->finish if $sth; # mb135-B10: match botAction cleanup on execute errors
-                }
-                $self->{_badword_cache}{$sTo} = { ts => $now, words => \@words };
-                $cache = $self->{_badword_cache}{$sTo};
-            }
+            my $words = _badwords_for_channel($self, $sTo);
 
             my $msg_lc = lc($sMsg);
-            for my $bw (@{ $cache->{words} // [] }) {
+            for my $bw (@$words) {
                 if (index($msg_lc, $bw) != -1) {
                     # mb387-B1: a rejected payload was never sent, therefore it
                     # must not appear as a normal LIVE line or CHANNEL_LOG event.
@@ -204,38 +223,12 @@ sub botAction {
 						}
 					}
 				}
-				# mb134-B8: keep botAction aligned with botPrivmsg for outgoing
-				# badword checks. The old path queried BADWORDS on every ACTION
-				# and did not finish the statement handle on the no-badword path.
-				# Reuse the same short-lived per-channel cache used by botPrivmsg.
-				{
-					my $now     = time();
-					my $ttl     = 300;
-					my $cache   = $self->{_badword_cache}{$sTo};
-
-					if (!$cache || ($now - ($cache->{ts} // 0)) > $ttl) {
-						my $sQuery = "SELECT badword FROM CHANNEL JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel WHERE CHANNEL.name = ?";
-						my $sth = $self->{dbh}->prepare($sQuery);
-						my @words;
-
-						if ($sth && $sth->execute($sTo)) {
-							while (my $ref = $sth->fetchrow_hashref()) {
-								push @words, lc($ref->{badword}) if defined $ref->{badword};
-							}
-							$sth->finish;
-						}
-						else {
-							$self->{logger}->log(1,"botAction() Badword SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-							$self->{metrics}->inc('mediabot_db_query_errors_total') if $self->{metrics};
-							$sth->finish if $sth;
-						}
-
-						$self->{_badword_cache}{$sTo} = { ts => $now, words => \@words };
-						$cache = $self->{_badword_cache}{$sTo};
-					}
+                # Use the same confirmed rules as PRIVMSG output.
+                {
+                    my $words = _badwords_for_channel($self, $sTo);
 
 					my $sMsgLc = lc $sMsg;
-					for my $bw (@{ $cache->{words} // [] }) {
+					for my $bw (@$words) {
 						if (index($sMsgLc, $bw) != -1) {
 							# mb387-B1: rejected ACTIONs are diagnostics, not sent
 							# conversation events. Do not forge LIVE/history entries.

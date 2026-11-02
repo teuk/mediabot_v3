@@ -49,6 +49,7 @@ sub execute {
     return ($self->{dbh}{failure} // '') eq 'execute' ? 0 : 1;
 }
 sub fetchrow_hashref {my $word = shift @{$_[0]{words}}; defined($word) ? {badword => $word} : undef}
+sub err {0}
 sub finish {$_[0]{dbh}{finishes}++; 1}
 package MB881::Timer;
 sub new {my ($class, %args) = @_; bless \%args, $class}
