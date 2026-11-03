@@ -1,5 +1,26 @@
 ## [Unreleased] — 3.8dev
 
+### MB1083 — Search Wikipedia in the channel language
+
+- Add the native public `wikipedia <keyword>` command. Reuse the channel
+  language policy: LangFR, LangES, then main.LANG, with English when absent
+  or invalid. Normalize regional language tags to their base edition.
+- Search the selected Wikipedia edition and return the first article's title,
+  plain introductory extract and article link in one sanitized, UTF-8-safe
+  IRC reply of at most 400 bytes. Empty searches and service failures remain
+  distinct; a missing localized article does not silently switch to English.
+- Run the single verified HTTPS request in the existing AsyncWorker, with
+  two pending searches per bot, bounded input/body/output and a 12-second
+  worker deadline. Release each reservation once, contain launch/delivery
+  failures and suppress stale replies after transport/channel replacement
+  or shutdown. Never run a blocking lookup as a fallback in the IRC loop.
+- Add ten grouped behavioral checks, including a real local fork/pipe and
+  event-loop responsiveness; update four existing catalogue/help count cases
+  and regenerate the command inventory. No live network in the test suite.
+- No schema, API key, dependency, new configuration or manual VERSION change;
+  previously qualified fixes remain intact.
+
+
 ### MB1082 — Prepare command entries before changing their live namespace
 
 - Materialize the complete registry entry, including plugin-owned metadata,
