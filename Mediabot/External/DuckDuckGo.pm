@@ -22,6 +22,7 @@ sub _message {
         invalid=>['ddg: invalid or too long query.','ddg : recherche invalide ou trop longue.','ddg: búsqueda inválida o demasiado larga.'],
         busy=>['ddg: searches are busy; try again shortly.','ddg : recherches en cours, réessaie dans un instant.','ddg: búsquedas en curso; inténtalo de nuevo en un momento.'],
         unavailable=>['ddg: results temporarily unavailable.','ddg : résultats temporairement indisponibles.','ddg: resultados temporalmente no disponibles.'],
+        search=>['Search: ','Recherche : ','Búsqueda: '],
         missing=>['ddg: no results found.','ddg : aucun résultat trouvé.','ddg: no se encontraron resultados.'],
         long=>['ddg: link too long; URL shortener unavailable.','ddg : lien trop long, raccourcisseur indisponible.','ddg: enlace demasiado largo; acortador no disponible.'],
     );
@@ -92,12 +93,15 @@ sub _parse {
     return {state=>'unavailable'} unless $ok;
     return @hits ? {state=>'ok',hits=>\@hits} : {state=>$missing?'missing':'unavailable'};
 }
-sub _search_url { return 'https://duckduckgo.com/?q='._uri_escape_bytes($_[0]) }
+sub _region {
+    my %region=(fr=>'fr-fr',es=>'es-es',en=>'wt-wt',de=>'de-de',pt=>'pt-pt',it=>'it-it',nl=>'nl-nl');
+    return $region{_edition($_[0])}//'wt-wt';
+}
+sub _search_url { return 'https://duckduckgo.com/?q='._uri_escape_bytes($_[0]).'&kl='._region($_[1]) }
 sub _lookup_sync {
     my ($bot,$query,$lang)=@_;$lang=_edition($lang);$query=_query([$query]);
     return {state=>'unavailable'} unless defined $query;
-    my %region=(fr=>'fr-fr',es=>'es-es',en=>'wt-wt',de=>'de-de',pt=>'pt-pt',it=>'it-it',nl=>'nl-nl');
-    my $url='https://html.duckduckgo.com/html/?q='._uri_escape_bytes($query).'&kl='.($region{$lang}//'wt-wt');
+    my $url='https://html.duckduckgo.com/html/?q='._uri_escape_bytes($query).'&kl='._region($lang);
     require Mediabot::External;
     my $http=Mediabot::External::_make_http(timeout=>8,verify_SSL=>1,max_size=>$MAX_BODY,max_redirect=>0,
         agent=>'Mediabot/3.8dev (https://github.com/teuk/mediabot_v3; web search)');
@@ -105,9 +109,9 @@ sub _lookup_sync {
     my $value=ref($response) eq 'HASH' && $response->{success} && ($response->{status}//0)==200
         ? _parse($response->{content}) : {state=>'unavailable'};
     if ($value->{state} eq 'unavailable') {
-        $value={state=>'ok',fallback=>1,hits=>[{title=>'DuckDuckGo',excerpt=>_message($lang,'unavailable'),url=>_search_url($query)}]};
+        $value={state=>'search_link',hits=>[{title=>$query,url=>_search_url($query,$lang)}]};
     }
-    if ($value->{state} eq 'ok') {
+    if ($value->{state} eq 'ok' || $value->{state} eq 'search_link') {
         # Private shortener credentials and all shortening I/O stay in the child.
         my $shorten=make_bot_shortener(bot=>$bot,allow_legacy=>0);
         my $base=eval {$bot->{conf}->get('shorturl.PUBLIC_BASE_URL')} // '';
@@ -124,21 +128,25 @@ sub _lookup_sync {
 sub _render {
     my ($value,$lang,$base)=@_;
     return [_message($lang,'missing')] if defined($value->{state}) && !ref($value->{state}) && $value->{state} eq 'missing';
-    return unless defined($value->{state}) && !ref($value->{state}) && $value->{state} eq 'ok'
+    return unless defined($value->{state}) && !ref($value->{state});
+    my $search_link=$value->{state} eq 'search_link';
+    return unless ($value->{state} eq 'ok' || $search_link)
         && ref($value->{hits}) eq 'ARRAY' && @{$value->{hits}} && @{$value->{hits}}<=2;
+    return if $search_link && @{$value->{hits}}!=1;
     $base=Mediabot::URLShortener::_public_base($base);my @lines;my $rank=0;
     for my $hit (@{$value->{hits}}) {
         return unless ref($hit) eq 'HASH';my $url=_target($hit->{url});my $display=_target($hit->{display_url})//$url;
         return unless $url && $display && ($display eq $url || (length($base) && $display =~ m{\A\Q$base\E[23456789A-HJ-NP-Za-km-z]{8,16}\z}));
         my $title=_plain($hit->{title},512);return unless length $title;
+        $title=_message($lang,'search').$title if $search_link;
         my $badge="\x0300,02[🦆 DDG]\x0f ";my $link="\x0312\x1f$display\x1f\x0f";
         if (_irc_wire_bytes($link)>280) {push @lines,$badge._message($lang,'long');next}
         my $suffix=" \x0314·\x0f $link";
-        my $lead=$badge.(++$rank).'. ';
+        my $lead=$badge.($search_link?'':(++$rank).'. ');
         my $title_budget=400-_irc_wire_bytes($lead.$suffix."\x02\x02")-3;
         $title_budget=80 if $title_budget>80;
         my $prefix=$lead."\x02".truncate_utf8($title,$title_budget,'…')."\x02";
-        my $excerpt=_plain($hit->{excerpt},800);my $middle='';
+        my $excerpt=$search_link?'':_plain($hit->{excerpt},800);my $middle='';
         my $budget=400-_irc_wire_bytes($prefix.$suffix.' — ')-3;
         $middle=' — '.truncate_utf8($excerpt,$budget,'…') if length($excerpt) && $budget>=16;
         push @lines,$prefix.$middle.$suffix;

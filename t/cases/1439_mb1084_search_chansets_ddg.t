@@ -153,12 +153,12 @@ HTML
     my $fallback=$D->can('_lookup_sync')->($b,'autre recherche','es');
     is_deeply([$uri->host,decode('UTF-8',$query{q}),$query{kl},[@{$options[0]}{qw(verify_SSL max_redirect timeout max_size)}],
         [map {$_->{display_url}} @{$value->{hits}}],[map {$_->{target}} grep {$_->{method} eq 'POST'} @calls],
-        $fallback->{fallback},$fallback->{hits}[0]{excerpt}],
+        $fallback->{state},$fallback->{hits}[0]{title}],
         ['html.duckduckgo.com','café & thé ☕','fr-fr',[1,0,8,262144],
          ['https://teuk.org/shorturl/Abcdef23','https://teuk.org/shorturl/Bbcdef23'],
-         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://duckduckgo.com/?q=autre%20recherche'],
-         1,'ddg: resultados temporalmente no disponibles.'],
-        'the real HTTP and shortener contracts receive one encoded regional search and two exact destination URLs; a challenge offers a clearly labelled short search link');
+         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://duckduckgo.com/?q=autre%20recherche&kl=es-es'],
+         'search_link','autre recherche'],
+        'search and shortening preserve exact result destinations; a challenge returns a distinct browser-search state with the original query and its region');
 }
 {
     my $base='https://teuk.org/shorturl/';
@@ -167,10 +167,20 @@ HTML
     $value->{hits}[0]{display_url}='https://foreign.example.org/wrong';my $foreign=$D->can('_render')->($value,'fr',$base);
     $value->{hits}[0]{display_url}=$value->{hits}[0]{url}='https://example.org/'.('a'x500);
     my $long=$D->can('_render')->($value,'fr',$base);
-    ok(@$lines==1 && _irc_wire_bytes($text)<=400 && $text!~/[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/
+    my @searches;
+    for my $lang ('fr','en','es') {
+        my $reply=$D->can('_render')->({state=>'search_link',hits=>[
+            {title=>'la vitesse de la lumière',excerpt=>'must not be an unavailable result',
+             url=>'https://duckduckgo.com/?q=test',display_url=>$base.'Abcdef23'}]},$lang,$base);
+        my $plain=ref($reply) eq 'ARRAY' && @$reply==1 ? $reply->[0] : '';
+        $plain=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$plain=~s/[\x02\x0f\x1f]//g;
+        push @searches,$plain;
+    }
+    is_deeply([(@$lines==1 && _irc_wire_bytes($text)<=400 && $text!~/[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/
         && $text=~/\x0300,02\[🦆 DDG\]\x0f/ && $text=~/\x0312\x1f\Q$base\EAbcdef23\x1f\x0f\z/
-        && !defined($foreign) && $long->[0]=~/raccourcisseur indisponible/,
-        'bounded themed replies have a white/navy badge, bold title and light-blue underlined intact link; injected destinations and misleading cut links are refused');
+        && !defined($foreign) && $long->[0]=~/raccourcisseur indisponible/)?1:0,\@searches],
+        [1,[map {"[🦆 DDG] $_".'la vitesse de la lumière · '.$base.'Abcdef23'} ('Recherche : ','Search: ','Búsqueda: ')]],
+        'themed links remain bounded and validated; a browser search is labelled with its query in each language, without a fake rank or failure excerpt');
 }
 {
     my $b=bot1084();set1084($b,'+ddg');$b->_register_builtin_command_catalogue;

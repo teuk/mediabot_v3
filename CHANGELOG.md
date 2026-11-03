@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1085 — Label usable DDG search links instead of failed result previews
+
+- Represent the browser-search fallback as search_link, distinct from parsed
+  result hits. A valid search URL now displays the localized search label and
+  original keywords, without a fake rank or unavailable-result excerpt.
+- Keep genuine result cards, empty-result messages, worker failure messages,
+  shortener destination validation and the light-blue underlined link style.
+  Include the same channel-region parameter in the browser search link.
+- Extend the existing DDG case with the reported fallback and French/English/
+  Spanish rendering regressions, keeping eight grouped assertions. No new test
+  file, process, dependency, schema, configuration or manual VERSION change.
+
+
 ### MB1084 — Gate Wikipedia by channel and add themed DuckDuckGo search
 
 - Add independent, default-off Wikipedia and ddg chansets. Authorized native
