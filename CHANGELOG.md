@@ -1,5 +1,24 @@
 ## [Unreleased] — 3.8dev
 
+### MB1080 — Confirm RSS reads before publishing rows or suppressing articles
+
+- Share one checked cursor reader across the seven RSS repository SELECT
+  paths. Prepare/execute/fetch failures now remain failures instead of becoming
+  missing feeds, empty lists or partially accepted announcements.
+- Check DBI err before cleanup, finish every acquired read statement and
+  expose only a fixed operation/stage error. Cleanup exceptions cannot erase
+  the read decision. Preserve successful empty results and detached rows.
+- In paced delivery, require the complete latest-candidate read before marking
+  older articles as suppressed. A failed read can no longer discard them or
+  make the poller report success; a later healthy poll can recover normally.
+- Preserve SELECT SQL, binds, ordering, limits, validators, pacing and write
+  operations. Replace read source pins and duplicate assertions in existing
+  case 902 with native DBI/poller regressions: nine instead of 18 assertions,
+  no new test file, process or wait.
+- No schema, dependency, configuration, persistent-data migration or manual
+  VERSION change; previously qualified fixes remain intact.
+
+
 ### MB1079 — Bound HTTP circuit metadata across failed origins
 
 - Cap the shared API v3 HTTP service's failure tracker at 128 origins,

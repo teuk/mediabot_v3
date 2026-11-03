@@ -5,6 +5,138 @@ use utf8;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 
 use Mediabot::RSS::Fetcher;
+use Mediabot::RSS::Repository;
+use Mediabot::RSS::Poller;
+use DBI;
+use DBD::SQLite::Constants qw(SQLITE_SELECT SQLITE_DENY SQLITE_OK);
+use JSON::PP;
+use POSIX ();
+use Time::Local ();
+
+# Native DBI queries and cursors. Adapt only MySQL's date functions to SQLite;
+# the driver/authorizer and DBI set_err inject errors at the actual boundaries.
+{
+    package MB1080::DBI;
+    our @ISA=('DBI');
+    package MB1080::DBI::db;
+    our @ISA=('DBI::db');
+    sub prepare {
+        my ($db,$sql,@rest)=@_;
+        $sql =~ s/\bSECOND\b/'SECOND'/g;
+        $sql =~ s/\bWHERE\b/WHERE mb1080_gate() AND/i
+            if $sql =~ /^\s*SELECT/ && ($db->{private_fault}//'') eq 'execute';
+        my $sth=$db->SUPER::prepare($sql,@rest);
+        if ($sth && $db->{private_probe}) {
+            $sth->{private_read}=$sql =~ /^\s*SELECT/ ? 1:0;
+            push @{$db->{private_statements}},$sth;
+        }
+        return $sth;
+    }
+    package MB1080::DBI::st;
+    our @ISA=('DBI::st');
+    sub execute {
+        my ($sth,@bind)=@_;
+        $sth->{private_binds}=\@bind;
+        return $sth->SUPER::execute(@bind);
+    }
+    sub _failed_fetch {
+        my ($sth)=@_;return 0 unless $sth->{private_read};
+        my $fault=$sth->{Database}{private_fault}//'';
+        my $n=++$sth->{private_fetches};
+        return ($fault eq 'fetch_empty' && $n==1) || ($fault eq 'fetch_partial' && $n==2);
+    }
+    sub fetchrow_hashref {
+        my $sth=shift;
+        return $sth->set_err(1,'private cursor diagnostic') if $sth->_failed_fetch;
+        return $sth->SUPER::fetchrow_hashref(@_);
+    }
+    sub fetchrow_array {
+        my $sth=shift;
+        if ($sth->_failed_fetch) {$sth->set_err(1,'private cursor diagnostic');return}
+        return $sth->SUPER::fetchrow_array(@_);
+    }
+    sub finish {
+        my $sth=shift;++$sth->{private_finished};
+        my $rv=$sth->SUPER::finish(@_);
+        $sth->set_err(undef,undef); # cleanup must not erase the already decided status
+        die "private cleanup diagnostic\n"
+            if $sth->{private_read} && $sth->{Database}{private_cleanup_throw};
+        return $rv;
+    }
+}
+
+my $json902=JSON::PP->new->canonical;
+sub _fixture1080 {
+    my ($raise)=@_;
+    my $db=DBI->connect('dbi:SQLite:dbname=:memory:','','',
+        {RaiseError=>$raise,PrintError=>0,RootClass=>'MB1080::DBI'});
+    my $epoch=sub {
+        return undef unless defined $_[0];
+        my @d=$_[0]=~/^(\d+)-(\d+)-(\d+) (\d+):(\d+):(\d+)$/;
+        return Time::Local::timegm($d[5],$d[4],$d[3],$d[2],$d[1]-1,$d[0]);
+    };
+    $db->sqlite_create_function('NOW',0,sub {'2026-11-03 12:00:00'});
+    $db->sqlite_create_function('GREATEST',2,sub {$_[0]>$_[1]?$_[0]:$_[1]});
+    $db->sqlite_create_function('TIMESTAMPADD',3,sub {
+        return undef unless defined $_[2];
+        return POSIX::strftime('%Y-%m-%d %H:%M:%S',gmtime($epoch->($_[2])+$_[1]));
+    });
+    $db->sqlite_create_function('TIMESTAMPDIFF',3,sub {
+        return undef unless defined($_[1]) && defined($_[2]);
+        return $epoch->($_[2])-$epoch->($_[1]);
+    });
+    $db->sqlite_create_function('mb1080_gate',0,sub {die "private execute diagnostic\n"});
+    $db->do('CREATE TABLE CHANNEL (id_channel INTEGER PRIMARY KEY,name TEXT)');
+    $db->do(q{CREATE TABLE RSS_FEED (id_rss_feed INTEGER PRIMARY KEY,id_channel INTEGER,
+        label TEXT,url TEXT,url_hash TEXT,enabled INTEGER,poll_interval INTEGER,
+        announce_limit INTEGER,etag TEXT,last_modified TEXT,last_poll_at TEXT,
+        last_success_at TEXT,last_error_at TEXT,last_error TEXT,created_by INTEGER,
+        created_by_nick TEXT,created_at TEXT,updated_at TEXT)});
+    $db->do(q{CREATE TABLE RSS_ITEM (id_rss_item INTEGER PRIMARY KEY,id_rss_feed INTEGER,
+        item_key TEXT,title TEXT,url TEXT,published_raw TEXT,seen_at TEXT,announced_at TEXT)});
+    $db->do(q{INSERT INTO CHANNEL VALUES (1,'#one'),(2,'#two')});
+    $db->do(q{INSERT INTO RSS_FEED (id_rss_feed,id_channel,label,url,enabled,poll_interval,announce_limit,last_poll_at,last_success_at)
+        VALUES (1,1,'Alpha','https://one.example/rss',1,600,3,'2026-11-03 11:00:00','old'),
+               (2,1,'Bravo','https://two.example/rss',1,600,3,'2026-11-03 11:59:00','old'),
+               (3,2,'Charlie','https://three.example/rss',0,600,3,NULL,'old'),
+               (4,2,'Delta','https://four.example/rss',1,600,3,NULL,NULL)});
+    $db->do(q{INSERT INTO RSS_ITEM (id_rss_item,id_rss_feed,title,announced_at)
+        VALUES (1,1,'Old one',NULL),(2,1,'Old two',NULL),(3,1,'Latest',NULL),
+               (4,2,'Other feed',NULL),(5,1,'Acknowledged','old')});
+    $db->{private_statements}=[];
+    return (Mediabot::RSS::Repository->new(dbh=>$db),$db);
+}
+my @reads1080=(
+    ['channel lookup',sub {$_[0]->channel_id('#one')}],
+    ['list',sub {$_[0]->list_feeds('#one')}],
+    ['get',sub {$_[0]->get_feed('#one','Alpha')}],
+    ['due-feed',sub {$_[0]->list_due_feeds(1)}],
+    ['enabled lookup',sub {$_[0]->is_feed_enabled(1)}],
+    ['pending',sub {$_[0]->pending_items(1,2)}],
+    ['latest-pending',sub {$_[0]->paced_pending_items(1)}],
+);
+sub _invoke1080 {
+    my ($repo,$db,$call,$fault,$cleanup)=@_;
+    $db->{private_fault}=$fault//'';$db->{private_cleanup_throw}=$cleanup//0;
+    $db->{private_probe}=1;
+    $db->sqlite_set_authorizer(sub {$_[0]==SQLITE_SELECT?SQLITE_DENY:SQLITE_OK})
+        if ($fault//'') eq 'prepare';
+    my $value=eval {$call->($repo)};my $error=$@;
+    $db->sqlite_set_authorizer(undef);
+    $db->{private_probe}=0;$db->{private_fault}='';$db->{private_cleanup_throw}=0;
+    return ($value,$error);
+}
+sub _pending1080 {
+    my ($db)=@_;
+    return join(',',map {$_->[0]} @{$db->selectall_arrayref(
+        'SELECT id_rss_item FROM RSS_ITEM WHERE id_rss_feed=1 AND announced_at IS NULL ORDER BY 1')});
+}
+sub _clean1080 {
+    my ($db)=@_;
+    my $ok=!grep {!$_->{private_finished} || $_->{Active}} @{$db->{private_statements}};
+    $db->{private_statements}=[];$db->disconnect;
+    return $ok;
+}
 
 {
     package FakeTiny902;
@@ -34,14 +166,10 @@ return sub {
         },
         etag => '"old"', last_modified => 'Fri, 22 Aug 2026 09:00:00 GMT',
     );
-    $assert->ok($res->{ok}, 'mb693-902: conditional fetch parses a 200 response');
-    $assert->is($seen{request_headers}{'If-None-Match'}, '"old"',
-        'mb693-902: ETag becomes If-None-Match');
-    $assert->is($seen{request_headers}{'If-Modified-Since'}, 'Fri, 22 Aug 2026 09:00:00 GMT',
-        'mb693-902: Last-Modified becomes If-Modified-Since');
-    $assert->is($res->{etag}, '"abc"', 'mb693-902: response ETag returned to poller');
-    $assert->is($res->{last_modified}, 'Sat, 23 Aug 2026 09:00:00 GMT',
-        'mb693-902: response Last-Modified returned to poller');
+    $assert->is($json902->encode([$res->{ok}?1:0,$seen{request_headers},$res->{etag},$res->{last_modified}]),
+        $json902->encode([1,{'If-None-Match'=>'"old"','If-Modified-Since'=>'Fri, 22 Aug 2026 09:00:00 GMT'},
+            '"abc"','Sat, 23 Aug 2026 09:00:00 GMT']),
+        'mb693-902: parsed conditional 200 forwards both old validators and returns both new validators');
 
     my $nm = Mediabot::RSS::Fetcher::fetch_feed_once(
         'https://feed.example/rss',
@@ -66,32 +194,86 @@ return sub {
             },
         );
     }
-    $assert->is($tiny->{args}{headers}{'If-None-Match'}, '"wire"',
-        'mb693-902: default HTTP requester emits If-None-Match');
-    $assert->is($tiny->{args}{headers}{'If-Modified-Since'}, 'Sat, 23 Aug 2026 09:00:00 GMT',
-        'mb693-902: default HTTP requester emits If-Modified-Since');
-    $assert->ok(!exists $tiny->{args}{headers}{Host},
-        'mb693-902: conditional-header path cannot inject Host');
+    $assert->is($json902->encode([$tiny->{args}{headers}{'If-None-Match'},
+            $tiny->{args}{headers}{'If-Modified-Since'},exists($tiny->{args}{headers}{Host})?1:0]),
+        $json902->encode(['"wire"','Sat, 23 Aug 2026 09:00:00 GMT',0]),
+        'mb693-902: native requester emits both conditional headers and rejects injected Host');
 
     my $repo = _slurp902('Mediabot/RSS/Repository.pm');
-    $assert->like($repo, qr/sub list_due_feeds .*?TIMESTAMPADD\(SECOND, rf\.poll_interval, rf\.last_poll_at\)/s,
-        'mb693-902: due-feed discovery honors each persisted interval');
-    $assert->like($repo, qr/sub insert_item .*?INSERT IGNORE INTO RSS_ITEM/s,
-        'mb693-902: durable item dedup uses the unique RSS_ITEM insert path');
-    $assert->like($repo, qr/announced_at\)\s*VALUES \(\?, \?, \?, \?, \?, IF\(\? = 1, NOW\(\), NULL\)\)/s,
-        'mb693-902: baseline/overflow suppression is persisted in announced_at');
-    $assert->like($repo, qr/sub pending_items .*?announced_at IS NULL.*?ORDER BY id_rss_item ASC/s,
-        'mb693-902: pending announcements are durable and oldest-first');
-    $assert->like($repo, qr/sub mark_announced .*?SET announced_at = NOW\(\)/s,
-        'mb693-902: post-send acknowledgement is explicit');
-    $assert->like($repo, qr/sub _record_poll_success .*?last_success_at = NOW\(\).*?\$validators/s,
-        'mb693-902: successful poll records health plus response-specific HTTP validators');
-    $assert->like($repo, qr/sub record_poll_error .*?last_error_at = NOW\(\).*?last_error = \?/s,
-        'mb693-902: one broken feed gets isolated durable error state');
+    $assert->ok($repo =~ /sub insert_item .*?INSERT IGNORE INTO RSS_ITEM/s
+        && $repo =~ /announced_at\)\s*VALUES \(\?, \?, \?, \?, \?, IF\(\? = 1, NOW\(\), NULL\)\)/s
+        && $repo =~ /sub mark_announced .*?SET announced_at = NOW\(\)/s
+        && $repo =~ /sub _record_poll_success .*?last_success_at = NOW\(\).*?\$validators/s
+        && $repo =~ /sub record_poll_error .*?last_error_at = NOW\(\).*?last_error = \?/s,
+        'mb693-902: dedup, baseline suppression, acknowledgement, success validators and isolated errors retain their write contracts');
 
-    my $fetch = _slurp902('Mediabot/RSS/Fetcher.pm');
-    $assert->like($fetch, qr/If-None-Match.*?If-Modified-Since/s,
-        'mb693-902: default HTTP requester allowlists conditional headers');
-    $assert->like($fetch, qr/status == 304.*?not_modified/s,
-        'mb693-902: fetcher has a first-class 304 path');
+    {
+        my ($r,$db)=_fixture1080(1);$db->{private_probe}=1;
+        my $list=$r->list_feeds('#one');my $get=$r->get_feed('#one','Alpha');
+        my $due=$r->list_due_feeds(1000);my $pending=$r->pending_items(1,0);
+        my @observed=($r->channel_id('#one'),$r->channel_id('#missing'),
+            [map {[$_->{label},0+$_->{item_count},0+$_->{pending_count},0+$_->{next_poll_in}]} @$list],
+            [$get->{id_rss_feed},$get->{channel},$get->{label}],$r->get_feed('#one','Missing'),
+            [map {$_->{id_rss_feed}} @$due],$r->is_feed_enabled(1),$r->is_feed_enabled(3),
+            $r->is_feed_enabled(99),[map {$_->{id_rss_item}} @$pending]);
+        # Returned hash mutations cannot alter subsequent database reads.
+        $get->{label}='mutated';$list->[0]{label}='mutated';
+        push @observed,$r->get_feed('#one','Alpha')->{label};
+        my $latest=$r->paced_pending_items(1);
+        $db->{private_probe}=0;
+        push @observed,[map {$_->{id_rss_item}} @$latest],_pending1080($db);
+        push @observed,_clean1080($db)?1:0;
+        $assert->is($json902->encode(\@observed),$json902->encode(
+            [1,undef,[['Alpha',4,3,0],['Bravo',1,1,540]],[1,'#one','Alpha'],undef,
+             [4,1],1,0,0,[1],'Alpha',[3],'3',1]),
+            'MB1080: native reads preserve channel scope, counts, empty values, due order, limits, detached rows and paced suppression');
+    }
+    for my $phase (['prepare','execute'],['fetch_empty','fetch_partial']) {
+        my @bad;
+        for my $raise (0,1) {for my $fault (@$phase) {for my $read (@reads1080) {
+            my ($r,$db)=_fixture1080($raise);
+            my ($value,$error)=_invoke1080($r,$db,$read->[1],$fault);
+            my $stage=$fault=~/^fetch/ ? 'fetch':$fault;
+            my $unchanged=_pending1080($db) eq '1,2,3';
+            my $clean=_clean1080($db);
+            push @bad,[$raise,$fault,$read->[0],$error,defined($value)?1:0,$unchanged?1:0,$clean?1:0]
+                unless !defined($value) && $error eq "RSS $read->[0] $stage failed\n" && $unchanged && $clean;
+        }}}
+        $assert->is($json902->encode(\@bad),'[]',
+            'MB1080: every native read rejects '.join('/',@$phase).' in both DBI error modes before publishing rows or discarding paced candidates');
+    }
+    {
+        my @bad;
+        for my $raise (0,1) {for my $fault ('','fetch_partial') {for my $read (@reads1080) {
+            my ($r,$db)=_fixture1080($raise);
+            my ($value,$error)=_invoke1080($r,$db,$read->[1],$fault,1);
+            my $expected=$fault eq '' ? defined($value) && $error eq ''
+                : !defined($value) && $error eq "RSS $read->[0] fetch failed\n";
+            my $clean=_clean1080($db);
+            push @bad,[$raise,$fault,$read->[0],$error] unless $expected && $clean;
+        }}}
+        $assert->is($json902->encode(\@bad),'[]',
+            'MB1080: native finish followed by an exception cannot change a successful or failed read decision');
+    }
+    {
+        my @observed;
+        for my $paced (0,1) {
+            my ($r,$db)=_fixture1080(0);
+            my $pacing=$paced ? bless({},'Pacing1080'):undef;
+            my $poller=Mediabot::RSS::Poller->new(repo=>$r,pacing=>$pacing,
+                fetcher=>sub {{ok=>1,not_modified=>1}});
+            my $feed={id_rss_feed=>1,url=>'https://one.example/rss',channel=>'#one',announce_limit=>3,last_success_at=>'old'};
+            my $failed;_invoke1080($r,$db,sub {$failed=$poller->poll_feed($feed)},'fetch_partial');
+            push @observed,[$failed->{ok}?1:0,$failed->{error},exists($failed->{pending})?1:0,_pending1080($db)];
+            my $retry=$poller->poll_feed($feed);
+            push @observed,[$retry->{ok}?1:0,[map {$_->{id_rss_item}} @{$retry->{pending}}],_pending1080($db)];
+            _clean1080($db);
+        }
+        $assert->is($json902->encode(\@observed),$json902->encode(
+            [[0,'repository_error',0,'1,2,3'],[1,[1,2,3],'1,2,3'],
+             [0,'repository_error',0,'1,2,3'],[1,[3],'3']]),
+            'MB1080: real poller reports failed reads without pending output or paced data loss, then recovers on the next poll');
+    }
 };
+
+{ package Pacing1080; sub status {{active=>1}} }

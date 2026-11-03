@@ -16,20 +16,38 @@ sub new {
 
 sub dbh { $_[0]->{dbh} }
 
+# MB1080: a failed/partial cursor is not an empty or successful RSS result.
+# Decide the read status before finish can clear DBI's error, and never expose
+# raw driver exceptions through the repository's public error text.
+sub _read_rows {
+    my ($self, $label, $sql, @bind) = @_;
+    my ($sth, @rows);
+    my $stage = 'prepare';
+    my $ok = eval {
+        $sth = $self->dbh->prepare($sql) or die "prepare failed\n";
+        $stage = 'execute';
+        $sth->execute(@bind) or die "execute failed\n";
+        $stage = 'fetch';
+        while (my $row = $sth->fetchrow_hashref) { push @rows, { %$row } }
+        die "fetch failed\n" if $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    die "RSS $label $stage failed\n" unless $ok;
+    return \@rows;
+}
+
 sub channel_id {
     my ($self, $channel) = @_;
     return undef unless is_channel($channel);
-    my $sth = $self->dbh->prepare('SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1')
-        or die "RSS channel lookup prepare failed";
-    $sth->execute($channel) or die "RSS channel lookup execute failed";
-    my ($id) = $sth->fetchrow_array;
-    $sth->finish;
-    return $id;
+    my $rows = $self->_read_rows('channel lookup',
+        'SELECT id_channel FROM CHANNEL WHERE name = ? LIMIT 1', $channel);
+    return @$rows ? $rows->[0]{id_channel} : undef;
 }
 
 sub list_feeds {
     my ($self, $channel) = @_;
-    my $sth = $self->dbh->prepare(q{
+    return $self->_read_rows('list', q{
         SELECT rf.id_rss_feed, rf.id_channel, c.name AS channel, rf.label, rf.url,
                rf.enabled, rf.poll_interval, rf.announce_limit, rf.last_poll_at,
                rf.last_success_at, rf.last_error_at, rf.last_error,
@@ -48,19 +66,14 @@ sub list_feeds {
                   rf.enabled, rf.poll_interval, rf.announce_limit, rf.last_poll_at,
                   rf.last_success_at, rf.last_error_at, rf.last_error
          ORDER BY rf.label
-    }) or die "RSS list prepare failed";
-    $sth->execute($channel) or die "RSS list execute failed";
-    my @rows;
-    while (my $row = $sth->fetchrow_hashref) { push @rows, { %$row } }
-    $sth->finish;
-    return \@rows;
+    }, $channel);
 }
 
 sub get_feed {
     my ($self, $channel, $label) = @_;
     $label = normalize_feed_label($label);
     return undef unless defined $label;
-    my $sth = $self->dbh->prepare(q{
+    my $rows = $self->_read_rows('get', q{
         SELECT rf.id_rss_feed, rf.id_channel, c.name AS channel, rf.label, rf.url,
                rf.url_hash, rf.enabled, rf.poll_interval, rf.announce_limit,
                rf.etag, rf.last_modified, rf.last_poll_at, rf.last_success_at,
@@ -83,11 +96,8 @@ sub get_feed {
                   rf.last_error_at, rf.last_error, rf.created_by, rf.created_by_nick,
                   rf.created_at, rf.updated_at
          LIMIT 1
-    }) or die "RSS get prepare failed";
-    $sth->execute($channel, $label) or die "RSS get execute failed";
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
-    return $row ? { %$row } : undef;
+    }, $channel, $label);
+    return $rows->[0];
 }
 
 sub add_feed {
@@ -173,7 +183,7 @@ sub list_due_feeds {
     $limit = 1 if $limit < 1;
     $limit = 100 if $limit > 100;
 
-    my $sth = $self->dbh->prepare(q{
+    return $self->_read_rows('due-feed', q{
         SELECT rf.id_rss_feed, rf.id_channel, c.name AS channel, rf.label, rf.url,
                rf.enabled, rf.poll_interval, rf.announce_limit, rf.etag,
                rf.last_modified, rf.last_poll_at, rf.last_success_at,
@@ -185,23 +195,15 @@ sub list_due_feeds {
                 OR TIMESTAMPADD(SECOND, rf.poll_interval, rf.last_poll_at) <= NOW())
          ORDER BY COALESCE(rf.last_poll_at, '1970-01-01 00:00:00'), rf.id_rss_feed
          LIMIT ?
-    }) or die "RSS due-feed prepare failed";
-    $sth->execute($limit) or die "RSS due-feed execute failed";
-    my @rows;
-    while (my $row = $sth->fetchrow_hashref) { push @rows, { %$row } }
-    $sth->finish;
-    return \@rows;
+    }, $limit);
 }
 
 sub is_feed_enabled {
     my ($self, $id_feed) = @_;
     die "invalid RSS feed id" unless defined($id_feed) && $id_feed =~ /^\d+$/;
-    my $sth = $self->dbh->prepare(
-        'SELECT enabled FROM RSS_FEED WHERE id_rss_feed = ? LIMIT 1'
-    ) or die "RSS enabled lookup prepare failed";
-    $sth->execute($id_feed) or die "RSS enabled lookup execute failed";
-    my ($enabled) = $sth->fetchrow_array;
-    $sth->finish;
+    my $rows = $self->_read_rows('enabled lookup',
+        'SELECT enabled FROM RSS_FEED WHERE id_rss_feed = ? LIMIT 1', $id_feed);
+    my $enabled = @$rows ? $rows->[0]{enabled} : undef;
     return defined($enabled) && $enabled ? 1 : 0;
 }
 
@@ -241,18 +243,13 @@ sub pending_items {
     $limit = 1 if $limit < 1;
     $limit = 10 if $limit > 10;
 
-    my $sth = $self->dbh->prepare(q{
+    return $self->_read_rows('pending', q{
         SELECT id_rss_item, item_key, title, url, published_raw, seen_at
           FROM RSS_ITEM
          WHERE id_rss_feed = ? AND announced_at IS NULL
          ORDER BY id_rss_item ASC
          LIMIT ?
-    }) or die "RSS pending prepare failed";
-    $sth->execute($id_feed, $limit) or die "RSS pending execute failed";
-    my @rows;
-    while (my $row = $sth->fetchrow_hashref) { push @rows, { %$row } }
-    $sth->finish;
-    return \@rows;
+    }, $id_feed, $limit);
 }
 
 # Paced salons retain only the newest pending candidate for each feed. Older
@@ -260,18 +257,15 @@ sub pending_items {
 sub paced_pending_items {
     my ($self, $id_feed) = @_;
     die "invalid RSS feed id" unless defined($id_feed) && $id_feed =~ /^\d+$/;
-    my $sth = $self->dbh->prepare(q{
+    my $rows = $self->_read_rows('latest-pending', q{
         SELECT id_rss_item, item_key, title, url, published_raw, seen_at
           FROM RSS_ITEM
          WHERE id_rss_feed = ? AND announced_at IS NULL
          ORDER BY id_rss_item DESC LIMIT 1
-    }) or die "RSS latest-pending prepare failed";
-    $sth->execute($id_feed) or die "RSS latest-pending execute failed";
-    my $item = $sth->fetchrow_hashref;
-    my $copy = $item ? {%$item} : undef;
-    $sth->finish;
+    }, $id_feed);
+    my $copy = $rows->[0];
     return [] unless $copy;
-    $sth = $self->dbh->prepare(q{
+    my $sth = $self->dbh->prepare(q{
         UPDATE RSS_ITEM SET announced_at = NOW()
          WHERE id_rss_feed = ? AND announced_at IS NULL AND id_rss_item < ?
     }) or die "RSS discard-old-pending prepare failed";
