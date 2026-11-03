@@ -1,5 +1,23 @@
 ## [Unreleased] — 3.8dev
 
+### MB1089 — Three DDG previews with correctly owned snippets and targets
+
+- Read modern rendered result cards as well as legacy HTML. Exclude DDG/Bing
+  advertising redirects and sponsored cards before selecting or shortening
+  the first three distinct organic targets. Never borrow a neighbouring card's
+  snippet when wrappers change or an individual excerpt is missing.
+- Use the existing bounded Chromium helper when HTML supplies no complete list.
+  Keep regional channel language, native worker isolation and destination-only
+  private shortening. Actual verification pages remain failures.
+- Send exactly three ranked preview lines when three results exist: bold title,
+  that result's excerpt, light-blue underlined target. No extra topic-summary
+  line or Aperçu label. Retain an unlabelled abstract only as a degraded reply
+  when both web paths fail; never manufacture ranked hits or keyword links.
+- Bound rendered DOM at 2 MiB, worker JSON at 32 KiB and lookup at 40 seconds;
+  cancellation lets the native browser finish cleanup before the worker exits.
+  Reuse the eight grouped DDG checks, including one native browser fixture.
+  No provider, dependency, configuration, schema or VERSION edit.
+
 ### MB1088 — Compact ranked DDG destinations and remove keyword-search links
 
 - Show a brief preview followed by the first three unique organic titles and

@@ -79,7 +79,7 @@ sub note_policy_change {
 sub run_lookup {
     my ($ctx,%args)=@_;
     my $name=_name($args{name}) or return;
-    my $reply_limit=$name eq 'ddg' ? 4 : 2;
+    my $reply_limit=$name eq 'ddg' ? 3 : 2;
     my $bot=$ctx->bot;my $channel=$ctx->channel;
     return unless enabled($bot,$channel,$name);
     my $lang=_language($bot,$channel);my $input=$ctx->args;
@@ -116,7 +116,7 @@ sub run_lookup {
     };
     my $worker=eval {Mediabot::AsyncWorker->start(
         loop=>$loop,label=>$args{label},timeout=>$args{timeout}//12,
-        term_grace=>0.2,force_grace=>1,max_output=>$args{max_output}//8192,
+        term_grace=>$args{term_grace}//0.2,force_grace=>$args{force_grace}//1,max_output=>$args{max_output}//8192,
         child=>sub {
             eval {$bot->{dbh}{InactiveDestroy}=1 if $bot->{dbh}};
             eval {$bot->{db}{dbh}{InactiveDestroy}=1 if $bot->{db} && $bot->{db}{dbh}};

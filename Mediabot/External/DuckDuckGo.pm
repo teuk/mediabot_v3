@@ -16,6 +16,7 @@ use Mediabot::JSON qw(decode_json_payload);
 
 our @EXPORT_OK=qw(mbDDG_ctx);
 our $MAX_BODY=256*1024;
+our $MAX_DOM=2*1024*1024;
 use constant MAX_RESULTS => 3;
 sub _message {
     my ($lang,$kind)=@_;
@@ -24,8 +25,6 @@ sub _message {
         invalid=>['ddg: invalid or too long query.','ddg : recherche invalide ou trop longue.','ddg: búsqueda inválida o demasiado larga.'],
         busy=>['ddg: searches are busy; try again shortly.','ddg : recherches en cours, réessaie dans un instant.','ddg: búsquedas en curso; inténtalo de nuevo en un momento.'],
         unavailable=>['ddg: results temporarily unavailable.','ddg : résultats temporairement indisponibles.','ddg: resultados temporalmente no disponibles.'],
-        preview=>['Preview','Aperçu','Vista previa'],
-        preview_only=>['Preview only','Aperçu seul','Solo vista previa'],
         missing=>['ddg: no results found.','ddg : aucun résultat trouvé.','ddg: no se encontraron resultados.'],
         long=>['ddg: link too long; URL shortener unavailable.','ddg : lien trop long, raccourcisseur indisponible.','ddg: enlace demasiado largo; acortador no disponible.'],
     );
@@ -55,9 +54,10 @@ sub _destination {
     my $uri=URI->new($url);
     if ($uri->host =~ /(?:\A|\.)duckduckgo\.com\z/i) {
         my @query=$uri->query_form;
-        return if grep {lc($query[$_]) eq 'q'} grep {$_%2==0} 0..$#query;
-        return if $uri->path =~ m{\A/(?:html|lite|c|l)(?:/|\z)}i;
+        return if grep {lc($query[$_]) =~ /\A(?:q|ad_domain|ad_provider)\z/} grep {$_%2==0} 0..$#query;
+        return if uri_unescape($uri->path) =~ m{\A/(?:html|lite|c|l|y(?:\.js)?)(?:/|\z)}i;
     }
+    return if $uri->host =~ /(?:\A|\.)bing\.com\z/i && uri_unescape($uri->path) =~ m{\A/aclick(?:/|\z)}i;
     return $url;
 }
 sub _result_url {
@@ -75,35 +75,76 @@ sub _result_url {
     return _destination($href);
 }
 sub _class { return (($_[0]->attr('class')//'') =~ /(?:\A|\s)\Q$_[1]\E(?:\s|\z)/) }
+sub _is_title {
+    my ($node)=@_;
+    return $node->tag eq 'a' && (($node->attr('data-testid')//'') eq 'result-title-a'
+        || _class($node,'result__a') || _class($node,'result-link'));
+}
+sub _is_snippet {
+    my ($node)=@_;
+    return ($node->attr('data-result')//'') eq 'snippet'
+        || ($node->attr('data-testid')//'') eq 'result-snippet'
+        || _class($node,'result__snippet') || _class($node,'result-snippet');
+}
+sub _ad_marker {
+    my ($node)=@_;
+    return _class($node,'result--ad') || _class($node,'result--ad--small')
+        || ($node->attr('data-testid')//'') =~ /\A(?:ad(?:s|-.*)?|result-ad|sponsored-result)\z/i
+        || ($node->attr('data-layout')//'') =~ /\A(?:ad|ads|sponsored)\z/i;
+}
+sub _owned_snippet {
+    my ($link)=@_;
+    my $key=_result_url($link->attr('href')) // ($link->attr('href')//'');
+    # Opaque modern cards need no CSS wrapper name. Never cross another
+    # result's title, even if that other link is an ad or an invalid URL.
+    for (my $node=$link->parent; $node && $node->tag !~ /\A(?:body|html)\z/; $node=$node->parent) {
+        return if _ad_marker($node);
+        my %owners;
+        for my $title ($node->look_down(\&_is_title)) {
+            $owners{_result_url($title->attr('href')) // ($title->attr('href')//'')}=1;
+        }
+        return if grep {$_ ne $key} keys %owners;
+        for my $snippet ($node->look_down(\&_is_snippet)) {
+            my $text=_plain($snippet->as_text,800);
+            return $text if length $text;
+        }
+    }
+    return;
+}
 sub _parse {
-    my ($html)=@_;return {state=>'unavailable'} unless defined($html) && !ref($html) && _irc_wire_bytes($html)<=$MAX_BODY;
+    my ($html,%opts)=@_;
+    my $limit=$opts{rendered}?$MAX_DOM:$MAX_BODY;
+    return {state=>'unavailable'} unless defined($html) && !ref($html) && _irc_wire_bytes($html)<$limit;
     $html=eval {decode('UTF-8',$html,FB_CROAK|LEAVE_SRC)} unless utf8::is_utf8($html);
     return {state=>'unavailable'} unless defined $html;
-    # Challenge pages are failures, never "no results" or a reason to bypass them.
-    return {state=>'unavailable'} if $html =~ /anomaly\.js|anomaly-modal|challenge-form|captcha/i;
-    my $tree=HTML::TreeBuilder->new;my (@hits,%seen);my $missing=0;
+    my $tree=HTML::TreeBuilder->new;my (@hits,%seen);my ($missing,$challenge)=(0,0);
     my $ok=eval {
         $tree->parse_content($html);
+        # Inspect actual verification nodes; normal scripts and snippets may
+        # contain words such as captcha without being a challenge page.
+        $challenge=$tree->look_down(sub {
+            _class($_[0],'anomaly-modal') || ($_[0]->attr('id')//'') =~ /\A(?:challenge-form|anomaly-modal)\z/
+                || ($_[0]->tag eq 'form' && ($_[0]->attr('action')//'') =~ m{(?:/|\A)anomaly(?:\.js|/|\z)})
+        })?1:0;
         $missing=$tree->look_down(sub {_class($_[0],'no-results') || _class($_[0],'no-results__message')}) ? 1:0;
-        for my $link ($tree->look_down(_tag=>'a')) {
-            next unless _class($link,'result__a') || _class($link,'result-link');
-            my $ad=0;my $container=$link;
-            while (my $parent=$container->parent) {
-                $container=$parent;
-                $ad=1 if _class($parent,'result--ad') || _class($parent,'result--ad--small');
-                last if _class($parent,'result') || $parent->tag eq 'body';
+        unless ($challenge) {
+            for my $link ($tree->look_down(\&_is_title)) {
+                my $url=_result_url($link->attr('href'));my $title=_plain($link->as_text,512);
+                next unless $url && length($title) && !$seen{$url};
+                my $ad=0;
+                for (my $node=$link; $node && $node->tag ne 'body'; $node=$node->parent) {$ad=1 if _ad_marker($node)}
+                next if $ad;
+                my $excerpt=_owned_snippet($link);
+                next unless defined($excerpt) && length($excerpt);
+                $seen{$url}=1;
+                push @hits,{url=>$url,title=>$title,excerpt=>$excerpt};
+                last if @hits>=MAX_RESULTS;
             }
-            next if $ad;
-            my $url=_result_url($link->attr('href'));my $title=_plain($link->as_text,512);
-            next unless $url && length($title) && !$seen{$url}++;
-            my $snippet=$container->look_down(sub {_class($_[0],'result__snippet')});
-            push @hits,{url=>$url,title=>$title,excerpt=>$snippet?_plain($snippet->as_text,800):''};
-            last if @hits>=MAX_RESULTS;
         }
         1;
     };
     $tree->delete;
-    return {state=>'unavailable'} unless $ok;
+    return {state=>'unavailable'} unless $ok && !$challenge;
     return @hits ? {state=>'ok',hits=>\@hits} : {state=>$missing?'missing':'unavailable'};
 }
 sub _region {
@@ -132,6 +173,21 @@ sub _instant_preview {
     # Ignore Redirect, HTML Answer/Abstract and broad RelatedTopics categories.
     return {title=>$title,excerpt=>$excerpt,url=>$source};
 }
+sub _browser_lookup {
+    my ($bot,$query,$lang)=@_;
+    require Mediabot::External::Chromium;
+    my %locale=(fr=>'fr-FR',en=>'en-US',es=>'es-ES',de=>'de-DE',pt=>'pt-PT',it=>'it-IT',nl=>'nl-NL');
+    my $cancelled=0;
+    # Let the bounded native helper reap its browser normally on cancellation.
+    # The worker's TERM grace covers its 15s deadline plus native cleanup.
+    local $SIG{TERM}=sub {$cancelled=1};
+    my $dom=eval {Mediabot::External::Chromium::_fetch_url_chromium_dumpdom($bot,
+        'https://duckduckgo.com/?q='._uri_escape_bytes($query).'&ia=web&kl='._region($lang),
+        virtual_time_budget=>7000,alarm_timeout=>15,lang=>$locale{$lang}//$lang,
+        max_stdout=>$MAX_DOM,max_stderr=>32768)};
+    return {state=>'cancelled'} if $cancelled;
+    return _parse($dom,rendered=>1);
+}
 sub _lookup_sync {
     my ($bot,$query,$lang)=@_;$lang=_edition($lang);$query=_query([$query]);
     return {state=>'unavailable'} unless defined $query;
@@ -142,9 +198,18 @@ sub _lookup_sync {
     my $response=eval {$http->get($url,{headers=>{Accept=>'text/html'}})};
     my $value=ref($response) eq 'HASH' && $response->{success} && ($response->{status}//0)==200
         ? _parse($response->{content}) : {state=>'unavailable'};
+    $value->{source}='html' if $value->{state} eq 'ok';
+    if ($value->{state} eq 'unavailable' || ($value->{state} eq 'ok' && @{$value->{hits}}<MAX_RESULTS)) {
+        my $browser=eval {_browser_lookup($bot,$query,$lang)};
+        return $browser if ref($browser) eq 'HASH' && ($browser->{state}//'') eq 'cancelled';
+        if (ref($browser) eq 'HASH' && ($browser->{state}//'') eq 'ok'
+            && @{$browser->{hits}} > scalar(@{$value->{hits}//[]})) {
+            $value=$browser;$value->{source}='chromium';
+        }
+    }
     if ($value->{state} eq 'unavailable') {
         my $preview=eval {_instant_preview($query,$lang)};
-        $value=$preview ? {state=>'preview',hits=>[$preview]} : {state=>'unavailable'};
+        $value=$preview ? {state=>'preview',source=>'instant',hits=>[$preview]} : {state=>'unavailable'};
     }
     if ($value->{state} eq 'ok' || $value->{state} eq 'preview') {
         # Private shortener credentials and all shortening I/O stay in the child.
@@ -170,60 +235,34 @@ sub _display_url {
 }
 sub _badge { return "\x0300,02[🦆 DDG]\x0f " }
 sub _link { return "\x0312\x1f$_[0]\x1f\x0f" }
-sub _preview_line {
-    my ($hit,$lang,$base,$only)=@_;
-    my $display=_display_url($hit,$base);return unless $display;
-    my $title=_plain($hit->{title},512);my $excerpt=_plain($hit->{excerpt},800);
-    return unless length($title) && length($excerpt);
-    my ($source_lang)=URI->new($hit->{url})->host =~ /\A([a-z]{2,3})\.wikipedia\.org\z/i;
-    my $language=defined($source_lang) && lc($source_lang) ne _edition($lang) ? ' ('.uc($source_lang).')' : '';
-    my $label=_message($lang,$only?'preview_only':'preview').$language.' : ';
-    # In the ranked view the same source is already linked as result 1.
-    my $suffix=$only?" \x0314·\x0f "._link($display):'';
-    my $available=400-_irc_wire_bytes(_badge().$suffix."\x02\x02")-3;
-    return if $available<24;
-    my $title_budget=$available<80?$available:80;
-    my $prefix=_badge()."\x02".truncate_utf8($label.$title,$title_budget,'…')."\x02";
-    my $budget=400-_irc_wire_bytes($prefix.$suffix.' — ')-3;
-    $budget=160 if $budget>160;
-    return $prefix.($budget>=16?' — '.truncate_utf8($excerpt,$budget,'…'):'').$suffix;
-}
 sub _render {
     my ($value,$lang,$base)=@_;
-    return unless defined($value->{state}) && !ref($value->{state});
+    return unless ref($value) eq 'HASH' && defined($value->{state}) && !ref($value->{state});
     return [_message($lang,'missing')] if $value->{state} eq 'missing';
     my $preview=$value->{state} eq 'preview';
     return unless ($value->{state} eq 'ok' || $preview)
         && ref($value->{hits}) eq 'ARRAY' && @{$value->{hits}} && @{$value->{hits}}<=MAX_RESULTS;
     return if $preview && @{$value->{hits}}!=1;
     $base=Mediabot::URLShortener::_public_base($base);
-    # Validate every destination before building any message or compact group.
-    my @cards;my $rank=0;
+    my (@lines,%seen);my $rank=0;
     for my $hit (@{$value->{hits}}) {
-        my $display=_display_url($hit,$base);return unless $display;
-        my $title=_plain($hit->{title},512);return unless length $title;
-        my $lead=(++$rank).'. ';my $suffix=" \x0314·\x0f "._link($display);
-        my $budget=400-_irc_wire_bytes(_badge().$lead.$suffix."\x02\x02")-3;
-        if ($budget<8) {push @cards,$lead._message($lang,'long');next}
-        $budget=48 if $budget>48;
-        push @cards,$lead."\x02".truncate_utf8($title,$budget,'…')."\x02".$suffix;
+        my $display=_display_url($hit,$base);return unless $display && !$seen{$hit->{url}}++;
+        my $title=_plain($hit->{title},512);my $excerpt=_plain($hit->{excerpt},800);
+        return unless length($title) && length($excerpt);
+        my $lead=$preview?'':(++$rank).'. ';
+        my $suffix=" \x0314·\x0f "._link($display);
+        my $room=400-_irc_wire_bytes(_badge().$lead.$suffix."\x02\x02 — ")-3;
+        if ($room<32) {push @lines,_badge().$lead._message($lang,'long');next}
+        my $title_budget=$room-24;$title_budget=80 if $title_budget>80;
+        my $prefix=_badge().$lead."\x02".truncate_utf8($title,$title_budget,'…')."\x02 — ";
+        my $budget=400-_irc_wire_bytes($prefix.$suffix)-3;
+        push @lines,$prefix.truncate_utf8($excerpt,$budget,'…').$suffix;
     }
-    my $overview=_preview_line($value->{hits}[0],$lang,$base,$preview);
-    return defined($overview)?[$overview]:undef if $preview;
-    my @lines=defined($overview)?($overview):();
-    my $line='';my $separator=" \x0314|\x0f ";
-    for my $card (@cards) {
-        if (length($line) && _irc_wire_bytes($line.$separator.$card)>400) {
-            push @lines,$line;$line='';
-        }
-        $line.=length($line)?$separator.$card:_badge().$card;
-    }
-    push @lines,$line if length $line;
     return \@lines;
 }
 sub mbDDG_ctx {
     my ($ctx)=@_;my $base=eval {$ctx->bot->{conf}->get('shorturl.PUBLIC_BASE_URL')} // '';
-    return run_lookup($ctx,name=>'ddg',label=>'ddg search',timeout=>24,max_output=>32768,
+    return run_lookup($ctx,name=>'ddg',label=>'ddg search',timeout=>40,term_grace=>18,force_grace=>19,max_output=>32768,
         message=>\&_message,lookup=>sub {_lookup_sync($ctx->bot,@_)},render=>sub {_render(@_,$base)});
 }
 

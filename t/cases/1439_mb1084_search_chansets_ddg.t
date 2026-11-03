@@ -14,6 +14,7 @@ use Mediabot::Channel;
 use Mediabot::ChannelCommands ();
 use Mediabot::Context;
 use Mediabot::External::DuckDuckGo ();
+use Mediabot::External::Chromium ();
 use Mediabot::External::SearchCommand ();
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
@@ -130,36 +131,71 @@ HTML
         $name eq 'Wikipedia'?Mediabot::External::Wikipedia::mbWikipedia_ctx($ctx):$D->can('mbDDG_ctx')->($ctx);
         set1084($b,'-'.$name);set1084($b,'+'.$name);
         $job->{on_done}->({ok=>1,value=>{message=>'stale',state=>'ok',hits=>[{title=>'stale',url=>'https://example.org/'}]}});
-        push @observed,[scalar(@{$b->{sent}}),scalar(keys %{$b->{'_'.lc($name).'_pending'}})];
+        push @observed,[scalar(@{$b->{sent}}),scalar(keys %{$b->{'_'.lc($name).'_pending'}}),$job->{term_grace},$job->{force_grace}];
     }
-    is_deeply(\@observed,[[0,0],[0,0]], 'disable then re-enable revokes both old attempts even though the flag is on again, and releases their capacity');
+    is_deeply(\@observed,[[0,0,0.2,1],[0,0,18,19]], 'disable then re-enable revokes both old attempts even though the flag is on again, and releases their capacity');
 }
+
+# Modern wrappers deliberately have no .result class or article tag.
+my $modern=<<'HTML';
+<html><body><main><section>
+<div><div><a data-testid="result-title-a" href="https://duckduckgo.com/y.js?ad_domain=ads.example.org&amp;u3=https%3A%2F%2Fwww.bing.com%2Faclick">Paid training</a></div><div data-result="snippet">AD EXCERPT</div></div>
+<div><div><a data-testid="result-title-a" href="https://www.linux.org/pages/download/">Download Linux</a></div><div data-testid="result-snippet"><span>Linux downloads.</span></div><a data-testid="result-title-a" href="https://www.linux.org/pages/download/">mobile duplicate</a></div>
+<div><div><a data-testid="result-title-a" href="https://fr.wikipedia.org/wiki/Linux">Linux — Wikipédia</a></div><div data-result="snippet">Le système Linux.</div></div>
+<div><a data-testid="result-title-a" href="https://missing.example.org/">No snippet</a></div>
+<div><div><a data-testid="result-title-a" href="https://kernel.org/">The Linux Kernel Archives</a></div><div class="result-snippet">The Linux kernel.</div></div>
+<div><a data-testid="result-title-a" href="https://fourth.example.org/">fourth</a><div data-result="snippet">Fourth excerpt.</div></div>
+</section></main></body></html>
+HTML
+my @modern_hits=(
+    {title=>'Download Linux',excerpt=>'Linux downloads.',url=>'https://www.linux.org/pages/download/'},
+    {title=>'Linux — Wikipédia',excerpt=>'Le système Linux.',url=>'https://fr.wikipedia.org/wiki/Linux'},
+    {title=>'The Linux Kernel Archives',excerpt=>'The Linux kernel.',url=>'https://kernel.org/'}
+);
 {
     my $value=$D->can('_parse')->(encode('UTF-8',$html));
+    my $rendered=$D->can('_parse')->(encode('UTF-8',$modern),rendered=>1);
     my @bad=map {defined($D->can('_result_url')->($_))?1:0} (
         '//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.example%2F&uddg=https%3A%2F%2Fb.example%2F',
-        'https://duckduckgo.com.evil/l/?uddg=javascript:bad','https://user:pass@example.org/','file:///tmp/a',"https://example.org/\n");
-    is_deeply([$value,\@bad],[{state=>'ok',hits=>[
+        'https://duckduckgo.com.evil/l/?uddg=javascript:bad','https://user:pass@example.org/','file:///tmp/a',"https://example.org/\n",
+        'https://duckduckgo.com/y.js?u3=https%3A%2F%2Fads.example.org%2F','https://www.bing.com/aclick?u=ad',
+        'https://duckduckgo.com/%79.js','https://duckduckgo.com/?q=linux');
+    is_deeply([$value,$rendered,\@bad],[{state=>'ok',hits=>[
         {title=>'Debian & café',excerpt=>'Le système libre 🌀.',url=>'https://www.debian.org/'},
         {title=>'Debian 13',excerpt=>'La documentation.',url=>'https://wiki.debian.org/Debian13'},
-        {title=>'third',excerpt=>'Troisième résultat.',url=>'https://third.example.org/'}]},[0,1,0,0,0]],
-        'exactly three ranked unique organic links survive Unicode/entity decoding; the fourth, ads/navigation/duplicates and unsafe redirects are excluded');
+        {title=>'third',excerpt=>'Troisième résultat.',url=>'https://third.example.org/'}]},
+        {state=>'ok',hits=>\@modern_hits},[0,1,0,0,0,0,0,0,0]],
+        'legacy and opaque modern cards yield three distinct organic destinations with their OWN snippets; ads, missing snippets and duplicate titles cannot borrow a neighbour');
 }
 {
     my @values=map {$D->can('_parse')->($_)->{state}} (
         '<div class="no-results"><h1>No results</h1></div>','<form id="challenge-form">verify</form>',
         '<html>unexpected layout</html>','x'x(256*1024+1),"\xff");
-    is_deeply(\@values,['missing','unavailable','unavailable','unavailable','unavailable'],
-        'only an explicit empty-result page is empty; challenges, unknown markup, oversized bodies and invalid UTF-8 remain unavailable');
+    my $large='<!--'.('x'x270000).'-->'.$modern;
+    my $legitimate=$modern;$legitimate=~s/Linux downloads\./CAPTCHA documentation./;
+    push @values,$D->can('_parse')->($large)->{state},$D->can('_parse')->($large,rendered=>1)->{state},
+        $D->can('_parse')->('x'x(2*1024*1024),rendered=>1)->{state},
+        $D->can('_parse')->($legitimate,rendered=>1)->{state},
+        $D->can('_parse')->($modern.'<form id="challenge-form"></form>',rendered=>1)->{state};
+    is_deeply(\@values,['missing','unavailable','unavailable','unavailable','unavailable',
+        'unavailable','ok','unavailable','ok','unavailable'],
+        'HTTP and rendered DOM have separate finite limits; actual challenge nodes block, while an ordinary snippet mentioning CAPTCHA is still valid');
 }
 {
-    my $b=bot1084();my @calls;my @options;
+    my $b=bot1084();my @calls;my @options;my @browser;
     my $http=bless {html=>$html,calls=>\@calls},'MB1084::HTTP';
     local *Mediabot::External::_make_http=sub {push @options,{@_};$http};
     local *Mediabot::URLShortener::_default_http=sub {$http};
+    my $native_browser=$D->can('_browser_lookup');
+    my $browser_value={state=>'unavailable'};
+    local *Mediabot::External::DuckDuckGo::_browser_lookup=sub {push @browser,[@_[1,2]];$browser_value};
     my $value=$D->can('_lookup_sync')->($b,'café & thé ☕','fr');
     my $uri=URI->new($calls[0]{url});my %query=$uri->query_form;
+    my $first_browser_count=@browser;
     $http->{response}={success=>1,status=>202,content=>'<form id="challenge-form">verify</form>'};
+    $browser_value=$D->can('_parse')->($modern,rendered=>1);
+    my $modern_value=$D->can('_lookup_sync')->($b,'linux','fr');
+    $browser_value={state=>'unavailable'};
     my $fallback=$D->can('_lookup_sync')->($b,'autre recherche','es');
     $http->{instant}={Heading=>'Eggdrop',AbstractText=>'Eggdrop est un bot IRC.',AbstractURL=>'https://fr.wikipedia.org/wiki/Eggdrop'};
     my $preview=$D->can('_lookup_sync')->($b,'eggdrop','fr');
@@ -175,37 +211,51 @@ HTML
         {success=>1,status=>200,content=>JSON::PP::encode_json({Heading=>'query',AbstractText=>'text',AbstractURL=>'https://duckduckgo.com/?q=query'})},
         {success=>1,status=>503,content=>JSON::PP::encode_json($http->{instant})}) {
         $http->{instant_response}=$response;
-        my $instant=$D->can('_instant_preview');push @invalid,$instant && defined($instant->('eggdrop','fr')) ? 1:0;
+        push @invalid,defined($D->can('_instant_preview')->('eggdrop','fr')) ? 1:0;
     }
+    my ($native_cancel,%native_options);
+    {
+        local *Mediabot::External::Chromium::_fetch_url_chromium_dumpdom=sub {
+            my ($bot,$url,%opts)=@_;%native_options=%opts;
+            $SIG{TERM}->();return encode('UTF-8',$modern);
+        };
+        $native_cancel=$native_browser ? $native_browser->($b,'linux','fr') : {};
+    }
+    my $before_cancel=@calls;$browser_value={state=>'cancelled'};
+    my $cancel=$D->can('_lookup_sync')->($b,'cancelled','fr');
     is_deeply([$uri->host,decode('UTF-8',$query{q}),$query{kl},[@{$options[0]}{qw(verify_SSL max_redirect timeout max_size)}],
-        [map {$_->{display_url}} @{$value->{hits}}],[map {$_->{target}} grep {$_->{method} eq 'POST'} @calls],
-        $fallback->{state},exists($preview->{search})?1:0,$preview->{state},$preview->{hits}[0]{excerpt},
+        $first_browser_count,$value->{source},$modern_value->{source},[map {$_->{excerpt}} @{$modern_value->{hits}}],
+        [map {$_->{target}} grep {$_->{method} eq 'POST'} @calls],
+        $fallback->{state},$preview->{state},$preview->{hits}[0]{excerpt},
         $api_uri->host,[@api_query{qw(q format no_html no_redirect kl)}],
-        [@{$api_options//{}}{qw(verify_SSL max_redirect timeout max_size)}],\@invalid],
-        ['html.duckduckgo.com','café & thé ☕','fr-fr',[1,0,8,262144],
-         ['https://teuk.org/shorturl/Abcdef23','https://teuk.org/shorturl/Bbcdef23','https://teuk.org/shorturl/Cbcdef23'],
-         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://third.example.org/','https://fr.wikipedia.org/wiki/Eggdrop'],
-         'unavailable',0,'preview','Eggdrop est un bot IRC.','api.duckduckgo.com',
-         ['eggdrop','json','1','1','fr-fr'],[1,0,8,131072],[0,0,0,0,0,0,0]],
-        'shortening receives only the three ranked destinations or the one real preview source; blocked searches never fabricate or shorten a keyword-search URL');
+        [@{$api_options//{}}{qw(verify_SSL max_redirect timeout max_size)}],\@invalid,$cancel->{state},scalar(@calls)-$before_cancel,
+        $native_cancel->{state},[@native_options{qw(alarm_timeout virtual_time_budget max_stdout max_stderr lang)}]],
+        ['html.duckduckgo.com','café & thé ☕','fr-fr',[1,0,8,262144],0,'html','chromium',
+         [map {$_->{excerpt}} @modern_hits],
+         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://third.example.org/',
+          (map {$_->{url}} @modern_hits),'https://fr.wikipedia.org/wiki/Eggdrop'],
+         'unavailable','preview','Eggdrop est un bot IRC.','api.duckduckgo.com',
+         ['eggdrop','json','1','1','fr-fr'],[1,0,8,131072],[0,0,0,0,0,0,0],'cancelled',1,'cancelled',[15,7000,2097152,32768,'fr-FR']],
+        'HTTP 202 falls through to rendered organic results before any abstract; shortening receives only real targets and cancellation stops API/shortener work');
 }
 {
     my $base='https://teuk.org/shorturl/';
     my @hits=map {{title=>'Article '.$_,url=>'https://example.org/'.$_,
-        display_url=>$base.chr(64+$_).'bcdef23',excerpt=>'Extrait '.('é'x400)}} 1..3;
+        display_url=>$base.chr(64+$_).'bcdef23',excerpt=>'Extrait '.$_.' '.('é'x400)}} 1..3;
     my $reply=$D->can('_render')->({state=>'ok',hits=>\@hits},'fr',$base);
     my @plain=map {my $s=$_;$s=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$s=~s/[\x02\x0f\x1f]//g;$s} @{$reply//[]};
-    my $packed=@$reply==2 && !(grep {_irc_wire_bytes($_)>400} @$reply)
-        && $plain[0]=~/\A\[🦆 DDG\] Aperçu : Article 1 — Extrait /
-        && $plain[1] eq '[🦆 DDG] '.join(' | ',map {$_ .'. Article '.$_.' · '.$base.chr(64+$_).'bcdef23'} 1..3)
-        && $reply->[1]=~/\x0312\x1f\Q$base\EAbcdef23\x1f\x0f/
-        && $reply->[1]=~/\x0312\x1f\Q$base\ECbcdef23\x1f\x0f/;
+    my $three=ref($reply) eq 'ARRAY' && @$reply==3 && !(grep {_irc_wire_bytes($_)>400} @$reply);
+    for my $i (0..2) {
+        $three &&= $plain[$i]=~/\A\[🦆 DDG\] @{[$i+1]}\. Article @{[$i+1]} — Extrait @{[$i+1]} /
+            && $reply->[$i]=~/\x0312\x1f\Q$hits[$i]{display_url}\E\x1f\x0f/
+            && $reply->[$i]=~/\x02Article @{[$i+1]}\x02/;
+    }
     my @long_hits=map {{title=>'👩‍💻 é 'x200,url=>'https://example.org/'.$_.'?'.('a'x245),excerpt=>"texte\n\1\3".('🌀'x800)}} 1..3;
     my $long=$D->can('_render')->({state=>'ok',hits=>\@long_hits},'fr',$base);
-    my $long_ok=ref($long) eq 'ARRAY' && @$long==4 && !(grep {_irc_wire_bytes($_)>400 || /[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/} @$long);
-    $long_ok &&= $long->[$_]=~/\Q$long_hits[$_-1]{url}\E/ for 1..3;
+    my $long_ok=ref($long) eq 'ARRAY' && @$long==3 && !(grep {_irc_wire_bytes($_)>400 || /[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/} @$long);
+    $long_ok &&= $long->[$_]=~/\Q$long_hits[$_]{url}\E/ for 0..2;
     my $foreign=$D->can('_render')->({state=>'ok',hits=>[{%{$hits[0]},display_url=>'https://foreign.example.org/'}]},'fr',$base);
-    my $query=$D->can('_render')->({state=>'ok',hits=>[{title=>'query',url=>'https://duckduckgo.com/?q=query',display_url=>$base.'Abcdef23'}]},'fr',$base);
+    my $query=$D->can('_render')->({state=>'ok',hits=>[{title=>'query',excerpt=>'text',url=>'https://duckduckgo.com/?q=query',display_url=>$base.'Abcdef23'}]},'fr',$base);
     my $four=$D->can('_render')->({state=>'ok',hits=>[@hits,$hits[0]]},'fr',$base);
     my $empty=$D->can('_render')->({state=>'preview',hits=>[{%{$hits[0]},excerpt=>''}]},'fr',$base);
     my @previews;
@@ -215,34 +265,49 @@ HTML
         my $plain=ref($preview) eq 'ARRAY' && @$preview==1 ? $preview->[0] : '';
         $plain=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$plain=~s/[\x02\x0f\x1f]//g;push @previews,$plain;
     }
-    is_deeply([$packed?1:0,$long_ok?1:0,defined($foreign)?1:0,defined($query)?1:0,defined($four)?1:0,defined($empty)?1:0,\@previews],
-        [1,1,0,0,0,0,[map {'[🦆 DDG] '.$_.' : Eggdrop — An IRC bot. · '.$base.'Abcdef23'}
-            ('Aperçu seul (EN)','Preview only','Solo vista previa (EN)')]],
-        'brief preview plus three ranked targets use two IRC lines with short URLs; whole long destinations wrap without loss, and no search-link fallback survives');
+    is_deeply([$three?1:0,$long_ok?1:0,defined($foreign)?1:0,defined($query)?1:0,defined($four)?1:0,defined($empty)?1:0,\@previews],
+        [1,1,0,0,0,0,[map {'[🦆 DDG] Eggdrop — An IRC bot. · '.$base.'Abcdef23'} 1..3]],
+        'exactly three previews each keep their own snippet, bold title and whole blue underlined target within 400 bytes; no extra overview or Aperçu label');
 }
 {
     my $b=bot1084();set1084($b,'+ddg');$b->_register_builtin_command_catalogue;
     my $entry=$b->commands->command_for('ddg','public');my $dir=tempdir(CLEANUP=>1);my $trace="$dir/http.jsonl";
-    # Three valid Unicode-rich hits exceed the old 16-KiB worker envelope.
-    my $heavy_html='<html><body>';
+    # A real fork/exec browser emits modern DOM, not a mocked parser return.
+    my $heavy_html='<html><body><main><div><a data-testid="result-title-a" href="https://duckduckgo.com/y.js?ad_domain=ads.example.org">AD</a><span data-result="snippet">AD EXCERPT</span></div>';
     for my $i (1..3) {
         my $url='https://example.org/'.$i.'?'.('a'x1900);
-        $heavy_html.='<div class="result"><a class="result__a" href="'.$url.'">Article '.$i.' '.('📚'x500)
-            .'</a><span class="result__snippet">'.('🌀'x800).'</span></div>';
+        $heavy_html.='<div><header><a data-testid="result-title-a" href="'.$url.'">Article '.$i.' '.('📚'x500)
+            .'</a></header><span data-result="snippet">Extrait '.$i.' '.('🌀'x800).'</span></div>';
     }
-    $heavy_html.='</body></html>';
-    my $large_payload=length(JSON::PP->new->utf8->encode($D->can('_parse')->($heavy_html)))>16384 ? 1:0;
-    my $http=bless {html=>$heavy_html,calls=>[],trace=>$trace},'MB1084::HTTP';
+    $heavy_html.='</main></body></html>';
+    my $large_payload=length(JSON::PP->new->utf8->encode($D->can('_parse')->($heavy_html,rendered=>1)))>16384 ? 1:0;
+    my $dom="$dir/dom.html";open my $df,'>:raw',$dom or die $!;print {$df} encode('UTF-8',$heavy_html);close $df or die $!;
+    my $binary="$dir/chromium";open my $bf,'>:raw',$binary or die $!;print {$bf} '#!'.$^X."\n".<<'BROWSER';
+use strict;use warnings;use JSON::PP;
+open my $log,'>>:raw',$ENV{MB1089_BROWSER_TRACE} or die $!;
+print {$log} JSON::PP::encode_json({pid=>$$,argv=>\@ARGV})."\n";close $log or die $!;
+open my $dom,'<:raw',$ENV{MB1089_BROWSER_DOM} or die $!;binmode STDOUT,':raw';local $/;print scalar <$dom>;
+BROWSER
+    close $bf or die $!;chmod 0700,$binary;
+    local $ENV{MB1089_BROWSER_TRACE}="$dir/browser.jsonl";local $ENV{MB1089_BROWSER_DOM}=$dom;
+    local *Mediabot::External::Chromium::_chromium_binary=sub {$binary};
+    local *Mediabot::External::Chromium::_chromium_profile_base=sub {"$dir/profiles"};
+    my $http=bless {response=>{success=>1,status=>202,content=>'<form id="challenge-form"></form>'},calls=>[],trace=>$trace},'MB1084::HTTP';
     local *Mediabot::External::_make_http=sub {$http};local *Mediabot::URLShortener::_default_http=sub {$http};
     $b->{loop}=IO::Async::Loop->really_new;
     $entry->{handler}->(ctx1084($b,'ddg','Debian','13'));
     my $deadline=Time::HiRes::time()+5;
-    $b->{loop}->loop_once(.02) while @{$b->{sent}}<2 && Time::HiRes::time()<$deadline;
+    $b->{loop}->loop_once(.02) while @{$b->{sent}}<3 && Time::HiRes::time()<$deadline;
     my @calls;if (-f $trace) {open my $fh,'<:raw',$trace or die $!;@calls=map {JSON::PP::decode_json($_)} <$fh>;close $fh}
+    my $browser;if (-f $ENV{MB1089_BROWSER_TRACE}) {open my $fh,'<:raw',$ENV{MB1089_BROWSER_TRACE} or die $!;$browser=JSON::PP::decode_json(<$fh>);close $fh}
+    my $browser_ok=$browser && $browser->{pid}!=$$ && grep {$_ eq '--lang=fr-FR'} @{$browser->{argv}};
+    $browser_ok &&= $browser->{argv}[-1] eq 'https://duckduckgo.com/?q=Debian%2013&ia=web&kl=fr-fr';
+    my $snippets=@{$b->{sent}}==3;
+    $snippets &&= $b->{sent}[$_][2]=~/Extrait @{[$_+1]} / for 0..2;
     is_deeply([$entry->{level},$entry->{metadata}{migration_fallback}//0,$large_payload,scalar(@calls),
-        (grep {$_->{pid}==$$} @calls)?1:0,[map {[$_->[0],$_->[1],$_->[3]]} @{$b->{sent}}],
-        scalar(keys %{$b->{_ddg_pending}})],
-        ['public',0,1,4,0,[['public','#test',$$],['public','#test',$$]],0],
-        'native fork/pipe returns one preview and three compact ranked targets in two IRC replies, with all three exact shortening requests in the child');
+        (grep {$_->{pid}==$$} @calls)?1:0,$browser_ok?1:0,$snippets?1:0,
+        [map {[$_->[0],$_->[1],$_->[3]]} @{$b->{sent}}],scalar(keys %{$b->{_ddg_pending}})],
+        ['public',0,1,4,0,1,1,[map {['public','#test',$$]} 1..3],0],
+        'native worker plus native browser exec survives HTTP 202 and returns three separate owned previews; only the child shortens their actual targets');
 }
 done_testing;
