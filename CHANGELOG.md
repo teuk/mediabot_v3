@@ -1,5 +1,25 @@
 ## [Unreleased] — 3.8dev
 
+### MB1082 — Prepare command entries before changing their live namespace
+
+- Materialize the complete registry entry, including plugin-owned metadata,
+  before validating or changing live command/alias maps. A tied metadata copy
+  that throws can no longer strip the existing command of its old aliases.
+- Run namespace conflict checks after metadata materialization. A command or
+  alias registered reentrantly while metadata is read remains visible and
+  cannot be stolen by the outer registration/replacement.
+- Preserve exception identity, normalization, handler/metadata fields, the
+  historical shallow metadata copy, source isolation and successful alias
+  replacement/removal. Independent changes performed by plugin callbacks are
+  retained; this does not roll back arbitrary plugin side effects.
+- Extend the existing native failed-replacement case with enumeration/fetch
+  failures and reentrant namespace collisions. Group old behavior checks and
+  retire two redundant source pins: seven instead of 15 assertions, no new
+  test file, process or wait.
+- No schema, dependency, configuration or manual VERSION change; previously
+  qualified fixes remain intact.
+
+
 ### MB1081 — Release retired IRC countdowns before they expire
 
 - Keep only a weak notifier reference in the shared IRC countdown callback.

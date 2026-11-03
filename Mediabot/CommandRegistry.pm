@@ -90,6 +90,23 @@ sub register_command {
         }
     }
 
+    # MB1082: materialize plugin-owned values before validating or changing
+    # the live namespace. A tied metadata hash can throw or re-enter registry
+    # registration while it is copied. Its failure must not remove old aliases;
+    # its reentrant changes must be visible to the conflict checks below.
+    my $entry = {
+        name        => $name,
+        source      => $source,
+        aliases     => [ @aliases ],
+        handler     => $handler,
+        category    => $args{category},
+        description => $args{description},
+        level       => $args{level},
+        chanset     => $args{chanset},
+        plugin      => $args{plugin},
+        metadata    => (ref($args{metadata}) eq 'HASH') ? { %{ $args{metadata} } } : {},
+    };
+
     $self->{commands}{$source} ||= {};
     $self->{aliases}{$source}  ||= {};
 
@@ -138,19 +155,6 @@ sub register_command {
                 && $self->{aliases}{$source}{$alias} eq $name;
         }
     }
-
-    my $entry = {
-        name        => $name,
-        source      => $source,
-        aliases     => [ @aliases ],
-        handler     => $handler,
-        category    => $args{category},
-        description => $args{description},
-        level       => $args{level},
-        chanset     => $args{chanset},
-        plugin      => $args{plugin},
-        metadata    => (ref($args{metadata}) eq 'HASH') ? { %{ $args{metadata} } } : {},
-    };
 
     $self->{commands}{$source}{$name} = $entry;
 
