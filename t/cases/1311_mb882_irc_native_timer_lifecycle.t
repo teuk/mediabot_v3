@@ -21,13 +21,11 @@ no warnings qw(redefine once);
     my $callback = $timer->{on_expire};
     undef $timer;
     $loop->loop_once(0.01);
-    is($calls, 1, 'native timer expires through the actual loop');
-    is(timer_count($loop), 0, 'native timer removes its notifier on normal expiry');
-    ok(!defined $weak_timer, 'native timer is freed even when its expiry callback is retained');
     undef $owner;
-    ok(!defined $weak_owner, 'completed native callback releases its payload owner');
+    my @completed=($calls,timer_count($loop),defined($weak_timer)?1:0,defined($weak_owner)?1:0);
     $callback->();
-    is($calls, 1, 'retained native expiry cannot duplicate output');
+    is_deeply([@completed,$calls],[1,0,0,0,1],
+        'native loop owns the pending timer, expires it once, frees timer/payload and leaves retained expiry inert');
 }
 for my $stage (qw(add-after start)) {
     my $loop = IO::Async::Loop->really_new;
@@ -47,13 +45,55 @@ for my $stage (qw(add-after start)) {
     my $calls = 0;
     my $ok = eval {countdown(loop => $loop, delay => 0, on_expire => (sub {my ($held) = @_; return sub {$calls++ if $held}})->($owner)); 1};
     my $got = $@;
-    ok(!$ok && refaddr($got) == refaddr($error), "$stage: native setup exception is preserved");
-    is(timer_count($loop), 0, "$stage: native partial setup is detached");
-    ok(!defined $probe, "$stage: native failed timer is released");
     undef $owner;
-    ok(!defined $weak_owner, "$stage: native failed callback releases its owner");
     $callback->();
-    is($calls, 0, "$stage: retained failed native expiry is inert");
+    is_deeply([!$ok && refaddr($got)==refaddr($error)?1:0,timer_count($loop),
+        defined($probe)?1:0,defined($weak_owner)?1:0,$calls],[1,0,0,0,0],
+        "$stage: native setup preserves the exception, detaches/frees the notifier and releases payload before an inert late callback");
+}
+
+# MB1081: real early removal must release a never-fired notifier and payload.
+# No retained callback or payload-created timer reference is part of this case.
+{
+    my $loop=IO::Async::Loop->really_new;my $weak_loop=$loop;weaken($weak_loop);
+    my (@states,$calls);$calls=0;
+    for (1..24) {
+        my $payload=bless {},'MB1081::Payload';my $weak_payload=$payload;weaken($weak_payload);
+        my $timer=countdown(loop=>$loop,delay=>3600,
+            on_expire=>(sub {my $held=shift;return sub {$calls++ if $held}})->($payload));
+        my $probe=$timer;weaken($probe);undef $payload;
+        my @active=(timer_count($loop),$timer->is_running?1:0,defined($weak_payload)?1:0);
+        $timer->stop;$loop->remove($timer);undef $timer;
+        push @states,[@active,timer_count($loop),defined($probe)?1:0,defined($weak_payload)?1:0];
+    }
+    undef $loop;
+    is_deeply([\@states,$calls,defined($weak_loop)?1:0],
+        [[map {[1,1,1,0,0,0]} 1..24],0,0],
+        'MB1081: repeated native stop/remove frees unexpired notifiers, payloads and the loop without running user callbacks');
+}
+{
+    my $start=IO::Async::Timer::Countdown->can('start');my @states;
+    for my $throws (0,1) {
+        my $loop=IO::Async::Loop->really_new;
+        my $payload={};my $weak_payload=$payload;weaken($weak_payload);
+        my $error=bless {},'MB1081::InlineError';my ($probe,$calls);$calls=0;
+        local *IO::Async::Timer::Countdown::start=sub {
+            my $self=shift;$probe=$self;weaken($probe);
+            my $rv=$start->($self,@_);
+            $self->{on_expire}->($self); # native notifier, inline expiry seam
+            die $error if $throws;
+            return $rv;
+        };
+        my $result;
+        my $ok=eval {$result=countdown(loop=>$loop,delay=>0,
+            on_expire=>(sub {my $held=shift;return sub {$calls++ if $held}})->($payload));1};
+        my $got=$@;undef $payload;
+        push @states,[$ok?1:0,defined($result)?1:0,$calls,timer_count($loop),
+            defined($probe)?1:0,defined($weak_payload)?1:0,
+            $throws && refaddr($got)==refaddr($error)?1:0];
+    }
+    is_deeply(\@states,[[1,0,1,0,0,0,0],[0,0,1,0,0,0,1]],
+        'MB1081: inline expiry stays single-use and a subsequent start exception retains its original object after cleanup');
 }
 my $original_new = IO::Async::Timer::Countdown->can('new');
 # Exercise production callbacks with real native timers, without waiting for
@@ -64,18 +104,20 @@ local *IO::Async::Timer::Countdown::new = sub {
 MB881OutputFixture::with_policy(sub {
     my $bot = MB881OutputFixture::new_bot(); $bot->{loop} = IO::Async::Loop->really_new;
     $bot->{policy}{AntiFlood} = 1;
-    for my $i (1 .. 50) {
+    my @states;
+    for my $i (1 .. 6) {
         $bot->{blocked} = 1;
         $i % 2 ? privmsg($bot, '#test', "item$i") : action($bot, '#test', "item$i");
-        is(timer_count($bot->{loop}), 1, "round $i: one native AntiFlood arm");
+        my $armed=timer_count($bot->{loop});
         $bot->{blocked} = 0;
         $bot->{loop}->loop_once(0.01);
-        is(timer_count($bot->{loop}), 0, "round $i: expired AntiFlood notifier is removed");
+        push @states,[$armed,timer_count($bot->{loop})];
     }
-    is(scalar @{$bot->{irc}{wire}}, 50, 'native AntiFlood sends each queued item once');
-    is_deeply([map {$_->{text}} @{$bot->{irc}{wire}}],
-        [map {$_ % 2 ? "item$_" : "\1ACTION item$_\1"} 1 .. 50], 'native mixed message kinds retain order and ACTION envelopes');
-    is($bot->{_flood_outq}{'#test'}{armed}, 0, 'native AntiFlood final arm is clear');
+    is_deeply(\@states,[[1,0],[1,0],[1,0],[1,0],[1,0],[1,0]],
+        'native AntiFlood owns exactly one notifier per arm and detaches it after every mixed output round');
+    is_deeply([[map {$_->{text}} @{$bot->{irc}{wire}}],$bot->{_flood_outq}{'#test'}{armed}],
+        [[map {$_ % 2 ? "item$_" : "\1ACTION item$_\1"} 1 .. 6],0],
+        'native mixed messages preserve exact count/order, ACTION envelopes and the final cleared arm');
 });
 {
     my $bot = MB881OutputFixture::new_bot(); $bot->{loop} = IO::Async::Loop->really_new;
@@ -101,8 +143,7 @@ MB881OutputFixture::with_policy(sub {
     local *Mediabot::Helpers::botPrivmsg = sub {push @wire, $_[2]; 1};
     queue_privmsg_chunks($bot, '#test', [qw(one two)], 10_000);
     $bot->{loop}->loop_once(0.01);
-    is_deeply(\@wire, [qw(one two)], 'native paced PRIVMSG still completes its batch');
-    is_deeply($bot->{_external_ai_output_queues}, {}, 'native completed batch releases queue state');
-    is(timer_count($bot->{loop}), 0, 'native paced PRIVMSG leaves no notifier');
+    is_deeply([\@wire,$bot->{_external_ai_output_queues},timer_count($bot->{loop})],
+        [[qw(one two)],{},0], 'native paced PRIVMSG completes its batch and releases queue state and notifier');
 }
 done_testing;

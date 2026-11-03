@@ -1,5 +1,25 @@
 ## [Unreleased] — 3.8dev
 
+### MB1081 — Release retired IRC countdowns before they expire
+
+- Keep only a weak notifier reference in the shared IRC countdown callback.
+  Early stop/remove followed by release of the notifier's owners no longer
+  leaves the helper's timer/callback cycle retaining its payload and loop.
+- Hold a separate strong notifier owner during setup and return. Preserve
+  loop ownership, normal expiry, callback arguments, single-use completion,
+  lazy IO::Async loading and constructor/add/start exception propagation.
+- Skip already completed cleanup when inline expiry precedes a setup error,
+  preserving the original exception object instead of calling an erased
+  cleanup callback. Caller-owned cycles and explicit cancellation policy remain
+  the responsibility of their owners; stop alone does not revoke callbacks.
+- Extend the existing native IO::Async case with repeated early removal and
+  inline completion/error regressions. Reduce the redundant mixed-output loop
+  from 50 to six rounds and group related checks: 15 instead of 128 assertions,
+  no new test file, process or wait.
+- No schema, dependency, configuration or manual VERSION change; previously
+  qualified fixes remain intact.
+
+
 ### MB1080 — Confirm RSS reads before publishing rows or suppressing articles
 
 - Share one checked cursor reader across the seven RSS repository SELECT

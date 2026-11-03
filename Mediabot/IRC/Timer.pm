@@ -3,6 +3,7 @@ package Mediabot::IRC::Timer;
 use strict;
 use warnings;
 use Exporter 'import';
+use Scalar::Util qw(weaken);
 
 our @EXPORT_OK = qw(countdown);
 
@@ -15,7 +16,7 @@ sub countdown {
     die "countdown requires an on_expire callback\n" unless ref($callback) eq 'CODE';
     require IO::Async::Timer::Countdown;
 
-    my ($timer, $finished);
+    my ($timer, $setup_owner, $finished);
     my $cleanup = sub {
         my ($owned) = @_;
         return unless $owned;
@@ -41,6 +42,11 @@ sub countdown {
                 return $run->(@_);
             },
         );
+        # The callback must not own its notifier: stop/remove can retire it
+        # before expiry ever breaks the cycle. Keep a strong setup owner until
+        # return, so add/start (including inline expiry) remain safe too.
+        $setup_owner = $timer;
+        weaken($timer);
         $loop->add($timer);
         $timer->start;
         1;
@@ -51,7 +57,9 @@ sub countdown {
         undef $callback;
         my $failed = $timer;
         undef $timer;
-        $cleanup->($failed);
+        # Inline expiry may already have completed cleanup before start or
+        # user code throws. Preserve that original exception in this case.
+        $cleanup->($failed) if $cleanup;
         undef $cleanup;
         undef $loop;
         die $error;
@@ -87,6 +95,13 @@ At expiration the helper stops and removes its notifier before invoking the
 callback, forwards event arguments, and releases its captured payload and timer.
 A retained expiry callback is inert after completion or failed setup. The
 returned notifier is single-use; restarting it is outside this contract.
+
+The callback holds only a weak reference to its notifier. After an early
+C<stop>/C<remove>, releasing the remaining notifier owners can therefore free
+the notifier and its callback payload without waiting for expiry. The helper
+keeps a separate strong owner during setup and return. Caller-created cycles
+or externally retained callbacks still require their own lifetime management;
+C<stop> alone is not a callback-revocation API.
 
 Constructor, add, start and callback exceptions propagate unchanged. Cleanup
 attempts stop/remove even after a partially successful add, and suppresses
