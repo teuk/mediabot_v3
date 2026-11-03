@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1086 — Deliver three DuckDuckGo results through the full search pipeline
+
+- Raise DDG extraction and rendering to three unique organic results, and
+  allow the shared parent delivery to send all three. Preserve the existing
+  two-line guard for Wikipedia and the single browser-search fallback.
+- Keep ranked titles, snippets, channel language/region, destination-checked
+  private short URLs and 400-byte styled replies. Bound worker output at
+  32 KiB for three structured hits; keep the existing 16-second deadline.
+- Remain DuckDuckGo-only. A challenge or unavailable response still produces
+  one honest search link, never three invented or relabelled fallback hits.
+- Extend the existing native DDG case to exercise three results and exclude
+  a fourth, including three child-side shortening calls and three parent-side
+  IRC replies. Eight assertions retained; no new case, dependency, schema,
+  configuration or manual VERSION change.
+
+
 ### MB1085 — Label usable DDG search links instead of failed result previews
 
 - Represent the browser-search fallback as search_link, distinct from parsed

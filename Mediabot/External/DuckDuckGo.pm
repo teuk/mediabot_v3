@@ -15,6 +15,7 @@ use Mediabot::URLShortener qw(make_bot_shortener);
 
 our @EXPORT_OK=qw(mbDDG_ctx);
 our $MAX_BODY=256*1024;
+use constant MAX_RESULTS => 3;
 sub _message {
     my ($lang,$kind)=@_;
     my %text=(
@@ -85,7 +86,7 @@ sub _parse {
             next unless $url && length($title) && !$seen{$url}++;
             my $snippet=$container->look_down(sub {_class($_[0],'result__snippet')});
             push @hits,{url=>$url,title=>$title,excerpt=>$snippet?_plain($snippet->as_text,800):''};
-            last if @hits>=2;
+            last if @hits>=MAX_RESULTS;
         }
         1;
     };
@@ -131,7 +132,7 @@ sub _render {
     return unless defined($value->{state}) && !ref($value->{state});
     my $search_link=$value->{state} eq 'search_link';
     return unless ($value->{state} eq 'ok' || $search_link)
-        && ref($value->{hits}) eq 'ARRAY' && @{$value->{hits}} && @{$value->{hits}}<=2;
+        && ref($value->{hits}) eq 'ARRAY' && @{$value->{hits}} && @{$value->{hits}}<=MAX_RESULTS;
     return if $search_link && @{$value->{hits}}!=1;
     $base=Mediabot::URLShortener::_public_base($base);my @lines;my $rank=0;
     for my $hit (@{$value->{hits}}) {
@@ -155,7 +156,7 @@ sub _render {
 }
 sub mbDDG_ctx {
     my ($ctx)=@_;my $base=eval {$ctx->bot->{conf}->get('shorturl.PUBLIC_BASE_URL')} // '';
-    return run_lookup($ctx,name=>'ddg',label=>'ddg search',timeout=>16,max_output=>16384,
+    return run_lookup($ctx,name=>'ddg',label=>'ddg search',timeout=>16,max_output=>32768,
         message=>\&_message,lookup=>sub {_lookup_sync($ctx->bot,@_)},render=>sub {_render(@_,$base)});
 }
 

@@ -79,6 +79,7 @@ sub note_policy_change {
 sub run_lookup {
     my ($ctx,%args)=@_;
     my $name=_name($args{name}) or return;
+    my $reply_limit=$name eq 'ddg' ? 3 : 2;
     my $bot=$ctx->bot;my $channel=$ctx->channel;
     return unless enabled($bot,$channel,$name);
     my $lang=_language($bot,$channel);my $input=$ctx->args;
@@ -102,10 +103,10 @@ sub run_lookup {
         if (ref($result) eq 'HASH' && $result->{ok} && ref($result->{value}) eq 'HASH') {
             $lines=eval {$args{render}->($result->{value},$lang)};
         }
-        $lines=[$message->($lang,'unavailable')] unless ref($lines) eq 'ARRAY' && @$lines && @$lines<=2
+        $lines=[$message->($lang,'unavailable')] unless ref($lines) eq 'ARRAY' && @$lines && @$lines<=$reply_limit
             && !grep {!defined($_) || ref($_) || !length($_) || /[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/ || _irc_wire_bytes($_)>400} @$lines;
         for my $line (@$lines) {
-            # A synchronous transport callback can revoke the second result too.
+            # A synchronous transport callback can revoke later results too.
             last unless delivery_context_current($bot,$binding)
                 && epoch($bot,$channel,$name)==$epoch && enabled($bot,$channel,$name);
             my $sent=eval {$ctx->reply($line);1};

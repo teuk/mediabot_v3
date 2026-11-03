@@ -37,7 +37,7 @@ use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
     sub get {my ($s,$url)=@_;$s->record('GET',$url);return $s->{response}//{success=>1,status=>200,content=>Encode::encode('UTF-8',$s->{html})}}
     sub request {
         my ($s,$method,$url,$options)=@_;my $body=JSON::PP::decode_json($options->{content});
-        $s->record($method,$url,$body->{url});my $id=++$s->{serial}==1?'Abcdef23':'Bbcdef23';
+        $s->record($method,$url,$body->{url});my $id=chr(64+(++$s->{serial})).'bcdef23';
         return {success=>0,status=>503} if $s->{short_fail};
         return {success=>1,status=>201,content=>JSON::PP::encode_json({protocol=>1,id=>$id,url=>$body->{url},short_url=>'https://teuk.org/shorturl/'.$id})};
     }
@@ -80,7 +80,8 @@ my $html=<<'HTML';
 <div class="result"><a class="result__a" href="https://www.debian.org/">duplicate</a></div>
 <div class="result"><a class="result__a" href="javascript:alert(1)">bad</a></div>
 <div class="result"><a class="result__a" href="https://wiki.debian.org/Debian13">Debian 13</a><span class="result__snippet">La documentation.</span></div>
-<div class="result"><a class="result__a" href="https://third.example.org/">third</a></div>
+<div class="result"><a class="result__a" href="https://third.example.org/">third</a><span class="result__snippet">Troisième résultat.</span></div>
+<div class="result"><a class="result__a" href="https://fourth.example.org/">fourth</a></div>
 </body></html>
 HTML
 {
@@ -132,8 +133,9 @@ HTML
         'https://duckduckgo.com.evil/l/?uddg=javascript:bad','https://user:pass@example.org/','file:///tmp/a',"https://example.org/\n");
     is_deeply([$value,\@bad],[{state=>'ok',hits=>[
         {title=>'Debian & café',excerpt=>'Le système libre 🌀.',url=>'https://www.debian.org/'},
-        {title=>'Debian 13',excerpt=>'La documentation.',url=>'https://wiki.debian.org/Debian13'}]},[0,1,0,0,0]],
-        'ranked organic links and plain snippets survive Unicode/entity decoding; ads/navigation/duplicates are skipped and redirects unwrap exactly one target');
+        {title=>'Debian 13',excerpt=>'La documentation.',url=>'https://wiki.debian.org/Debian13'},
+        {title=>'third',excerpt=>'Troisième résultat.',url=>'https://third.example.org/'}]},[0,1,0,0,0]],
+        'exactly three ranked unique organic links survive Unicode/entity decoding; the fourth, ads/navigation/duplicates and unsafe redirects are excluded');
 }
 {
     my @values=map {$D->can('_parse')->($_)->{state}} (
@@ -155,8 +157,8 @@ HTML
         [map {$_->{display_url}} @{$value->{hits}}],[map {$_->{target}} grep {$_->{method} eq 'POST'} @calls],
         $fallback->{state},$fallback->{hits}[0]{title}],
         ['html.duckduckgo.com','café & thé ☕','fr-fr',[1,0,8,262144],
-         ['https://teuk.org/shorturl/Abcdef23','https://teuk.org/shorturl/Bbcdef23'],
-         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://duckduckgo.com/?q=autre%20recherche&kl=es-es'],
+         ['https://teuk.org/shorturl/Abcdef23','https://teuk.org/shorturl/Bbcdef23','https://teuk.org/shorturl/Cbcdef23'],
+         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://third.example.org/','https://duckduckgo.com/?q=autre%20recherche&kl=es-es'],
          'search_link','autre recherche'],
         'search and shortening preserve exact result destinations; a challenge returns a distinct browser-search state with the original query and its region');
 }
@@ -167,6 +169,10 @@ HTML
     $value->{hits}[0]{display_url}='https://foreign.example.org/wrong';my $foreign=$D->can('_render')->($value,'fr',$base);
     $value->{hits}[0]{display_url}=$value->{hits}[0]{url}='https://example.org/'.('a'x500);
     my $long=$D->can('_render')->($value,'fr',$base);
+    my @hits=map {{title=>'Article '.$_,url=>'https://example.org/'.$_,
+        display_url=>$base.chr(64+$_).'bcdef23',excerpt=>'Extrait '.('é'x400)}} 1..3;
+    my $three=$D->can('_render')->({state=>'ok',hits=>\@hits},'fr',$base);
+    my $four=$D->can('_render')->({state=>'ok',hits=>[@hits,$hits[0]]},'fr',$base);
     my @searches;
     for my $lang ('fr','en','es') {
         my $reply=$D->can('_render')->({state=>'search_link',hits=>[
@@ -178,24 +184,36 @@ HTML
     }
     is_deeply([(@$lines==1 && _irc_wire_bytes($text)<=400 && $text!~/[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/
         && $text=~/\x0300,02\[🦆 DDG\]\x0f/ && $text=~/\x0312\x1f\Q$base\EAbcdef23\x1f\x0f\z/
-        && !defined($foreign) && $long->[0]=~/raccourcisseur indisponible/)?1:0,\@searches],
+        && !defined($foreign) && $long->[0]=~/raccourcisseur indisponible/
+        && ref($three) eq 'ARRAY' && @$three==3
+        && !(grep {my $rank=$_+1;_irc_wire_bytes($three->[$_])>400 || $three->[$_]!~/\Q$rank\E\. \x02Article /} 0..2)
+        && !defined($four))?1:0,\@searches],
         [1,[map {"[🦆 DDG] $_".'la vitesse de la lumière · '.$base.'Abcdef23'} ('Recherche : ','Search: ','Búsqueda: ')]],
-        'themed links remain bounded and validated; a browser search is labelled with its query in each language, without a fake rank or failure excerpt');
+        'three numbered themed replies fit their byte budgets and a fourth is refused; browser-search fallback remains one unranked localized link');
 }
 {
     my $b=bot1084();set1084($b,'+ddg');$b->_register_builtin_command_catalogue;
     my $entry=$b->commands->command_for('ddg','public');my $dir=tempdir(CLEANUP=>1);my $trace="$dir/http.jsonl";
-    my $http=bless {html=>$html,calls=>[],trace=>$trace},'MB1084::HTTP';
+    # Three valid Unicode-rich hits exceed the old 16-KiB worker envelope.
+    my $heavy_html='<html><body>';
+    for my $i (1..3) {
+        my $url='https://example.org/'.$i.'?'.('a'x1900);
+        $heavy_html.='<div class="result"><a class="result__a" href="'.$url.'">Article '.$i.' '.('📚'x500)
+            .'</a><span class="result__snippet">'.('🌀'x800).'</span></div>';
+    }
+    $heavy_html.='</body></html>';
+    my $large_payload=length(JSON::PP->new->utf8->encode($D->can('_parse')->($heavy_html)))>16384 ? 1:0;
+    my $http=bless {html=>$heavy_html,calls=>[],trace=>$trace},'MB1084::HTTP';
     local *Mediabot::External::_make_http=sub {$http};local *Mediabot::URLShortener::_default_http=sub {$http};
     $b->{loop}=IO::Async::Loop->really_new;
     $entry->{handler}->(ctx1084($b,'ddg','Debian','13'));
     my $deadline=Time::HiRes::time()+5;
-    $b->{loop}->loop_once(.02) while @{$b->{sent}}<2 && Time::HiRes::time()<$deadline;
+    $b->{loop}->loop_once(.02) while @{$b->{sent}}<3 && Time::HiRes::time()<$deadline;
     my @calls;if (-f $trace) {open my $fh,'<:raw',$trace or die $!;@calls=map {JSON::PP::decode_json($_)} <$fh>;close $fh}
-    is_deeply([$entry->{level},$entry->{metadata}{migration_fallback}//0,scalar(@calls),
+    is_deeply([$entry->{level},$entry->{metadata}{migration_fallback}//0,$large_payload,scalar(@calls),
         (grep {$_->{pid}==$$} @calls)?1:0,[map {[$_->[0],$_->[1],$_->[3]]} @{$b->{sent}}],
         scalar(keys %{$b->{_ddg_pending}})],
-        ['public',0,3,0,[['public','#test',$$],['public','#test',$$]],0],
-        'actual native ddg handler, policy, HTTP client and shortener run through one real fork/pipe; all network stays in the child and both IRC replies in the parent');
+        ['public',0,1,4,0,[['public','#test',$$],['public','#test',$$],['public','#test',$$]],0],
+        'actual native handler, parser, renderer and shared delivery return all three results through one fork/pipe, with three shortener requests in the child');
 }
 done_testing;
