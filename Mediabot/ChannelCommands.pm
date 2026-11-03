@@ -655,8 +655,15 @@ sub channelSet_ctx {
         $chanset = 'AppleMusicFallback' if lc($chanset) eq 'applemusicfallback';
         $chanset = 'Reddit' if lc($chanset) eq 'reddit';
         $chanset = 'MixCloud' if lc($chanset) eq 'mixcloud';
+        $chanset = 'Wikipedia' if lc($chanset) eq 'wikipedia';
+        $chanset = 'ddg' if lc($chanset) eq 'ddg';
 
         my $id_chanset_list = getIdChansetList($self, $chanset);
+        if (!$id_chanset_list && $op eq '+' && $chanset =~ /\A(?:Wikipedia|ddg)\z/) {
+            require Mediabot::External::SearchCommand;
+            Mediabot::External::SearchCommand::register_chanset($self, $chanset);
+            $id_chanset_list = getIdChansetList($self, $chanset);
+        }
         if (!$id_chanset_list && $op eq '+' && $chanset eq 'MixCloud') {
             require Mediabot::External::MixCloud;
             Mediabot::External::MixCloud::register_chanset($self);
@@ -763,6 +770,11 @@ sub channelSet_ctx {
             botNotice($self,$nick,'AppleMusicFallback needs tavily.API_KEY for searches; main.YOUTUBE_APIKEY also enables YouTube verification.')
                 unless $ready->{tavily} && $ready->{youtube};
         }
+    }
+    if ($args[0] =~ /^[+-](Wikipedia|ddg)$/i) {
+        my $name=lc($1) eq 'wikipedia' ? 'Wikipedia' : 'ddg';
+        require Mediabot::External::SearchCommand;
+        Mediabot::External::SearchCommand::note_policy_change($self,$target_channel,$name);
     }
     if ($args[0] =~ /^[+-]MixCloud$/i) {
         require Mediabot::External::MixCloud;

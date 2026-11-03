@@ -8,10 +8,10 @@ Source version line: `3.8dev`
 
 | Measure | Count |
 | --- | ---: |
-| Internal help entries | 251 |
-| Registered public built-ins | 244 |
+| Internal help entries | 252 |
+| Registered public built-ins | 245 |
 | Registered private built-ins | 99 |
-| Direct public registry handlers | 244 |
+| Direct public registry handlers | 245 |
 | Direct private registry handlers | 99 |
 | Compatibility dispatch tables | 0 |
 | Help parser anomalies | 0 |
@@ -87,6 +87,7 @@ Source version line: `3.8dev`
 | `cstat` | public | registry-public, registry-private | `cstat #channel` | Show channel statistics. |  |
 | `dashboard` | public | registry-public | `dashboard` | Show a compact dashboard for the current channel. |  |
 | `date` | public | registry-public | `date [timezone\|user]` | Display the current date/time for a timezone or user. |  |
+| `ddg` | public | registry-public | `ddg <keywords>` | Search DuckDuckGo in the channel language with short result links; requires +ddg. |  |
 | `debug` | master | registry-public, registry-private | `debug <level>` | Change or display debug verbosity. |  |
 | `define` | public | registry-public | `define <word>` | Look up a word definition from Wiktionary. |  |
 | `del` | channel admin | registry-public, registry-private | `del #channel <nick>` | Remove a user from channel access. |  |
@@ -269,7 +270,7 @@ Source version line: `3.8dev`
 | `whoami` | public | registry-public, registry-private | `whoami` | Show who the bot thinks you are. |  |
 | `whotalk` | public | registry-public, registry-private | `whotalk #channel` | Show channel talk statistics. |  |
 | `whotalks` | public | registry-public, registry-private | `whotalks #channel` | Alias for whotalk. |  |
-| `wikipedia` | public | registry-public | `wikipedia <keyword>` | Search Wikipedia in the channel language and show an article summary and link. |  |
+| `wikipedia` | public | registry-public | `wikipedia <keyword>` | Search Wikipedia in the channel language; requires +Wikipedia. |  |
 | `wordcount` | public | registry-public | `wordcount [nick]` | Count distinct words spoken by a nick on the channel. |  |
 | `xauth` | master | registry-public, registry-private | `xauth [status]` | Verify or show Undernet X authentication and configured +x. Uses private configuration only. |  |
 | `xlogin` | master | registry-public, registry-private | `xlogin [status]` | Check the configured X account and recover authentication; alias for xauth. |  |

@@ -39,6 +39,7 @@ my $W='Mediabot::External::Wikipedia';
 my $json=JSON::PP->new->utf8->canonical;
 my @warnings;local $SIG{__WARN__}=sub {push @warnings,@_};
 no warnings qw(redefine once);
+local *Mediabot::External::SearchCommand::enabled=sub {1};
 local *Mediabot::Helpers::chanset_enabled=sub {
     my ($bot,$channel,$name)=@_;
     return $bot->{flags}{lc($channel).'/'.$name}//0;

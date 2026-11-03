@@ -4,47 +4,13 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
-use Encode qw(decode encode FB_CROAK LEAVE_SRC);
 use JSON::PP ();
-use Mediabot::Helpers ();
-use Mediabot::AsyncWorker ();
 use Mediabot::External::URLCodec qw(_uri_escape_bytes);
-use Mediabot::IRC::DeliveryContext qw(capture_delivery_context delivery_context_current);
+use Mediabot::External::SearchCommand qw(_edition _language _query run_lookup);
 use Mediabot::IRC::TextBudget qw(truncate_utf8 _irc_wire_bytes);
 
 our @EXPORT_OK = qw(mbWikipedia_ctx);
-our $MAX_PENDING = 2;
 our $MAX_BODY = 128 * 1024;
-
-sub _edition {
-    my ($value) = @_;
-    return 'en' unless defined($value) && !ref($value);
-    $value =~ s/^\s+|\s+$//g;
-    return lc($1) if $value =~ /\A([a-z]{2,3})(?:[-_][a-z0-9]+)*\z/i;
-    return 'en';
-}
-
-sub _language {
-    my ($bot, $channel) = @_;
-    return _edition(eval { Mediabot::Helpers::channel_lang($bot, $channel) });
-}
-
-sub _query {
-    my ($args) = @_;
-    return unless ref($args) eq 'ARRAY' && @$args && @$args <= 32;
-    return if grep { !defined($_) || ref($_) } @$args;
-    my $text = join ' ', @$args;
-    return if length($text) > 640;
-    $text = eval { decode('UTF-8', $text, FB_CROAK | LEAVE_SRC) }
-        unless utf8::is_utf8($text);
-    return unless defined($text) && $text !~ /[\x00-\x1f\x7f]/;
-    $text =~ s/\s+/ /g;
-    $text =~ s/^\s+|\s+$//g;
-    return unless length($text) && length($text) <= 160;
-    my $bytes = eval { encode('UTF-8', $text, FB_CROAK | LEAVE_SRC) };
-    return unless defined($bytes) && length($bytes) <= 320;
-    return $text;
-}
 
 sub _message {
     my ($lang, $kind) = @_;
@@ -123,55 +89,14 @@ sub _lookup_sync {
 
 sub mbWikipedia_ctx {
     my ($ctx) = @_;
-    my $bot = $ctx->bot;
-    my $lang = _language($bot, $ctx->channel);
-    my $args = $ctx->args;
-    unless (ref($args) eq 'ARRAY' && @$args) {
-        $ctx->reply_private(_message($lang, 'syntax'));
-        return;
-    }
-    my $query = _query($args);
-    unless (defined $query) {
-        $ctx->reply_private(_message($lang, 'invalid'));
-        return;
-    }
-    my $loop = eval { $bot->getLoop };
-    $loop ||= $bot->{loop};
-    unless ($loop && $loop->can('add') && $loop->can('remove')) {
-        $ctx->reply_private(_message($lang, 'unavailable'));
-        return;
-    }
-    my $pending = $bot->{_wikipedia_pending} //= {};
-    if (keys(%$pending) >= $MAX_PENDING) {
-        $ctx->reply_private(_message($lang, 'busy'));
-        return;
-    }
-    my $id = ++$bot->{_wikipedia_sequence};
-    $pending->{$id} = 1;
-    my $binding = capture_delivery_context($bot, $ctx->channel);
-    my $finished = 0;
-    my $done = sub {
-        my ($result) = @_;
-        return if $finished++;
-        delete $pending->{$id};
-        return unless delivery_context_current($bot, $binding);
-        my $message = _message($lang, 'unavailable');
-        if (ref($result) eq 'HASH' && $result->{ok} && ref($result->{value}) eq 'HASH') {
-            my $text = $result->{value}{message};
-            $message = $text if defined($text) && !ref($text) && length($text)
-                && $text !~ /[\x00-\x1f\x7f]/ && _irc_wire_bytes($text) <= 400;
-        }
-        my $sent = eval { $ctx->reply($message); 1 };
-        eval { $bot->{logger}->log(1, 'Wikipedia reply failed') } if !$sent && $bot->{logger};
-    };
-    my $worker = eval { Mediabot::AsyncWorker->start(
-        loop => $loop, label => 'wikipedia lookup', timeout => 12,
-        term_grace => 0.2, force_grace => 1, max_output => 8192,
-        child => sub { return {message => _lookup_sync($query, $lang)} },
-        on_done => $done,
-    ) };
-    $done->({ok => 0, error => 'worker_setup'}) unless $worker;
-    return 1;
+    return run_lookup($ctx, name=>'Wikipedia', label=>'wikipedia lookup',
+        message=>\&_message,
+        lookup=>sub {return {message=>_lookup_sync(@_)}},
+        render=>sub {
+            my ($value)=@_;my $text=$value->{message};
+            return unless defined($text) && !ref($text) && $text !~ /[\x00-\x1f\x7f]/;
+            return [$text];
+        });
 }
 
 1;

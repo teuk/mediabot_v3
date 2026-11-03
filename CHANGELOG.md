@@ -1,5 +1,27 @@
 ## [Unreleased] — 3.8dev
 
+### MB1084 — Gate Wikipedia by channel and add themed DuckDuckGo search
+
+- Add independent, default-off Wikipedia and ddg chansets. Authorized native
+  chanset +Wikipedia/+ddg registers only its missing catalogue row and enables
+  the requested channel, without a schema migration or automatic activation.
+- Share bounded query/language handling and asynchronous search lifecycle.
+  Fresh checked policy reads and channel policy epochs suppress disabled or
+  superseded replies, including disable/re-enable during a pending lookup.
+  Preserve Wikipedia language selection, summaries, limits and existing tests.
+- Add native public ddg <keywords>: one localized DuckDuckGo HTML search,
+  up to two organic results with plain snippets, private shared URL shortening
+  in the worker, navy/white duck badge, bold titles and light-blue underlined
+  links. Keep each message within 400 UTF-8 bytes and never cut a URL.
+- Distinguish explicit empty results from service errors, challenges and
+  unknown markup. When results are unavailable, offer a clearly labelled
+  search link; preserve original destinations when shortening is unavailable.
+- Add eight grouped native behavior checks, including real SQL chanset
+  authorization and one real fork/pipe with the native shortener contract.
+  Keep the ten Wikipedia checks, update catalogue/help counts and regenerate
+  the inventory. No new dependency, API key or manual VERSION change.
+
+
 ### MB1083 — Search Wikipedia in the channel language
 
 - Add the native public `wikipedia <keyword>` command. Reuse the channel

@@ -91,8 +91,8 @@ return sub {
         'inventory records the actual source version line');
     $assert->unlike($generated, qr/Source version: `[^`]+-\d{8}_\d{6}`/,
         'development inventory excludes volatile commit timestamps');
-    $assert->like($generated, qr/\| Internal help entries \| 251 \|/,
-        'MB1083 records all 251 current built-in help entries with Wikipedia');
+    $assert->like($generated, qr/\| Internal help entries \| 252 \|/,
+        'MB1084 records all 252 current built-in help entries with Wikipedia and DuckDuckGo');
     $assert->like($generated, qr/\| Help parser anomalies \| 0 \|/,
         'MB741 resolves the two frozen help parser anomalies');
     $assert->like($generated, qr/`roll`.*registry-public/s,

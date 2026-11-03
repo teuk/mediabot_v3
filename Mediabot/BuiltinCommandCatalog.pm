@@ -30,7 +30,7 @@ my @PUBLIC_CATALOGUE = qw(
     calclast wordcount alias streak slap karma karmatop karmareset karmadiff
     karmgraph triviastop karmawatch remindsnooze karmainfo triviareset
     triviatop pollextend karmahist roll flip choose morse abbrev compare
-    heatmap monthstats define wikipedia trivia triviascore active when achievements
+    heatmap monthstats define wikipedia ddg trivia triviascore active when achievements
     achievs profil profile radar actualites actualite actu news rss randomquote vdm dtc
     bashfr dashboard chanstats duel horoscope horo compat affinity quotegame
     qg mood milestone milestones ambiance leaderboard lb awards yearbook
@@ -63,7 +63,7 @@ my @PRIVATE_CATALOGUE = qw(
 # The first four native handlers predated MB741. The new hailo operator
 # command and MB807 previews/variable guide have no legacy public handlers. All existing
 # migratable public built-ins retain their original migration eligibility.
-my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars randomquote xauth wikipedia);
+my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars randomquote xauth wikipedia ddg);
 
 sub public_command_names {
     return @PUBLIC_CATALOGUE;

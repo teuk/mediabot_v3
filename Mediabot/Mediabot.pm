@@ -35,6 +35,7 @@ use Mediabot::ChannelCommands;
 use Mediabot::UserCommands;
 use Mediabot::External;
 use Mediabot::External::Wikipedia qw(mbWikipedia_ctx);
+use Mediabot::External::DuckDuckGo qw(mbDDG_ctx);
 use Mediabot::DCC qw(validate_dcc_active_target);
 use Mediabot::DBCommands;
 use Mediabot::AdminCommands;
@@ -2214,6 +2215,7 @@ sub _builtin_public_command_handlers {
         monthstats   => sub { my ($ctx) = @_; mbMonthStats_ctx($ctx) },
         define       => sub { my ($ctx) = @_; mbDefine_ctx($ctx) },
         wikipedia    => sub { my ($ctx) = @_; mbWikipedia_ctx($ctx) },
+        ddg          => sub { my ($ctx) = @_; mbDDG_ctx($ctx) },
         trivia       => sub { my ($ctx) = @_; mbTrivia_ctx($ctx) },
         triviascore  => sub { my ($ctx) = @_; mbTriviaScore_ctx($ctx) },
         active       => sub { my ($ctx) = @_; mbActive_ctx($ctx) },
@@ -2994,7 +2996,8 @@ triviascore|triviascore|public|Show trivia scores for the current channel sessio
 
 # Dictionary / external
 define|define <word>|public|Look up a word definition from Wiktionary.
-wikipedia|wikipedia <keyword>|public|Search Wikipedia in the channel language and show an article summary and link.
+wikipedia|wikipedia <keyword>|public|Search Wikipedia in the channel language; requires +Wikipedia.
+ddg|ddg <keywords>|public|Search DuckDuckGo in the channel language with short result links; requires +ddg.
 
 # AI
 ai|ai <prompt>|public|Ask Claude in at most two IRC-rendered lines. Subcommands: [#channel] summary (Administrator+; Master+ to publish another channel here) [periode] [N] [Nl] [public] [en/fr/es] [nick] (details: ai summary help), pin, relay, forget, models, stats, reset, history, ai persona.
