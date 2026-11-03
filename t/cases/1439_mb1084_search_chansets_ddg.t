@@ -34,7 +34,15 @@ use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
         push @{$s->{calls}},$row;
         if ($s->{trace}) {open my $fh,'>>:raw',$s->{trace} or die $!;print {$fh} JSON::PP::encode_json($row)."\n";close $fh or die $!}
     }
-    sub get {my ($s,$url)=@_;$s->record('GET',$url);return $s->{response}//{success=>1,status=>200,content=>Encode::encode('UTF-8',$s->{html})}}
+    sub get {
+        my ($s,$url)=@_;$s->record('GET',$url);
+        if ($url=~m{\Ahttps://api\.duckduckgo\.com/}) {
+            return $s->{instant_response} if $s->{instant_response};
+            return $s->{instant} ? {success=>1,status=>202,content=>JSON::PP->new->utf8->encode($s->{instant})}
+                : {success=>0,status=>503};
+        }
+        return $s->{response}//{success=>1,status=>200,content=>Encode::encode('UTF-8',$s->{html})};
+    }
     sub request {
         my ($s,$method,$url,$options)=@_;my $body=JSON::PP::decode_json($options->{content});
         $s->record($method,$url,$body->{url});my $id=chr(64+(++$s->{serial})).'bcdef23';
@@ -153,14 +161,33 @@ HTML
     my $uri=URI->new($calls[0]{url});my %query=$uri->query_form;
     $http->{response}={success=>1,status=>202,content=>'<form id="challenge-form">verify</form>'};
     my $fallback=$D->can('_lookup_sync')->($b,'autre recherche','es');
+    $http->{instant}={Heading=>'Eggdrop',AbstractText=>'Eggdrop est un bot IRC.',AbstractURL=>'https://fr.wikipedia.org/wiki/Eggdrop'};
+    my $preview=$D->can('_lookup_sync')->($b,'eggdrop','fr');
+    my ($api_call)=grep {$_->{method} eq 'GET' && $_->{url}=~/api\.duckduckgo\.com.*q=eggdrop/} @calls;
+    my $api_uri=URI->new($api_call->{url}//'https://missing.invalid/');my %api_query=$api_uri->query_form;
+    my ($api_options)=grep {$_->{max_size}==131072} @options;
+    my @invalid;
+    for my $response ({success=>1,status=>202,content=>'not json'},
+        {success=>1,status=>200,content=>'x'x131073},
+        {success=>1,status=>200,content=>JSON::PP::encode_json({Heading=>[],AbstractText=>'text',AbstractURL=>'https://example.org/'})},
+        {success=>1,status=>200,content=>JSON::PP::encode_json({Heading=>'Eggdrop',AbstractText=>'text',AbstractURL=>'file:///tmp/private'})},
+        {success=>1,status=>200,content=>JSON::PP::encode_json({Redirect=>'https://example.org/'})},
+        {success=>1,status=>503,content=>JSON::PP::encode_json($http->{instant})}) {
+        $http->{instant_response}=$response;
+        my $instant=$D->can('_instant_preview');push @invalid,$instant && defined($instant->('eggdrop','fr')) ? 1:0;
+    }
     is_deeply([$uri->host,decode('UTF-8',$query{q}),$query{kl},[@{$options[0]}{qw(verify_SSL max_redirect timeout max_size)}],
         [map {$_->{display_url}} @{$value->{hits}}],[map {$_->{target}} grep {$_->{method} eq 'POST'} @calls],
-        $fallback->{state},$fallback->{hits}[0]{title}],
+        $fallback->{state},$fallback->{hits}[0]{title},$preview->{state},$preview->{hits}[0]{excerpt},
+        $api_uri->host,[@api_query{qw(q format no_html no_redirect kl)}],
+        [@{$api_options//{}}{qw(verify_SSL max_redirect timeout max_size)}],\@invalid],
         ['html.duckduckgo.com','café & thé ☕','fr-fr',[1,0,8,262144],
          ['https://teuk.org/shorturl/Abcdef23','https://teuk.org/shorturl/Bbcdef23','https://teuk.org/shorturl/Cbcdef23'],
-         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://third.example.org/','https://duckduckgo.com/?q=autre%20recherche&kl=es-es'],
-         'search_link','autre recherche'],
-        'search and shortening preserve exact result destinations; a challenge returns a distinct browser-search state with the original query and its region');
+         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://third.example.org/','https://duckduckgo.com/?q=autre%20recherche&kl=es-es',
+          'https://fr.wikipedia.org/wiki/Eggdrop','https://duckduckgo.com/?q=eggdrop&kl=fr-fr'],
+         'search_link','autre recherche','preview','Eggdrop est un bot IRC.','api.duckduckgo.com',
+         ['eggdrop','json','1','1','fr-fr'],[1,0,8,131072],[0,0,0,0,0,0]],
+        'DDG-only instant answers add a validated localized abstract and two exact short destinations after an unreadable web result, including valid JSON under HTTP 202');
 }
 {
     my $base='https://teuk.org/shorturl/';
@@ -182,14 +209,27 @@ HTML
         $plain=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$plain=~s/[\x02\x0f\x1f]//g;
         push @searches,$plain;
     }
+    my $preview=$D->can('_render')->({state=>'preview',hits=>[
+        {title=>'Eggdrop',excerpt=>'Eggdrop is an IRC bot.',url=>'https://en.wikipedia.org/wiki/Eggdrop',display_url=>$base.'Abcdef23'}],
+        search=>{title=>'eggdrop',url=>'https://duckduckgo.com/?q=eggdrop',display_url=>$base.'Bbcdef23'}},'fr',$base);
+    my @preview_lines;
+    for my $line (@{ref($preview) eq 'ARRAY' ? $preview : []}) {
+        my $plain=$line;$plain=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$plain=~s/[\x02\x0f\x1f]//g;
+        push @preview_lines,$plain;
+    }
+    my $empty_preview=$D->can('_render')->({state=>'preview',hits=>[
+        {title=>'Empty',excerpt=>'',url=>'https://example.org/'}],
+        search=>{title=>'query',url=>'https://duckduckgo.com/?q=query'}},'fr',$base);
     is_deeply([(@$lines==1 && _irc_wire_bytes($text)<=400 && $text!~/[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/
         && $text=~/\x0300,02\[🦆 DDG\]\x0f/ && $text=~/\x0312\x1f\Q$base\EAbcdef23\x1f\x0f\z/
         && !defined($foreign) && $long->[0]=~/raccourcisseur indisponible/
         && ref($three) eq 'ARRAY' && @$three==3
         && !(grep {my $rank=$_+1;_irc_wire_bytes($three->[$_])>400 || $three->[$_]!~/\Q$rank\E\. \x02Article /} 0..2)
-        && !defined($four))?1:0,\@searches],
-        [1,[map {"[🦆 DDG] $_".'la vitesse de la lumière · '.$base.'Abcdef23'} ('Recherche : ','Search: ','Búsqueda: ')]],
-        'three numbered themed replies fit their byte budgets and a fourth is refused; browser-search fallback remains one unranked localized link');
+        && !defined($four) && !defined($empty_preview))?1:0,\@searches,\@preview_lines],
+        [1,[map {"[🦆 DDG] $_".'la vitesse de la lumière · '.$base.'Abcdef23'} ('Recherche : ','Search: ','Búsqueda: ')],
+         ['[🦆 DDG] Aperçu (EN) : Eggdrop — Eggdrop is an IRC bot. · '.$base.'Abcdef23',
+          '[🦆 DDG] Recherche : eggdrop · '.$base.'Bbcdef23']],
+        'ranked results retain their budgets and limits; instant preview and search link have explicit unranked labels, including a source-language marker');
 }
 {
     my $b=bot1084();set1084($b,'+ddg');$b->_register_builtin_command_catalogue;

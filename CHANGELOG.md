@@ -1,5 +1,24 @@
 ## [Unreleased] — 3.8dev
 
+### MB1087 — Show real DuckDuckGo topic previews when web results are unavailable
+
+- Ask DuckDuckGo's Instant Answers endpoint for a plain localized abstract
+  when the HTML search cannot be read. Require a title, nonempty summary and
+  valid HTTP(S) source URL, including valid JSON returned with HTTP 202.
+- Display an explicitly labelled preview and its source link, followed by the
+  full browser-search link. Keep up to three ranked organic results when the
+  HTML search succeeds; instant answers are never relabelled as ranked hits.
+- Send the channel language/region and mark Wikipedia source language when
+  it differs. Keep private child-side shortening, bold titles, light-blue
+  underlined links and the 400-byte UTF-8 budget. Retain the search-link
+  fallback when neither interface supplies a usable answer.
+- Bound the additional JSON body to 128 KiB and request to eight seconds;
+  allow 24 seconds for the worker including HTML and private shortening.
+  Ignore automatic redirects, HTML answers and unrelated topic categories.
+- Extend two groups in the existing eight-assertion DDG case, with no new
+  test file, process, provider, key, dependency, schema or VERSION edit.
+
+
 ### MB1086 — Deliver three DuckDuckGo results through the full search pipeline
 
 - Raise DDG extraction and rendering to three unique organic results, and
