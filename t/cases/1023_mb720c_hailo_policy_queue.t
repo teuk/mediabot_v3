@@ -235,4 +235,45 @@ return sub {
         'expiry callbacks may read queue metrics without recursive pruning');
     $assert->is($after_reentrant->{dropped_expired}, 1,
         'reentrant metric read does not double-count the expired entry');
+
+    # MB1091: no sleeping or wall-clock patching. A distinct monotonic origin
+    # proves which clock default policy/queue lifetimes actually consume.
+    {
+        my $mono=100;my $expired=0;
+        no warnings 'redefine';
+        local *Time::HiRes::clock_gettime=sub {$mono};
+        my $policy=Mediabot::Hailo::Policy->new(reply_interval=>5,learn_interval=>5,
+            flood_max=>1,flood_window=>5,key_reply_rate=>100,rng_cb=>sub {0});
+        my %request=(channel=>'#clock',speaker=>'Alice',text=>'ordinary useful words',
+            master_enabled=>1,learn_enabled=>1,respond_enabled=>1,mode=>'mention');
+        $policy->record_learn(%request);$policy->record_reply(%request);
+        my $queue=Mediabot::Hailo::ReplyQueue->new(ttl_seconds=>5);
+        $queue->enqueue(channel=>'#clock',on_ready=>sub {1},on_expire=>sub {$expired++});
+        $mono=104;
+        my $early=$policy->decide(%request);
+        my $flood=$policy->decide(%request,speaker=>'Bob');
+        my $pending=$queue->stats->{queued};
+        $mono=105;
+        my $due=$policy->decide(%request);
+        require JSON::PP;
+        $assert->is(JSON::PP::encode_json([
+            $early->{learn_reason},$early->{reply_reason},$flood->{reply_reason},$pending,
+            $due->{learn},$due->{reply},$queue->stats->{queued},$expired,
+            $queue->can('now')?$queue->now:undef]),
+            JSON::PP::encode_json(['learn_cooldown','reply_cooldown','channel_flood',1,1,1,0,1,105]),
+            'MB1091 default policy and queue share monotonic elapsed time for cooldown, flood expiry and exact TTL');
+    }
+    {
+        my $mono=100.25;my $expired=0;
+        no warnings 'redefine';
+        local *Time::HiRes::clock_gettime=sub {$mono};
+        my $queue=Mediabot::Hailo::ReplyQueue->new(ttl_seconds=>1);
+        $queue->enqueue(channel=>'#fraction',on_ready=>sub {1},on_expire=>sub {$expired++});
+        $mono=101.24;my $before=$queue->stats->{queued};
+        $mono=101.25;my $at=$queue->stats->{queued};
+        $queue->stats;
+        $assert->is(join(',', $before,$at,$expired), '1,0,1',
+            'MB1091 fractional elapsed timestamps preserve the exact TTL boundary and report expiry once');
+    }
+
 };

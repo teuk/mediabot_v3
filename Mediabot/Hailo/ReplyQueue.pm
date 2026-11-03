@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 
 use Carp qw(croak);
+use Time::HiRes ();
 
 our $VERSION = '1.0';
 
@@ -30,7 +31,7 @@ sub new {
         ttl_seconds     => _bounded_int($args{ttl_seconds}, 15, 1, 300),
         typing_coeff    => defined($args{typing_coeff}) ? 0 + $args{typing_coeff} : 1,
         typing_offset   => defined($args{typing_offset}) ? 0 + $args{typing_offset} : 0,
-        now_cb          => ref($args{now_cb}) eq 'CODE' ? $args{now_cb} : sub { time() },
+        now_cb          => ref($args{now_cb}) eq 'CODE' ? $args{now_cb} : sub { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) },
         queue           => [],
         next_id         => 0,
         dropped_full    => 0,
@@ -41,8 +42,16 @@ sub new {
 sub _now {
     my ($self) = @_;
     my $now = eval { $self->{now_cb}->() };
-    return time() unless _plain($now) && "$now" =~ /^-?(?:\d+(?:[.]\d*)?|[.]\d+)\z/;
+    return Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) unless _plain($now) && "$now" =~ /^-?(?:\d+(?:[.]\d*)?|[.]\d+)\z/;
     return 0 + $now;
+}
+
+# The queue owns the clock for its entries. Consumers using the default
+# runtime clock can share that domain, including an explicitly injected clock.
+sub now {
+    my ($self) = @_;
+    croak 'queue object is required' unless ref($self);
+    return $self->_now;
 }
 
 sub _channel_key {

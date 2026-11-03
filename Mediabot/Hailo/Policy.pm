@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 
 use Carp qw(croak);
+use Time::HiRes ();
 
 our $VERSION = '1.0';
 
@@ -30,7 +31,7 @@ sub _key {
 
 sub new {
     my ($class, %args) = @_;
-    my $now_cb = ref($args{now_cb}) eq 'CODE' ? $args{now_cb} : sub { time() };
+    my $now_cb = ref($args{now_cb}) eq 'CODE' ? $args{now_cb} : sub { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) };
     my $rng_cb = ref($args{rng_cb}) eq 'CODE' ? $args{rng_cb} : sub { rand(100) };
 
     return bless {
@@ -52,7 +53,7 @@ sub new {
 sub _now {
     my ($self) = @_;
     my $now = eval { $self->{now_cb}->() };
-    return time() unless _plain($now) && "$now" =~ /^-?(?:\d+(?:[.]\d*)?|[.]\d+)\z/;
+    return Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) unless _plain($now) && "$now" =~ /^-?(?:\d+(?:[.]\d*)?|[.]\d+)\z/;
     return 0 + $now;
 }
 

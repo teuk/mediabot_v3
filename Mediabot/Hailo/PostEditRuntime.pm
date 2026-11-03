@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 
 use Carp qw(croak);
+use Time::HiRes ();
 use Encode qw(encode_utf8);
 
 use Mediabot::Hailo::Language qw(resolve_hailo_language);
@@ -72,6 +73,11 @@ sub new {
         unless $post_editor && ref($post_editor)
             && eval { $post_editor->can('submit') };
 
+    for my $name (qw(clock schedule_cb metric_cb log_cb)) {
+        croak "$name must be a code reference"
+            if defined($args{$name}) && ref($args{$name}) ne 'CODE';
+    }
+
     my $queue = $args{queue};
     if (defined $queue) {
         croak 'queue must provide enqueue(), take_next(), queued_for() and typing_delay_seconds()'
@@ -82,18 +88,19 @@ sub new {
                 && eval { $queue->can('typing_delay_seconds') };
     }
     else {
-        $queue = Mediabot::Hailo::ReplyQueue->new();
+        $queue = Mediabot::Hailo::ReplyQueue->new(now_cb => $args{clock});
     }
 
-    for my $name (qw(clock schedule_cb metric_cb log_cb)) {
-        croak "$name must be a code reference"
-            if defined($args{$name}) && ref($args{$name}) ne 'CODE';
-    }
+    # Queue and runtime timestamps must share an origin. An explicit runtime
+    # clock remains authoritative; otherwise follow the queue's public clock.
+    my $clock = $args{clock}
+        || (eval { $queue->can('now') } ? sub { $queue->now }
+            : sub { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) });
 
     return bless {
         post_editor         => $post_editor,
         queue               => $queue,
-        clock               => $args{clock} || sub { time() },
+        clock               => $clock,
         schedule_cb         => $args{schedule_cb},
         metric_cb           => $args{metric_cb},
         log_cb              => $args{log_cb},
@@ -123,7 +130,7 @@ sub new {
 sub _now {
     my ($self) = @_;
     my $now = eval { $self->{clock}->() };
-    return time() unless _plain($now)
+    return Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) unless _plain($now)
         && "$now" =~ /^-?(?:\d+(?:[.]\d*)?|[.]\d+)\z/;
     return 0 + $now;
 }
@@ -361,8 +368,8 @@ sub _start_job {
     my $key = $job->{channel_key};
     return 0 if $self->{inflight}{$key};
 
-    $job->{queued_at} = $entry->{queued_at}
-        if _plain($entry->{queued_at});
+    # Keep the runtime-owned submission timestamp. An externally supplied
+    # queue can use a different clock; its timestamp cannot redefine job age.
     $self->{inflight}{$key} = $job;
     $self->{inflight_total}++;
 

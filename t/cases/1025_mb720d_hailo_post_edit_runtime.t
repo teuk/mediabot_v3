@@ -402,4 +402,48 @@ return sub {
         'old channel counters are evicted when the configured memory bound is reached');
     $assert->is($bounded->channel_stats('#recent')->{fallback}, 1,
         'the latest channel retains its aggregate local-fallback outcome');
+
+    {
+        my @cases;
+        # A runtime clock owns total job age even when an external queue has
+        # a different origin. The implicit queue must inherit an injected clock.
+        for my $kind (qw(implicit_queue external_queue default_monotonic)) {
+            my $elapsed=100;my $queue_time=900000;my $e=MB720D::Editor->new;
+            my (@wire,@done);
+            my %options=(post_editor=>$e,typing_enabled=>0);
+            $options{clock}=sub {$elapsed} unless $kind eq 'default_monotonic';
+            $options{queue}=Mediabot::Hailo::ReplyQueue->new(now_cb=>sub {$queue_time},ttl_seconds=>15)
+                if $kind eq 'external_queue';
+            no warnings 'redefine';
+            local *Time::HiRes::clock_gettime=sub {$elapsed};
+            my $r=Mediabot::Hailo::PostEditRuntime->new(%options);
+            $r->submit(channel=>'#age',trigger=>'ordinary trigger words',candidate=>'safe learned phrase',
+                request_generation=>71,state_cb=>sub {_state_1025(71,1)},
+                send_cb=>sub {push @wire,[@_];1},on_done=>sub {push @done,$_[0]});
+            $elapsed=115;
+            $e->complete({line=>'safe learned phrase',reason=>'unchanged'});
+            push @cases,[scalar(@wire),$done[0]{reason},$r->stats->{inflight}];
+        }
+        require JSON::PP;
+        $assert->is(JSON::PP::encode_json(\@cases),JSON::PP::encode_json([[0,'expired',0],[0,'expired',0],[0,'expired',0]]),
+            'MB1091 implicit, external and default queues cannot overwrite the runtime-owned total reply age');
+    }
+    {
+        my $elapsed=200;my $e=MB720D::Editor->new;my (@wire,@done);
+        my $q=Mediabot::Hailo::ReplyQueue->new(now_cb=>sub {$elapsed},ttl_seconds=>15);
+        my $r=Mediabot::Hailo::PostEditRuntime->new(post_editor=>$e,queue=>$q,
+            typing_enabled=>0,max_context_age_seconds=>5);
+        $r->observe_public_line(channel=>'#shared',text=>'a useful old context');
+        my $submit=sub {$r->submit(channel=>'#shared',trigger=>'ordinary trigger words',candidate=>'safe learned phrase',
+            request_generation=>72,state_cb=>sub {_state_1025(72,1)},
+            send_cb=>sub {push @wire,[@_];1},on_done=>sub {push @done,$_[0]})};
+        $submit->();$elapsed=204;$e->complete({line=>'safe learned phrase',reason=>'unchanged'});
+        my $fresh=$r->recent_context(channel=>'#shared');
+        $submit->();$elapsed=219;$e->complete({line=>'safe learned phrase',reason=>'unchanged'});
+        my $stale=$r->recent_context(channel=>'#shared');
+        $assert->is(JSON::PP::encode_json([scalar(@wire),[map {$_->{reason}} @done],scalar(@$fresh),scalar(@$stale),$r->stats->{inflight}]),
+            JSON::PP::encode_json([1,['delivered','expired'],2,0,0]),
+            'MB1091 runtime follows a supplied queue clock for prompt delivery, context retention and late expiration without a second clock argument');
+    }
+
 };

@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1091 — Keep Hailo lifetimes on coherent elapsed clocks
+
+- Measure default Hailo cooldowns, flood windows, queue TTL and post-edit
+  context/reply age with CLOCK_MONOTONIC rather than the civil clock.
+- Let a post-edit runtime follow its supplied queue clock unless its own clock
+  is explicit; give an implicit queue that same injected clock. Expose the
+  queue clock through now() without requiring it from external queue adapters.
+- Retain the runtime-owned submission timestamp through provider handoff.
+  A queue timestamp with a different origin can no longer make a late reply
+  appear fresh or make a fresh reply expire immediately.
+- Add four grouped behavioral checks to the existing policy/queue/runtime
+  cases, covering exact fractional TTL, cooldown/flood boundaries, implicit
+  and external queues, timely delivery and context expiry. No sleep, network,
+  new test file, dependency, configuration, schema or VERSION edit.
+
 ### MB1090 — Share poll tallying and observe expiry in read views
 
 - Compute voter counts, weighted scores and tied winners through one shared
