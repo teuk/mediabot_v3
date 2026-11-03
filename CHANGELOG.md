@@ -1,5 +1,25 @@
 ## [Unreleased] — 3.8dev
 
+### MB1079 — Bound HTTP circuit metadata across failed origins
+
+- Cap the shared API v3 HTTP service's failure tracker at 128 origins,
+  independently of successful response caching. Distinct failed destinations
+  can no longer grow the service's retained failure metadata without a bound.
+- Reclaim closed/expired origins before open circuits, then the least recently
+  failed entry. Use a serial independent of civil-clock corrections. A full
+  tracker of open circuits still admits a new origin by evicting its oldest
+  failure entry; an evicted origin starts a fresh failure streak.
+- Preserve the three-failure/60-second circuit, shared-origin policy, success
+  reset, cache/inflight limits and revoked/duplicate completion guards. Expose
+  the bound in the existing machine-readable and written API contracts.
+- Extend the existing native HTTP service case with five grouped regressions.
+  Remove its repeated happy-path callback-count assertion from the fetch
+  helper; dedicated callback/lifecycle coverage remains. 58 instead of 79
+  assertions, no new test file, process or wait.
+- No schema, dependency, configuration or manual VERSION change; previously
+  qualified fixes remain intact.
+
+
 ### MB1078 — Retry achievement identity touches after failed persistence
 
 - Publish an alias's hourly touch stamp and cached display only after both

@@ -15,6 +15,7 @@ our $MAX_BODY_BYTES = 64 * 1024;
 our $MAX_CACHE_ENTRIES = 128;
 our $MAX_REDIRECTS = 2;
 our $MAX_INFLIGHT_PER_PLUGIN = 2;
+our $MAX_CIRCUIT_ORIGINS = 128;
 our $CIRCUIT_FAILURES = 3;
 our $CIRCUIT_SECONDS = 60;
 
@@ -79,6 +80,7 @@ sub new {
         cache          => {},
         cache_order    => [],
         circuit        => {},
+        circuit_serial => 0,
         inflight       => {},
         generation     => {},
         sequence       => 0,
@@ -311,6 +313,35 @@ sub _cache_store {
     }
 }
 
+# Bound failure metadata independently of successful response caching. Prefer
+# reclaiming a closed/expired circuit, then the least recently failed origin.
+# A serial makes eviction independent of civil-clock corrections. No second
+# origin/order collection may retain entries after a successful request.
+sub _record_circuit_failure {
+    my ($self, $origin) = @_;
+    my $now = $self->{clock}->();
+    my $states = $self->{circuit};
+    my $state = $states->{$origin};
+    my $keep = $MAX_CIRCUIT_ORIGINS - ($state ? 0 : 1);
+    while (keys(%$states) > $keep) {
+        my @others = grep { $_ ne $origin } keys %$states;
+        last unless @others;
+        my ($oldest) = sort {
+            (($states->{$a}{open_until} // 0) > $now ? 1 : 0)
+                <=> (($states->{$b}{open_until} // 0) > $now ? 1 : 0)
+            || ($states->{$a}{failure_serial} // 0) <=> ($states->{$b}{failure_serial} // 0)
+            || $a cmp $b
+        } @others;
+        delete $states->{$oldest};
+    }
+    $state ||= $states->{$origin} = { failures => 0 };
+    $state->{failure_serial} = ++$self->{circuit_serial};
+    $state->{failures}++;
+    return 0 if $state->{failures} < $CIRCUIT_FAILURES;
+    $state->{open_until} = $now + $CIRCUIT_SECONDS;
+    return 1;
+}
+
 sub fetch {
     my ($self, $plugin, $request, $callback) = @_;
     $plugin = _plugin_name($plugin);
@@ -388,10 +419,7 @@ sub fetch {
         my $failed = !$data->{ok} && (($data->{status} // 0) == 0
             || ($data->{status} // 0) == 429 || ($data->{status} // 0) >= 500);
         if ($failed) {
-            my $state = $self->{circuit}{$origin} ||= { failures => 0 };
-            $state->{failures}++;
-            if ($state->{failures} >= $CIRCUIT_FAILURES) {
-                $state->{open_until} = $self->{clock}->() + $CIRCUIT_SECONDS;
+            if ($self->_record_circuit_failure($origin)) {
                 $self->_metric('mediabot_plugin_v3_http_circuit_open_total', {
                     plugin => $plugin,
                 });

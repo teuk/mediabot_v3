@@ -4,6 +4,7 @@ use Test::More;
 use File::Temp qw(tempdir);
 use IO::Async::Loop;
 use Time::HiRes ();
+use JSON::PP ();
 use Mediabot::Plugin::HTTPServiceV3;
 
 {
@@ -27,11 +28,10 @@ my $s = Mediabot::Plugin::HTTPServiceV3->new(
 );
 sub fetch {
     my ($ttl, %extra) = @_;
-    my ($out, $callbacks) = (undef, 0);
+    my $out;
     my $result = $s->fetch('fixture-v3', {
         url => 'https://example.net/item', cache_ttl_seconds => $ttl, %extra,
-    }, sub { $out = shift; $callbacks++ });
-    is($callbacks, 1, 'one completed HTTP request has one terminal callback');
+    }, sub { $out = shift });
     return ($out, $result);
 }
 my ($r) = fetch(60);
@@ -150,5 +150,111 @@ ok(grep($_->[0] eq 'mediabot_plugin_v3_http_cache_hit_total', @metrics), 'cache-
     is($native->inflight_count('native-v3'), 0, 'native worker completion releases capacity');
     $native->fetch('native-v3', {url => 'https://example.net/item', cache_ttl_seconds => 60}, sub {push @out, shift});
     is($out[2] ? $out[2]->body : '', 'native first', 'native uncached fetch leaves the other policy intact');
+}
+# MB1079: failure metadata is bounded independently of positive response cache.
+# Exercise fetch, the real validated request path and terminal worker delivery;
+# only DNS/HTTP/worker launch are local seams, with no external network access.
+{
+    my $fixture=sub {
+        my (%args)=@_;my $clock=100;my (%status,@calls,@workers,@metrics);
+        my $svc=Mediabot::Plugin::HTTPServiceV3->new(
+            clock=>sub {$clock},resolver=>sub {['93.184.216.34']},
+            requester=>sub {
+                my ($url)=@_;push @calls,$url;my $host=URI->new($url)->host;
+                return {status=>$status{$host}//503,headers=>{},content=>'local response'};
+            },
+            worker_factory=>sub {
+                my $w=MB861Worker->new(@_);
+                if ($args{defer}) {push @workers,$w} else {$w->run}
+                return $w;
+            },on_metric=>sub {push @metrics,[@_]});
+        return {service=>$svc,clock=>\$clock,status=>\%status,calls=>\@calls,
+            workers=>\@workers,metrics=>\@metrics};
+    };
+    my $ask=sub {
+        my ($f,$host,$plugin)=@_;$plugin//='origin-v3';
+        my (@out,$count);
+        my $receipt=$f->{service}->fetch($plugin,
+            {url=>"https://$host/item",cache_ttl_seconds=>0},
+            sub {push @out,$_[0];$count++});
+        return {receipt=>$receipt,out=>\@out,count=>\$count};
+    };
+    {
+        my $f=$fixture->();my $svc=$f->{service};my $max=0;my $completed=1;
+        for my $n (1..137) {
+            my $r=$ask->($f,"p$n.example.net");
+            $completed&&=$r->{receipt}{accepted} && ${$r->{count}}==1 && $r->{out}[0]->status==503;
+            my $size=keys %{$svc->{circuit}};$max=$size if $size>$max;
+        }
+        open my $fh,'<:raw','plugins/API_V3_CONTRACT.json' or die $!;
+        my $contract=do {local $/;JSON::PP->new->decode(<$fh>)};close $fh;
+        is_deeply([$completed?1:0,$max,scalar(keys %{$svc->{circuit}}),
+            [sort keys %{$svc->{circuit}}],scalar(keys %{$svc->{cache}}),
+            $svc->inflight_count('origin-v3'),$contract->{http_limits}{maximum_circuit_origins}],
+            [1,128,128,[sort map {"https://p$_.example.net"} 10..137],0,0,128],
+            'failed requests across more than 128 real URL origins retain only the bounded recent metadata advertised by the contract');
+    }
+    {
+        local $Mediabot::Plugin::HTTPServiceV3::MAX_CIRCUIT_ORIGINS=3;
+        my $f=$fixture->();my $svc=$f->{service};
+        $ask->($f,'open.example.net') for 1..3;
+        $ask->($f,'keep.example.net');$ask->($f,'old.example.net');$ask->($f,'keep.example.net');
+        ${$f->{clock}}=90;$ask->($f,'new.example.net');
+        my $before=@{$f->{calls}};my $blocked=$ask->($f,'open.example.net','another-v3');
+        is_deeply([[sort keys %{$svc->{circuit}}],
+            [map {$svc->{circuit}{"https://$_.example.net"}{failures}} qw(open keep new)],
+            $blocked->{out}[0]->error,scalar(@{$f->{calls}})-$before],
+            [[sort map {"https://$_.example.net"} qw(open keep new)],[3,2,1],'circuit_open',0],
+            'closed entries are evicted by most recent failure even after a clock rewind; an open shared-origin circuit remains protected');
+    }
+    {
+        local $Mediabot::Plugin::HTTPServiceV3::MAX_CIRCUIT_ORIGINS=2;
+        my $f=$fixture->();my $svc=$f->{service};
+        $ask->($f,'a.example.net') for 1..3;$ask->($f,'b.example.net') for 1..3;
+        $ask->($f,'c.example.net') for 1..3;
+        my $r=$ask->($f,'a.example.net');
+        is_deeply([[sort keys %{$svc->{circuit}}],
+            $svc->{circuit}{'https://c.example.net'}{failures},
+            $svc->{circuit}{'https://a.example.net'}{failures},
+            $r->{receipt}{accepted}?1:0,$r->{out}[0]->status,
+            scalar(grep {$_->[0] eq 'mediabot_plugin_v3_http_circuit_open_total'} @{$f->{metrics}})],
+            [[sort map {"https://$_.example.net"} qw(a c)],3,1,1,503,3],
+            'a full tracker of open circuits still admits new failures and an evicted origin starts a fresh streak');
+    }
+    {
+        local $Mediabot::Plugin::HTTPServiceV3::MAX_CIRCUIT_ORIGINS=2;
+        my $f=$fixture->(defer=>1);my $svc=$f->{service};
+        my $a=$ask->($f,'a.example.net');my $b=$ask->($f,'b.example.net');
+        my $c=$ask->($f,'c.example.net','other-v3');
+        $f->{workers}[1]->run;$f->{workers}[2]->run;$f->{workers}[0]->run;
+        my $state=JSON::PP->new->canonical->encode($svc->{circuit});
+        my $cancelled=$ask->($f,'revoked.example.net','cancel-v3');
+        $svc->cancel_plugin('cancel-v3');$f->{workers}[3]->run;
+        $f->{workers}[0]{on_done}->({ok=>0,error=>'worker_timeout'});
+        is_deeply([[sort keys %{$svc->{circuit}}],
+            [map {${$_->{count}}//0} ($a,$b,$c,$cancelled)],
+            $state eq JSON::PP->new->canonical->encode($svc->{circuit})?1:0,
+            [map {$svc->inflight_count($_)} qw(origin-v3 other-v3 cancel-v3)]],
+            [[sort map {"https://$_.example.net"} qw(a c)],[1,1,1,0],1,[0,0,0]],
+            'out-of-order completions use failure recency, while cancelled and duplicate terminal callbacks leave bounded metadata unchanged');
+        @{$f->{workers}}=();
+    }
+    {
+        local $Mediabot::Plugin::HTTPServiceV3::MAX_CIRCUIT_ORIGINS=2;
+        my $f=$fixture->();my $svc=$f->{service};
+        $ask->($f,'a.example.net') for 1..3;$ask->($f,'b.example.net');
+        ${$f->{clock}}=160;$ask->($f,'c.example.net');
+        my $expired_gone=!exists $svc->{circuit}{'https://a.example.net'};
+        $ask->($f,'b.example.net') for 1..2;
+        ${$f->{clock}}=220;$f->{status}{'b.example.net'}=200;
+        my $good=$ask->($f,'b.example.net');
+        my $released=!exists $svc->{circuit}{'https://b.example.net'};
+        $f->{status}{'b.example.net'}=503;$ask->($f,'b.example.net');
+        $f->{status}{'b.example.net'}=404;my $client_error=$ask->($f,'b.example.net');
+        is_deeply([$expired_gone?1:0,$good->{out}[0]->ok?1:0,$released?1:0,
+            $client_error->{out}[0]->status,[sort keys %{$svc->{circuit}}],scalar(keys %{$svc->{cache}})],
+            [1,1,1,404,['https://c.example.net'],0],
+            'expired circuits are reclaimable at the exact deadline and both healthy and client-error responses release their failure metadata');
+    }
 }
 done_testing;

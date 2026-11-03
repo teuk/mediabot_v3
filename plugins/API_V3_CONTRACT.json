@@ -101,6 +101,7 @@
     "maximum_body_bytes": 65536,
     "maximum_inflight_per_plugin": 2,
     "maximum_cache_entries": 128,
+    "maximum_circuit_origins": 128,
     "circuit_failures": 3,
     "circuit_seconds": 60,
     "private_addresses": "reject",

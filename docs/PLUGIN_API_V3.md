@@ -310,8 +310,15 @@ which is capped at one hour. A zero TTL reads and writes no cache entry; other
 live cache policies remain intact. Different TTL policies have independent
 entries and expiry, while equivalent explicit/default values share an entry.
 These entries still share the same total 128-entry capacity bound. Three
-transport, rate-limit or server failures open a 60-second circuit. Disable or unload cancels owned workers and
-changes a generation token; even an uncooperative late completion is discarded.
+transport, rate-limit or server failures open a 60-second circuit. Failure
+metadata is bounded to 128 origins per service instance, shared across plugins.
+When a new origin needs room, a closed or expired entry is evicted before an
+open one; within each group, the least recently failed origin is reclaimed.
+If all entries are open, the oldest failure entry is evicted to admit the new
+origin. Successful requests remove their failure metadata. Evicted origins
+start a new failure streak on their next request. Disable or unload cancels
+owned workers and changes a generation token; even an uncooperative late
+completion is discarded.
 The current channel mode is checked again before the plugin callback. Observe
 therefore exercises fetch and parsing while the invocation sink still suppresses
 output.
