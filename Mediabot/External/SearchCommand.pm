@@ -79,7 +79,7 @@ sub note_policy_change {
 sub run_lookup {
     my ($ctx,%args)=@_;
     my $name=_name($args{name}) or return;
-    my $reply_limit=$name eq 'ddg' ? 3 : 2;
+    my $reply_limit=$name eq 'ddg' ? 4 : 2;
     my $bot=$ctx->bot;my $channel=$ctx->channel;
     return unless enabled($bot,$channel,$name);
     my $lang=_language($bot,$channel);my $input=$ctx->args;

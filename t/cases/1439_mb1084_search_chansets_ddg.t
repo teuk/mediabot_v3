@@ -172,64 +172,53 @@ HTML
         {success=>1,status=>200,content=>JSON::PP::encode_json({Heading=>[],AbstractText=>'text',AbstractURL=>'https://example.org/'})},
         {success=>1,status=>200,content=>JSON::PP::encode_json({Heading=>'Eggdrop',AbstractText=>'text',AbstractURL=>'file:///tmp/private'})},
         {success=>1,status=>200,content=>JSON::PP::encode_json({Redirect=>'https://example.org/'})},
+        {success=>1,status=>200,content=>JSON::PP::encode_json({Heading=>'query',AbstractText=>'text',AbstractURL=>'https://duckduckgo.com/?q=query'})},
         {success=>1,status=>503,content=>JSON::PP::encode_json($http->{instant})}) {
         $http->{instant_response}=$response;
         my $instant=$D->can('_instant_preview');push @invalid,$instant && defined($instant->('eggdrop','fr')) ? 1:0;
     }
     is_deeply([$uri->host,decode('UTF-8',$query{q}),$query{kl},[@{$options[0]}{qw(verify_SSL max_redirect timeout max_size)}],
         [map {$_->{display_url}} @{$value->{hits}}],[map {$_->{target}} grep {$_->{method} eq 'POST'} @calls],
-        $fallback->{state},$fallback->{hits}[0]{title},$preview->{state},$preview->{hits}[0]{excerpt},
+        $fallback->{state},exists($preview->{search})?1:0,$preview->{state},$preview->{hits}[0]{excerpt},
         $api_uri->host,[@api_query{qw(q format no_html no_redirect kl)}],
         [@{$api_options//{}}{qw(verify_SSL max_redirect timeout max_size)}],\@invalid],
         ['html.duckduckgo.com','café & thé ☕','fr-fr',[1,0,8,262144],
          ['https://teuk.org/shorturl/Abcdef23','https://teuk.org/shorturl/Bbcdef23','https://teuk.org/shorturl/Cbcdef23'],
-         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://third.example.org/','https://duckduckgo.com/?q=autre%20recherche&kl=es-es',
-          'https://fr.wikipedia.org/wiki/Eggdrop','https://duckduckgo.com/?q=eggdrop&kl=fr-fr'],
-         'search_link','autre recherche','preview','Eggdrop est un bot IRC.','api.duckduckgo.com',
-         ['eggdrop','json','1','1','fr-fr'],[1,0,8,131072],[0,0,0,0,0,0]],
-        'DDG-only instant answers add a validated localized abstract and two exact short destinations after an unreadable web result, including valid JSON under HTTP 202');
+         ['https://www.debian.org/','https://wiki.debian.org/Debian13','https://third.example.org/','https://fr.wikipedia.org/wiki/Eggdrop'],
+         'unavailable',0,'preview','Eggdrop est un bot IRC.','api.duckduckgo.com',
+         ['eggdrop','json','1','1','fr-fr'],[1,0,8,131072],[0,0,0,0,0,0,0]],
+        'shortening receives only the three ranked destinations or the one real preview source; blocked searches never fabricate or shorten a keyword-search URL');
 }
 {
     my $base='https://teuk.org/shorturl/';
-    my $value={state=>'ok',hits=>[{title=>'📚é'x200,excerpt=>"texte\n\1\3".('👩‍💻 é 'x300),url=>'https://example.org/',display_url=>$base.'Abcdef23'}]};
-    my $lines=$D->can('_render')->($value,'fr',$base);my $text=$lines->[0];
-    $value->{hits}[0]{display_url}='https://foreign.example.org/wrong';my $foreign=$D->can('_render')->($value,'fr',$base);
-    $value->{hits}[0]{display_url}=$value->{hits}[0]{url}='https://example.org/'.('a'x500);
-    my $long=$D->can('_render')->($value,'fr',$base);
     my @hits=map {{title=>'Article '.$_,url=>'https://example.org/'.$_,
         display_url=>$base.chr(64+$_).'bcdef23',excerpt=>'Extrait '.('é'x400)}} 1..3;
-    my $three=$D->can('_render')->({state=>'ok',hits=>\@hits},'fr',$base);
+    my $reply=$D->can('_render')->({state=>'ok',hits=>\@hits},'fr',$base);
+    my @plain=map {my $s=$_;$s=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$s=~s/[\x02\x0f\x1f]//g;$s} @{$reply//[]};
+    my $packed=@$reply==2 && !(grep {_irc_wire_bytes($_)>400} @$reply)
+        && $plain[0]=~/\A\[🦆 DDG\] Aperçu : Article 1 — Extrait /
+        && $plain[1] eq '[🦆 DDG] '.join(' | ',map {$_ .'. Article '.$_.' · '.$base.chr(64+$_).'bcdef23'} 1..3)
+        && $reply->[1]=~/\x0312\x1f\Q$base\EAbcdef23\x1f\x0f/
+        && $reply->[1]=~/\x0312\x1f\Q$base\ECbcdef23\x1f\x0f/;
+    my @long_hits=map {{title=>'👩‍💻 é 'x200,url=>'https://example.org/'.$_.'?'.('a'x245),excerpt=>"texte\n\1\3".('🌀'x800)}} 1..3;
+    my $long=$D->can('_render')->({state=>'ok',hits=>\@long_hits},'fr',$base);
+    my $long_ok=ref($long) eq 'ARRAY' && @$long==4 && !(grep {_irc_wire_bytes($_)>400 || /[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/} @$long);
+    $long_ok &&= $long->[$_]=~/\Q$long_hits[$_-1]{url}\E/ for 1..3;
+    my $foreign=$D->can('_render')->({state=>'ok',hits=>[{%{$hits[0]},display_url=>'https://foreign.example.org/'}]},'fr',$base);
+    my $query=$D->can('_render')->({state=>'ok',hits=>[{title=>'query',url=>'https://duckduckgo.com/?q=query',display_url=>$base.'Abcdef23'}]},'fr',$base);
     my $four=$D->can('_render')->({state=>'ok',hits=>[@hits,$hits[0]]},'fr',$base);
-    my @searches;
+    my $empty=$D->can('_render')->({state=>'preview',hits=>[{%{$hits[0]},excerpt=>''}]},'fr',$base);
+    my @previews;
     for my $lang ('fr','en','es') {
-        my $reply=$D->can('_render')->({state=>'search_link',hits=>[
-            {title=>'la vitesse de la lumière',excerpt=>'must not be an unavailable result',
-             url=>'https://duckduckgo.com/?q=test',display_url=>$base.'Abcdef23'}]},$lang,$base);
-        my $plain=ref($reply) eq 'ARRAY' && @$reply==1 ? $reply->[0] : '';
-        $plain=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$plain=~s/[\x02\x0f\x1f]//g;
-        push @searches,$plain;
+        my $preview=$D->can('_render')->({state=>'preview',hits=>[
+            {title=>'Eggdrop',excerpt=>'An IRC bot.',url=>'https://en.wikipedia.org/wiki/Eggdrop',display_url=>$base.'Abcdef23'}]},$lang,$base);
+        my $plain=ref($preview) eq 'ARRAY' && @$preview==1 ? $preview->[0] : '';
+        $plain=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$plain=~s/[\x02\x0f\x1f]//g;push @previews,$plain;
     }
-    my $preview=$D->can('_render')->({state=>'preview',hits=>[
-        {title=>'Eggdrop',excerpt=>'Eggdrop is an IRC bot.',url=>'https://en.wikipedia.org/wiki/Eggdrop',display_url=>$base.'Abcdef23'}],
-        search=>{title=>'eggdrop',url=>'https://duckduckgo.com/?q=eggdrop',display_url=>$base.'Bbcdef23'}},'fr',$base);
-    my @preview_lines;
-    for my $line (@{ref($preview) eq 'ARRAY' ? $preview : []}) {
-        my $plain=$line;$plain=~s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;$plain=~s/[\x02\x0f\x1f]//g;
-        push @preview_lines,$plain;
-    }
-    my $empty_preview=$D->can('_render')->({state=>'preview',hits=>[
-        {title=>'Empty',excerpt=>'',url=>'https://example.org/'}],
-        search=>{title=>'query',url=>'https://duckduckgo.com/?q=query'}},'fr',$base);
-    is_deeply([(@$lines==1 && _irc_wire_bytes($text)<=400 && $text!~/[\x00-\x01\x04-\x0e\x10-\x1e\x7f]/
-        && $text=~/\x0300,02\[🦆 DDG\]\x0f/ && $text=~/\x0312\x1f\Q$base\EAbcdef23\x1f\x0f\z/
-        && !defined($foreign) && $long->[0]=~/raccourcisseur indisponible/
-        && ref($three) eq 'ARRAY' && @$three==3
-        && !(grep {my $rank=$_+1;_irc_wire_bytes($three->[$_])>400 || $three->[$_]!~/\Q$rank\E\. \x02Article /} 0..2)
-        && !defined($four) && !defined($empty_preview))?1:0,\@searches,\@preview_lines],
-        [1,[map {"[🦆 DDG] $_".'la vitesse de la lumière · '.$base.'Abcdef23'} ('Recherche : ','Search: ','Búsqueda: ')],
-         ['[🦆 DDG] Aperçu (EN) : Eggdrop — Eggdrop is an IRC bot. · '.$base.'Abcdef23',
-          '[🦆 DDG] Recherche : eggdrop · '.$base.'Bbcdef23']],
-        'ranked results retain their budgets and limits; instant preview and search link have explicit unranked labels, including a source-language marker');
+    is_deeply([$packed?1:0,$long_ok?1:0,defined($foreign)?1:0,defined($query)?1:0,defined($four)?1:0,defined($empty)?1:0,\@previews],
+        [1,1,0,0,0,0,[map {'[🦆 DDG] '.$_.' : Eggdrop — An IRC bot. · '.$base.'Abcdef23'}
+            ('Aperçu seul (EN)','Preview only','Solo vista previa (EN)')]],
+        'brief preview plus three ranked targets use two IRC lines with short URLs; whole long destinations wrap without loss, and no search-link fallback survives');
 }
 {
     my $b=bot1084();set1084($b,'+ddg');$b->_register_builtin_command_catalogue;
@@ -248,12 +237,12 @@ HTML
     $b->{loop}=IO::Async::Loop->really_new;
     $entry->{handler}->(ctx1084($b,'ddg','Debian','13'));
     my $deadline=Time::HiRes::time()+5;
-    $b->{loop}->loop_once(.02) while @{$b->{sent}}<3 && Time::HiRes::time()<$deadline;
+    $b->{loop}->loop_once(.02) while @{$b->{sent}}<2 && Time::HiRes::time()<$deadline;
     my @calls;if (-f $trace) {open my $fh,'<:raw',$trace or die $!;@calls=map {JSON::PP::decode_json($_)} <$fh>;close $fh}
     is_deeply([$entry->{level},$entry->{metadata}{migration_fallback}//0,$large_payload,scalar(@calls),
         (grep {$_->{pid}==$$} @calls)?1:0,[map {[$_->[0],$_->[1],$_->[3]]} @{$b->{sent}}],
         scalar(keys %{$b->{_ddg_pending}})],
-        ['public',0,1,4,0,[['public','#test',$$],['public','#test',$$],['public','#test',$$]],0],
-        'actual native handler, parser, renderer and shared delivery return all three results through one fork/pipe, with three shortener requests in the child');
+        ['public',0,1,4,0,[['public','#test',$$],['public','#test',$$]],0],
+        'native fork/pipe returns one preview and three compact ranked targets in two IRC replies, with all three exact shortening requests in the child');
 }
 done_testing;

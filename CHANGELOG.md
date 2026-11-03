@@ -1,5 +1,27 @@
 ## [Unreleased] — 3.8dev
 
+### MB1088 — Compact ranked DDG destinations and remove keyword-search links
+
+- Show a brief preview followed by the first three unique organic titles and
+  actual destinations, packing ranked cards into one IRC line when they fit.
+  The preview reuses the first result's excerpt and source attribution, so a
+  successful HTML search needs no additional lookup or duplicate source URL.
+- Keep light-blue underlined private short URLs and whole original URLs when
+  shortening fails. Wrap complete cards at 400 UTF-8 bytes, never discard the
+  third target to save a line. Allow up to four DDG lines only for long-URL
+  wrapping; Wikipedia's existing two-line delivery limit is unchanged.
+- Remove the generated keyword-search URL and its shortening request. Reject
+  DDG query/category/navigation URLs as result destinations or preview sources.
+  A blocked web lookup retains one explicitly labelled preview-only reply if
+  available, rather than claiming to have retrieved three ranked results.
+- Retain DuckDuckGo-only operation. Its Instant Answers endpoint cannot supply
+  the top three web results; a web challenge therefore remains a real limit,
+  not silently replaced with related topics or a different search provider.
+- Update the same eight grouped native checks: two-line packing, exact targets,
+  long-URL wrapping, control/UTF-8 budgets, no keyword-link shortening and one
+  real fork/pipe. No new test file, dependency, key, schema or VERSION edit.
+
+
 ### MB1087 — Show real DuckDuckGo topic previews when web results are unavailable
 
 - Ask DuckDuckGo's Instant Answers endpoint for a plain localized abstract

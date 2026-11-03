@@ -24,8 +24,8 @@ sub _message {
         invalid=>['ddg: invalid or too long query.','ddg : recherche invalide ou trop longue.','ddg: búsqueda inválida o demasiado larga.'],
         busy=>['ddg: searches are busy; try again shortly.','ddg : recherches en cours, réessaie dans un instant.','ddg: búsquedas en curso; inténtalo de nuevo en un momento.'],
         unavailable=>['ddg: results temporarily unavailable.','ddg : résultats temporairement indisponibles.','ddg: resultados temporalmente no disponibles.'],
-        search=>['Search: ','Recherche : ','Búsqueda: '],
         preview=>['Preview','Aperçu','Vista previa'],
+        preview_only=>['Preview only','Aperçu seul','Solo vista previa'],
         missing=>['ddg: no results found.','ddg : aucun résultat trouvé.','ddg: no se encontraron resultados.'],
         long=>['ddg: link too long; URL shortener unavailable.','ddg : lien trop long, raccourcisseur indisponible.','ddg: enlace demasiado largo; acortador no disponible.'],
     );
@@ -50,6 +50,16 @@ sub _target {
     return unless length($out)<=2048 && $out =~ /\A[\x21-\x7e]+\z/;
     return $out;
 }
+sub _destination {
+    my $url=_target($_[0]);return unless $url;
+    my $uri=URI->new($url);
+    if ($uri->host =~ /(?:\A|\.)duckduckgo\.com\z/i) {
+        my @query=$uri->query_form;
+        return if grep {lc($query[$_]) eq 'q'} grep {$_%2==0} 0..$#query;
+        return if $uri->path =~ m{\A/(?:html|lite|c|l)(?:/|\z)}i;
+    }
+    return $url;
+}
 sub _result_url {
     my ($href)=@_;return unless defined($href) && !ref($href);
     # Unwrap only an actual DDG redirect, and exactly one encoded target.
@@ -62,7 +72,7 @@ sub _result_url {
         return unless @targets==1;
         $href=$targets[0];
     }
-    return _target($href);
+    return _destination($href);
 }
 sub _class { return (($_[0]->attr('class')//'') =~ /(?:\A|\s)\Q$_[1]\E(?:\s|\z)/) }
 sub _parse {
@@ -100,7 +110,6 @@ sub _region {
     my %region=(fr=>'fr-fr',es=>'es-es',en=>'wt-wt',de=>'de-de',pt=>'pt-pt',it=>'it-it',nl=>'nl-nl');
     return $region{_edition($_[0])}//'wt-wt';
 }
-sub _search_url { return 'https://duckduckgo.com/?q='._uri_escape_bytes($_[0]).'&kl='._region($_[1]) }
 sub _instant_preview {
     my ($query,$lang)=@_;$query=_query([$query]);$lang=_edition($lang);
     return unless defined $query;
@@ -117,7 +126,7 @@ sub _instant_preview {
     my $data=eval {decode_json_payload($response->{content})};
     return unless ref($data) eq 'HASH';
     my $title=_plain($data->{Heading},512);my $excerpt=_plain($data->{AbstractText},800);
-    my $source=_target($data->{AbstractURL});
+    my $source=_destination($data->{AbstractURL});
     return unless length($title) && length($excerpt) && $source;
     # Instant-answer abstracts are previews, never ranked web search hits.
     # Ignore Redirect, HTML Answer/Abstract and broad RelatedTopics categories.
@@ -134,18 +143,15 @@ sub _lookup_sync {
     my $value=ref($response) eq 'HASH' && $response->{success} && ($response->{status}//0)==200
         ? _parse($response->{content}) : {state=>'unavailable'};
     if ($value->{state} eq 'unavailable') {
-        my $search={title=>$query,url=>_search_url($query,$lang)};
         my $preview=eval {_instant_preview($query,$lang)};
-        $value=$preview ? {state=>'preview',hits=>[$preview],search=>$search}
-            : {state=>'search_link',hits=>[$search]};
+        $value=$preview ? {state=>'preview',hits=>[$preview]} : {state=>'unavailable'};
     }
-    if ($value->{state} eq 'ok' || $value->{state} eq 'search_link' || $value->{state} eq 'preview') {
+    if ($value->{state} eq 'ok' || $value->{state} eq 'preview') {
         # Private shortener credentials and all shortening I/O stay in the child.
         my $shorten=make_bot_shortener(bot=>$bot,allow_legacy=>0);
         my $base=eval {$bot->{conf}->get('shorturl.PUBLIC_BASE_URL')} // '';
         $base=Mediabot::URLShortener::_public_base($base);
-        my @links=(@{$value->{hits}},$value->{state} eq 'preview' ? $value->{search} : ());
-        for my $hit (@links) {
+        for my $hit (@{$value->{hits}}) {
             my $short=eval {$shorten->($hit->{url})};
             $hit->{display_url}=defined($short) && !ref($short) && _target($short)
                 && ($short eq $hit->{url} || (length($base) && $short =~ m{\A\Q$base\E[23456789A-HJ-NP-Za-km-z]{8,16}\z}))
@@ -154,45 +160,65 @@ sub _lookup_sync {
     }
     return $value;
 }
+sub _display_url {
+    my ($hit,$base)=@_;
+    return unless ref($hit) eq 'HASH';
+    my $url=_destination($hit->{url});my $display=_target($hit->{display_url})//$url;
+    return unless $url && $display && ($display eq $url || (length($base)
+        && $display =~ m{\A\Q$base\E[23456789A-HJ-NP-Za-km-z]{8,16}\z}));
+    return $display;
+}
+sub _badge { return "\x0300,02[🦆 DDG]\x0f " }
+sub _link { return "\x0312\x1f$_[0]\x1f\x0f" }
+sub _preview_line {
+    my ($hit,$lang,$base,$only)=@_;
+    my $display=_display_url($hit,$base);return unless $display;
+    my $title=_plain($hit->{title},512);my $excerpt=_plain($hit->{excerpt},800);
+    return unless length($title) && length($excerpt);
+    my ($source_lang)=URI->new($hit->{url})->host =~ /\A([a-z]{2,3})\.wikipedia\.org\z/i;
+    my $language=defined($source_lang) && lc($source_lang) ne _edition($lang) ? ' ('.uc($source_lang).')' : '';
+    my $label=_message($lang,$only?'preview_only':'preview').$language.' : ';
+    # In the ranked view the same source is already linked as result 1.
+    my $suffix=$only?" \x0314·\x0f "._link($display):'';
+    my $available=400-_irc_wire_bytes(_badge().$suffix."\x02\x02")-3;
+    return if $available<24;
+    my $title_budget=$available<80?$available:80;
+    my $prefix=_badge()."\x02".truncate_utf8($label.$title,$title_budget,'…')."\x02";
+    my $budget=400-_irc_wire_bytes($prefix.$suffix.' — ')-3;
+    $budget=160 if $budget>160;
+    return $prefix.($budget>=16?' — '.truncate_utf8($excerpt,$budget,'…'):'').$suffix;
+}
 sub _render {
     my ($value,$lang,$base)=@_;
-    return [_message($lang,'missing')] if defined($value->{state}) && !ref($value->{state}) && $value->{state} eq 'missing';
     return unless defined($value->{state}) && !ref($value->{state});
-    my $search_link=$value->{state} eq 'search_link';
+    return [_message($lang,'missing')] if $value->{state} eq 'missing';
     my $preview=$value->{state} eq 'preview';
-    return unless ($value->{state} eq 'ok' || $search_link || $preview)
+    return unless ($value->{state} eq 'ok' || $preview)
         && ref($value->{hits}) eq 'ARRAY' && @{$value->{hits}} && @{$value->{hits}}<=MAX_RESULTS;
-    return if ($search_link || $preview) && @{$value->{hits}}!=1;
-    $base=Mediabot::URLShortener::_public_base($base);my @lines;my $rank=0;
+    return if $preview && @{$value->{hits}}!=1;
+    $base=Mediabot::URLShortener::_public_base($base);
+    # Validate every destination before building any message or compact group.
+    my @cards;my $rank=0;
     for my $hit (@{$value->{hits}}) {
-        return unless ref($hit) eq 'HASH';my $url=_target($hit->{url});my $display=_target($hit->{display_url})//$url;
-        return unless $url && $display && ($display eq $url || (length($base) && $display =~ m{\A\Q$base\E[23456789A-HJ-NP-Za-km-z]{8,16}\z}));
+        my $display=_display_url($hit,$base);return unless $display;
         my $title=_plain($hit->{title},512);return unless length $title;
-        return if $preview && !length(_plain($hit->{excerpt},800));
-        $title=_message($lang,'search').$title if $search_link;
-        if ($preview) {
-            my ($source_lang)=URI->new($url)->host =~ /\A([a-z]{2,3})\.wikipedia\.org\z/i;
-            my $language=defined($source_lang) && lc($source_lang) ne _edition($lang) ? ' ('.uc($source_lang).')' : '';
-            $title=_message($lang,'preview').$language.' : '.$title;
+        my $lead=(++$rank).'. ';my $suffix=" \x0314·\x0f "._link($display);
+        my $budget=400-_irc_wire_bytes(_badge().$lead.$suffix."\x02\x02")-3;
+        if ($budget<8) {push @cards,$lead._message($lang,'long');next}
+        $budget=48 if $budget>48;
+        push @cards,$lead."\x02".truncate_utf8($title,$budget,'…')."\x02".$suffix;
+    }
+    my $overview=_preview_line($value->{hits}[0],$lang,$base,$preview);
+    return defined($overview)?[$overview]:undef if $preview;
+    my @lines=defined($overview)?($overview):();
+    my $line='';my $separator=" \x0314|\x0f ";
+    for my $card (@cards) {
+        if (length($line) && _irc_wire_bytes($line.$separator.$card)>400) {
+            push @lines,$line;$line='';
         }
-        my $badge="\x0300,02[🦆 DDG]\x0f ";my $link="\x0312\x1f$display\x1f\x0f";
-        if (_irc_wire_bytes($link)>280) {push @lines,$badge._message($lang,'long');next}
-        my $suffix=" \x0314·\x0f $link";
-        my $lead=$badge.(($search_link || $preview)?'':(++$rank).'. ');
-        my $title_budget=400-_irc_wire_bytes($lead.$suffix."\x02\x02")-3;
-        $title_budget=80 if $title_budget>80;
-        my $prefix=$lead."\x02".truncate_utf8($title,$title_budget,'…')."\x02";
-        my $excerpt=$search_link?'':_plain($hit->{excerpt},800);my $middle='';
-        my $budget=400-_irc_wire_bytes($prefix.$suffix.' — ')-3;
-        $middle=' — '.truncate_utf8($excerpt,$budget,'…') if length($excerpt) && $budget>=16;
-        push @lines,$prefix.$middle.$suffix;
+        $line.=length($line)?$separator.$card:_badge().$card;
     }
-    if ($preview) {
-        return unless ref($value->{search}) eq 'HASH';
-        my $search=_render({state=>'search_link',hits=>[$value->{search}]},$lang,$base);
-        return unless ref($search) eq 'ARRAY' && @$search==1;
-        push @lines,@$search;
-    }
+    push @lines,$line if length $line;
     return \@lines;
 }
 sub mbDDG_ctx {
