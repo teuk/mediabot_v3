@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1090 — Share poll tallying and observe expiry in read views
+
+- Compute voter counts, weighted scores and tied winners through one shared
+  tally used by vote, status, result and manual closure. Read ballots once
+  instead of repeatedly scanning every voter for every option.
+- Make pollstatus and pollresult observe the same strict deadline boundary
+  as vote/unvote. An overdue status announces expiry once; results directly
+  show Closed while preserving every ballot and other channels.
+- Keep the exact-deadline inclusive rule, explicit extension of an unobserved
+  late poll, option-order ties, default weights, formatting and metrics.
+- Replace 14 historical source/mirrored-algorithm checks in the existing poll
+  winner case with eight grouped native behavioral checks. Cover all four
+  views, weighted ties, empty polls, deadline transitions and bounded ballot
+  reads without a timing benchmark. No new test file, schema or VERSION edit.
+
 ### MB1089 — Three DDG previews with correctly owned snippets and targets
 
 - Read modern rendered result cards as well as legacy HTML. Exclude DDG/Bing

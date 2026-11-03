@@ -907,41 +907,62 @@ sub mbPollVoters_ctx {
 
 # ---------------------------------------------------------------------------
 # mbPollStatus_ctx --- !pollstatus  (W8)
-# Show live poll results without closing the poll.
+# Show live results until the deadline; expire overdue polls once.
 # ---------------------------------------------------------------------------
+# MB1090: one ballot pass and one option pass feed every poll view. Keep
+# voter counts separate from weighted scores, with ties in option order.
+sub _poll_tally {
+    my ($poll) = @_;
+    my $votes = $poll->{votes} // {};
+    my %counts;
+    $counts{$_}++ for values %$votes;
+    my $total = scalar keys %$votes;
+    my $weighted = $poll->{weighted} ? 1 : 0;
+    my $weights = $poll->{weights} // [];
+    my (@voters, @scores, @winners);
+    my ($score_total, $best) = (0, -1);
+    for my $idx (0 .. $#{ $poll->{options} }) {
+        my $count = $counts{$idx} // 0;
+        my $score = $weighted ? $count * ($weights->[$idx] // 1) : $count;
+        push @voters, $count;
+        push @scores, $score;
+        $score_total += $score;
+        next unless $total;
+        if ($score > $best) {
+            $best = $score;
+            @winners = ($idx);
+        } elsif ($score == $best) {
+            push @winners, $idx;
+        }
+    }
+    return { total => $total, weighted => $weighted, voters => \@voters,
+        scores => \@scores, score_total => $score_total, winners => \@winners };
+}
+
 sub mbPollStatus_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my $poll = $self->{_polls}{lc($channel // '')};
+    return 1 if _expire_poll_if_due($self, $channel, $poll);
     unless ($poll && $poll->{active}) {
         botPrivmsg($self, $channel, 'No active poll.'); return 1;
     }
-    my $total = scalar keys %{ $poll->{votes} };
-    # mb160-B1: appliquer les poids en mode weighted (BB7).
-    my $weighted = $poll->{weighted} ? 1 : 0;
-    my $weights  = $poll->{weights}  || [];
-    my $weighted_label = $weighted ? ' [weighted]' : '';
+    my $tally = _poll_tally($poll);
+    my $total = $tally->{total};
+    my $weights = $poll->{weights} // [];
+    my $weighted_label = $tally->{weighted} ? ' [weighted]' : '';
     botPrivmsg($self, $channel, "\"$poll->{question}\"${weighted_label} -- $total vote(s) so far:");
-    my $weighted_total = 0;
-    if ($weighted) {
-        for my $idx (0 .. $#{ $poll->{options} }) {
-            my $voters = scalar grep { $_ == $idx } values %{ $poll->{votes} };
-            my $w      = $weights->[$idx] // 1;
-            $weighted_total += $voters * $w;
-        }
-    }
     for my $idx (0 .. $#{ $poll->{options} }) {
-        my $voters = scalar grep { $_ == $idx } values %{ $poll->{votes} };
-        if ($weighted) {
-            my $w     = $weights->[$idx] // 1;
-            my $score = $voters * $w;
-            my $pct   = $weighted_total > 0 ? int($score * 100 / $weighted_total) : 0;
+        my $voters = $tally->{voters}[$idx];
+        my $score = $tally->{scores}[$idx];
+        my $pct = $tally->{score_total} > 0 ? int($score * 100 / $tally->{score_total}) : 0;
+        if ($tally->{weighted}) {
+            my $w = $weights->[$idx] // 1;
             botPrivmsg($self, $channel, sprintf('  [%d] %s (x%d): %d=%d (%d%%)',
                 $idx+1, $poll->{options}[$idx], $w, $voters, $score, $pct));
         } else {
-            my $pct = $total > 0 ? int($voters * 100 / $total) : 0;
             botPrivmsg($self, $channel, sprintf('  [%d] %s: %d (%d%%)',
                 $idx+1, $poll->{options}[$idx], $voters, $pct));
         }
@@ -953,15 +974,15 @@ sub mbPollStatus_ctx {
 # ---------------------------------------------------------------------------
 # mbUnvote_ctx --- !unvote  (Y6)
 # ---------------------------------------------------------------------------
-# MB927: both vote mutations use the same lazy-expiry boundary. Closing the
+# Vote mutations and read views share the lazy-expiry boundary. Closing the
 # poll preserves its ballots; withdrawing one after the deadline must not
 # change the final tally. Keep the historical strict > deadline rule.
 sub _expire_poll_if_due {
-    my ($self, $channel, $poll) = @_;
+    my ($self, $channel, $poll, $quiet) = @_;
     return 0 unless $poll && $poll->{active}
         && time() > ($poll->{deadline} // 0);
     $poll->{active} = 0;
-    botPrivmsg($self, $channel, 'Poll expired. Use !pollresult to see results.');
+    botPrivmsg($self, $channel, 'Poll expired. Use !pollresult to see results.') unless $quiet;
     return 1;
 }
 
@@ -998,7 +1019,7 @@ sub mbPollExtend_ctx {
         botPrivmsg($self, $channel, 'No active poll.'); return 1;
     }
     # mb431-B1: si la deadline est déjà passée (l'expiration est paresseuse,
-    # le sondage reste actif tant que personne n'a voté après l'échéance),
+    # le sondage reste actif tant qu'aucune commande n'a constaté l'échéance),
     # repartir de maintenant. Sinon `deadline_passée + $extra` restait dans le
     # passé -> "remaining" négatif et aucune vraie réouverture du vote.
     my $base = $poll->{deadline} // time();
@@ -1103,31 +1124,18 @@ sub mbVote_ctx {
     # Y9: Prometheus counter for poll votes
     $self->{metrics}->inc('mediabot_poll_votes_total') if $self->{metrics};
 
-    # U3: show live tally after each vote
-    # mb160-B1: appliquer les poids quand le poll est en mode weighted (BB7).
-    # Avant ce fix, $poll->{weights} etait stocke a la creation mais jamais
-    # consulte dans tally/result/status -> mode 'weighted' completement dead.
-    my $weighted = $poll->{weighted} ? 1 : 0;
-    my $weights  = $poll->{weights}  || [];
+    my $tally = _poll_tally($poll);
+    my $weights = $poll->{weights} // [];
     my @tally;
-    my $weighted_total = 0;
-    if ($weighted) {
-        for my $idx (0 .. $#{ $poll->{options} }) {
-            my $voters = scalar grep { $_ == $idx } values %{ $poll->{votes} };
-            my $w = $weights->[$idx] // 1;
-            $weighted_total += $voters * $w;
-        }
-    }
     for my $idx (0 .. $#{ $poll->{options} }) {
-        my $voters = scalar grep { $_ == $idx } values %{ $poll->{votes} };
-        if ($weighted) {
-            my $w     = $weights->[$idx] // 1;
-            my $score = $voters * $w;
-            my $pct   = $weighted_total > 0 ? int($score * 100 / $weighted_total) : 0;
+        my $voters = $tally->{voters}[$idx];
+        my $score = $tally->{scores}[$idx];
+        my $pct = $tally->{score_total} > 0 ? int($score * 100 / $tally->{score_total}) : 0;
+        if ($tally->{weighted}) {
+            my $w = $weights->[$idx] // 1;
             push @tally, sprintf('[%d] %s (x%d): %d=%d (%d%%)',
                 $idx+1, $poll->{options}[$idx], $w, $voters, $score, $pct);
         } else {
-            my $pct = $total > 0 ? int($voters * 100 / $total) : 0;
             push @tally, sprintf('[%d] %s: %d (%d%%)',
                 $idx+1, $poll->{options}[$idx], $voters, $pct);
         }
@@ -1149,59 +1157,27 @@ sub mbPollResult_ctx {
         botNotice($self, $nick, 'No poll found for this channel.'); return;
     }
 
+    # Results are a read of the final ballot set after the same deadline
+    # boundary used by vote/unvote, without an extra expiry announcement.
+    _expire_poll_if_due($self, $channel, $poll, 1);
     my @options = @{ $poll->{options} };
-    my %counts;
-    $counts{ $poll->{votes}{$_} }++ for keys %{ $poll->{votes} };
-    my $total = scalar keys %{ $poll->{votes} };
-
-    # mb160-B1: appliquer les poids en mode weighted (BB7). Sans cette
-    # branche, le mode 'weighted' du poll etait sans effet : les poids
-    # etaient parses et stockes mais jamais utilises dans le tally ni la
-    # determination du gagnant.
-    my $weighted = $poll->{weighted} ? 1 : 0;
-    my $weights  = $poll->{weights}  || [];
-    my %weighted_scores;
-    my $weighted_total = 0;
-    if ($weighted) {
-        for my $idx (0 .. $#options) {
-            my $voters = $counts{$idx} // 0;
-            my $w      = $weights->[$idx] // 1;
-            $weighted_scores{$idx} = $voters * $w;
-            $weighted_total += $voters * $w;
-        }
-    }
-
+    my $tally = _poll_tally($poll);
+    my $total = $tally->{total};
+    my $weighted = $tally->{weighted};
+    my $weights = $poll->{weights} // [];
+    my $weighted_total = $tally->{score_total};
     my $status = $poll->{active} ? 'Active' : 'Closed';
-    # DD8/MB306: show the winning label prominently and keep ties
-    # deterministic. The previous sort started from hash keys, so equal scores
-    # could select a different winner from one process to another.
-    my @winner_opts;
-    if ($total > 0) {
-        my $best_score = -1;
-        for my $idx (0 .. $#options) {
-            my $score = $weighted
-                ? ($weighted_scores{$idx} // 0)
-                : ($counts{$idx} // 0);
-
-            if ($score > $best_score) {
-                $best_score = $score;
-                @winner_opts = ($idx);
-            }
-            elsif ($score == $best_score) {
-                push @winner_opts, $idx;
-            }
-        }
-    }
+    my @winner_opts = @{ $tally->{winners} };
 
     my $winner_str = '';
     if (@winner_opts == 1) {
         my $winner_opt   = $winner_opts[0];
         my $winner_label = $options[$winner_opt] // 'option ' . ($winner_opt + 1);
         if ($weighted && $weighted_total > 0) {
-            my $wpct = sprintf('%.0f%%', 100 * ($weighted_scores{$winner_opt} // 0) / $weighted_total);
+            my $wpct = sprintf('%.0f%%', 100 * $tally->{scores}[$winner_opt] / $weighted_total);
             $winner_str = "  Winner: $winner_label ($wpct weighted)";
         } else {
-            my $wpct = sprintf('%.0f%%', 100 * ($counts{$winner_opt} // 0) / $total);
+            my $wpct = sprintf('%.0f%%', 100 * $tally->{voters}[$winner_opt] / $total);
             $winner_str = "  Winner: $winner_label ($wpct)";
         }
     }
@@ -1214,10 +1190,10 @@ sub mbPollResult_ctx {
     my $weighted_label = $weighted ? ' [weighted]' : '';
     botPrivmsg($self, $channel, "$status poll${weighted_label}: \"$poll->{question}\" ($total vote(s))$winner_str");
     for my $i (0 .. $#options) {
-        my $c   = $counts{$i} // 0;
+        my $c   = $tally->{voters}[$i];
         if ($weighted) {
             my $w     = $weights->[$i] // 1;
-            my $score = $weighted_scores{$i} // 0;
+            my $score = $tally->{scores}[$i];
             my $pct   = $weighted_total > 0
                 ? sprintf('%.0f%%', 100 * $score / $weighted_total)
                 : '0%';
@@ -1253,11 +1229,10 @@ sub mbPollStop_ctx {
     # MB306: keep !pollstop consistent with !pollresult.
     # The old code announced the zero-based option index as the winner and
     # ignored weighted poll scores entirely.
-    my $votes    = $poll->{votes}   // {};
-    my $opts     = $poll->{options} // [];
-    my $weights  = $poll->{weights} // [];
-    my $weighted = $poll->{weighted} ? 1 : 0;
-    my $total    = scalar(keys %$votes);
+    my $opts = $poll->{options} // [];
+    my $tally = _poll_tally($poll);
+    my $weighted = $tally->{weighted};
+    my $total = $tally->{total};
 
     my $duration = int(time() - ($poll->{started} // time()));
     $duration = 0 if $duration < 0;
@@ -1265,31 +1240,8 @@ sub mbPollStop_ctx {
         if $self->{metrics};
 
     if ($total > 0) {
-        my %counts;
-        $counts{$votes->{$_}}++ for keys %$votes;
-
-        my %scores;
-        my $score_total = 0;
-        for my $idx (0 .. $#$opts) {
-            my $voters = $counts{$idx} // 0;
-            my $weight = $weights->[$idx] // 1;
-            my $score  = $weighted ? ($voters * $weight) : $voters;
-            $scores{$idx} = $score;
-            $score_total += $score;
-        }
-
-        my $best_score = -1;
-        my @winners;
-        for my $idx (0 .. $#$opts) {
-            my $score = $scores{$idx} // 0;
-            if ($score > $best_score) {
-                $best_score = $score;
-                @winners = ($idx);
-            }
-            elsif ($score == $best_score) {
-                push @winners, $idx;
-            }
-        }
+        my @winners = @{ $tally->{winners} };
+        my $score_total = $tally->{score_total};
 
         if (@winners > 1) {
             my @labels = map { $opts->[$_] // 'option ' . ($_ + 1) } @winners;
@@ -1302,8 +1254,8 @@ sub mbPollStop_ctx {
         else {
             my $winner       = $winners[0];
             my $winner_label = $opts->[$winner] // 'option ' . ($winner + 1);
-            my $winner_votes = $counts{$winner} // 0;
-            my $winner_score = $scores{$winner} // 0;
+            my $winner_votes = $tally->{voters}[$winner];
+            my $winner_score = $tally->{scores}[$winner];
             my $pct = $score_total > 0
                 ? int(100 * $winner_score / $score_total)
                 : 0;
