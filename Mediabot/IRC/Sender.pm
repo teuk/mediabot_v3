@@ -24,7 +24,10 @@ sub _defer_flooded_send { return Mediabot::Helpers::_defer_flooded_send(@_); }
 sub _badwords_for_channel {
     my ($self, $target) = @_;
     my $now = time();
-    my $cache = $self->{_badword_cache}{$target};
+    # Match the channel registry's identity without changing the wire target
+    # or SQL bind. Different display spellings must share confirmed rules.
+    my $key = lc($target);
+    my $cache = $self->{_badword_cache}{$key};
     return $cache->{words} // []
         if $cache && ($now - ($cache->{ts} // 0)) <= 300;
 
@@ -48,7 +51,7 @@ sub _badwords_for_channel {
     # Capture success before finish(), which may clear a driver's error flag.
     eval { $sth->finish } if $sth;
     if ($complete) {
-        $self->{_badword_cache}{$target} = { ts => $now, words => \@words };
+        $self->{_badword_cache}{$key} = { ts => $now, words => \@words };
         return \@words;
     }
 

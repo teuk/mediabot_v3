@@ -1,5 +1,19 @@
 ## [Unreleased] — 3.8dev
 
+### MB1098 — Share outgoing badword rules across channel spellings
+
+- Key PRIVMSG/ACTION badword caches by the channel registry's lowercase
+  identity. Changing a target's display casing can no longer miss confirmed
+  rules during a SQL failure or reuse a stale empty list after a rule change.
+- Invalidate that shared identity after successful add/remove commands, keeping
+  the historical display/typed-key cleanup and preserving no-op/failed writes.
+  Retain the original SQL bind, wire/history targets, TTL and failure policy.
+- Replace nine mirrored-filter assertions with four grouped native checks in
+  the existing output case: 32 mixed-case read/fault scenarios, four real
+  command cycles and eight failed-write controls. Keep unrelated antiflood
+  coverage; five fewer assertions, with no new test file or child process.
+
+
 ### MB1097 — Keep stats elapsed ages independent of the host timezone
 
 - Ask SQL for UNIX_TIMESTAMP values alongside first-seen, last-message and

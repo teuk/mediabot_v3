@@ -3665,11 +3665,8 @@ sub channelAddBadword_ctx {
         return;
     }
 
-    # mb162-B1: cle de cache canonique. Le cache _badword_cache est keye par
-    # le nom de canal tel qu'utilise par botPrivmsg ($sTo = nom canonique en
-    # memoire). Si l'utilisateur tape `addbadword #CHAN foo` alors que le
-    # canal est connu comme #chan, un delete avec la casse tapee raterait
-    # la cle. On normalise via le channel_obj deja resolu.
+    # Use the registered display name for compatibility cleanup; outgoing
+    # rules are keyed by its lowercase channel identity (MB1098).
     my $canon_chan = eval { $channel_obj->get_name } || $chan;
 
     # Already exists?
@@ -3706,6 +3703,7 @@ sub channelAddBadword_ctx {
     # mb162-B1: invalider le cache botPrivmsg APRES l'insertion reussie, pour
     # que le nouveau badword soit filtre immediatement (au lieu d'attendre
     # l'expiration du TTL 5 min).
+    delete $self->{_badword_cache}{lc($canon_chan)};
     delete $self->{_badword_cache}{$canon_chan};
     delete $self->{_badword_cache}{$chan} if $chan ne $canon_chan;
 
@@ -3812,9 +3810,10 @@ sub channelRemBadword_ctx {
         return;
     }
 
-    # mb162-B1: invalidation avec cle canonique (meme raison que addbadword:
-    # le cache est keye par le nom canonique utilise par botPrivmsg).
+    # Invalidate the shared identity after a confirmed deletion, while
+    # retaining cleanup of the historical display/typed spellings.
     my $canon_chan = eval { $channel_obj->get_name } || $chan;
+    delete $self->{_badword_cache}{lc($canon_chan)};
     delete $self->{_badword_cache}{$canon_chan};
     delete $self->{_badword_cache}{$chan} if $chan ne $canon_chan;
     botNotice($self, $nick, "Removed badword '$badword' from $chan");

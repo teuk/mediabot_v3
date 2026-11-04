@@ -9,6 +9,9 @@ use Symbol qw(gensym);
 use DBI;
 use Mediabot::IRC::Output qw(privmsg action notice);
 use Mediabot::CommandAsync ();
+use Mediabot::ChannelCommands ();
+use Mediabot::Context ();
+use Mediabot::Channel ();
 use MB881OutputFixture;
 my @warnings_1073;
 local $SIG{__WARN__}=sub {push @warnings_1073,@_};
@@ -174,10 +177,10 @@ sub native_1073 {
     my ($raise)=@_;
     my $db=DBI->connect('dbi:SQLite:dbname=:memory:','','',{
         RootClass=>'MB1073::DBI',RaiseError=>$raise,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
-    $db->do('CREATE TABLE CHANNEL(id_channel INTEGER,name TEXT)');
+    $db->do('CREATE TABLE CHANNEL(id_channel INTEGER,name TEXT COLLATE NOCASE)');
     $db->do(q{INSERT INTO CHANNEL VALUES(1,'#test'),(2,'#else')});
-    $db->do('CREATE TABLE BADWORDS(id_channel INTEGER,badword TEXT)');
-    $db->do(q{INSERT INTO BADWORDS VALUES(1,'BLOCKED'),(1,'oldextra'),(2,'foreign')});
+    $db->do('CREATE TABLE BADWORDS(id_badwords INTEGER PRIMARY KEY,id_channel INTEGER,badword TEXT)');
+    $db->do(q{INSERT INTO BADWORDS(id_channel,badword) VALUES(1,'BLOCKED'),(1,'oldextra'),(2,'foreign')});
     my $bot=MB881OutputFixture::new_bot();$bot->{dbh}=$db;
     return ($bot,$db);
 }
@@ -192,7 +195,7 @@ MB881OutputFixture::with_policy(sub {
                 my $old=$bot->{_badword_cache}{'#test'};
                 $old->{ts}-=301;my $expired=$old->{ts};
                 $db->do(q{DELETE FROM BADWORDS WHERE id_channel=1});
-                $db->do(q{INSERT INTO BADWORDS VALUES(1,'partial'),(1,'newonly')});
+                $db->do(q{INSERT INTO BADWORDS(id_channel,badword) VALUES(1,'partial'),(1,'newonly')});
                 $bot->{irc}{wire}=[];$bot->{events}=[];$bot->{logger}{rows}=[];
                 my $finished=$db->{private_finishes}//0;
                 $db->{private_fault}=$fault;
@@ -244,6 +247,114 @@ MB881OutputFixture::with_policy(sub {
         }
         is_deeply(\@actual,\@expected,
             "RaiseError=$raise: initial fetch failure retains legacy send behavior but cannot suppress the next real read");
+    }
+});
+# MB1098: channel spelling is a wire property, not a second cache identity.
+# Reuse the native SQL/error fixture and output seams above; no extra child.
+{
+    package MB1098::Master;
+    sub is_authenticated {1}
+    sub has_level {$_[1] eq 'Master'}
+}
+sub command_1098 {
+    my ($bot,$operation,$channel,$word)=@_;
+    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'operator',channel=>'#test',
+        command=>$operation,args=>[$channel,$word]);
+    $ctx->{user}=bless {},'MB1098::Master';$ctx->{_user_fetched}=1;
+    return $operation eq 'addbadword'
+        ? Mediabot::ChannelCommands::channelAddBadword_ctx($ctx)
+        : Mediabot::ChannelCommands::channelRemBadword_ctx($ctx);
+}
+MB881OutputFixture::with_policy(sub {
+    no warnings 'redefine';
+    local *Mediabot::ChannelCommands::botNotice=sub {1};
+    local *Mediabot::ChannelCommands::logBot=sub {1};
+    for my $raise (0,1) {
+        my (@actual,@expected);
+        for my $send (\&privmsg,\&action) {
+            for my $expired (0,1) {
+                for my $fault (qw(prepare execute fetch_first fetch_after_one)) {
+                    my ($bot,$db)=native_1073($raise);
+                    $send->($bot,'#tEsT','warmup');
+                    my $old=$bot->{_badword_cache}{'#test'} // $bot->{_badword_cache}{'#tEsT'};
+                    $old->{ts}-=301 if $expired;my $ts=$old->{ts};
+                    $bot->{irc}{wire}=[];$bot->{events}=[];$bot->{logger}{rows}=[];
+                    $db->{private_fault}=$fault;
+                    my $ok=eval {$send->($bot,'#TEST','blocked');1};
+                    push @actual,[$ok?1:0,scalar @{$bot->{irc}{wire}},
+                        scalar(grep {$_->[0] eq 'history'} @{$bot->{events}}),
+                        scalar(grep {$_->[1]=~/\[LIVE\]/} @{$bot->{logger}{rows}}),
+                        [sort keys %{$bot->{_badword_cache}}],
+                        refaddr($bot->{_badword_cache}{'#test'} // {})==refaddr($old)?1:0,
+                        $old->{ts}==$ts?1:0,$db->{private_reads},
+                        $bot->{metrics}{counts}{mediabot_db_query_errors_total}//0,
+                        $db->{private_bind}];
+                    push @expected,[1,0,0,0,['#test'],1,1,1+$expired,$expired,
+                        [$expired && $fault ne 'prepare'?'#TEST':'#tEsT']];
+                    $db->disconnect;
+                }
+            }
+        }
+        is_deeply(\@actual,\@expected,
+            "RaiseError=$raise: mixed-case PRIVMSG/ACTION share fresh and expired rules, including every read failure");
+
+        @actual=();@expected=();
+        for my $send (\&privmsg,\&action) {
+            my ($bot,$db)=native_1073($raise);
+            $bot->{channels}{'#test'}=Mediabot::Channel->new({id=>1,name=>'#TeSt'});
+            $db->do('DELETE FROM BADWORDS WHERE id_channel=1');
+            $send->($bot,'#tEsT','blocked');
+            $send->($bot,'#ElSe','foreign'); # Another channel keeps its own rules.
+            my $other=$bot->{_badword_cache}{'#else'};
+            my $added=command_1098($bot,'addbadword','#TEST','blocked');
+            my $invalidated=!exists $bot->{_badword_cache}{'#test'};
+            $send->($bot,'#tEsT','blocked');
+            my $confirmed=$bot->{_badword_cache}{'#test'};
+            my $before=$db->{private_reads};
+            command_1098($bot,'addbadword','#TeST','blocked'); # Existing: no write/invalidation.
+            my $same=defined($confirmed) && refaddr($confirmed)==refaddr($bot->{_badword_cache}{'#test'} // {});
+            $send->($bot,'#TEST','blocked');
+            my $blocked=scalar @{$bot->{irc}{wire}};
+            my $removed=command_1098($bot,'rembadword','#TEst','blocked');
+            my $cleared=!exists $bot->{_badword_cache}{'#test'};
+            $send->($bot,'#tEsT','blocked');
+            my $empty=$bot->{_badword_cache}{'#test'};
+            command_1098($bot,'rembadword','#TEST','blocked'); # Missing: no write/invalidation.
+            my $missing_same=defined($empty) && refaddr($empty)==refaddr($bot->{_badword_cache}{'#test'} // {});
+            $send->($bot,'#TEST','allowed');
+            my $accepted_targets=[map {$_->{target}} @{$bot->{irc}{wire}}];
+            my $history_targets=[map {$_->[4]} grep {$_->[0] eq 'history'} @{$bot->{events}}];
+            my $reads=$db->{private_reads};my $last_bind=$db->{private_bind};
+            my @failed_writes;
+            for my $operation ('addbadword','rembadword') {
+                $db->do(q{INSERT INTO BADWORDS(id_channel,badword) VALUES(1,'blocked')})
+                    if $operation eq 'rembadword';
+                $bot->{_badword_cache}{'#test'}{ts}-=301;
+                $send->($bot,'#TEST','warmup');
+                my $cache=$bot->{_badword_cache}{'#test'};
+                my $verb=$operation eq 'addbadword'?'INSERT':'DELETE';
+                $db->do("CREATE TRIGGER refuse_write BEFORE $verb ON BADWORDS BEGIN SELECT RAISE(ABORT,'fixture write refused'); END");
+                my $ok=eval {command_1098($bot,$operation,'#TeST','blocked');1};
+                push @failed_writes,[$ok?1:0,
+                    refaddr($cache)==refaddr($bot->{_badword_cache}{'#test'} // {})?1:0,
+                    $db->selectrow_array('SELECT COUNT(*) FROM BADWORDS WHERE id_channel=1')];
+                $db->do('DROP TRIGGER refuse_write');
+            }
+            # The failed-write probes emit their own warmup lines; retain the
+            # successful mutation observations separately from those controls.
+            push @actual,[$added?1:0,$invalidated?1:0,$same?1:0,$blocked,
+                $removed?1:0,$cleared?1:0,$missing_same?1:0,
+                $accepted_targets,$history_targets,
+                [sort keys %{$bot->{_badword_cache}}],
+                defined($other) && refaddr($other)==refaddr($bot->{_badword_cache}{'#else'} // {})?1:0,
+                $reads,$before,$last_bind,\@failed_writes];
+            push @expected,[1,1,1,1,1,1,1,['#tEsT','#tEsT','#TEST'],
+                ['#tEsT','#tEsT','#TEST'],['#else','#test'],1,4,3,['#tEsT'],
+                [[$raise?0:1,1,0],[$raise?0:1,1,1]]];
+            $db->disconnect;
+        }
+        is_deeply(\@actual,\@expected,
+            "RaiseError=$raise: native add/remove invalidates all channel spellings immediately; no-ops, isolation and wire/history targets remain intact");
     }
 });
 is_deeply(\@warnings_1073,[],'native badword reads and output paths are warning-free');
