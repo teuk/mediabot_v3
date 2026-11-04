@@ -45,6 +45,84 @@ sub _slurp_744 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     }
 }
 
+
+# MB1092: local DBI wire model, including the driver's silent reconnect path.
+# No database credentials, socket, worker process or server are used.
+{
+    package MB1092::Conf;
+    sub get {$_[0]{$_[1]}}
+    package MB1092::Metrics;
+    sub set {$_[0]{up}=$_[2] if $_[1] eq 'mediabot_db_up';1}
+    sub inc {$_[0]{$_[2]{result}}++ if $_[1] eq 'mediabot_db_reconnects_total';1}
+    package MB1092::Handle;
+    sub new {my ($c,%a)=@_;bless {init=>$a{init}//'',attrs=>$a{attrs},fault=>$a{fault}//'',at=>$a{at}//0,
+        cleanup=>$a{cleanup}//0,sql=>[],statements=>[],step=>0,charset=>'server_default',zone=>'+02:00'},$c}
+    sub prepare {
+        my ($h,$sql)=@_;my $step=$sql=~/\ASET /?++$h->{step}:0;
+        push @{$h->{sql}},$sql;
+        if ($step && $step==$h->{at}) {
+            return if $h->{fault} eq 'prepare_false';
+            die "fixture prepare failure\n" if $h->{fault} eq 'prepare_throw';
+        }
+        my $st=bless {db=>$h,sql=>$sql,step=>$step,error=>0,finished=>0},'MB1092::Statement';
+        push @{$h->{statements}},$st;return $st;
+    }
+    sub driver_init {
+        my ($h)=@_;
+        return unless length($h->{init});
+        $h->{zone}='+00:00' if $h->{init}=~/time_zone = '\+00:00'/;
+        # The native driver enforces UTF-8 after MYSQL_INIT_COMMAND.
+        $h->{charset}='utf8mb4';
+        $h->{init_calls}++;
+    }
+    sub ping {
+        my ($h)=@_;
+        if ($h->{broken} && $h->{attrs}{mariadb_auto_reconnect}) {
+            # A replacement server session does not execute application SETs.
+            $h->{broken}=0;$h->{charset}='server_default';$h->{zone}='+02:00';$h->driver_init;
+        }
+        return $h->{broken}?0:1;
+    }
+    sub disconnect {$_[0]{disconnected}++;1}
+    package MB1092::Statement;
+    sub execute {
+        my ($s)=@_;my $h=$s->{db};
+        if ($s->{step} && $s->{step}==$h->{at}) {
+            return if $h->{fault} eq 'execute_false';
+            die "fixture execute failure\n" if $h->{fault} eq 'execute_throw';
+            if ($h->{fault} eq 'execute_err') {$s->{error}=1;return '0E0'}
+        }
+        $h->{charset}=$1 if $s->{sql}=~/\ASET NAMES (\w+)/;
+        $h->{zone}='+00:00' if $s->{sql} eq q{SET time_zone = '+00:00'};
+        return '0E0';
+    }
+    sub err {$_[0]{error}}
+    sub finish {$_[0]{finished}++;$_[0]{error}=0;die "fixture cleanup failure\n" if $_[0]{db}{cleanup};1}
+    sub fetchrow_array {return ('collation_connection','utf8mb4_unicode_ci')}
+}
+sub conf1092 {
+    my ($mode)=@_;return bless {'mysql.MAIN_PROG_DDBNAME'=>'fixture',
+        'mysql.MAIN_PROG_DBUSER'=>'fixture','mysql.CHARSET_MODE'=>$mode},'MB1092::Conf';
+}
+sub connect1092 {
+    my ($entry,$mode,%fault)=@_;
+    my @opened;
+    no warnings qw(redefine once);
+    local *DBI::connect=sub {
+        die "session SQL must be a connection attribute, not DSN data\n" if $_[1]=~/mariadb_init_command/;
+        my $init=$_[4]{mariadb_init_command};
+        my $h=MB1092::Handle->new(attrs=>{%{$_[4]}},init=>$init,%fault);$h->driver_init;push @opened,$h;$h};
+    my $parent=MB1092::Handle->new(attrs=>{mariadb_auto_reconnect=>0});
+    my $owner=bless {conf=>conf1092($mode),logger=>L744->new,charset_mode=>$mode,dbh=>$parent},'Mediabot::DB';
+    my ($got,$error);my $ok=eval {
+        if ($entry eq 'startup') {$owner=Mediabot::DB->new(conf1092($mode),L744->new);$got=$owner->dbh}
+        elsif ($entry eq 'reconnect') {$got=$owner->_connect}
+        else {($got,$error)=$owner->connect_isolated_handle}
+        1;
+    };
+    return {owner=>$owner,parent=>$parent,got=>$got,error=>$error,threw=>$ok?0:1,opened=>\@opened};
+}
+
 return sub {
     my ($assert) = @_;
 
@@ -140,4 +218,84 @@ return sub {
             $assert->like($sample, qr/^#$k=\d+/m, "sample: $k documente");
         }
     }
+
+    if ($db_ok) {
+        require Scalar::Util;
+        my @bad;
+        for my $entry (qw(startup reconnect isolated)) {
+            for my $mode (qw(utf8mb4 latin1 off unknown)) {
+                my $x=connect1092($entry,$mode);my $h=$x->{opened}[0];
+                my @set=grep {/\ASET /} @{$h->{sql}};
+                my $wanted=$mode eq 'latin1'?'latin1':'utf8mb4';
+                my $parent_ok=$entry eq 'isolated'
+                    ? Scalar::Util::refaddr($x->{owner}->dbh)==Scalar::Util::refaddr($x->{parent})
+                    : $x->{got} && Scalar::Util::refaddr($x->{owner}->dbh)==Scalar::Util::refaddr($x->{got});
+                push @bad,"$entry/$mode" unless $x->{got} && !$x->{threw} && !$x->{error}
+                    && $h->{attrs}{mariadb_auto_reconnect}==($entry eq 'isolated'?0:1) && $h->{init_calls}==1 && $h->{charset} eq $wanted && $h->{zone} eq '+00:00'
+                    && @set==($mode eq 'off'?1:4) && $set[-1] eq q{SET time_zone = '+00:00'} && $parent_ok;
+            }
+        }
+        $assert->is(join(',',@bad),'',
+            'MB1092 startup, reconnect and isolated handles share confirmed charset/UTC setup and driver initialization while preserving canonical reconnect compatibility');
+
+        {
+            my @opened;
+            no warnings qw(redefine once);
+            local *DBI::connect=sub {
+        die "session SQL must be a connection attribute, not DSN data\n" if $_[1]=~/mariadb_init_command/;
+        my $init=$_[4]{mariadb_init_command};
+                my $h=MB1092::Handle->new(attrs=>{%{$_[4]}},init=>$init);$h->driver_init;push @opened,$h;$h};
+            my $owner=Mediabot::DB->new(conf1092('utf8mb4'),L744->new);
+            my $old=$owner->dbh;$old->{broken}=1;
+            my $metrics=bless {},'MB1092::Metrics';$owner->set_metrics($metrics);
+            my $fresh=$owner->ensure_connected;my $again=$owner->ensure_connected;
+            $assert->ok($fresh && Scalar::Util::refaddr($fresh)==Scalar::Util::refaddr($old)
+                && Scalar::Util::refaddr($again)==Scalar::Util::refaddr($fresh) && @opened==1 && $fresh->{init_calls}==2
+                && $fresh->{charset} eq 'utf8mb4' && $fresh->{zone} eq '+00:00'
+                && $metrics->{up}==1 && !$metrics->{ok} && !$metrics->{failed},
+                'MB1092 a transparent reconnect restores UTF-8/UTC on the same legacy handle without inventing an explicit reconnect metric');
+        }
+        @bad=();
+        for my $entry (qw(startup reconnect isolated)) {
+            for my $at (1..4) {
+                for my $fault (qw(prepare_false prepare_throw execute_false execute_throw execute_err)) {
+                    my $x=connect1092($entry,'utf8mb4',at=>$at,fault=>$fault,cleanup=>1);
+                    my $h=$x->{opened}[0];
+                    my @set=grep {/\ASET /} @{$h->{sql}};
+                    my $safe=$entry eq 'isolated'
+                        ? $x->{error} && !$x->{threw} && Scalar::Util::refaddr($x->{owner}->dbh)==Scalar::Util::refaddr($x->{parent})
+                        : $entry eq 'startup' ? $x->{threw} : !defined($x->{owner}->dbh) && !$x->{threw};
+                    my $clean=!grep {!$_->{finished}} @{$h->{statements}};
+                    push @bad,"$entry/$at/$fault" unless !defined($x->{got}) && $h->{disconnected}==1
+                        && @set==$at && $safe && $clean;
+                }
+            }
+        }
+        $assert->is(join(',',@bad),'',
+            'MB1092 every failed prepare/execute/err phase aborts before publication, closes the candidate and retains isolated parent ownership despite throwing cleanup');
+        {
+            my @opened;my $attempt=0;
+            no warnings qw(redefine once);
+            local *DBI::connect=sub {my $h=MB1092::Handle->new(attrs=>{%{$_[4]}},
+                ($attempt++?():(fault=>'execute_false',at=>4)));push @opened,$h;$h};
+            my $dead=MB1092::Handle->new(attrs=>{mariadb_auto_reconnect=>0});$dead->{broken}=1;
+            my $owner=bless {conf=>conf1092('utf8mb4'),logger=>L744->new,charset_mode=>'utf8mb4',dbh=>$dead},'Mediabot::DB';
+            my $metrics=bless {},'MB1092::Metrics';$owner->set_metrics($metrics);
+            my $failed=$owner->ensure_connected;my $down=!defined($owner->dbh) && $metrics->{up}==0;
+            my $fresh=$owner->ensure_connected;
+            $assert->ok(!defined($failed) && $down && $fresh && @opened==2 && $opened[0]{disconnected}==1
+                && $fresh->{zone} eq '+00:00' && $fresh->{charset} eq 'utf8mb4' && $metrics->{up}==1
+                && $metrics->{failed}==1 && $metrics->{ok}==1,
+                'MB1092 failed session initialization is DB-down, then a clean retry recovers without exposing an uninitialized handle');
+        }
+        @bad=();
+        for my $entry (qw(startup reconnect isolated)) {
+            my $x=connect1092($entry,'utf8mb4',cleanup=>1);my $h=$x->{opened}[0];
+            push @bad,$entry unless $x->{got} && !$x->{threw} && !$x->{error}
+                && !$h->{disconnected} && $h->{zone} eq '+00:00' && $h->{charset} eq 'utf8mb4';
+        }
+        $assert->is(join(',',@bad),'',
+            'MB1092 successful zero-row SET acknowledgements remain success even if later statement cleanup throws');
+    }
+
 };

@@ -59,7 +59,7 @@ sub new {
         PrintError           => 0,
         AutoCommit           => 1,
         mariadb_auto_reconnect => 1,
-        # Active seulement en mode utf8mb4 (sinon on laisse à 0)
+        mariadb_init_command => _session_init_sql($mode),
     );
 
     my $dbh = DBI->connect($dsn, $dbuser, $dbpass, \%attrs);
@@ -71,8 +71,11 @@ sub new {
     }
 
     # Appliquer le charset/collation de session selon le mode choisi
-    _apply_session_charset($dbh, $logger, $mode);
-    _apply_session_timezone($dbh, $logger);
+    # Only an explicitly initialized connection may become canonical.
+    unless (_initialize_session($dbh, $logger, $mode)) {
+        eval { $dbh->disconnect };
+        die "DB session initialization failed\n";
+    }
 
     # Log de vérif (collation de session)
     eval {
@@ -93,62 +96,70 @@ sub new {
     return $self;
 }
 
-sub _apply_session_charset {
-    my ($dbh, $logger, $mode) = @_;
-
-    my @sql;
-    if ($mode eq 'utf8mb4') {
-        @sql = (
-            'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
-            'SET CHARACTER SET utf8mb4',                       # ⚠️ sans apostrophe orpheline
-            'SET COLLATION_CONNECTION = utf8mb4_unicode_ci',
-        );
+# Pass mariadb_init_command as an attribute, never in the DSN: its UTC
+# colon is a legacy DSN separator. The driver replays it on reconnect. Use
+# one static SET statement, not multi-statements or configuration-derived SQL.
+sub _session_init_sql {
+    my ($mode) = @_;
+    my @set = (q{time_zone = '+00:00'});
+    unless ($mode eq 'off') {
+        my $charset = $mode eq 'latin1' ? 'latin1' : 'utf8mb4';
+        my $collation = $charset eq 'latin1' ? 'latin1_swedish_ci' : 'utf8mb4_unicode_ci';
+        push @set, "character_set_client = '$charset'", "character_set_results = '$charset'",
+            "collation_connection = '$collation'";
     }
-    elsif ($mode eq 'latin1') {  # compat héritage si des hashes ont été faits en latin1
-        @sql = (
-            'SET NAMES latin1',
-            'SET CHARACTER SET latin1',
-            'SET COLLATION_CONNECTION = latin1_swedish_ci',
-        );
-    }
-    elsif ($mode eq 'off') {
-        # Ne change rien — garder la session telle quelle
-        $logger->log(2, "Charset mode OFF: leaving session charset/collation untouched");
-        return;
-    } else {
-        # Valeur inattendue -> fallback utf8mb4
-        $logger->log(0, "Unknown CHARSET_MODE '$mode', falling back to utf8mb4 -- check [mysql] in mediabot.conf");
-        @sql = (
-            'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
-            'SET CHARACTER SET utf8mb4',
-            'SET COLLATION_CONNECTION = utf8mb4_unicode_ci',
-        );
-    }
-
-    foreach my $stmt (@sql) {
-        my $sth = $dbh->prepare($stmt);
-        unless ($sth && $sth->execute) {
-            $logger->log(1, "SQL error during init: $DBI::errstr (query: $stmt)");
-        }
-        $sth->finish if $sth;
-    }
+    return 'SET SESSION ' . join(', ', @set);
 }
 
-# CHANNEL_LOG.ts is a TIMESTAMP. Keep every application connection in UTC so
-# SQL can convert it explicitly into a channel's IANA civil time without first
-# inheriting the host or MariaDB server timezone.
+# Explicit setup is checked before publication; driver reconnects replay the
+# equivalent initialization on the SAME handle retained by historical callers.
+sub _session_statement {
+    my ($dbh, $logger, $sql, $phase) = @_;
+    my $sth;
+    my $ok = eval {
+        $sth = $dbh->prepare($sql) or die "session prepare failed\n";
+        $sth->execute or die "session execute failed\n";
+        die "session statement failed\n" if $sth->err;
+        1;
+    };
+    # Capture failure before finish(), whose error state is unrelated to SET.
+    eval { $sth->finish } if $sth;
+    eval { $logger->log(1, "DB session $phase initialization failed") }
+        if !$ok && $logger;
+    return $ok ? 1 : 0;
+}
+
+sub _apply_session_charset {
+    my ($dbh, $logger, $mode) = @_;
+    return 1 if $mode eq 'off';
+    my $charset = $mode eq 'latin1' ? 'latin1' : 'utf8mb4';
+    if ($mode ne 'latin1' && $mode ne 'utf8mb4') {
+        eval { $logger->log(0, "Unknown CHARSET_MODE '$mode', falling back to utf8mb4 -- check [mysql] in mediabot.conf") }
+            if $logger;
+    }
+    my $collation = $charset eq 'latin1' ? 'latin1_swedish_ci' : 'utf8mb4_unicode_ci';
+    my @sql = (
+        $charset eq 'latin1' ? 'SET NAMES latin1' : "SET NAMES $charset COLLATE $collation",
+        "SET CHARACTER SET $charset",
+        "SET COLLATION_CONNECTION = $collation",
+    );
+    for my $sql (@sql) {
+        return 0 unless _session_statement($dbh, $logger, $sql, 'charset');
+    }
+    return 1;
+}
+
+# CHANNEL_LOG.ts is a TIMESTAMP. Require UTC for every application connection;
+# channel-specific civil-time conversion happens explicitly at the query layer.
 sub _apply_session_timezone {
     my ($dbh, $logger) = @_;
-    my $stmt = q{SET time_zone = '+00:00'};
-    my $sth = $dbh->prepare($stmt);
-    unless ($sth && $sth->execute) {
-        $logger->log(1, "SQL error during UTC session init: $DBI::errstr (query: $stmt)")
-            if $logger;
-        $sth->finish if $sth;
-        return 0;
-    }
-    $sth->finish;
-    return 1;
+    return _session_statement($dbh, $logger, q{SET time_zone = '+00:00'}, 'timezone');
+}
+
+sub _initialize_session {
+    my ($dbh, $logger, $mode) = @_;
+    return 0 unless _apply_session_charset($dbh, $logger, $mode);
+    return _apply_session_timezone($dbh, $logger);
 }
 
 # Reconnexion (même signature que l'implémentation précédente si tu l'appelais)
@@ -185,6 +196,7 @@ sub _connect {
         PrintError           => 0,
         AutoCommit           => 1,
         mariadb_auto_reconnect => 1,
+        mariadb_init_command => _session_init_sql($mode),
     );
 
     $logger->log(1, "Connecting to DB: $dbname at $dbhost:$dbport (charset_mode=$mode)");
@@ -197,8 +209,11 @@ sub _connect {
         return;
     }
 
-    _apply_session_charset($dbh, $logger, $mode);
-    _apply_session_timezone($dbh, $logger);
+    unless (_initialize_session($dbh, $logger, $mode)) {
+        eval { $dbh->disconnect };
+        $self->{dbh} = undef;
+        return;
+    }
     $self->{dbh} = $dbh;
     return $dbh;
 }
@@ -235,42 +250,15 @@ sub connect_isolated_handle {
         PrintError             => 0,
         AutoCommit             => 1,
         mariadb_auto_reconnect => 0,
+        mariadb_init_command => _session_init_sql($mode),
     );
 
     my $dbh = DBI->connect($dsn, $dbuser, $dbpass, \%attrs);
     return (undef, ($DBI::errstr || 'isolated DB connect failed')) unless $dbh;
 
-    my @sql;
-    if ($mode eq 'latin1') {
-        @sql = (
-            'SET NAMES latin1',
-            'SET CHARACTER SET latin1',
-            'SET COLLATION_CONNECTION = latin1_swedish_ci',
-        );
-    }
-    elsif ($mode ne 'off') {
-        @sql = (
-            'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
-            'SET CHARACTER SET utf8mb4',
-            'SET COLLATION_CONNECTION = utf8mb4_unicode_ci',
-        );
-    }
-
-    push @sql, q{SET time_zone = '+00:00'};
-
-    for my $stmt (@sql) {
-        my $ok = eval {
-            my $sth = $dbh->prepare($stmt);
-            my $rv = $sth && $sth->execute;
-            $sth->finish if $sth;
-            $rv ? 1 : 0;
-        };
-        unless ($ok) {
-            my $err = $@ || $DBI::errstr || 'session charset setup failed';
-            eval { $dbh->disconnect };
-            $err =~ s/[\r\n\0]+/ /g;
-            return (undef, substr($err, 0, 240));
-        }
+    unless (_initialize_session($dbh, $self->{logger}, $mode)) {
+        eval { $dbh->disconnect };
+        return (undef, 'isolated DB session initialization failed');
     }
 
     return ($dbh, undef);

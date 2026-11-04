@@ -1,5 +1,23 @@
 ## [Unreleased] — 3.8dev
 
+### MB1092 — Restore and confirm database session initialization
+
+- Pass one static mariadb_init_command as a DBI attribute on all three
+  connection paths (never in the DSN, whose parser splits UTC colons) so
+  transparent driver reconnects restore UTC on the same handles retained by
+  historical callers. Explicit setup confirms the configured charset/collation;
+  native transparent reconnects retain the driver’s existing UTF-8 policy. Keep canonical
+  auto-reconnect compatibility and worker auto-reconnect disabled.
+- Share checked explicit session setup across startup, reconnect and isolated
+  workers. Confirm prepare/execute/statement error before cleanup; stop at
+  the first failed setting and disconnect the unpublished candidate handle.
+- A failed reconnect stays unavailable and records failure; isolated setup
+  never replaces the parent handle. Keep latin1/off/fallback modes, timeouts,
+  socket-driver behavior and successful zero-row SET acknowledgements.
+- Add five grouped native checks in the existing DB lag case, with no server,
+  credential, network, new process or new test file. No schema, configuration,
+  dependency or VERSION change.
+
 ### MB1091 — Keep Hailo lifetimes on coherent elapsed clocks
 
 - Measure default Hailo cooldowns, flood windows, queue TTL and post-edit
