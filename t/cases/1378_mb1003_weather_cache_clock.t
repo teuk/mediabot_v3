@@ -3,6 +3,7 @@ use warnings;
 use utf8;
 use Test::More;
 use Storable qw(dclone);
+use Encode qw(encode);
 our $NOW;
 BEGIN {$NOW=1_000_000;*CORE::GLOBAL::time=sub () {$NOW}}
 use Mediabot::Mediabot;
@@ -21,12 +22,12 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
     }
     package MB1003::Conf;
     sub get {$_[1] eq 'main.MAIN_PROG_URL'?'https://project.example.invalid/':undef}
-    package MB1003::Log;sub log {1}
+    package MB1003::Log;sub log {push @{$_[0]{rows}},[@_[1..$#_]];1}
 }
-my ($http,@wire,@audit,@warnings);
+my ($http,@wire,@audit,@warnings,@clients);
 local $SIG{__WARN__}=sub {push @warnings,@_};
 no warnings qw(redefine once);
-local *Mediabot::External::_make_http=sub {$http};
+local *Mediabot::External::_make_http=sub {push @clients,{@_};$http};
 local *Mediabot::External::getIdChansetList=sub {7};
 local *Mediabot::External::getIdChannelSet=sub {8};
 local *Mediabot::Helpers::botPrivmsg=sub {push @wire,['public',$_[1],$_[2]];1};
@@ -37,7 +38,7 @@ sub setup_1378 {
     $NOW=1_000_000;@wire=();@audit=();
     $http=bless {calls=>[],elapsed=>$elapsed,response=>$response},'MB1003::HTTP';
     my $bot=Mediabot->new({});
-    $bot->{conf}=bless {},'MB1003::Conf';$bot->{logger}=bless {},'MB1003::Log';
+    $bot->{conf}=bless {},'MB1003::Conf';$bot->{logger}=bless {rows=>[]},'MB1003::Log';
     $bot->{_weather_cache}={paris=>{ts=>$NOW-$age,text=>'Stored Paris'}};
     return $bot;
 }
@@ -106,6 +107,63 @@ my $fresh={success=>1,status=>200,content=>'Fresh Paris'};
     is_deeply(invoke_1378($bot),[[['public','#test','Fresh Paris']],[['#test','weather','Paris']],1,
         {paris=>{ts=>$NOW,text=>'Fresh Paris'}}],
         'undated cache is repaired by normal fetching with the existing successful output and audit');
+}
+
+# Exercise the registered command and its cache, not a copied parser.
+{
+    my (@actual,@expected);
+    my $weather="Genève : ☀️ +18°C | vent <5 km/h | 💧70%";
+    for my $line ($weather,encode('UTF-8',$weather),'x' x 2048) {
+        my $bot=setup_1378(300,2,{success=>1,status=>200,
+            headers=>{'content-type'=>'text/plain; charset=utf-8'},content=>" \r\n$line\r\n "});
+        push @actual,invoke_1378($bot);
+        push @expected,[[['public','#test',$line]],[['#test','weather','Paris']],1,
+            {paris=>{ts=>$NOW,text=>$line}}];
+        push @actual,[$clients[-1]{max_size},$clients[-1]{timeout},$clients[-1]{verify_SSL},$clients[-1]{agent}];
+        push @expected,[16384,4,1,'mediabot_v3 weather/1.0 (+https://project.example.invalid/)'];
+        push @actual,invoke_1378($bot);
+        push @expected,[[['public','#test',$line],['public','#test',$line]],
+            [['#test','weather','Paris']],1,{paris=>{ts=>$NOW,text=>$line}}];
+    }
+    {
+        no warnings 'redefine';local *MB1003::Conf::get=sub {undef};
+        my $bot=setup_1378(300,0,$fresh);invoke_1378($bot);
+        push @actual,$clients[-1]{agent};
+        push @expected,'mediabot_v3 weather/1.0 (+https://github.com/teuk/mediabot_v3)';
+    }
+    is_deeply(\@actual,\@expected,'single-line weather keeps Unicode, UTF-8 bytes, comparisons, bounded HTTP and both project User-Agents');
+}
+{
+    my (@actual,@expected);
+    my @bad=(
+        '<!DOCTYPE html><html><body>upstream failed</body></html>',
+        '<form action="/challenge">verification required</form>',
+        "Paris: sunny\nLyon: rainy","Paris: sunny\rLyon: rainy",
+        'x' x 2049,"☀" x 683,encode('UTF-8',"☀" x 683),
+        '', 'Unknown location', 'Please try again later', 'Service unavailable',
+        undef, [], {}, map {"Paris: $_ sunny"} map {chr} (0..9,11,12,14..31,127),
+    );
+    my @responses=(map {{success=>1,status=>200,content=>$_}} @bad);
+    push @responses,map {{success=>1,status=>200,content=>'apparently plain',
+        headers=>{'content-type'=>$_}}} ('text/html; charset=utf-8','application/json','application/xhtml+xml');
+    for my $response (@responses) {
+        for my $age (undef,300,899,901) {
+            my $bot=setup_1378($age//300,defined($age)&&$age==899?2:0,$response);
+            delete $bot->{_weather_cache}{paris} unless defined $age;
+            my $before=dclone($bot->{_weather_cache});
+            my $out=defined($age)&&$age==300?'Stored Paris  (cached)':"No answer from wttr.in for 'Paris'. Try again later.";
+            push @actual,invoke_1378($bot,'meteo');
+            push @expected,[[['public','#test',$out]],[],1,$before];
+            push @actual,$bot->{logger}{rows};
+            push @expected,[[2,'displayWeather_ctx(): wttr response rejected']];
+            # A failed body must not become a fresh cache hit on the next call.
+            $http->{response}=$fresh;$http->{elapsed}=0;
+            push @actual,invoke_1378($bot);
+            push @expected,[[['public','#test',$out],['public','#test','Fresh Paris']],
+                [['#test','weather','Paris']],2,{paris=>{ts=>$NOW,text=>'Fresh Paris'}}];
+        }
+    }
+    is_deeply(\@actual,\@expected,'invalid provider success never reaches IRC, cache or audit; fallback expiry and next-call recovery remain exact');
 }
 is_deeply(\@warnings,[],'weather cache timing emits no warnings');
 done_testing;

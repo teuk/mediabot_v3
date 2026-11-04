@@ -5,8 +5,26 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::External::URLCodec qw(_uri_escape_bytes);
+use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
 our @EXPORT_OK = qw(displayWeather_ctx);
+
+sub _weather_line {
+    my ($res) = @_;
+    my $line = $res->{content};
+    return unless defined($line) && !ref($line);
+    # The requested custom format is one short plain-text line. A successful
+    # HTTP status can also carry a proxy error, challenge or full HTML page.
+    if (ref($res->{headers}) eq 'HASH' && defined(my $type = $res->{headers}{'content-type'})) {
+        return if ref($type) || $type !~ m{\Atext/plain\s*(?:;|\z)}i;
+    }
+    $line =~ s/\A[ \r\n]+|[ \r\n]+\z//g;
+    return if $line eq '' || _irc_wire_bytes($line) > 2048;
+    return if $line =~ /[\x00-\x1f\x7f]/;
+    return if $line =~ m{</?[a-z][a-z0-9:-]*(?:\s[^<>]*)?/?>|<!doctype\b|<!--}i;
+    return if $line =~ /^Unknown location/i || $line =~ /try again later|Service unavailable/i;
+    return $line;
+}
 
 sub displayWeather_ctx {
     my ($ctx) = @_;
@@ -80,6 +98,7 @@ sub displayWeather_ctx {
         timeout    => 4,
         agent      => $weather_agent,
         verify_SSL => 1,   # explicit verified TLS for the weather endpoint
+        max_size   => 16 * 1024,
     );
 
     my $res = eval { $http->get($url, {
@@ -108,13 +127,9 @@ sub displayWeather_ctx {
         return;
     }
 
-    my $line = $res->{content} // '';
-    $line =~ s/^\s+|\s+$//g;
-    $line =~ s/\r//g;
-
-    # wttr sometimes replies with “Unknown location” or throttling texts
-    if ($line eq '' || $line =~ /^Unknown location/i || $line =~ /try again later/i || $line =~ /Service unavailable/i) {
-        $self->{logger}->log(2, "displayWeather_ctx(): wttr unhappy reply for '$location': '$line'");
+    my $line = _weather_line($res);
+    unless (defined $line) {
+        $self->{logger}->log(2, 'displayWeather_ctx(): wttr response rejected');
         $use_cache_or_msg->("No answer from wttr.in for '$location'. Try again later.");
         return;
     }

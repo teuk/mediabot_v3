@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1101 — Keep invalid weather responses out of IRC and cache
+
+- Validate successful wttr replies before publishing: one nonempty plain-text
+  line, at most 2,048 wire bytes, without control codes or HTML markup.
+  Limit the HTTP body to 16 KiB; preserve Unicode, existing UTF-8 bytes,
+  weather symbols, normal CRLF framing and textual comparisons such as <5.
+- On malformed success, retain confirmed cached text and its original timestamp.
+  Recheck the fifteen-minute fallback limit after the request and allow the
+  next normal refresh; never publish or log the rejected provider body.
+- Extend the existing native registered-command fixture with two grouped checks
+  for valid output, failed bodies, cache expiry and recovery. Remove two older
+  source/mirrored weather cases now covered by native URL and HTTP fixtures:
+  fifteen fewer assertions and two fewer test processes.
+
+
 ### MB1100 — Keep explicitly refused reminders pending
 
 - Inspect the normal outgoing acceptance result after claiming a reminder.
