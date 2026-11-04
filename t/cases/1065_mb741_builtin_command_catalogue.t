@@ -47,17 +47,17 @@ return sub {
     my $legacy_private = _set_1065(legacy_private_adapter_names());
     my $direct_public = _set_1065(direct_public_command_names());
 
-    $assert->is(scalar @public, 245,
-        'MB1084 catalogues all 245 public built-ins');
+    $assert->is(scalar @public, 246,
+        'MB1084 catalogues all 246 public built-ins');
     $assert->is(scalar keys %$public, scalar @public,
         'MB741 public catalogue has no duplicate');
     $assert->is(scalar @private, 99,
         'MB741 catalogues all 99 private built-ins');
     $assert->is(scalar keys %$private, scalar @private,
         'MB741 private catalogue has no duplicate');
-    $assert->is(scalar @entries, 344,
+    $assert->is(scalar @entries, 345,
         'MB741 emits one source-scoped definition per built-in');
-    $assert->is(scalar keys %$direct_public, 245,
+    $assert->is(scalar keys %$direct_public, 246,
         'MB749 makes every public built-in a direct registry handler');
     $assert->is(scalar keys %$legacy_public, 0,
         'MB749 retires the public compatibility adapter list');
@@ -98,7 +98,7 @@ return sub {
     require Mediabot::Mediabot;
     my $bot = Mediabot->new({});
     my $registry = $bot->commands;
-    $assert->is($registry->count('public'), 245,
+    $assert->is($registry->count('public'), 246,
         'runtime registry exposes the complete public catalogue');
     $assert->is($registry->count('private'), 99,
         'runtime registry exposes the complete private catalogue');

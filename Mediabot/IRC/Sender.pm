@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use utf8;
 use Encode qw(encode);
+use Time::HiRes ();
 
 # Internal implementation reached by Helpers. Callers use IRC::Output or the
 # legacy Helpers facade; these bodies are not exported. Resolve the existing
@@ -64,6 +65,19 @@ sub _badwords_for_channel {
     return $cache ? ($cache->{words} // []) : [];
 }
 
+# A timed ping is a fixed ASCII reply, never a caller-supplied callback.
+# Render after AntiFlood and the badword read, before filtering/history/wire.
+sub _timed_ping_text {
+    my ($text, $options) = @_;
+    return $text unless $text eq 'POng ! [0.000s]' && ref($options) eq 'HASH';
+    my $started = $options->{ping_started_at};
+    return $text unless defined($started) && !ref($started) && length($started) <= 32
+        && $started =~ /\A[0-9]+(?:\.[0-9]+)?\z/;
+    my $elapsed = Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) - $started;
+    $elapsed = 0 if $elapsed < 0;
+    return sprintf('POng ! [%.3fs]', $elapsed);
+}
+
 sub botPrivmsg {
     my ($self, $sTo, $sMsg, $send_options) = @_;
 
@@ -110,7 +124,7 @@ sub botPrivmsg {
                     # Contextual replies expire with their conversation. Other
                     # callers keep the historical bounded deferred-send queue.
                     return 0 if ref($send_options) eq 'HASH' && $send_options->{no_defer};
-                    return _defer_flooded_send($self, 'privmsg', $sTo, $sMsg);
+                    return _defer_flooded_send($self, 'privmsg', $sTo, $sMsg, $send_options);
                 }
             }
         }
@@ -119,6 +133,7 @@ sub botPrivmsg {
         # Avoids one SQL query per outgoing message on busy channels.
         {
             my $words = _badwords_for_channel($self, $sTo);
+            $sMsg = _timed_ping_text($sMsg, $send_options);
 
             my $msg_lc = lc($sMsg);
             for my $bw (@$words) {

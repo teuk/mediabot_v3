@@ -44,7 +44,7 @@ my @PUBLIC_CATALOGUE = qw(
     addresponder delresponder lastcom q quote moduser antifloodset leet rehash
     mp3 exec qlog hailo hailo_ignore hailo_unignore hailo_status hailo_chatter
     whereis birthday f xlogin xauth tellme chatgpt openai ai claude gemini yomomma
-    resolve tmdb tmdblangset debug version uptime help commands spike update
+    resolve tmdb tmdblangset debug version uptime ping help commands spike update
 );
 
 my @PRIVATE_CATALOGUE = qw(
@@ -63,7 +63,7 @@ my @PRIVATE_CATALOGUE = qw(
 # The first four native handlers predated MB741. The new hailo operator
 # command and MB807 previews/variable guide have no legacy public handlers. All existing
 # migratable public built-ins retain their original migration eligibility.
-my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars randomquote xauth wikipedia ddg);
+my %NO_MIGRATION_FALLBACK = map { $_ => 1 } qw(version uptime help commands hailo testcmd cmdvars randomquote xauth wikipedia ddg ping);
 
 sub public_command_names {
     return @PUBLIC_CATALOGUE;

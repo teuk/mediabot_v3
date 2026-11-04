@@ -198,15 +198,11 @@ return sub {
             'tick: aucun second keepalive redondant');
         $assert->like($src, qr/SLOW PRIVMSG: processing took/,
             'wrapper: message de lenteur present');
-        $assert->like($src, qr/sub on_message_PRIVMSG \{[^}]*_on_message_PRIVMSG_body/s,
-            'wrapper: delegue au corps renomme');
+        # MB1099: delegation and scalar/list/void preservation now run natively
+        # in case 1306, including nested receipt timing and exceptions.
         my $body_defs = () = $src =~ /^sub _on_message_PRIVMSG_body \{/mg;
         $assert->ok($body_defs == 1, 'wrapper: corps defini une seule fois');
         $assert->like($src, qr/tv_interval\(\$t0_548\)/, 'wrapper: chrono HiRes reel');
-        $assert->like($src, qr/my \$want_547 = wantarray;/,
-            'wrapper: contexte appelant capture avant delegation');
-        $assert->like($src, qr/return \$want_547 \? \@ret_547 : \$ret_547;/,
-            'wrapper: contexte scalaire ou liste preserve');
     }
 
     # ------------------------------------------------------------------

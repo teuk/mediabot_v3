@@ -3783,6 +3783,9 @@ sub on_message_PRIVMSG {
     my $want_547 = wantarray;
     my (@ret_547, $ret_547);
     my $t0_548 = [ Time::HiRes::gettimeofday() ];
+    # MB1099: local scope keeps nested messages and later callbacks separate.
+    local $mediabot->{_privmsg_received_at} =
+        Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
 
     if (!defined $want_547) {
         _on_message_PRIVMSG_body($self, $message, $hints);

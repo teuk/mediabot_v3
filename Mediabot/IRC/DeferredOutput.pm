@@ -11,14 +11,19 @@ sub botPrivmsg { return Mediabot::Helpers::botPrivmsg(@_); }
 sub botAction { return Mediabot::Helpers::botAction(@_); }
 
 sub _defer_flooded_send {
-    my ($self, $kind, $to, $msg) = @_;
+    my ($self, $kind, $to, $msg, $send_options) = @_;
 
     my $q = $self->{_flood_outq}{$to} //= { items => [], armed => 0 };
+    my $item = [ $kind, $msg ];
+    # Keep the receipt stamp, never the command Context or message object.
+    push @$item, { ping_started_at => $send_options->{ping_started_at} }
+        if ref($send_options) eq 'HASH' && defined($send_options->{ping_started_at})
+            && !ref($send_options->{ping_started_at});
 
     if (defined($self->{_flood_draining}) && $self->{_flood_draining} eq $to) {
         # MB1042: only this target's reflood returns to its head. A callback
         # enqueueing another target must keep its normal cap, FIFO and timer.
-        unshift @{ $q->{items} }, [ $kind, $msg ];
+        unshift @{ $q->{items} }, $item;
         return undef;
     }
 
@@ -28,7 +33,7 @@ sub _defer_flooded_send {
         return undef;
     }
 
-    push @{ $q->{items} }, [ $kind, $msg ];
+    push @{ $q->{items} }, $item;
     $self->{logger}->log(4, "botPrivmsg/botAction deferred by AntiFlood on $to ("
         . scalar(@{ $q->{items} }) . " queued)");
     Mediabot::Helpers::_arm_flood_drain($self, $to);
@@ -71,10 +76,10 @@ sub _drain_flood_queue {
     my $item = shift @{ $q->{items} };
     my $sent = eval {
         if ($item) {
-            my ($kind, $msg) = @$item;
+            my ($kind, $msg, $send_options) = @$item;
             local $self->{_flood_draining} = $to;
             if ($kind eq 'action') { botAction($self, $to, $msg) }
-            else                   { botPrivmsg($self, $to, $msg) }
+            else                   { botPrivmsg($self, $to, $msg, $send_options) }
         }
         1;
     };

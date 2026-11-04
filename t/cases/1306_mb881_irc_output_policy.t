@@ -357,5 +357,145 @@ MB881OutputFixture::with_policy(sub {
             "RaiseError=$raise: native add/remove invalidates all channel spellings immediately; no-ops, isolation and wire/history targets remain intact");
     }
 });
+# MB1099: fixed ping text, with deterministic monotonic time and no sleep.
+require Mediabot::Mediabot;
+sub ping_bot_1099 {
+    my $bot=Mediabot->new({});my $output=MB881OutputFixture::new_bot();
+    $bot->{$_}=$output->{$_} for qw(policy blocked events logger irc metrics dbh);
+    return $bot;
+}
+{
+    # Compile the actual ingress wrapper, replacing only its application body.
+    # Its local variable, timing, return context and exception unwinding are real.
+    my $source=do {open my $f,'<:encoding(UTF-8)','mediabot.pl' or die $!;local $/;<$f>};
+    my ($wrapper)=$source=~/(sub on_message_PRIVMSG \{.*?^\})/ms;
+    die 'missing PRIVMSG ingress wrapper' unless $wrapper;
+    eval 'package MB1099::Boundary; our ($mediabot,$body);'
+        .'sub _on_message_PRIVMSG_body {return $body->(@_)} '.$wrapper;
+    die $@ if $@;
+}
+MB881OutputFixture::with_policy(sub {
+    no warnings qw(redefine once);
+    my $now=100;
+    local *Time::HiRes::clock_gettime=sub {$now};
+    my ($channel_block,$nick_block,$cooldown)=(0,0,0);
+    local *Mediabot::checkChanFlood=sub {$channel_block};
+    local *Mediabot::checkNickFlood=sub {$nick_block};
+    local *Mediabot::checkCmdCooldown=sub {$cooldown};
+    my (@actual,@expected);
+    for my $context (qw(void scalar list)) {
+        my $bot=ping_bot_1099();$bot->{_privmsg_received_at}=7;
+        local $MB1099::Boundary::mediabot=$bot;
+        my @inside;
+        local $MB1099::Boundary::body=sub {
+            push @inside,[!defined(wantarray)?'void':wantarray?'list':'scalar',
+                $bot->{_privmsg_received_at}];
+            return wantarray?(11,22):11;
+        };
+        my @result;
+        if ($context eq 'void') {MB1099::Boundary::on_message_PRIVMSG(undef,undef,{});}
+        elsif ($context eq 'scalar') {@result=scalar MB1099::Boundary::on_message_PRIVMSG(undef,undef,{});}
+        else {@result=MB1099::Boundary::on_message_PRIVMSG(undef,undef,{});}
+        push @actual,[\@inside,\@result,$bot->{_privmsg_received_at}];
+        push @expected,[[[$context,100]],$context eq 'void'?[]:$context eq 'scalar'?[11]:[11,22],7];
+    }
+    {
+        my $bot=ping_bot_1099();$bot->{_privmsg_received_at}=7;
+        local $MB1099::Boundary::mediabot=$bot;
+        my @inside;my $depth=0;
+        local $MB1099::Boundary::body=sub {
+            push @inside,$bot->{_privmsg_received_at};
+            if (!$depth++) {
+                $now=101;eval {MB1099::Boundary::on_message_PRIVMSG(undef,undef,{})};
+                push @inside,$bot->{_privmsg_received_at};
+                die "outer fixture failure\n";
+            }
+            die "inner fixture failure\n";
+        };
+        my $ok=eval {MB1099::Boundary::on_message_PRIVMSG(undef,undef,{});1};
+        push @actual,[\@inside,$ok?1:0,$@ eq "outer fixture failure\n"?1:0,$bot->{_privmsg_received_at}];
+        push @expected,[[100,101,100],0,1,7];$now=100;
+    }
+    is_deeply(\@actual,\@expected,
+        'ping ingress preserves scalar/list/void dispatch and restores receipt stamps after nested messages and exceptions');
+
+    @actual=();@expected=();
+    for my $target ('#MiXeD','&local','!safe','+modeless') {
+        my $bot=ping_bot_1099();$bot->{_privmsg_received_at}=7;
+        my $entry=$bot->commands->command_for('ping','public');
+        # Simulate incoming processing + plugin observation + native SQL time.
+        $bot->events->on('public_command_observed',sub {$now+=0.234});
+        my $prepare=MB881::DBH->can('prepare');
+        local *MB881::DBH::prepare=sub {$now+=0.100;return $prepare->(@_)};
+        local $MB1099::Boundary::mediabot=$bot;
+        local $MB1099::Boundary::body=sub {
+            $now+=1;
+            $bot->mbCommandPublic(undef,$target,'Alice',0,'PING');
+        };
+        MB1099::Boundary::on_message_PRIVMSG(undef,undef,{});
+        my ($history)=grep {$_->[0] eq 'history'} @{$bot->{events}};
+        push @actual,[$bot->{irc}{wire}[0]{target},$bot->{irc}{wire}[0]{text},
+            $history->[5],$bot->{_privmsg_received_at},
+            $entry->{metadata}{syntax},$entry->{metadata}{migration_fallback}//0,
+            $bot->{metrics}{counts}{mediabot_privmsg_out_total}];
+        push @expected,[$target,'POng ! [1.334s]','POng ! [1.334s]',7,'ping',0,1];
+        $now=100;
+    }
+    # A non-IRC direct dispatch gets a fresh start, rather than a previous ping's stamp.
+    {
+        my $bot=ping_bot_1099();$now=20;
+        $bot->events->on('public_command_observed',sub {$now+=0.250});
+        $bot->mbCommandPublic(undef,'#test','Alice',0,'ping');
+        $now=50;$bot->mbCommandPublic(undef,'#test','Alice',0,'ping');
+        push @actual,[[map {$_->{text}} @{$bot->{irc}{wire}}],defined($bot->{_privmsg_received_at})?1:0];
+        push @expected,[['POng ! [0.250s]','POng ! [0.250s]'],0];
+    }
+    is_deeply(\@actual,\@expected,
+        'registry ping measures ingress, hooks and SQL preparation for all channel prefixes, with exact wire/history text and fresh direct-dispatch clocks');
+
+    {
+        my $bot=ping_bot_1099();$bot->{policy}{AntiFlood}=1;$bot->{blocked}=1;
+        $now=100;$bot->{_privmsg_received_at}=100;
+        $bot->mbCommandPublic(undef,'#test','Alice',0,'ping');
+        my $queued=[map {[@$_]} @{$bot->{_flood_outq}{'#test'}{items}}];
+        privmsg($bot,'#test','after');
+        $now=102;Mediabot::Helpers::_drain_flood_queue($bot,'#test'); # Still flooded: retain stamp and head.
+        my $reflood=[map {[@$_]} @{$bot->{_flood_outq}{'#test'}{items}}];
+        $now=103.334;$bot->{blocked}=0;
+        Mediabot::Helpers::_drain_flood_queue($bot,'#test');
+        Mediabot::Helpers::_drain_flood_queue($bot,'#test');
+        is_deeply([$queued,$reflood,[map {$_->{text}} @{$bot->{irc}{wire}}],
+            $bot->{_flood_outq}{'#test'}{items}],
+            [[['privmsg','POng ! [0.000s]',{ping_started_at=>100}]],
+             [['privmsg','POng ! [0.000s]',{ping_started_at=>100}],['privmsg','after']],
+             ['POng ! [3.334s]','after'],[]],
+            'AntiFlood retains only the scalar ping stamp across reflooding, includes queue wait and preserves FIFO/ordinary two-field items');
+    }
+    @actual=();@expected=();
+    for my $guard (qw(channel nick cooldown badword)) {
+        my $bot=ping_bot_1099();$bot->{_privmsg_received_at}=100;$now=101.334;
+        $channel_block=$guard eq 'channel';$nick_block=$guard eq 'nick';$cooldown=$guard eq 'cooldown'?1:0;
+        # Check filtering of the final measured text, not its zero placeholder.
+        $bot->{dbh}{words}=['1.334'] if $guard eq 'badword';
+        $bot->mbCommandPublic(undef,'#test','Alice',0,'ping');
+        push @actual,[scalar(grep {$_->{kind} eq 'privmsg'} @{$bot->{irc}{wire}}),
+            scalar(grep {$_->[0] eq 'history'} @{$bot->{events}})];
+        push @expected,[0,0];
+    }
+    ($channel_block,$nick_block,$cooldown)=(0,0,0);
+    for my $started (undef,{},'NaN','1e1000','-1','9'x1000) {
+        my $bot=ping_bot_1099();
+        privmsg($bot,'#test','POng ! [0.000s]',{ping_started_at=>$started});
+        push @actual,$bot->{irc}{wire}[0]{text};push @expected,'POng ! [0.000s]';
+    }
+    {
+        my $bot=ping_bot_1099();$now=100;
+        privmsg($bot,'#test','ordinary',{ping_started_at=>99});
+        privmsg($bot,'#test','POng ! [0.000s]',{ping_started_at=>101});
+        push @actual,[map {$_->{text}} @{$bot->{irc}{wire}}];push @expected,['ordinary','POng ! [0.000s]'];
+    }
+    is_deeply(\@actual,\@expected,
+        'ping obeys channel/nick/cooldown/badword guards; malformed stamps and clock regressions cannot alter ordinary output or emit negative durations');
+});
 is_deeply(\@warnings_1073,[],'native badword reads and output paths are warning-free');
 done_testing;

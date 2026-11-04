@@ -37,8 +37,8 @@ my $case = sub {
 
     $assert->($reg && ref($reg) eq 'Mediabot::CommandRegistry',
         'Mediabot->commands returns CommandRegistry');
-    $assert->($reg->count('public') == 245,
-        'public registry includes the complete built-in surface with Wikipedia and DuckDuckGo');
+    $assert->($reg->count('public') == 246,
+        'public registry includes the complete built-in surface with Wikipedia, DuckDuckGo and ping');
     $assert->($reg->count('private') == 99,
         'private registry contains the complete frozen built-in surface');
     $assert->($reg->has_command('hailo', 'public'),

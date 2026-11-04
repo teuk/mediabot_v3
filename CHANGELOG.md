@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1099 — Add a public IRC response timer with !ping
+
+- Register the native public `ping` command with the fixed one-line response
+  `POng ! [1.334s]`, using a local monotonic clock and three decimal places.
+  The value covers IRC ingress through reply preparation, including observer,
+  SQL and AntiFlood queue time; it is not a client network round-trip estimate.
+- Keep the receipt stamp local to each incoming message and restore it after
+  nesting or exceptions. Deferred/reflooded pings retain only that scalar;
+  ordinary queue shapes, FIFO, caps and all command/output guards remain intact.
+- Render before final badword filtering/history/wire, without an API, probe,
+  sleep, login, chanset or schema change. Add help and regenerate inventory.
+- Add four grouped native checks to the existing output case and remove three
+  superseded wrapper source checks: one extra assertion, no new test process.
+
+
 ### MB1098 — Share outgoing badword rules across channel spellings
 
 - Key PRIVMSG/ACTION badword caches by the channel registry's lowercase

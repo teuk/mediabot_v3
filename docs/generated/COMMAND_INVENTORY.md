@@ -8,10 +8,10 @@ Source version line: `3.8dev`
 
 | Measure | Count |
 | --- | ---: |
-| Internal help entries | 252 |
-| Registered public built-ins | 245 |
+| Internal help entries | 253 |
+| Registered public built-ins | 246 |
 | Registered private built-ins | 99 |
-| Direct public registry handlers | 245 |
+| Direct public registry handlers | 246 |
 | Direct private registry handlers | 99 |
 | Compatibility dispatch tables | 0 |
 | Help parser anomalies | 0 |
@@ -175,6 +175,7 @@ Source version line: `3.8dev`
 | `owncmd` | authorized | registry-public, registry-private | `owncmd [nick]` | List dynamic commands owned by a user. |  |
 | `part` | admin | registry-public, registry-private | `part #channel [reason]` | Make the bot leave a channel. |  |
 | `pass` | private | registry-private | `pass <newpass>\|pass <oldpass> <newpass>` | Set first password, or change existing password with old password verification. |  |
+| `ping` | public | registry-public | `ping` | Reply POng with the local IRC response preparation time in seconds, including AntiFlood waiting. |  |
 | `play` | public | registry-public, registry-private | `play <artist title or YouTube URL>` | Request a track on a +Radio channel. Other uses remain Master-only. |  |
 | `poll` | public | registry-public | `poll [secs] [weighted] <q> \| opt1[:N] \| opt2` | Start a poll. 'weighted' enables weighted options (opt:N). |  |
 | `pollextend` | public | registry-public | `pollextend <secs>` | Extend the current poll timer by N seconds (10-600). |  |

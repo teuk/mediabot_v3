@@ -2406,6 +2406,7 @@ sub _builtin_public_command_handlers {
         debug        => sub { my ($ctx) = @_; debug_ctx($ctx) },
         version      => sub { my ($ctx) = @_; versionCheck($ctx) },
         uptime       => sub { my ($ctx) = @_; mbUptime_ctx($ctx) },
+        ping         => sub { my ($ctx) = @_; mbPing_ctx($ctx) },
         help         => sub { my ($ctx) = @_; mbHelp_ctx($ctx) },
         commands     => sub { my ($ctx) = @_;
             $ctx->{args} = [ 'commands' ];
@@ -2420,6 +2421,10 @@ sub _builtin_public_command_handlers {
 
 sub mbCommandPublic {
     my ($self, $message, $sChannel, $sNick, $botNickTriggered, $sCommand, @tArgs) = @_;
+
+    # Preserve the IRC receipt time; direct dispatch callers start here.
+    local $self->{_privmsg_received_at} = $self->{_privmsg_received_at}
+        // Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
 
     # AF4: global per-channel rate limit — all nicks combined
     return if checkChanFlood($self, $sChannel);
@@ -2675,6 +2680,17 @@ sub _mbSuggestCommand {
 }
 
 
+# MB1099: the sender renders this fixed reply after output policy/SQL work.
+# Only a scalar monotonic stamp is retained if AntiFlood defers the reply.
+sub mbPing_ctx {
+    my ($ctx) = @_;
+    my $self = $ctx->bot;
+    my $started = $self->{_privmsg_received_at}
+        // Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
+    return botPrivmsg($self, $ctx->channel, 'POng ! [0.000s]',
+        { ping_started_at => $started });
+}
+
 # ---------------------------------------------------------------------------
 # mbUptime_ctx — !uptime
 # ---------------------------------------------------------------------------
@@ -2825,6 +2841,7 @@ nicklist|nicklist #channel|public|List nicks currently known on a channel.
 op|op #channel [nick]|operator+|Give operator status on a channel.
 owncmd|owncmd [nick]|authorized|List dynamic commands owned by a user.
 part|part #channel [reason]|admin|Make the bot leave a channel.
+ping|ping|public|Reply POng with the local IRC response preparation time in seconds, including AntiFlood waiting.
 pass|pass <newpass>|pass <oldpass> <newpass>|private|Set first password, or change existing password with old password verification.
 popcmd|popcmd|authorized|Show popular dynamic commands.
 purge|purge #channel|admin|Purge or reset channel runtime information.
