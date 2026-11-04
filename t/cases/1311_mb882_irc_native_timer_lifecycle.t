@@ -146,4 +146,100 @@ MB881OutputFixture::with_policy(sub {
     is_deeply([\@wire,$bot->{_external_ai_output_queues},timer_count($bot->{loop})],
         [[qw(one two)],{},0], 'native paced PRIVMSG completes its batch and releases queue state and notifier');
 }
+# MB1094: send diagnostics must not strand the paced pump. Use actual loop
+# occurrences; shorten only delays through the existing native timer seam.
+our ($bool_calls_1094,$string_calls_1094)=(0,0);
+{
+    package MB1094::StringError;
+    use overload 'bool'=>sub {$main::bool_calls_1094++;1},
+        '""'=>sub {$main::string_calls_1094++;die "private exception formatter failed\n"},fallback=>1;
+    package MB1094::BoolError;
+    use overload 'bool'=>sub {$main::bool_calls_1094++;die "private exception boolean failed\n"},
+        '""'=>sub {$main::string_calls_1094++;die "private exception formatter failed\n"},fallback=>1;
+    package MB1094::FalseError;
+    use overload 'bool'=>sub {$main::bool_calls_1094++;0},
+        '""'=>sub {$main::string_calls_1094++;'private exception payload'},fallback=>1;
+    package MB1094::Logger;
+    sub log {
+        push @{$_[0]{rows}},$_[2];
+        die bless({},'MB1094::BoolError') if $_[0]{broken};
+        return 1;
+    }
+}
+{
+    my (@bad_flow,@bad_diagnostic,@bad_cleanup,@warnings);
+    local $SIG{__WARN__}=sub {push @warnings,@_};
+    for my $type (qw(scalar long MB1094::StringError MB1094::BoolError MB1094::FalseError)) {
+        for my $phase (qw(first middle last)) {
+            for my $logging (qw(normal broken absent)) {
+                $bool_calls_1094=$string_calls_1094=0;
+                my $error=$type eq 'scalar'?"known\nfailure\n":$type eq 'long'?('x'x3000)."\n":bless({},$type);
+                my $bot=MB881OutputFixture::new_bot();$bot->{loop}=IO::Async::Loop->really_new;
+                my $logger=$logging eq 'absent'?undef:bless({rows=>[],broken=>$logging eq 'broken'},'MB1094::Logger');
+                $bot->{logger}=$logger;
+                my (@attempted,@wire,@healthy,@counts);my $escaped=0;
+                local *Mediabot::Helpers::botPrivmsg=sub {
+                    my (undef,$target,$text)=@_;
+                    if ($target eq '#test') {
+                        push @attempted,$text;
+                        die $error if $text eq 'fail';
+                        push @wire,$text;
+                    } else {push @healthy,$text}
+                    return 1;
+                };
+                my @payload=$phase eq 'first'?qw(fail one two):$phase eq 'middle'?qw(one fail two):qw(one two fail);
+                my $owner=bless {},'MB1094::Payload';my $weak_owner=$owner;weaken($weak_owner);
+                my $guard=(sub {my $held=shift;return sub {$held?1:0}})->($owner);
+                my $ok=eval {push @counts,queue_privmsg_chunks($bot,'#test',\@payload,10_000,'fixture',{can_send=>$guard});1};
+                $escaped++ unless $ok;
+                undef $guard;undef $owner;
+                $ok=eval {
+                    push @counts,queue_privmsg_chunks($bot,'#test',[qw(successor tail)],10_000);
+                    push @counts,queue_privmsg_chunks($bot,'#test',['late'],0);
+                    queue_privmsg_chunks($bot,'#other',[qw(healthy-one healthy-two)],10_000);
+                    1;
+                };
+                $escaped++ unless $ok;
+                for (1..16) {
+                    last unless timer_count($bot->{loop});
+                    $ok=eval {$bot->{loop}->loop_once(0);1};
+                    $escaped++ unless $ok;
+                }
+                my $label="$type/$phase/$logging";
+                my $sequence=join('|',@payload,qw(successor tail late));
+                my $delivered=join('|',(grep {$_ ne 'fail'} @payload),qw(successor tail late));
+                push @bad_flow,$label if $escaped || join('|',@attempted) ne $sequence
+                    || join('|',@wire) ne $delivered || join('|',@healthy) ne 'healthy-one|healthy-two'
+                    || join('|',@counts) ne '3|2|1';
+                my $expected='fixture paced output failed for #test: '.
+                    ($type eq 'scalar'?'known failure ':$type eq 'long'?('x'x512):'non-scalar send exception');
+                my @logs=$logger?@{$logger->{rows}}:();
+                push @bad_diagnostic,$label if $bool_calls_1094 || $string_calls_1094
+                    || ($logging eq 'absent'?@logs!=0:@logs!=1 || $logs[0] ne $expected);
+                push @bad_cleanup,$label if timer_count($bot->{loop})
+                    || keys(%{$bot->{_external_ai_output_queues}}) || defined($weak_owner);
+            }
+        }
+    }
+    is_deeply(\@bad_flow,[],
+        'MB1094: native paced failures never escape or strand current/successor batches, replay uncertain sends or affect another target');
+    is_deeply(\@bad_diagnostic,[],
+        'MB1094: scalar diagnostics stay bounded and objects never invoke overloads, including a failing or absent logger');
+    is_deeply([\@bad_cleanup,\@warnings],[[],[]],
+        'MB1094: every native failure path releases queues, notifiers and guarded payloads without warnings');
+}
+{
+    my @bad;
+    for my $class (qw(MB1094::StringError MB1094::BoolError MB1094::FalseError)) {
+        $bool_calls_1094=$string_calls_1094=0;
+        my $error=bless {},$class;my $bot=MB881OutputFixture::new_bot();
+        local *Mediabot::Helpers::botPrivmsg=sub {die $error};
+        my $ok=eval {queue_privmsg_chunks($bot,'#test',['fail'],0);1};my $caught=$@;
+        push @bad,$class if $ok || !ref($caught) || refaddr($caught)!=refaddr($error)
+            || $bool_calls_1094 || $string_calls_1094 || exists($bot->{_external_ai_output_queues});
+    }
+    is_deeply(\@bad,[],
+        'MB1094: immediate no-loop output still propagates the original exception object without queue state');
+}
+
 done_testing;

@@ -1,5 +1,22 @@
 ## [Unreleased] — 3.8dev
 
+### MB1094 — Keep paced IRC output moving after object exceptions
+
+- Treat exception objects as a fixed scalar diagnostic before logging a paced
+  PRIVMSG failure. Never invoke their boolean/string overloads in the pump;
+  an exception formatter can no longer escape and strand every queued batch
+  behind an active queue with no timer.
+- Bound scalar diagnostic payloads to 512 characters while retaining existing
+  whitespace normalization and best-effort logging. A missing or failing logger
+  cannot stop delivery of the remaining chunks or successor batches.
+- Keep FIFO spacing, accepted-chunk counts, per-target isolation and the rule
+  that an attempted send is never replayed. Immediate no-loop output still
+  propagates its original exception unchanged.
+- Add four grouped checks to the existing native timer case, covering real
+  IO::Async occurrences, three send positions, scalar/object exceptions,
+  logger failure/absence and payload/notifier cleanup. No new test file or
+  process, dependency, schema, configuration or VERSION change.
+
 ### MB1093 — Share karma guard identity and make operator resets precise
 
 - Key the 30-second vote cooldown and distinct-voter brigade window by the

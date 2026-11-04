@@ -160,8 +160,14 @@ sub _queue_irc_chunks {
             };
 
             unless ($ok) {
-                my $error = $@ || 'unknown send error';
+                # The send may already have reached IRC. Do not replay it,
+                # and never let exception overloads strand this active pump
+                # while preparing the best-effort diagnostic.
+                my $error = $@;
+                $error = ref($error) ne '' ? 'non-scalar send exception'
+                    : defined($error) && length($error) ? $error : 'unknown send error';
                 $error =~ s/\s+/ /g;
+                $error = substr($error, 0, 512);
                 eval {
                     $self->{logger}->log(
                         1,
