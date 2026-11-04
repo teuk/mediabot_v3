@@ -1,5 +1,20 @@
 ## [Unreleased] — 3.8dev
 
+### MB1093 — Share karma guard identity and make operator resets precise
+
+- Key the 30-second vote cooldown and distinct-voter brigade window by the
+  same lowercase channel identity as the channel cache. Automatic and explicit
+  votes can no longer split either guard by changing channel letter case.
+- Make partyline .flushcooldown nick #channel remove that voter's actual
+  voter:recipient reservations in that channel. Channel-only resets use the
+  same key; preserve other voters/channels and accept the native IRC prefixes.
+- Require an empty argument list for a global reset. Malformed scope now shows
+  usage instead of silently clearing every channel's cooldown. Refresh help.
+- Replace 13 mirrored assertions in the existing brigade case with eight
+  grouped native scenarios using real SQLite writes and the partyline
+  dispatcher. No additional test file, process, sleep, dependency, schema,
+  configuration or VERSION change.
+
 ### MB1092 — Restore and confirm database session initialization
 
 - Pass one static mariadb_init_command as a DBI attribute on all three

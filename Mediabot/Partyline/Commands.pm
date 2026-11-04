@@ -1424,7 +1424,7 @@ sub _cmd_help {
       . "  .cmdcooldown <#chan> <cmd> <s>- set per-cmd cooldown in seconds (CC1)\r\n"
       . "  .netsplit                    - show netsplit state and channel nicklist status\r\n"
       . "  .floodstatus                 - show live antiflood state (AF1/AF3/AF4)\r\n"
-      . "  .flushcooldown [#chan]        - clear karma anti-spam cooldown\r\n"
+      . "  .flushcooldown [#chan|nick #chan] - clear karma anti-spam cooldown\r\n"
       . "  .achievementprofile <nick> <#chan> - explain durable achievement identity (read-only)\r\n"
       . "  .dbstats            - show DB connection and query stats\r\n"
       . "  .karmahist [nick]   - show karma history for a channel or nick\r\n"
@@ -4638,22 +4638,36 @@ sub _cmd_floodstatus {
 sub _cmd_flushcooldown {
     my ($self, $stream, $id, $args) = @_;
     my $bot = $self->{bot};
-    # Z6: support targeted nick+chan clear: .flushcooldown <nick> <#chan>
-    if (defined $args && $args =~ /^(\S+)\s+(#\S+)$/) {
+    $args //= '';
+    $args =~ s/^\s+|\s+$//g;
+    # A bare command is the only global reset. Invalid scope must never
+    # become permission to flush every channel's protection.
+    if ($args eq '') {
+        $bot->{_karma_cooldown} = {};
+        $stream->write("All karma cooldowns cleared.\r\n");
+    } elsif ($args =~ /\A([^:#&!+\s\x00-\x1f\x7f]+)\s+([#&!+][^\s\x00-\x1f\x7f,]+)\z/) {
         my ($target, $chan) = (lc($1), $2);
-        my $cd_key = "$target:" . lc($chan);  # matches U6 format
-        if (exists $bot->{_karma_cooldown}{$chan}{$cd_key}) {
-            delete $bot->{_karma_cooldown}{$chan}{$cd_key};
+        # U6 stores voter:recipient pairs inside the canonical channel.
+        # Clear this voter's pairs, not a nonexistent voter:channel key.
+        my $cooldowns = $bot->{_karma_cooldown}{lc $chan} // {};
+        my $prefix = "$target:";
+        my $cleared = 0;
+        for my $key (keys %$cooldowns) {
+            next unless index($key, $prefix) == 0;
+            delete $cooldowns->{$key};
+            $cleared++;
+        }
+        if ($cleared) {
             $stream->write("Karma cooldown cleared for $target on $chan.\r\n");
         } else {
             $stream->write("No active cooldown for $target on $chan.\r\n");
         }
-    } elsif (defined $args && $args =~ /^(#\S+)$/) {
-        delete $bot->{_karma_cooldown}{$1};
-        $stream->write("Karma cooldown cleared for $1.\r\n");
+    } elsif ($args =~ /\A([#&!+][^\s\x00-\x1f\x7f,]+)\z/) {
+        my $chan = $1;
+        delete $bot->{_karma_cooldown}{lc $chan};
+        $stream->write("Karma cooldown cleared for $chan.\r\n");
     } else {
-        $bot->{_karma_cooldown} = {};
-        $stream->write("All karma cooldowns cleared.\r\n");
+        $stream->write("Usage: .flushcooldown [#channel | nick #channel]\r\n");
     }
 }
 

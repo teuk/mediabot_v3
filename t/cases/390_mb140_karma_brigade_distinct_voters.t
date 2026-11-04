@@ -1,208 +1,159 @@
-# t/cases/390_mb140_karma_brigade_distinct_voters.t
-# =============================================================================
-# Test de la correction mb140 :
-#
-#   - B1 : Le brigade detection comptait les HITS bruts (timestamps) au lieu
-#          des NICKS DISTINCTS, malgre le commentaire explicite "5 different
-#          nicks voting for same target in 30s". Resultat :
-#            * Un seul user qui spam-vote 6 fois en 30s declenchait le
-#              message "Karma brigade detected" (alors que le cooldown
-#              anti-spam bloque deja le spam d'un meme nick)
-#            * Le compteur de blocks etait gonfle artificiellement
-#
-#          Fix : passer de { hits => [t0,t1,t2,...], warned => 0 } a
-#          { nicks => { 'lc_nick' => last_ts }, warned => 0 }.
-# =============================================================================
-
+# Native karma admission and operator recovery. No copied protection algorithm,
+# sleeps, external database or extra process: SQLite translates SQL dialect only.
 use strict;
 use warnings;
-
-my $case = sub {
-    my ($assert) = @_;
-
-    # Implementation buggy : compte les hits bruts
-    my $brigade_buggy = sub {
-        my ($state, $nick, $target, $channel, $now) = @_;
-        my $key = "brigade:$target:$channel";
-        my $b = $state->{$key} //= { hits => [], warned => 0 };
-        push @{ $b->{hits} }, $now;
-        @{ $b->{hits} } = grep { ($now - $_) < 30 } @{ $b->{hits} };
-        return scalar @{ $b->{hits} } > 5 ? 1 : 0;
-    };
-
-    # Implementation fixee (mb140-B1) : compte les nicks distincts
-    my $brigade_fixed = sub {
-        my ($state, $nick, $target, $channel, $now) = @_;
-        my $key = "brigade:$target:$channel";
-        my $b = $state->{$key} //= { nicks => {}, warned => 0 };
-        $b->{nicks}{lc($nick)} = $now;
-        for my $k (keys %{ $b->{nicks} }) {
-            delete $b->{nicks}{$k} if ($now - $b->{nicks}{$k}) >= 30;
-        }
-        return scalar(keys %{ $b->{nicks} }) > 5 ? 1 : 0;
-    };
-
-    # -------------------------------------------------------------------------
-    # Cas 1 (le bug) : un seul user spam-vote 6 fois
-    # -------------------------------------------------------------------------
-    {
-        my $now = 1000000;
-        my $st_buggy = {};
-        my @triggered_buggy;
-        for my $i (1..6) {
-            push @triggered_buggy,
-                $brigade_buggy->($st_buggy, 'spammer', 'victim', '#chan', $now + $i);
-        }
-        $assert->($triggered_buggy[5] == 1,
-            "B1 REGRESSION-POC: ancien code declenche 'brigade' apres 6 votes du MEME user (faux positif)");
-
-        my $st_fixed = {};
-        my @triggered_fixed;
-        for my $i (1..6) {
-            push @triggered_fixed,
-                $brigade_fixed->($st_fixed, 'spammer', 'victim', '#chan', $now + $i);
-        }
-        $assert->($triggered_fixed[5] == 0,
-            "B1 FIX: nouveau code ne declenche PAS 'brigade' pour spam d'un meme nick");
+use utf8;
+use DBI;
+use JSON::PP ();
+use Mediabot::Karma;
+use Mediabot::Partyline;
+{
+    package MB1093::DBI;
+    our @ISA=('DBI');
+    package MB1093::DBI::db;
+    our @ISA=('DBI::db');
+    sub prepare {
+        my ($dbh,$sql,@rest)=@_;
+        $sql =~ s/ON DUPLICATE KEY UPDATE score = score \+ \?/ON CONFLICT(id_channel,nick) DO UPDATE SET score = score + ?/;
+        $sql =~ s/INSERT IGNORE INTO KARMA_LOG/INSERT OR IGNORE INTO KARMA_LOG/;
+        $sql =~ s/NOW\(\)/CURRENT_TIMESTAMP/g;
+        return $dbh->SUPER::prepare($sql,@rest);
     }
-
-    # -------------------------------------------------------------------------
-    # Cas 2 : 6 users distincts → BRIGADE LEGITIME
-    # -------------------------------------------------------------------------
-    {
-        my $now = 1000000;
-        my $st = {};
-        my @triggered;
-        for my $i (1..6) {
-            push @triggered,
-                $brigade_fixed->($st, "user$i", 'victim', '#chan', $now + $i);
-        }
-        # 1-5 : pas encore brigade (5 nicks = limite)
-        $assert->($triggered[0] == 0, "B1 vote 1/6 (user1) : pas de brigade");
-        $assert->($triggered[4] == 0, "B1 vote 5/6 (user5) : limite atteinte mais pas depassee");
-        $assert->($triggered[5] == 1, "B1 vote 6/6 (user6) : 6 distincts > 5, BRIGADE !");
-    }
-
-    # -------------------------------------------------------------------------
-    # Cas 3 : memes 5 users votent N fois chacun → PAS de brigade
-    # -------------------------------------------------------------------------
-    {
-        my $now = 1000000;
-        my $st = {};
-        my $any_trigger = 0;
-        for my $round (1..4) {
-            for my $i (1..5) {
-                $any_trigger ||=
-                    $brigade_fixed->($st, "user$i", 'victim', '#chan',
-                        $now + ($round * 10) + $i);
-            }
-        }
-        $assert->(!$any_trigger,
-            "B1 5 users distincts × 4 rounds = 20 hits mais 5 nicks → PAS brigade");
-    }
-
-    # -------------------------------------------------------------------------
-    # Cas 4 : window de 30s — vieux entries expirent
-    # -------------------------------------------------------------------------
-    {
-        my $now = 1000000;
-        my $st = {};
-        # 5 users votent a t=0
-        for my $i (1..5) {
-            $brigade_fixed->($st, "user$i", 'victim', '#chan', $now + $i);
-        }
-        # 100s plus tard, 1 nouveau user vote
-        my $triggered = $brigade_fixed->($st, 'user6', 'victim', '#chan', $now + 1000);
-        $assert->(!$triggered,
-            "B1 vieux votes (>30s) expirent, nouveau vote isole != brigade");
-        # Verifier que les anciens nicks ont ete purges
-        my $b = $st->{"brigade:victim:#chan"};
-        $assert->(scalar(keys %{ $b->{nicks} }) == 1,
-            "B1 apres 1000s, 1 seul nick reste dans la window (user6)");
-    }
-
-    # -------------------------------------------------------------------------
-    # Cas 5 : case-insensitive (Bob vs bob = meme voter)
-    # -------------------------------------------------------------------------
-    {
-        my $now = 1000000;
-        my $st = {};
-        for my $form (qw(Bob bob BOB Bob bob)) {
-            $brigade_fixed->($st, $form, 'victim', '#chan', $now);
-            $now += 1;
-        }
-        my $b = $st->{"brigade:victim:#chan"};
-        $assert->(scalar(keys %{ $b->{nicks} }) == 1,
-            "B1 5 votes avec casses differentes du meme nick = 1 voter distinct");
-    }
-
-    # -------------------------------------------------------------------------
-    # Cas 6 : migration ancien format -> nouveau format
-    # -------------------------------------------------------------------------
-    {
-        my $brigade_with_migration = sub {
-            my ($state, $nick, $target, $channel, $now) = @_;
-            my $key = "brigade:$target:$channel";
-            my $b = $state->{$key} //= { nicks => {}, warned => 0 };
-            # Migration ancien format
-            if (ref($b->{hits}) eq 'ARRAY' && !$b->{nicks}) {
-                $b->{nicks} = {};
-                delete $b->{hits};
-            }
-            $b->{nicks}{lc($nick)} = $now;
-            for my $k (keys %{ $b->{nicks} }) {
-                delete $b->{nicks}{$k} if ($now - $b->{nicks}{$k}) >= 30;
-            }
-            return scalar(keys %{ $b->{nicks} }) > 5 ? 1 : 0;
-        };
-
-        # State avec ancien format
-        my $st = {
-            'brigade:victim:#chan' => {
-                hits => [100, 101, 102],   # ancien format
-                warned => 1,
-            },
-        };
-
-        $brigade_with_migration->($st, 'newuser', 'victim', '#chan', 200);
-
-        my $b = $st->{"brigade:victim:#chan"};
-        $assert->(!exists $b->{hits}, "B1 migration: ancien champ 'hits' supprime");
-        $assert->(exists $b->{nicks}, "B1 migration: nouveau champ 'nicks' present");
-        $assert->(scalar(keys %{ $b->{nicks} }) == 1, "B1 migration: 1 entree (le nouveau vote)");
-        $assert->(exists $b->{nicks}{'newuser'}, "B1 migration: le bon nick");
-    }
-};
-
-# ---------------------------------------------------------------------------
-# Direct runner for standalone execution:
-#   perl t/cases/390_mb140_karma_brigade_distinct_voters.t
-#
-# When loaded by the project harness, return the case coderef.
-# ---------------------------------------------------------------------------
-if (caller) {
-    return $case;
+    package MB1093::DBI::st;
+    our @ISA=('DBI::st');
+    package MB1093::Bot;
+    sub gethChannelsNicksOnChan {qw(Alice Alan Bob Carol)}
+    package MB1093::Channel;
+    sub get_id {$_[0]{id}}
+    package MB1093::Log;
+    sub log {1}
+    package MB1093::Metrics;
+    sub inc {$_[0]{$_[1]}++;1}
+    package MB1093::Stream;
+    sub write {$_[0]{text}.=$_[1];1}
+    package MB1093::Ctx;
+    sub bot {$_[0]{bot}}
+    sub nick {$_[0]{nick}}
+    sub channel {$_[0]{channel}}
+    sub args {$_[0]{args}}
+    sub message {undef}
 }
-
-my $tests = 0;
-my $fail  = 0;
-
-my $assert = sub {
-    my ($ok, $name) = @_;
-    $tests++;
-    $name = 'unnamed assertion' unless defined $name && $name ne '';
-
-    if ($ok) {
-        print "ok $tests - $name\n";
+$INC{'MB1093/DBI.pm'}=__FILE__;
+sub fixture_390 {
+    my $dbh=DBI->connect('dbi:SQLite:dbname=:memory:','','',{
+        RootClass=>'MB1093::DBI',RaiseError=>1,PrintError=>0,AutoCommit=>1});
+    $dbh->do('CREATE TABLE KARMA(id_channel INTEGER,nick TEXT,score INTEGER,UNIQUE(id_channel,nick))');
+    $dbh->do('CREATE TABLE KARMA_LOG(id_channel INTEGER,nick TEXT,delta INTEGER,from_nick TEXT,score INTEGER,ts TEXT)');
+    return bless {dbh=>$dbh,logger=>bless({},'MB1093::Log'),
+        metrics=>bless({},'MB1093::Metrics'),
+        channels=>{'#test'=>bless({id=>1},'MB1093::Channel'),
+                   '#other'=>bless({id=>2},'MB1093::Channel'),
+                   '&test'=>bless({id=>3},'MB1093::Channel')},
+        _karma_watch=>{Watcher=>['bob','carol']},wire=>[]},'MB1093::Bot';
+}
+sub vote_390 {
+    my ($bot,$voter,$channel,$text,$explicit)=@_;
+    if ($explicit) {
+        my ($target,$op)=$text=~/\A(.*)(\+\+|--)\z/;
+        Mediabot::Karma::mbKarma_ctx(bless {bot=>$bot,nick=>$voter,channel=>$channel,
+            args=>[$op,$target]},'MB1093::Ctx');
+    } else {
+        Mediabot::Karma::processKarma($bot,$voter,$channel,$text);
     }
-    else {
-        print "not ok $tests - $name\n";
-        $fail++;
+}
+sub operator_390 {
+    my ($bot,$line)=@_;
+    my $stream=bless {text=>''},'MB1093::Stream';
+    my $party=bless {bot=>$bot,users=>{1=>{authenticated=>1,login=>'Owner',nick=>'Owner',level=>0}},
+        streams=>{1=>$stream}},'Mediabot::Partyline';
+    $party->_handle_line($stream,1,$line);
+    return $stream->{text};
+}
+sub scores_390 {$_[0]{dbh}->selectall_arrayref('SELECT id_channel,nick,score FROM KARMA ORDER BY id_channel,nick')}
+sub history_390 {scalar $_[0]{dbh}->selectrow_array('SELECT COUNT(*) FROM KARMA_LOG')}
+return sub {
+    my ($assert)=@_;
+    my $json=JSON::PP->new->canonical;
+    my @warnings;
+    local $SIG{__WARN__}=sub {push @warnings,@_};
+    no warnings qw(redefine once);
+    local *Mediabot::Helpers::botPrivmsg=sub {push @{$_[0]{wire}},['public',$_[1],$_[2]];1};
+    local *Mediabot::Helpers::botNotice=sub {push @{$_[0]{wire}},['notice',$_[1],$_[2]];1};
+    local *Mediabot::UserCommands::botPrivmsg=sub {goto &Mediabot::Helpers::botPrivmsg};
+    local *Mediabot::UserCommands::botNotice=sub {goto &Mediabot::Helpers::botNotice};
+
+    my $bot=fixture_390();
+    vote_390($bot,'Alice','#TeSt','bob++');
+    vote_390($bot,'ALICE','#test','bob++',1);
+    vote_390($bot,'aLiCe','#TEST','bob--');
+    $assert->is($json->encode([scores_390($bot),history_390($bot),
+        $bot->{metrics}{mediabot_karma_votes_total},
+        scalar(grep {$_->[2]=~/wait \d+s/} @{$bot->{wire}})]),
+        $json->encode([[[1,'bob',1]],1,1,2]),
+        'automatic and explicit votes share one cooldown across channel and voter casing');
+    vote_390($bot,'Alice','#other','bob++');
+    $bot->{_karma_cooldown}{'#test'}{'alice:bob'}=time()-31;
+    vote_390($bot,'Alice','#tEsT','bob--');
+    $assert->is($json->encode([scores_390($bot),history_390($bot)]),
+        $json->encode([[[1,'bob',0],[2,'bob',1]],3]),
+        'another channel stays independent and an expired canonical cooldown admits the next vote');
+    $bot->{dbh}->disconnect;
+
+    $bot=fixture_390();
+    my @spellings=qw(#test #TEST #TeSt #tEsT #Test #tesT #tEST);
+    vote_390($bot,'Voter'.($_+1),$spellings[$_],'bob++') for 0..4;
+    vote_390($bot,'Voter6',$spellings[5],'bob++ carol--');
+    vote_390($bot,'Voter7',$spellings[6],'bob++');
+    $assert->is($json->encode([scores_390($bot),history_390($bot),
+        $bot->{metrics}{mediabot_karma_brigade_blocks},
+        scalar(grep {$_->[2]=~/Karma brigade detected/} @{$bot->{wire}})]),
+        $json->encode([[[1,'bob',5],[1,'carol',-1]],6,2,1]),
+        'six distinct voters cannot split the brigade window by channel case; warn once and keep later targets usable');
+    $_=time()-31 for values %{$bot->{_karma_brigade}{'brigade:bob:#test'}{nicks}};
+    vote_390($bot,'Voter8','#TeST','bob--');
+    $assert->is($json->encode([scores_390($bot),history_390($bot),
+        $bot->{_karma_brigade}{'brigade:bob:#test'}{warned}]),
+        $json->encode([[[1,'bob',4],[1,'carol',-1]],7,0]),
+        'expiry removes old voters and resets the canonical brigade warning');
+    $bot->{dbh}->disconnect;
+
+    $bot=fixture_390();
+    vote_390($bot,($_%2?'Alice':'ALICE'),$spellings[$_%@spellings],'bob++') for 0..7;
+    $assert->ok(history_390($bot)==1 && !($bot->{metrics}{mediabot_karma_brigade_blocks}//0)
+        && keys(%{$bot->{_karma_brigade}{'brigade:bob:#test'}{nicks}})==1,
+        'repeated votes by one case-insensitive voter never manufacture a brigade');
+    $bot->{dbh}->disconnect;
+
+    $bot=fixture_390();
+    vote_390($bot,'Alice','#test','bob++ carol++');
+    vote_390($bot,'Alan','#test','bob++');
+    vote_390($bot,'Alice2','#test','bob++');
+    vote_390($bot,'Alice','#other','bob++');
+    my $reply=operator_390($bot,'.flushcooldown ALICE #TeSt');
+    vote_390($bot,'Alice','#TEST','bob++');
+    $assert->ok($reply=~/Karma cooldown cleared for alice on #TeSt/
+        && !exists($bot->{_karma_cooldown}{'#test'}{'alice:carol'})
+        && exists($bot->{_karma_cooldown}{'#test'}{'alan:bob'})
+        && exists($bot->{_karma_cooldown}{'#test'}{'alice2:bob'})
+        && exists($bot->{_karma_cooldown}{'#other'}{'alice:bob'})
+        && history_390($bot)==6,
+        'targeted partyline recovery clears the voter’s actual pairs only and permits a genuine retry');
+    my $before=$json->encode($bot->{_karma_cooldown});
+    my @invalid;
+    for my $args ('typo','Alice','#test extra','#test #other','Alice #test extra','Alice :bad') {
+        my $text=operator_390($bot,'.flushcooldown '.$args);
+        push @invalid,$args if $text!~/Usage:/ || $json->encode($bot->{_karma_cooldown}) ne $before;
     }
+    $assert->is(join(',',@invalid),'',
+        'malformed recovery arguments show usage and never fall through to a global flush');
+    operator_390($bot,'.flushcooldown #TeSt');
+    my $channel_ok=!exists($bot->{_karma_cooldown}{'#test'})
+        && exists($bot->{_karma_cooldown}{'#other'}{'alice:bob'});
+    vote_390($bot,'Alice','&TeSt','bob++');
+    operator_390($bot,'.flushcooldown alice &TEST');
+    my $local_ok=!exists($bot->{_karma_cooldown}{'&test'}{'alice:bob'});
+    operator_390($bot,'.flushcooldown');
+    $assert->ok($channel_ok && $local_ok && !keys(%{$bot->{_karma_cooldown}}) && !@warnings,
+        'channel/global recovery retains its explicit scope, supports local channels and emits no warnings');
+    $bot->{dbh}->disconnect;
 };
-
-$case->($assert);
-
-print "1..$tests\n";
-exit($fail ? 1 : 0);
-

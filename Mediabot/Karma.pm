@@ -199,6 +199,9 @@ sub processKarma {
     # mb413-R1: id canal via le helper central (cache d'abord, mb411).
     my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel);
     return unless $id_channel;
+    # One channel identity for both admission guards, matching the channel
+    # cache. Keep the received spelling for wire output and stored history.
+    my $channel_key = lc $channel;
 
     # NOTE: nick++/nick-- auto-detection is kept but gated:
     #   1. The ++ or -- must be at end-of-word (not followed by non-space/non-punct)
@@ -227,7 +230,7 @@ sub processKarma {
         # DD9: anti-brigade guard — >5 different nicks voting for same target in 30s → block
     {
         my $now = time();
-        my $brigade_key = "brigade:$target:$channel";
+        my $brigade_key = "brigade:$target:$channel_key";
         # mb140-B1: tracker les NICKS DISTINCTS au lieu des hits bruts.
         # Avant ce fix, brigade->{hits} etait un arrayref de timestamps qui
         # comptait toutes les tentatives de vote, meme celles deja bloquees
@@ -268,13 +271,13 @@ sub processKarma {
 
     # U6: anti-spam cooldown — 30s between votes targeting the same nick
         my $cd_key = lc($nick) . ':' . lc($target);
-        if (time() - ($self->{_karma_cooldown}{$channel}{$cd_key} // 0) < 30) {
-            my $wait = 30 - (time() - ($self->{_karma_cooldown}{$channel}{$cd_key} // 0));
+        if (time() - ($self->{_karma_cooldown}{$channel_key}{$cd_key} // 0) < 30) {
+            my $wait = 30 - (time() - ($self->{_karma_cooldown}{$channel_key}{$cd_key} // 0));
             Mediabot::Helpers::botPrivmsg($self, $channel,
                 "$nick: wait ${wait}s before voting for $target again.");
             next;
         }
-        $self->{_karma_cooldown}{$channel}{$cd_key} = time();
+        $self->{_karma_cooldown}{$channel_key}{$cd_key} = time();
     $self->{metrics}->inc('mediabot_karma_votes_total') if $self->{metrics};  # AA6
         my $delta = ($op eq '++') ? 1 : -1;
         my $sth = $self->{dbh}->prepare(q{
