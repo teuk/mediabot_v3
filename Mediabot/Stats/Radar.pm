@@ -116,23 +116,43 @@ sub mbRadar_ctx {
         return 1;
     }
 
+    # Read each diagnostic completely before deriving absence or publishing
+    # the report. DBI may signal a failed fetch through err instead of dying.
+    my $read_rows = sub {
+        my ($sql, $bind, $single) = @_;
+        my ($sth, @rows);
+        my $ok = eval {
+            $sth = $dbh->prepare($sql) or die "radar_prepare\n";
+            $sth->execute(@$bind) or die "radar_execute\n";
+            while (my $row = $sth->fetchrow_hashref) { push @rows, $row }
+            die "radar_fetch\n" if $sth->err;
+            die "radar_aggregate\n" if $single && @rows != 1;
+            1;
+        };
+        # Observe EOF before cleanup can clear err; cleanup cannot invalidate
+        # a complete read or replace the original failure.
+        eval { $sth->finish } if $sth;
+        unless ($ok) {
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        return \@rows;
+    };
+
     # Mode standard (par défaut) — diagnostic temps réel
     # 1. Activity rate — dernière heure vs moyenne 24h
-    my $sth_r = $dbh->prepare(q{
+    my $rate_rows = $read_rows->(q{
         SELECT
             SUM(IF(cl.ts >= NOW() - INTERVAL  1 HOUR, 1, 0)) AS last_h,
             SUM(IF(cl.ts >= NOW() - INTERVAL 24 HOUR, 1, 0)) AS last_24h
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.event_type IN ('public','action')
-    });
-    my ($last_h, $avg_h, $last_24h) = (0, 0, 0);
-    if ($sth_r && $sth_r->execute($channel)) {
-        my $r = $sth_r->fetchrow_hashref; $sth_r->finish;
-        $last_h   = $r->{last_h}   // 0;
-        $last_24h = $r->{last_24h} // 0;
-        $avg_h    = $last_24h / 24;
-    }
+    }, [$channel], 1);
+    return unless $rate_rows;
+    my $last_h   = $rate_rows->[0]{last_h}   // 0;
+    my $last_24h = $rate_rows->[0]{last_24h} // 0;
+    my $avg_h    = $last_24h / 24;
 
     my $rate_emoji = "\x{3030}\x{FE0F}";
     my $rate_msg   = "calm";
@@ -148,15 +168,15 @@ sub mbRadar_ctx {
         $rate_emoji, $last_h, $avg_h, $rate_msg);
 
     # 2. Last message ago
-    my $sth_l = $dbh->prepare(q{
+    my $last_rows = $read_rows->(q{
         SELECT TIMESTAMPDIFF(MINUTE, MAX(cl.ts), NOW()) AS m
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.event_type IN ('public','action')
-    });
-    if ($sth_l && $sth_l->execute($channel)) {
-        my $r = $sth_l->fetchrow_hashref; $sth_l->finish;
-        my $m = $r->{m} // 0;
+    }, [$channel], 1);
+    return unless $last_rows;
+    {
+        my $m = $last_rows->[0]{m} // 0;
         if ($m > 30) {
             my $silent_emoji = $m > 360 ? "\x{1F997}" : "\x{1F634}";
             push @lines, sprintf('%s last public msg: %s ago',
@@ -168,7 +188,7 @@ sub mbRadar_ctx {
     }
 
     # 3. Newcomers — premières activités dans les dernières 24h
-    my $sth_n = $dbh->prepare(q{
+    my $new_rows = $read_rows->(q{
         SELECT cl.nick, MIN(cl.ts) AS first
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
@@ -178,11 +198,10 @@ sub mbRadar_ctx {
         HAVING first >= NOW() - INTERVAL 24 HOUR
         ORDER BY first ASC
         LIMIT 10
-    });
-    if ($sth_n && $sth_n->execute($channel)) {
-        my @newbies;
-        while (my $r = $sth_n->fetchrow_hashref) { push @newbies, $r->{nick}; }
-        $sth_n->finish;
+    }, [$channel]);
+    return unless $new_rows;
+    {
+        my @newbies = map { $_->{nick} } @$new_rows;
         if (@newbies) {
             my $list = join(', ', @newbies);
             $list = substr($list, 0, 200) . '...' if length($list) > 200;
@@ -198,7 +217,7 @@ sub mbRadar_ctx {
         my @ghosts;
         if (@candidates) {
             my $ph = join(',', ('?') x scalar(@candidates));
-            my $sth_g = $dbh->prepare(qq{
+            my $ghost_rows = $read_rows->(qq{
                 SELECT cl.nick, MAX(cl.ts) AS last_ts,
                        TIMESTAMPDIFF(HOUR, MAX(cl.ts), NOW()) AS hours_silent
                 FROM CHANNEL_LOG cl
@@ -207,13 +226,11 @@ sub mbRadar_ctx {
                   AND cl.nick IN ($ph)
                   AND cl.event_type IN ('public','action')
                 GROUP BY cl.nick
-            });
+            }, [$channel, @candidates]);
+            return unless $ghost_rows;
             my %last_seen;
-            if ($sth_g && $sth_g->execute($channel, @candidates)) {
-                while (my $r = $sth_g->fetchrow_hashref) {
-                    $last_seen{lc($r->{nick})} = $r->{hours_silent} // 9999;
-                }
-                $sth_g->finish;
+            for my $r (@$ghost_rows) {
+                $last_seen{lc($r->{nick})} = $r->{hours_silent} // 9999;
             }
             for my $n (@candidates) {
                 my $h = $last_seen{lc($n)} // 9999;
@@ -242,7 +259,7 @@ sub mbRadar_ctx {
 
     # 6. Top talkers dernière heure
     if ($last_h > 0) {
-        my $sth_tp = $dbh->prepare(q{
+        my $talker_rows = $read_rows->(q{
             SELECT cl.nick, COUNT(*) AS c
             FROM CHANNEL_LOG cl
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
@@ -252,15 +269,10 @@ sub mbRadar_ctx {
             GROUP BY cl.nick
             ORDER BY c DESC
             LIMIT 3
-        });
-        if ($sth_tp && $sth_tp->execute($channel)) {
-            my @talkers;
-            while (my $r = $sth_tp->fetchrow_hashref) {
-                push @talkers, "$r->{nick}:$r->{c}";
-            }
-            $sth_tp->finish;
-            push @lines, sprintf("\x{1F399}\x{FE0F} loudest (1h): %s", join('  ', @talkers)) if @talkers;
-        }
+        }, [$channel]);
+        return unless $talker_rows;
+        my @talkers = map { "$_->{nick}:$_->{c}" } @$talker_rows;
+        push @lines, sprintf("\x{1F399}\x{FE0F} loudest (1h): %s", join('  ', @talkers)) if @talkers;
     }
 
     botPrivmsg($self, $channel, "\x{1F4E1} \x02Radar\x02 on $channel:");

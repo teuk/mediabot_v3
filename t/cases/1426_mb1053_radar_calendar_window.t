@@ -5,43 +5,67 @@ use Test::More;
 use DBI;
 use Mediabot::Mediabot;
 use Mediabot::Context;
+use Time::Local qw(timegm);
+use Storable qw(dclone);
 
 {
     package MB1053::DBI; our @ISA=('DBI');
     package MB1053::DBI::db; our @ISA=('DBI::db');
     sub prepare {
         my ($db,$sql,@rest)=@_;
-        my $history=$sql =~ /SELECT\s+DATE\(cl\.ts\)/ ? 1:0;
+        my $kind=$sql =~ /SELECT\s+DATE\(cl\.ts\)/ ? 'history'
+            : $sql =~ /SUM\(IF/ ? 'rate' : $sql =~ /AS m\b/ ? 'silence'
+            : $sql =~ /AS first\b/ ? 'newcomers' : $sql =~ /hours_silent/ ? 'ghosts'
+            : $sql =~ /ORDER BY c DESC/ ? 'talkers' : '';
         my $state=$db->{private_mb1053};
-        if ($history && ($state->{fault}//'') eq 'prepare') {
+        if ($kind) {push @{$state->{prepared}},$kind}
+        if ($kind eq ($state->{kind}//'history') && ($state->{fault}//'') eq 'prepare') {
             return $db->set_err(1901,'local prepare failure');
         }
-        $sql =~ s/NOW\(\)\s*-\s*INTERVAL\s+(\d+)\s+DAY/DATETIME(NOW(), '-$1 day')/ig;
+        $sql =~ s/NOW\(\)\s*-\s*INTERVAL\s+(\d+)\s+(DAY|HOUR)/DATETIME(NOW(), '-$1 $2')/ig;
         $sql =~ s/CURDATE\(\)\s*-\s*INTERVAL\s+\?\s+DAY/DATETIME(CURDATE(), '-' || ? || ' day')/ig;
         $sql =~ s/CURDATE\(\)\s*\+\s*INTERVAL\s+1\s+DAY/DATETIME(CURDATE(), '+1 day')/ig;
+        $sql =~ s/TIMESTAMPDIFF\((MINUTE|HOUR),/TIMESTAMPDIFF('$1',/g;
         my $sth=$db->SUPER::prepare($sql,@rest);
-        if ($sth && $history) {$sth->{private_mb1053}=$state;$sth->{private_mb1053_fetched}=0}
+        if ($sth && $kind) {
+            $sth->{private_mb1053}=$state;$sth->{private_mb1053_kind}=$kind;
+            $sth->{private_mb1053_fetched}=0;
+        }
         return $sth;
     }
     package MB1053::DBI::st; our @ISA=('DBI::st');
+    sub targeted {
+        my ($sth)=@_;
+        return ($sth->{private_mb1053_kind}//'') eq ($sth->{private_mb1053}{kind}//'history');
+    }
     sub execute {
         my ($sth,@bind)=@_;
+        push @{$sth->{private_mb1053}{binds}},[$sth->{private_mb1053_kind},@bind]
+            if $sth->{private_mb1053_kind};
         return $sth->set_err(1902,'local execute failure')
-            if ($sth->{private_mb1053}{fault}//'') eq 'execute';
+            if $sth->targeted && ($sth->{private_mb1053}{fault}//'') eq 'execute';
         return $sth->SUPER::execute(@bind);
     }
     sub fetchrow_hashref {
         my ($sth)=@_;
-        return $sth->set_err(1903,'local partial fetch failure')
-            if ($sth->{private_mb1053}{fault}//'') eq 'fetch'
-                && $sth->{private_mb1053_fetched}++;
+        if ($sth->targeted) {
+            my $fault=$sth->{private_mb1053}{fault}//'';
+            return $sth->set_err(1903,'local partial fetch failure')
+                if $fault eq 'fetch_before' || ($fault eq 'fetch' && $sth->{private_mb1053_fetched}++);
+            return undef if $fault eq 'missing_aggregate';
+        }
         return $sth->SUPER::fetchrow_hashref;
     }
     sub finish {
         my ($sth)=@_;
-        die "local cleanup failure\n" if $sth->{private_mb1053}{finish_error};
+        if ($sth->{private_mb1053_kind}) {
+            push @{$sth->{private_mb1053}{finished}},$sth->{private_mb1053_kind};
+        }
+        die "local cleanup failure\n" if $sth->targeted && $sth->{private_mb1053}{finish_error};
         return $sth->SUPER::finish;
     }
+    package MB1102::IRC;
+    sub nick_folded {'bot'}
 }
 $INC{'MB1053/DBI.pm'}=__FILE__;
 my (@wire,@warnings);
@@ -57,21 +81,30 @@ sub fixture_1426 {
     $db->{private_mb1053}={};
     $db->sqlite_create_function('CURDATE',0,sub {$today});
     $db->sqlite_create_function('NOW',0,sub {"$today 10:00:00"});
+    $db->sqlite_create_function('IF',3,sub {$_[0]?$_[1]:$_[2]});
+    $db->sqlite_create_function('TIMESTAMPDIFF',3,sub {
+        my ($unit,$from,$to)=@_;return undef unless defined($from)&&defined($to);
+        my @epoch=map {
+            my @n=/\A(\d+)-(\d+)-(\d+) (\d+):(\d+):(\d+)\z/;
+            timegm($n[5],$n[4],$n[3],$n[2],$n[1]-1,$n[0]);
+        } ($from,$to);
+        return int(($epoch[1]-$epoch[0])/($unit eq 'HOUR'?3600:60));
+    });
     $db->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT COLLATE NOCASE)');
     $db->do(q{INSERT INTO CHANNEL VALUES(1,'#test'),(2,'#other')});
-    $db->do(q{CREATE TABLE CHANNEL_LOG(id_channel INTEGER,ts TEXT,event_type TEXT)});
+    $db->do(q{CREATE TABLE CHANNEL_LOG(id_channel INTEGER,ts TEXT,event_type TEXT,nick TEXT COLLATE NOCASE)});
     for my $row (@$rows) {
-        my ($stamp,$count,$kind,$cid)=@$row;
-        for (1..$count) {$db->do('INSERT INTO CHANNEL_LOG VALUES(?,?,?)',undef,$cid//1,$stamp,$kind//'public')}
+        my ($stamp,$count,$kind,$cid,$nick)=@$row;
+        for (1..$count) {$db->do('INSERT INTO CHANNEL_LOG VALUES(?,?,?,?)',undef,$cid//1,$stamp,$kind//'public',$nick//'Reader')}
     }
-    return (bless({dbh=>$db},'Mediabot'),$db);
+    return (Mediabot->new({dbh=>$db}),$db);
 }
 sub invoke_1426 {
     my ($bot,$days,$entry)=@_;
     $entry //='Mediabot';@wire=();
-    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Operator',channel=>'#test',args=>[$days]);
+    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Operator',channel=>'#test',command=>'radar',args=>defined($days)?[$days]:[]);
     no strict 'refs';
-    my $ok=eval {&{$entry.'::mbRadar_ctx'}($ctx);1};
+    my $ok=eval {$entry eq 'registry' ? $bot->command_registry->handler_for('radar','public')->($ctx) : &{$entry.'::mbRadar_ctx'}($ctx);1};
     return $ok ? '' : "$@";
 }
 sub view_1426 {
@@ -103,9 +136,6 @@ for my $case (
 for my $tz ('Pacific/Kiritimati','America/Los_Angeles') {
     local $ENV{TZ}=$tz;
     is_deeply(view_1426(invoke_1426($bot,'7d')),$seven,"database calendar remains authoritative under host TZ=$tz");
-}
-for my $entry (qw(Mediabot::Stats::Radar Mediabot::UserCommands Mediabot)) {
-    is_deeply(view_1426(invoke_1426($bot,'7d',$entry)),$seven,"$entry: the real historical facade uses the same calendar view");
 }
 $db->disconnect;
 for my $case (
@@ -147,5 +177,87 @@ for my $fault ('','fetch') {
     }
     $h->disconnect;
 }
-is_deeply(\@warnings,[],'native calendar, empty and database-failure paths are warning-free');
+
+# Standard reports: real SQLite queries, fault injection at the DBI boundary.
+sub standard_1426 {
+    my ($empty)=@_;
+    my @rows=(['2026-11-01 09:15:00',3,'public',1,'Alice'],
+        ['2026-11-01 08:00:00',2,'action',1,'Bob'],
+        ['2026-10-31 00:00:00',1,'public',1,'Ancien'],
+        ['2026-11-01 09:59:00',20,'join',1,'Other'],
+        ['2026-11-01 09:59:00',30,'public',2,'Other']);
+    my ($b,$h)=fixture_1426('2026-11-01',$empty?[]:\@rows);
+    $b->{irc}=bless {},'MB1102::IRC';
+    $b->{_test_nicks}=$empty?[]:[qw(Alice Bob Ancien Never Bot)];
+    $b->{_karma_log}{'#test'}=[map {{ts=>time()-60,delta=>$_<4?'+1':'-1'}} 0..4]
+        unless $empty;
+    return ($b,$h);
+}
+local *Mediabot::gethChannelsNicksOnChan=sub {@{$_[0]{_test_nicks}//[]}};
+my $standard=[
+    ['public','#test',"📡 \x02Radar\x02 on #test:"],
+    ['public','#test','  🔥 rate: 3 msgs/last-hour (avg 0/h over 24h) - SPIKE x14.4'],
+    ['public','#test','  😴 last public msg: 45m ago'],
+    ['public','#test','  🆕 newcomers (24h): Bob, Alice'],
+    ['public','#test','  👻 silent ghosts: Never (9999h), Ancien (34h)'],
+    ['public','#test','  ⚡ karma vortex (1h): 5 votes (+4 / -1)'],
+    ['public','#test',"  🎙️ loudest (1h): Alice:3"],
+];
+my @kinds=qw(rate silence newcomers ghosts talkers);
+{
+    my (@actual,@expected);
+    for my $entry (qw(Mediabot::Stats::Radar Mediabot::UserCommands Mediabot registry)) {
+        my ($b,$h)=standard_1426();
+        push @actual,[invoke_1426($b,undef,$entry),dclone(\@wire),dclone($h->{private_mb1053})];
+        push @expected,['',$standard,{prepared=>[ @kinds ],finished=>[ @kinds ],binds=>[
+            map {[$_,'#test',($_ eq 'ghosts'?qw(Alice Bob Ancien Never):())]} @kinds]}];
+        $h->disconnect;
+    }
+    for my $nicks ([],['Never','Bot']) {
+        my ($b,$h)=standard_1426(1);$b->{_test_nicks}=$nicks;
+        push @actual,[invoke_1426($b,undef),dclone(\@wire)];
+        push @expected,['',[
+            ['public','#test',"📡 \x02Radar\x02 on #test:"],
+            ['public','#test',"  〰️ rate: 0 msgs/last-hour (avg 0/h over 24h) - calm"],
+            (@$nicks?(['public','#test','  👻 silent ghosts: Never (9999h)']):()),
+        ]];
+        $h->disconnect;
+    }
+    is_deeply(\@actual,\@expected,'standard report preserves exact formatting, binds, channel/event scope, zero activity, unknown-history ghosts and all native entry points');
+}
+{
+    my (@actual,@expected);
+    for my $raise (0,1) {
+        for my $kind (@kinds) {
+            for my $fault (qw(prepare execute fetch_before fetch),($kind=~/^(rate|silence)$/?'missing_aggregate':())) {
+                my ($b,$h)=standard_1426();$h->{RaiseError}=$raise;
+                my $state=$h->{private_mb1053}={kind=>$kind,fault=>$fault};
+                push @actual,[invoke_1426($b,undef,'registry'),dclone(\@wire),
+                    $state->{prepared}[-1],scalar(grep {$_ eq $kind} @{$state->{finished}//[]})];
+                push @expected,['',[['notice','Operator','Database error.']],$kind,$fault eq 'prepare'?0:1];
+                $h->{private_mb1053}={};
+                push @actual,[invoke_1426($b,undef,'registry'),dclone(\@wire)];
+                push @expected,['',$standard];
+                $h->disconnect;
+            }
+        }
+    }
+    is_deeply(\@actual,\@expected,'each failed or partial standard read emits one private error, publishes no report, cleans its statement and recovers on the next invocation');
+}
+{
+    my (@actual,@expected);
+    for my $raise (0,1) {
+        for my $kind (@kinds) {
+            for my $fault ('','fetch') {
+                my ($b,$h)=standard_1426();$h->{RaiseError}=$raise;
+                $h->{private_mb1053}={kind=>$kind,fault=>$fault,finish_error=>1};
+                push @actual,[invoke_1426($b,undef),dclone(\@wire)];
+                push @expected,['',$fault?[['notice','Operator','Database error.']]:$standard];
+                $h->disconnect;
+            }
+        }
+    }
+    is_deeply(\@actual,\@expected,'cleanup exceptions preserve completely read standard reports and never replace the original fetch failure');
+}
+is_deeply(\@warnings,[],'native calendar and standard reports, empty data and database failures are warning-free');
 done_testing;

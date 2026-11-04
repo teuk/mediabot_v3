@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1102 — Confirm radar reads before announcing activity
+
+- Require each standard radar query to prepare, execute and finish fetching
+  successfully before publishing the report. A failed or partial read now
+  produces one private database-error notice instead of a fabricated calm
+  channel, incomplete newcomer/talker list or 9,999-hour ghost activity.
+- Check DBI EOF errors before cleanup; retain complete results even if finish
+  throws, and reject absent aggregate rows without confusing valid SQL NULLs
+  with failures. Keep normal formatting, binds, thresholds and calendar mode.
+- Extend the existing SQLite radar fixture with three grouped native checks
+  for valid reports, 44 failure/recovery cycles and 20 cleanup scenarios.
+  Reuse entry-point coverage across those real reports instead of three
+  duplicated calendar-forwarding assertions: no additional assertion, test
+  file, child process, sleep, dependency or schema change.
+
+
 ### MB1101 — Keep invalid weather responses out of IRC and cache
 
 - Validate successful wttr replies before publishing: one nonempty plain-text
