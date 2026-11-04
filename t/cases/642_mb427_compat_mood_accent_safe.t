@@ -49,7 +49,8 @@ return sub {
               . "\n" . _slurp_642(File::Spec->catfile('Mediabot', 'Stats', 'Affinity.pm'));
     (my $code = $src) =~ s/^\s*#.*$//mg;
 
-    for my $sub (qw(mbCompat_ctx mbMood_ctx)) {
+    # MB1096: compat now has native Unicode/DBI checks in case 1398.
+    for my $sub (qw(mbMood_ctx)) {
         my ($body) = $code =~ /(sub \Q$sub\E \{.*?\n\}\n)/s; $body //= '';
         $assert->like($body, qr/split \/\[\^0-9A-Za-z_\\x80-\\xFF\]\+\//,
             "$sub: split byte-safe");

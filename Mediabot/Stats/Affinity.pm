@@ -5,6 +5,8 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Helpers ();
+use Mediabot::IRC::Text qw(decode_irc_text);
+use Unicode::Normalize qw(NFC);
 
 our @EXPORT_OK = qw(mbCompat_ctx);
 
@@ -111,14 +113,15 @@ sub mbCompat_ctx {
         splice(@w_rows, 5000) if @w_rows > 5000;
         my %w_counts;
         for my $wr (@w_rows) {
-            my $txt = lc($wr->{publictext} // '');
-            # mb427-B1: tokenisation byte-safe (comme mb426). publictext est
-            # en OCTETS UTF-8 (DBI ne décode pas) ; l'ancien
-            # s/[^\w\s\x{00C0}-\x{017F}]/ /g gardait même un octet parasite
-            # (café -> "caf\xC3"). Les octets >= 0x80 comptent comme lettres.
-            for my $w (split /[^0-9A-Za-z_\x80-\xFF]+/, $txt) {
-                next unless length($w) >= 4;
-                $w_counts{$w}++;
+            use feature 'unicode_strings';
+            # DBI can return UTF-8 bytes or decoded characters. Normalize
+            # before folding and counting; byte fragments and emoji are not
+            # vocabulary. Keep the shared decoder's legacy-byte fallback.
+            my $text = NFC(decode_irc_text($wr->{publictext} // ''));
+            while ($text =~ /([\p{L}\p{N}_][\p{L}\p{M}\p{N}_]*)/g) {
+                my $word = lc $1;
+                next unless length($word) >= 4;
+                $w_counts{$word}++;
             }
         }
         # Garder top 100 mots

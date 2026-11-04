@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1096 — Score compatibility vocabulary as Unicode words
+
+- Decode UTF-8 rows once and normalize canonical accents before lowercasing
+  compatibility vocabulary. Raw DBI bytes and decoded text now agree for
+  accented and non-Latin words, with the shared legacy-byte fallback retained.
+- Count letters, attached marks, numbers and underscores as words; punctuation
+  and emoji separate them. Apply the four-character minimum after normalization,
+  without stripping accents or awarding vocabulary points for emoji bytes.
+- Preserve frequency ordering, the stable lexical cutoff, top-100 vocabulary,
+  SQL sampling and the hours, karma and co-presence components and output.
+- Extend the existing seeded handler probe through real SQLite TEXT/BLOB reads.
+  Run all cases in four children instead of fourteen; replace two obsolete
+  compat source pins and the archive tokenizer pin with two grouped native
+  assertions: one fewer assertion overall.
+
+
 ### MB1095 — Preserve working SQL timers after an incomplete reload
 
 - Confirm prepare, execute and the complete DBI fetch before replacing the

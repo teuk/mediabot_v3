@@ -6,7 +6,6 @@
 #   [2] last est le cas d'ecole : LIMIT par table puis tri desc + splice
 #       (jamais d'ORDER/LIMIT sur une derivee UNION) ;
 #   [3] mood reste STRICTEMENT sur le vif (fenetres recentes) ;
-#   [4] la tokenisation byte-safe mb426/mb427 est conservee.
 # =============================================================================
 
 use strict;
@@ -58,12 +57,5 @@ return sub {
     $assert->ok(defined $mood && $mood !~ /channel_log_gather/,
         'mood: fenetres recentes, vif seulement');
 
-    # Wordcount's byte/character normalization is exercised natively by 641.
-    # Keep the unchanged compat tokenizer's historical guard here.
-    my $compat = _sub_src_764($src, 'mbCompat_ctx');
-    for my $pair ([compat => $compat]) {
-        my ($n, $b) = @$pair;
-        $assert->like($b, qr/\[\^0-9A-Za-z_\\x80-\\xFF\]\+/,
-            "$n: split byte-safe mb426/mb427 conserve");
-    }
+    # Unicode tokenization is exercised by native cases 641 and 1398.
 };
