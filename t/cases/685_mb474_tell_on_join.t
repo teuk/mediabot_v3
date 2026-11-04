@@ -59,17 +59,6 @@ return sub {
     $assert->like($med, qr/^tell\|tell <nick> <msg>\|public\|/m,
         '[3] tell documenté dans le help');
 
-    # -------------------------------------------------------------------------
-    # [4] Idempotence : deliverReminders marque delivered AVANT l'envoi, donc
-    #     l'appeler au JOIN puis sur message ne double-délivre pas.
-    # -------------------------------------------------------------------------
-    my $uc = _slurp_685(File::Spec->catfile('.', 'Mediabot', 'CommunityState.pm'));
-    my ($deliver) = $uc =~ /(sub deliverReminders \{.*?\n\}\s*#\s*end sub deliverReminders)/s;
-    $deliver //= '';
-    $assert->ok($deliver ne '', 'deliverReminders localisé');
-    $assert->like($deliver, qr/UPDATE REMINDERS SET delivered = 1.*?mark delivered BEFORE|mark delivered BEFORE.*?UPDATE REMINDERS SET delivered = 1/s,
-        '[4] delivered=1 marqué AVANT envoi (pas de double délivrance JOIN+message)');
-    # tags [at:TS] : un reminder programmé dans le futur n'est pas délivré au JOIN.
-    $assert->like($deliver, qr/\[at:\(\\d\+\)\]|\[at:/,
-        '[4] les reminders programmés (at:TS) restent filtrés au JOIN');
+    # MB1100: real pre-send claims, due filtering and repeated delivery are
+    # exercised by 397/1337/1339/1384. Avoid pinning a comment or code spelling.
 };

@@ -524,15 +524,17 @@ sub deliverReminders {
             $r->{message} =~ s/\s*\[at:\d+\]\s*/ /g;
             $r->{message} =~ s/^\s+|\s+$//g;
         }
-        # H/fix: mark delivered BEFORE sending — prevents double delivery on crash
+        # Claim BEFORE offering output: a transport exception may follow a partial
+        # send. Only an explicit refusal below permits a conditional release.
         my $sth_up = $dbh->prepare(q{
             UPDATE REMINDERS SET delivered = 1 WHERE id_reminder = ? AND delivered = 0
-              AND message = ?
+              AND HEX(message) = HEX(?)
         });
         # C2/fix: test execute return
         if ($sth_up) {
             # A snooze can commit after SELECT. Claim only the exact snapshot
-            # selected above, including its original scheduling tags.
+            # selected above, including its original scheduling tags. HEX also
+            # preserves exact snapshot matching under case-insensitive SQL.
             unless ($sth_up->execute($r->{id_reminder}, $stored_message)) {
                 $self->{logger}->log(1, "deliverReminders: UPDATE failed for id=$r->{id_reminder}: $DBI::errstr");
                 $sth_up->finish;
@@ -568,8 +570,32 @@ sub deliverReminders {
             my @dn = qw(Sun Mon Tue Wed Thu Fri Sat);
             $recur_tag = " [weekly $dn[$1] $2]";
         }
-        botPrivmsg($self, $channel,
+        my $accepted = botPrivmsg($self, $channel,
             "$nick: reminder from $r->{from_nick} ($r->{created_at}$ago_str)$recur_tag: $display_msg");
+        unless ($accepted) {
+            # MB1100: filtering/full queues refuse before any wire attempt.
+            # Preserve the exact stored tags and release only our claimed row.
+            # HEX compares bytes even under MariaDB's case-insensitive collation.
+            my ($release, $released);
+            my $release_ok = eval {
+                $release = $dbh->prepare(q{
+                    UPDATE REMINDERS SET delivered = 0
+                    WHERE id_reminder = ? AND id_channel = ? AND to_nick = ?
+                      AND from_nick = ? AND delivered = 1 AND HEX(message) = HEX(?)
+                }) or die "reminder release prepare failed\n";
+                $release->execute($r->{id_reminder}, $id_channel, lc($nick),
+                    $r->{from_nick}, $stored_message) or die "reminder release execute failed\n";
+                $released = $release->rows;
+                1;
+            };
+            eval { $release->finish } if $release;
+            my $pending = $release_ok && defined($released) && $released > 0;
+            eval { $self->{logger}->log($pending ? 3 : 1,
+                "deliverReminders: output refused; "
+                . ($pending ? "reminder kept pending" : "claim release not confirmed")
+                . " id=$r->{id_reminder}") } if $self->{logger};
+            next; # No recurrence until output has accepted this occurrence.
+        }
 
         # mb87-IMP1 / mb88-R1: si le remind est daily, le re-créer pour le lendemain
         # mb90-IMP1: si le remind est weekly, le re-créer pour la semaine suivante

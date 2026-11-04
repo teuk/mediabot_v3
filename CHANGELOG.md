@@ -1,5 +1,22 @@
 ## [Unreleased] — 3.8dev
 
+### MB1100 — Keep explicitly refused reminders pending
+
+- Inspect the normal outgoing acceptance result after claiming a reminder.
+  A badword rejection or full AntiFlood queue now conditionally restores the
+  same stored row to pending and skips the next recurrence until acceptance.
+- Keep accepted immediate/queued output and transport exceptions claimed to
+  retain at-most-once attempts. Guard release by ID, channel, sender, recipient,
+  exact stored message and state; never overwrite a concurrent row change.
+- Match claim/release message snapshots by HEX bytes under case-insensitive
+  SQL collations. Bound release-failure diagnostics and preserve stored tags,
+  formatting, three-due-message budget and local calendar scheduling.
+- Add four grouped native SQL/output checks to the existing fixture, update
+  the prior false-output contract, remove seventeen mirrored assertions and
+  three superseded JOIN delivery source pins:
+  sixteen fewer assertions with no new test file, child process or sleep.
+
+
 ### MB1099 — Add a public IRC response timer with !ping
 
 - Register the native public `ping` command with the fixed one-line response
