@@ -40,6 +40,16 @@ sub setup_1402 {
         sqlite_unicode=>1,
     });
     $db->sqlite_create_function('DATE_FORMAT', 2, sub {substr($_[0], 0, 7)});
+    # The stats projection now asks SQL for the epoch paired with its date.
+    # This private fixture's SQL calendar is UTC, independent of host TZ.
+    $db->sqlite_create_function('UNIX_TIMESTAMP', 1, sub {
+        my ($value)=@_;
+        return undef unless defined($value)
+            && $value =~ /\A([0-9]{4})-([0-9]{2})-([0-9]{2}) ([0-9]{2}):([0-9]{2}):([0-9]{2})\z/;
+        my ($y,$m,$d,$h,$min,$sec)=($1,$2,$3,$4,$5,$6);
+        require Time::Local;
+        return Time::Local::timegm($sec,$min,$h,$d,$m-1,$y);
+    });
     $db->sqlite_create_function('regexp', 2, sub {
         my ($pattern, $text) = @_;
         return defined($text) && $text =~ /$pattern/ ? 1 : 0;

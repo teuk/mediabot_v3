@@ -59,9 +59,11 @@ sub mbStats_ctx {
     # message fait foi). La revue avait raison : mb577 avait change
     # « join date » en « date du premier message ».
     my ($msg_count, $last_msg, $first_seen) = (0, undef, undef);
+    my ($last_msg_uts, $first_seen_uts);
     my $stats_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
         SELECT COUNT(*)  AS msg_count,
-               MAX(ts)  AS last_msg
+               MAX(ts)  AS last_msg,
+               UNIX_TIMESTAMP(MAX(ts)) AS last_msg_uts
         FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE LOWER(cl.nick) = LOWER(?)
@@ -74,24 +76,29 @@ sub mbStats_ctx {
     }, [ $target, $channel ], sub {
         my ($r) = @_;
         $msg_count += $r->{msg_count} // 0;
-        $last_msg = $r->{last_msg}
-            if defined $r->{last_msg}
-            && (!defined $last_msg || $r->{last_msg} gt $last_msg);
+        if (defined $r->{last_msg}
+            && (!defined $last_msg || $r->{last_msg} gt $last_msg)) {
+            $last_msg = $r->{last_msg};
+            $last_msg_uts = $r->{last_msg_uts};
+        }
     }, 'content');
     unless ($stats_g->{live_ok}) {
         botNotice($self, $nick, "Database error.");
         return;
     }
     my $stats_first_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, q{
-        SELECT MIN(cl.ts) AS first_seen
+        SELECT MIN(cl.ts) AS first_seen,
+               UNIX_TIMESTAMP(MIN(cl.ts)) AS first_seen_uts
         FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE LOWER(cl.nick) = LOWER(?)
           AND c.name = ?
     }, [ $target, $channel ], sub {
-        $first_seen = $_[0]->{first_seen}
-            if defined $_[0]->{first_seen}
-            && (!defined $first_seen || $_[0]->{first_seen} lt $first_seen);
+        if (defined $_[0]->{first_seen}
+            && (!defined $first_seen || $_[0]->{first_seen} lt $first_seen)) {
+            $first_seen = $_[0]->{first_seen};
+            $first_seen_uts = $_[0]->{first_seen_uts};
+        }
     }, 'all');
     unless ($stats_first_g->{live_ok}) {
         botNotice($self, $nick, "Database error.");
@@ -146,7 +153,8 @@ sub mbStats_ctx {
 
     # Last seen (USER_SEEN)
     my $sth2 = $self->{dbh}->prepare(q{
-        SELECT seen_at, event_type FROM USER_SEEN WHERE nick = ?
+        SELECT seen_at, event_type, UNIX_TIMESTAMP(seen_at) AS seen_uts
+        FROM USER_SEEN WHERE nick = ?
         ORDER BY seen_at DESC LIMIT 1
     });
     unless ($sth2 && $sth2->execute($target)) {
@@ -184,17 +192,16 @@ sub mbStats_ctx {
         $msg_count, ($msg_count != 1 ? "s" : ""),
         $pct, $channel
     );
-    # V6: helper to compute '(X ago)' from a SQL timestamp string
+    # SQL owns the timezone of its timestamps, including archived rows.
+    # Never reinterpret those wall-clock labels in the Perl process timezone.
+    my $stats_now = time();
     my $_ago = sub {
-        my ($ts) = @_;
-        return '' unless defined $ts && $ts =~ /^\d{4}-\d{2}-\d{2}/;
-        require Time::Local;
-        my ($y,$mo,$d,$h,$mi,$s) = $ts =~ /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}):(\d{2}))?$/;
-        $h //= 12; $mi //= 0; $s //= 0;
-        my $epoch = eval { Time::Local::timelocal($s,$mi,$h,$d,$mo-1,$y-1900) };
-        return '' unless $epoch;
-        my $diff = time() - $epoch;
-        return '' if $diff < 0;
+        my ($epoch) = @_;
+        return '' unless defined($epoch) && !ref($epoch)
+            && "$epoch" =~ /\A[0-9]+(?:\.[0-9]+)?\z/;
+        my $elapsed = $stats_now - $epoch;
+        return '' if $elapsed < 0;
+        my $diff = $elapsed;
         my $dy = int($diff/31536000); $diff %= 31536000;
         my $dm = int($diff/2592000);  $diff %= 2592000;
         my $dd = int($diff/86400);    $diff %= 86400;
@@ -202,19 +209,19 @@ sub mbStats_ctx {
         my $str = $dy  ? "${dy}y ${dm}m"
                 : $dm  ? "${dm}m ${dd}d"
                 : $dd  ? "${dd}d ${dh}h"
-                :        int((time()-$epoch)/3600) . 'h';
+                :        int($elapsed/3600) . 'h';
         return " ($str ago)";
     };
     # mb579-B1: un nick deja apparu mais encore silencieux a bien une
     # premiere apparition. Le compteur a zero ne doit plus masquer la date.
-    $out .= " | first seen: $first_seen" . $_ago->($first_seen) if $first_seen;
-    $out .= " | last msg: $last_msg" . $_ago->($last_msg)       if $msg_count > 0;
+    $out .= " | first seen: $first_seen" . $_ago->($first_seen_uts) if $first_seen;
+    $out .= " | last msg: $last_msg" . $_ago->($last_msg_uts)   if $msg_count > 0;
 
     # MB75-S1: when a user asks for their own stats, USER_SEEN may already
     # have been updated by the current command, so it is misleading and always
     # reads as "0h ago". Keep it for stats about another nick.
     my $show_seen = (lc($target // '') ne lc($nick // '')) ? 1 : 0;
-    $out .= " | last seen: $seen_at ($seen_type)" . $_ago->($seen_at)
+    $out .= " | last seen: $seen_at ($seen_type)" . $_ago->($seen_row->{seen_uts})
         if $show_seen && $seen_at ne 'never';
 
     $out .= $karma_str if $karma_str;

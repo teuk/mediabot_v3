@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1097 — Keep stats elapsed ages independent of the host timezone
+
+- Ask SQL for UNIX_TIMESTAMP values alongside first-seen, last-message and
+  last-seen labels. Preserve each timestamp with the selected live/archive
+  extremum instead of reinterpreting database wall time in Perl's timezone.
+- Render elapsed ages from one current-clock sample, retaining existing units,
+  counts, date labels, rank, karma, achievements and self-seen suppression.
+  Future or unavailable epochs keep their labels without a fabricated age;
+  epoch zero remains a valid timestamp.
+- Replace ten source/mirrored achievement checks with ten native handler/SQLite
+  checks in the same test file. One isolated probe covers 60 host/session
+  timezone and DST-date combinations plus empty, future and metadata controls,
+  without changing the database schema or increasing the assertion count.
+  Give the existing activity-counter SQLite fixture its SQL epoch function.
+
+
 ### MB1096 — Score compatibility vocabulary as Unicode words
 
 - Decode UTF-8 rows once and normalize canonical accents before lowercasing
