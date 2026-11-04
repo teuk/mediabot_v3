@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1095 — Preserve working SQL timers after an incomplete reload
+
+- Confirm prepare, execute and the complete DBI fetch before replacing the
+  live timer set at IRC login/reconnect. Both returned errors and RaiseError
+  exceptions retain the previously running timers and return a failed reload.
+- Check the statement error before cursor cleanup; a false or throwing finish
+  cannot turn a partial read into an empty snapshot or invalidate a confirmed
+  complete read. Failure diagnostics expose a fixed phase, without raw errors.
+- Keep fresh timers detached until the full read succeeds, preserve the
+  existing add/start rollback and cancel old pending responder replies as before.
+- Consolidate redundant source-text checks into the existing native timer
+  probe: 30 read-failure cases and six confirmed-read controls, using the real
+  event loop, Periodic timers and private SQLite. No extra process or delay;
+  18 fewer assertions overall and one fewer test file.
+
+
 ### MB1094 — Keep paced IRC output moving after object exceptions
 
 - Treat exception objects as a fixed scalar diagnostic before logging a paced

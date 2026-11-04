@@ -1,51 +1,9 @@
 # t/cases/403_mb164_onstarttimers_stage_fresh_before_publish.t
 use strict;
 use warnings;
-use FindBin qw($Bin);
-use File::Spec;
 
 my $case = sub {
     my ($assert) = @_;
-
-    my $root = File::Spec->catdir($Bin, '..', '..');
-    my $file = File::Spec->catfile($root, 'Mediabot', 'DBCommands.pm');
-
-    open my $fh, '<', $file
-        or do { $assert->(0, "cannot open DBCommands.pm: $!"); return; };
-    my $src = do { local $/; <$fh> };
-    close $fh;
-
-    my ($start) = $src =~ /sub onStartTimers \{(.*?)^sub mbAddTimer_ctx/ms;
-
-    $assert->(defined($start) && length($start) > 0,
-        'onStartTimers block extracted');
-
-    $assert->($start =~ /mb164-B1: stage the fresh timer object only/,
-        'fetch loop documents fresh timer staging');
-    $assert->($start !~ /\$hTimers\{\$name\} = \$timer;\s*\$self->\{loop\}->add\(\$timer\);\s*\$timer->start;/s,
-        'old start-inside-fetch-loop pattern is gone');
-    $assert->($start =~ /\$hTimers\{\$name\} = \$timer;\s*\$i\+\+;/s,
-        'fetch loop only stores timer object and increments count');
-
-    $assert->($start =~ /my \@started_fresh;/,
-        'commit path tracks fresh timers that were started');
-    $assert->($start =~ /for my \$timer_name \(sort keys %hTimers\)/,
-        'commit path starts all staged fresh timers deterministically');
-    $assert->($start =~ /\$self->\{loop\}->add\(\$timer\).*?\$timer->start/s,
-        'commit path adds and starts fresh timers');
-    $assert->($start =~ /unless \(\$ok\).*?for my \$started \(\@started_fresh\).*?\$started->stop if \$started->can\('stop'\).*?\$self->\{loop\}->remove\(\$started\).*?return 0;/s,
-        'failed fresh start rolls back already-started fresh timers and keeps old timers alive');
-
-    my $idx_start_fresh = index($start, 'for my $timer_name (sort keys %hTimers)');
-    my $idx_stop_old    = index($start, '$self->_stop_all_runtime_db_timers();');
-    my $idx_publish     = index($start, '%{$self->{hTimers}} = %hTimers');
-
-    $assert->($idx_start_fresh >= 0 && $idx_stop_old >= 0 && $idx_start_fresh < $idx_stop_old,
-        'fresh timers are started before old timers are stopped');
-    $assert->($idx_stop_old >= 0 && $idx_publish >= 0 && $idx_stop_old < $idx_publish,
-        'old timers are stopped immediately before publishing fresh hash');
-    $assert->($start =~ /All fresh timers are alive\. Now stop\/remove the old registered timers/,
-        'commit path documents all-fresh-before-stop-old invariant');
 
     # MB925: native Periodic timers, real event loop and private SQLite.
     # Inject add/start failures before and after their real side effects.
@@ -78,7 +36,7 @@ use Mediabot::Context;
         my ($s,$sql,@rest)=@_;
         my $p=$s->{private_mb925};
         push @{$p->{sql}},$sql if $p;
-        my $sth=$s->SUPER::prepare($sql,@rest);
+        my $sth=$s->SUPER::prepare($p && ($p->{read_fault}//'') eq 'prepare' ? 'SELECT * FROM MB1095_ABSENT' : $sql,@rest);
         $sth->{private_mb925}=$p if $sth && $p;
         return $sth;
     }
@@ -86,12 +44,29 @@ use Mediabot::Context;
     sub execute {
         my ($s,@bind)=@_;my $p=$s->{private_mb925};
         push @{$p->{binds}},[@bind] if $p;
-        return $s->SUPER::execute($p && $p->{fail_execute} ? ('unexpected-bind') : @bind);
+        return $s->SUPER::execute($p && ($p->{fail_execute} || ($p->{read_fault}//'') eq 'execute') ? ('unexpected-bind') : @bind);
+    }
+    sub fetchrow_hashref {
+        my ($s)=@_;my $p=$s->{private_mb925};
+        if ($p && ($p->{read_fault}//'') eq 'fetch'
+                && $p->{fetches}++ >= $p->{after}) {
+            # DBI records a real statement error; RaiseError chooses whether
+            # the production caller receives undef or an exception.
+            return $s->set_err(1905, 'MB1095 private fetch failure');
+        }
+        return $s->SUPER::fetchrow_hashref;
     }
     sub finish {
         my ($s)=@_;my $p=$s->{private_mb925};
         $p->{finishes}++ if $p;
-        return $s->SUPER::finish;
+        my $ret=$s->SUPER::finish;
+        if ($p && $p->{read_fault}) {
+            # Cleanup is allowed to clear DBI's diagnostic before returning.
+            $s->set_err(undef,undef);
+            die "MB1095 cleanup failure\n" if ($p->{cleanup_read}//'') eq 'throw';
+            return undef if ($p->{cleanup_read}//'') eq 'false';
+        }
+        return $ret;
     }
 }
 $INC{'MB925/DBI.pm'}=__FILE__;
@@ -104,7 +79,7 @@ sub run {
     my (%a)=@_;
     my $loop=IO::Async::Loop->really_new;
     my $db=DBI->connect('dbi:SQLite:dbname=:memory:','','',{
-        RootClass=>'MB925::DBI',RaiseError=>0,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
+        RootClass=>'MB925::DBI',RaiseError=>$a{raise}//0,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
     $db->do('CREATE TABLE TIMERS(id_timers INTEGER PRIMARY KEY,name,duration,command)');
     my @rows=$a{empty} ? () : (
         [1,'alpha',11,"PRIVMSG #test :été alpha"],
@@ -132,7 +107,9 @@ sub run {
     my @weak;my %labels;my @events;my @construct;my @warnings;
     my ($attempt,$injected)=(0,0);
     my $error="MB925 setup refusal\n";
-    my $trace={sql=>[],binds=>[],finishes=>0,fail_execute=>$a{sql_execute}?1:0};
+    my $trace={sql=>[],binds=>[],finishes=>0,fail_execute=>$a{sql_execute}?1:0,
+        read_fault=>$a{read_fault}//'',after=>$a{after}//0,fetches=>0,
+        cleanup_read=>$a{cleanup_read}//''};
     $db->do('DROP TABLE TIMERS') if $a{sql_prepare};
     $db->{private_mb925}=$trace;
     no warnings qw(redefine once);
@@ -186,20 +163,20 @@ sub run {
     local *Mediabot::botNotice=sub {push @notices,[@_[1,2]];1};
     local *Mediabot::DBCommands::logBot=sub {push @audit,[@_[3,4]];1};
     my $method=$a{entry} eq 'module' ? \&Mediabot::DBCommands::onStartTimers : \&Mediabot::onStartTimers;
-    my $ret;
+    my ($ret,$escaped);
     if ($a{add_command}) {
         my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>'#test',
             command=>'addtimer',
             args=>['delta',11,'PRIVMSG','#test',":été delta"]);
         $ctx->{user}=bless({},'MB925::Owner');$ctx->{_user_fetched}=1;
         $ret=Mediabot::mbAddTimer_ctx($ctx);
-    } else {$ret=$method->($bot)}
+    } else {eval {$ret=$method->($bot);1} or $escaped=1}
     my $tick_ok=eval {$loop->loop_once(0);1};
     my $tick_error=$tick_ok?'':"$@";
     $tick_error=~s/ at [^\n]+ line \d+\.\n\z//;
     my @loop_names=sort map {$labels{refaddr($_)}//'old'} $loop->notifiers;
     my $out={
-        return=>$ret,
+        return=>$ret,escaped=>$escaped?1:0,
         same_old_hash=>refaddr($old_hash)==refaddr($bot->{hTimers})?1:0,
         old_running=>[map {$_->is_running?1:0} @old],
         old_attached=>[map {defined($_->loop)?1:0} @old],
@@ -238,6 +215,25 @@ for my $entry (qw(module facade)) {
     $out{recovery}{$entry}=run(entry=>$entry,stage=>'start-after',at=>2,recover=>1);
     for my $kind (qw(normal empty invalid disconnected controls sql_prepare sql_execute)) {
         $out{nominal}{$entry}{$kind}=run(entry=>$entry, $kind eq 'normal'?() : ($kind=>1));
+    }
+}
+# MB1095 extends this existing native child, without a new process or delay.
+for my $raise (0,1) {
+    for my $fault (qw(prepare execute fetch)) {
+        for my $after ($fault eq 'fetch' ? (0,1,3) : (0)) {
+            for my $cleanup (qw(normal false throw)) {
+                my $key=join('/', $raise,$fault,$after,$cleanup);
+                $out{reads}{$key}=run(entry=>'facade',public=>1,raise=>$raise,
+                    read_fault=>$fault,after=>$after,cleanup_read=>$cleanup,recover=>1);
+            }
+        }
+    }
+}
+for my $kind (qw(normal empty)) {
+    for my $cleanup (qw(normal false throw)) {
+        my $key=join('/', $kind,$cleanup);
+        $out{read_success}{$key}=run(entry=>'facade',public=>1,
+            empty=>$kind eq 'empty'?1:0,read_fault=>'none',cleanup_read=>$cleanup);
     }
 }
 for my $kind (qw(normal disconnected controls add_command)) {
@@ -330,6 +326,41 @@ MB925_NATIVE
     $assert->(!@bad,
         'MB925 actual Mediabot callbacks resolve the secure writer for reload and authenticated addtimer'
         . (@bad ? ': '.join(',',@bad) : ''));
+
+    my (@bad_reads,@bad_recovery,@bad_success);
+    for my $key (sort keys %{$data->{reads}}) {
+        my $x=$data->{reads}{$key};
+        push @bad_reads,$key unless !$x->{escaped} && defined($x->{return})
+            && $x->{return}==0 && $x->{same_old_hash}
+            && $same->($x->{registry},[qw(old-1 old-2)])
+            && $same->($x->{old_running},[1,1]) && $same->($x->{old_attached},[1,1])
+            && $same->($x->{loop_names},[qw(old old)])
+            && $same->($x->{wire},[qw(old-1 old-2)]) && !@{$x->{events}}
+            && !grep {$_->{alive} || $_->{running} || $_->{attached}} @{$x->{fresh}};
+        my $r=$x->{recovered};
+        push @bad_recovery,$key unless $r->{return}==3
+            && $same->($r->{registry},[qw(alpha bravo charlie)])
+            && $same->($r->{wire},['old-1','old-2',@commands])
+            && @{$r->{loop_names}}==3 && !grep {$_ eq 'old'} @{$r->{loop_names}};
+    }
+    $assert->(keys(%{$data->{reads}})==30 && !@bad_reads,
+        'MB1095 failed and truncated DBI reads preserve the exact live timers with both RaiseError modes'
+        . (@bad_reads ? ': '.join(',',@bad_reads) : ''));
+    $assert->(!@bad_recovery,
+        'MB1095 every failed read can recover on the next native reload without missing or duplicate ticks'
+        . (@bad_recovery ? ': '.join(',',@bad_recovery) : ''));
+    for my $key (sort keys %{$data->{read_success}}) {
+        my $x=$data->{read_success}{$key};my $empty=$key=~/^empty/;
+        push @bad_success,$key unless !$x->{escaped}
+            && defined($x->{return}) && $x->{return}==($empty?0:3)
+            && $same->($x->{old_running},[0,0]) && $same->($x->{old_attached},[0,0])
+            && $same->($x->{registry},$empty?[]:[qw(alpha bravo charlie)])
+            && $same->($x->{wire},$empty?[]:\@commands)
+            && $x->{trace}{finishes}==1;
+    }
+    $assert->(keys(%{$data->{read_success}})==6 && !@bad_success,
+        'MB1095 confirmed complete and empty snapshots publish despite false or throwing cursor cleanup'
+        . (@bad_success ? ': '.join(',',@bad_success) : ''));
 
 };
 

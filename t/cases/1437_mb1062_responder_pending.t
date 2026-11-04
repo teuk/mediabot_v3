@@ -130,16 +130,16 @@ for my $stage (qw(add start callback)) {
     cleanup_1437($b);
 }
 {
-    my $b=fixture_1437();invoke_1437($b);my ($old)=timers_1437($b);my $error;
+    my $b=fixture_1437();invoke_1437($b);my ($old)=timers_1437($b);my ($error,$reloaded);
     {
         no warnings 'redefine';
         local *MB1062::DB::prepare=sub {die "private reload detail\n"};
-        eval {$b->onStartTimers();1} or $error=$@;
+        eval {$reloaded=$b->onStartTimers();1} or $error=$@;
     }
     $old->invoke_event('on_expire') if $old;
-    is_deeply([$error,scalar(timers_1437($b)),scalar(@{$b->{sent}})],
-        ["private reload detail\n",0,0],
-        'login cancels the old automatic reply even when independent DB timer reload fails');
+    is_deeply([$error,$reloaded,scalar(timers_1437($b)),scalar(@{$b->{sent}})],
+        [undef,0,0,0],
+        'login cancels the old automatic reply while containing a failed independent DB timer reload');
     cleanup_1437($b);
 }
 {

@@ -149,61 +149,63 @@ sub onStartTimers {
     # reconnect would silently disable all DB-backed timers.
     my %hTimers;
     my $sQuery = "SELECT id_timers, name, duration, command FROM TIMERS";
-    my $sth = $self->{dbh}->prepare($sQuery);
-
-    unless ($sth) {
-        $self->{logger}->log(1, "onStartTimers() SQL prepare error : " . $DBI::errstr . " Query : " . $sQuery)
+    my ($sth, $i);
+    my $phase = 'prepare';
+    my $loaded = eval {
+        $sth = $self->{dbh}->prepare($sQuery)
+            or die "timer reload prepare failed\n";
+        $phase = 'execute';
+        $sth->execute() or die "timer reload execute failed\n";
+        $phase = 'fetch';
+        $self->{logger}->log(1, "Checking timers to set at startup")
             if $self->{logger};
-        # mb151-B1: keep existing runtime timers alive if DB reload cannot start.
+        $i = 0;
+
+        while (my $ref = $sth->fetchrow_hashref()) {
+            my $id_timers = $ref->{'id_timers'};
+            my $name      = $ref->{'name'};
+            my $duration  = $ref->{'duration'};
+            my $command   = $ref->{'command'};
+
+            next unless defined($name)     && $name ne '';
+            next unless defined($duration) && $duration =~ /^\d+$/ && $duration > 0;
+            next unless defined($command)  && $command ne '';
+
+            my $sSecondText = ($duration > 1 ? "seconds" : "second");
+            $self->{logger}->log(1, "Timer $name - id : $id_timers - every $duration $sSecondText - command $command")
+                if $self->{logger};
+
+            my $timer = IO::Async::Timer::Periodic->new(
+                interval => $duration,
+                on_tick  => sub {
+                    $self->{logger}->log(4, "Timer every $duration seconds : $command")
+                        if $self->{logger};
+
+                    # mb369-B1: écriture via le helper qui refuse CR/LF/NUL.
+                    $self->_timer_irc_write($command, $name);
+                },
+            );
+
+            # mb164-B1: stage the fresh timer object only. Do not add/start it yet.
+            # We only publish the fresh timer set after the whole reload path has
+            # succeeded, otherwise a partial reload can leave untracked live timers.
+            $hTimers{$name} = $timer;
+            $i++;
+        }
+
+        # EOF only confirms a complete snapshot when DBI has no fetch error.
+        # A partial read must never replace the previously working timer set.
+        die "timer reload fetch failed\n" if $sth->err;
+        1;
+    };
+    # finish() may clear err, return false or throw after a confirmed read.
+    # Capture the result first, then release the cursor without changing it.
+    eval { $sth->finish } if $sth;
+    unless ($loaded) {
+        eval { $self->{logger}->log(1, "onStartTimers() SQL $phase error; keeping existing timers") }
+            if $self->{logger};
         return 0;
     }
-
-    unless ($sth->execute()) {
-        $self->{logger}->log(1, "onStartTimers() SQL execute error : " . $DBI::errstr . " Query : " . $sQuery)
-            if $self->{logger};
-        $sth->finish;
-        # mb151-B1: keep existing runtime timers alive if DB reload fails.
-        return 0;
-    }
-
-    $self->{logger}->log(1, "Checking timers to set at startup")
-        if $self->{logger};
-
-    my $i = 0;
-
-    while (my $ref = $sth->fetchrow_hashref()) {
-        my $id_timers = $ref->{'id_timers'};
-        my $name      = $ref->{'name'};
-        my $duration  = $ref->{'duration'};
-        my $command   = $ref->{'command'};
-
-        next unless defined($name)     && $name ne '';
-        next unless defined($duration) && $duration =~ /^\d+$/ && $duration > 0;
-        next unless defined($command)  && $command ne '';
-
-        my $sSecondText = ($duration > 1 ? "seconds" : "second");
-        $self->{logger}->log(1, "Timer $name - id : $id_timers - every $duration $sSecondText - command $command")
-            if $self->{logger};
-
-        my $timer = IO::Async::Timer::Periodic->new(
-            interval => $duration,
-            on_tick  => sub {
-                $self->{logger}->log(4, "Timer every $duration seconds : $command")
-                    if $self->{logger};
-
-                # mb369-B1: écriture via le helper qui refuse CR/LF/NUL.
-                $self->_timer_irc_write($command, $name);
-            },
-        );
-
-        # mb164-B1: stage the fresh timer object only. Do not add/start it yet.
-        # We only publish the fresh timer set after the whole reload path has
-        # succeeded, otherwise a partial reload can leave untracked live timers.
-        $hTimers{$name} = $timer;
-        $i++;
-    }
-
-    $sth->finish;
 
     if ($i) {
         my $sTimerText = ($i > 1 ? "timers" : "timer");
