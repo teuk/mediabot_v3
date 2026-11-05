@@ -200,8 +200,57 @@ return sub {
                 && $progress[0][0] eq 'compat' && $progress[0][2] eq '#test'
                 && $achievement[0][0] eq 'alice' && $achievement[0][2]==23
                 && $bot->{_compat_count}{alice}==1;
-            print 'checked';
         };
+        # Exercise the error matrix once; the import-order checks above run in all three children.
+        if ($order->[0] eq 'Stats::History') {
+            $code .= q{
+                my (@audit,@log);
+                my ($fault,$finished,$reads);
+                local *Mediabot::UserCommands::logBot=sub {push @audit,[@_]};
+                local *MB956Cold::Logger::log=sub {shift;push @log,[@_]};
+                local *MB956Cold::DB::prepare=sub {
+                    return undef if $fault eq 'prepare';
+                    return bless {rows=>[
+                        {event_type=>'public',publictext=>'fixture first row',hit=>8}
+                    ]},'MB956Cold::STH';
+                };
+                local *MB956Cold::STH::execute=sub {
+                    return undef if $fault eq 'execute';
+                    1;
+                };
+                local *MB956Cold::STH::fetchrow_hashref=sub {
+                    my ($s)=@_;
+                    ++$reads;
+                    return undef if $fault eq 'empty' || $fault eq 'fetch_first';
+                    if ($reads==2) {
+                        die "private SQL exception\n" if $fault eq 'throw';
+                        return undef if $fault eq 'fetch_partial';
+                    }
+                    return shift @{$s->{rows}};
+                };
+                local *MB956Cold::STH::err=sub {$fault =~ /\Afetch_/ ? 1 : undef};
+                local *MB956Cold::STH::finish=sub {++$finished;1};
+                for my $scenario (qw(empty fetch_partial fetch_first prepare execute throw)) {
+                    $fault=$scenario;
+                    @notice=();@public=();@audit=();@log=();$finished=0;$reads=0;
+                    my $ret;
+                    my $completed=eval {$ret=$call->('userTopSay_ctx','#test',['bob'],$user);1};
+                    if ($fault eq 'empty') {
+                        die 'empty sayings response changed' unless $completed && $ret && !@notice
+                            && @public==1 && $public[0][1] eq 'No results.'
+                            && @audit==1 && $finished==1;
+                        next;
+                    }
+                    die "failed sayings read escaped or was published: $fault"
+                        unless $completed && !$ret && !@public && !@audit
+                        && @notice==1 && $notice[0][0] eq 'alice' && $notice[0][1] eq 'Database error.'
+                        && $finished==($fault eq 'prepare' ? 0 : 1);
+                    die 'raw SQL exception leaked to logs'
+                        if grep {join(' ',@$_) =~ /private SQL exception/} @log;
+                }
+            };
+        }
+        $code .= q{ print 'checked'; };
         my $err=Symbol::gensym();
         my $pid=IPC::Open3::open3(undef,my $out,$err,$^X,'-I.','-It/lib','-e',$code);
         my $stdout=do{local $/;<$out>} // '';

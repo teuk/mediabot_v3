@@ -501,10 +501,22 @@ SQL
     $target_nick_like =~ s/%/!%/g;
     $target_nick_like =~ s/_/!_/g;
 
-    my $sth = $self->{dbh}->prepare($sql);
-    unless ($sth && $sth->execute($chan, $target_nick_like)) {
-        $self->{logger}->log(1, "userTopSay_ctx() SQL Error: $DBI::errstr Query: $sql");
-        $sth->finish if $sth;
+    my $sth;
+    my @rows;
+    my $read_ok = eval {
+        $sth = $self->{dbh}->prepare($sql) or die "topsay_prepare\n";
+        $sth->execute($chan, $target_nick_like) or die "topsay_execute\n";
+        while (my $ref = $sth->fetchrow_hashref()) {
+            push @rows, [@{$ref}{qw/publictext event_type hit/}];
+        }
+        # DBI can return undef both at EOF and after a failed fetch.
+        die "topsay_fetch\n" if $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
+        $self->{logger}->log(1, "userTopSay_ctx() database read failed");
+        botNotice($self, $nick, "Database error.");
         return;
     }
 
@@ -523,8 +535,8 @@ SQL
         qr/^lol$/i,
     );
 
-    while (my $ref = $sth->fetchrow_hashref()) {
-        my ($text, $event_type, $count) = @{$ref}{qw/publictext event_type hit/};
+    for my $row (@rows) {
+        my ($text, $event_type, $count) = @$row;
 
         next unless defined $text;
 
@@ -581,7 +593,6 @@ SQL
     my $pfx = ($ctx->message && $ctx->message->can('prefix')) ? ($ctx->message->prefix // $nick) : $nick;
     logBot($self, $ctx->message, $dest_chan, "topsay", "$pfx topsay on $target_nick");
 
-    $sth->finish;
     return 1;
 }
 

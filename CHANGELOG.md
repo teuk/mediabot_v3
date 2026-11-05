@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1113 — Publish top sayings only after a complete read
+
+- Give a private database error if !topsay cannot prepare, execute or
+  read its query. A failed cursor cannot publish a partial ranking, a
+  false empty response or a success audit.
+- Keep successful empty results, literal nickname matching and existing
+  pagination. Test the command with successful, empty and failed reads.
+
+
 ### MB1112 — Require a complete co-presence read for compatibility
 
 - Abort !compat with the existing private database error if the co-presence
