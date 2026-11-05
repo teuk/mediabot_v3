@@ -34,6 +34,43 @@ sub decode_json ($) {
     return &JSON::MaybeXS::decode_json;
 }
 
+sub _lookup_ip {
+    my ($host) = @_;
+    return undef if $host =~ /[\x00-\x20\x7f]/;
+
+    if ($host =~ /\A[0-9]{1,3}(?:\.[0-9]{1,3}){3}\z/) {
+        my $packed = inet_aton($host);
+        return undef unless defined $packed;
+        my $ip = inet_ntoa($packed);
+        return $ip if defined($ip) && $ip =~ /\A[0-9]{1,3}(?:\.[0-9]{1,3}){3}\z/;
+        return undef;
+    }
+
+    if (index($host, ':') >= 0) {
+        my $packed = Socket::inet_pton(Socket::AF_INET6(), $host);
+        return defined($packed) ? Socket::inet_ntop(Socket::AF_INET6(), $packed) : undef;
+    }
+
+    my ($error, @answers) = Socket::getaddrinfo($host, undef, {
+        family => Socket::AF_UNSPEC(), socktype => Socket::SOCK_STREAM(),
+    });
+    return undef if $error;
+
+    # Keep the historical IPv4 preference even when the resolver orders IPv6 first.
+    my $ipv6;
+    for my $answer (@answers) {
+        if ($answer->{family} == Socket::AF_INET()) {
+            my (undef, $packed) = Socket::unpack_sockaddr_in($answer->{addr});
+            return Socket::inet_ntop(Socket::AF_INET(), $packed);
+        }
+        if (!defined($ipv6) && $answer->{family} == Socket::AF_INET6()) {
+            my (undef, $packed, $scope) = Socket::unpack_sockaddr_in6($answer->{addr});
+            $ipv6 = Socket::inet_ntop(Socket::AF_INET6(), $packed) unless $scope;
+        }
+    }
+    return $ipv6;
+}
+
 sub whereis {
     my ($self, $sHostname) = @_;
 
@@ -52,23 +89,8 @@ sub whereis {
         return 'on an Undernet hidden host ;)';
     }
 
-    my $userIP;
-
-    if ($sHostname =~ /\A\d{1,3}(?:\.\d{1,3}){3}\z/) {
-        # inet_aton validates each octet and canonicalizes the IPv4 address.
-        my $packed_ip = inet_aton($sHostname);
-        return 'N/A' unless defined $packed_ip;
-        $userIP = inet_ntoa($packed_ip);
-    }
-    else {
-        my $packed_ip = gethostbyname($sHostname);
-        return 'N/A' unless defined $packed_ip;
-        $userIP = inet_ntoa($packed_ip);
-    }
-
-    return 'N/A'
-        unless defined($userIP)
-            && $userIP =~ /\A\d{1,3}(?:\.\d{1,3}){3}\z/;
+    my $userIP = eval { _lookup_ip($sHostname) };
+    return 'N/A' unless defined $userIP;
 
     my $whereis_url = "https://api.country.is/$userIP";
     my $response = eval { HTTP::Tiny->new(timeout => 3, verify_SSL => 1)->get($whereis_url); }

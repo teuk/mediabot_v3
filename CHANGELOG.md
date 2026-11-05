@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1107 — Resolve IPv6 hosts for whereis
+
+- Look up numeric IPv6 and IPv6-only WHOIS hostnames through the existing
+  asynchronous country lookup. Canonicalize literals without DNS and keep
+  IPv4 preference when a hostname has both families.
+- Keep Undernet hidden hosts out of DNS and HTTP. Send only a numeric address
+  to country.is and retain the existing timeout, TLS and private reply path.
+- Replace source-only lookup assertions with a native fixture that exercises
+  numeric addresses, resolver results and failure paths without live traffic.
+
+
 ### MB1106 — Preserve newer passwords during lazy bcrypt migration
 
 - Let login and ident upgrade a legacy credential only if the stored bytes
