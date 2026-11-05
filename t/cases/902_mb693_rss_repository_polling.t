@@ -7,6 +7,7 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use Mediabot::RSS::Fetcher;
 use Mediabot::RSS::Repository;
 use Mediabot::RSS::Poller;
+use Mediabot::RSS::Runtime;
 use DBI;
 use DBD::SQLite::Constants qw(SQLITE_SELECT SQLITE_DENY SQLITE_OK);
 use JSON::PP;
@@ -152,6 +153,37 @@ sub _slurp902 {
     my ($p)=@_; open my $fh,'<',$p or die $!; local $/; return <$fh>;
 }
 
+{
+    package MB1111::DB;
+    sub ensure_connected { $_[0]{parent_handle} }
+    sub connect_isolated_handle { return (undef, 'private connection detail') }
+
+    package MB1111::InlineWorker;
+    sub start {
+        my ($class,%job)=@_;
+        $job{on_done}->({ok=>1,value=>$job{child}->()});
+        return bless {}, $class;
+    }
+}
+sub _runtime1111 {
+    my ($db)=@_;
+    return Mediabot::RSS::Runtime->new(
+        bot=>{_start_time=>1, db=>bless({parent_handle=>$db},'MB1111::DB')},
+        loop=>bless({},'MB1111::Loop'), pacing=>bless({},'Pacing1080'),
+        worker_class=>'MB1111::InlineWorker', max_workers=>1,
+    );
+}
+sub _failure_state1111 {
+    my ($db)=@_;
+    return $db->selectrow_arrayref(q{
+        SELECT last_poll_at,last_error_at,last_error,last_success_at,etag,last_modified
+          FROM RSS_FEED WHERE id_rss_feed=1});
+}
+sub _seed_validators1111 {
+    my ($db)=@_;
+    $db->do(q{UPDATE RSS_FEED SET etag='saved',last_modified='prior' WHERE id_rss_feed=1});
+}
+
 return sub {
     my ($assert) = @_;
 
@@ -274,6 +306,52 @@ return sub {
              [0,'repository_error',0,'1,2,3'],[1,[3],'3']]),
             'MB1080: real poller reports failed reads without pending output or paced data loss, then recovers on the next poll');
     }
+    {
+        my ($r,$db)=_fixture1080(1);
+        _seed_validators1111($db);
+        $db->do('UPDATE RSS_FEED SET enabled=0 WHERE id_rss_feed=4');
+        my $runtime=_runtime1111($db);
+        my $started=$runtime->tick;
+        my $retry=$runtime->tick;
+        my $failed=_failure_state1111($db);
+        $db->sqlite_create_function('NOW',0,sub {'2026-11-03 12:10:00'});
+        my @due=map {$_->{id_rss_feed}} @{$r->list_due_feeds(20)};
+        $assert->is($json902->encode([$started,$retry,$runtime->inflight_count,$runtime->queued_count,$failed,\@due]),
+            $json902->encode([1,0,0,0,['2026-11-03 12:00:00','2026-11-03 12:00:00',
+                'RSS poll failed (isolated_db)','old','saved','prior'],[2,1]]),
+            'MB1111: child DB failure is recorded by the parent, waits the feed interval and preserves the accepted body');
+    }
+    {
+        my @observed;
+        for my $fail_write (0,1) {
+            my ($r,$db)=_fixture1080(1);
+            _seed_validators1111($db);
+            $db->do('CREATE TABLE poll_errors (note TEXT)');
+            $db->do(q{CREATE TRIGGER count_errors AFTER UPDATE OF last_error ON RSS_FEED
+                BEGIN INSERT INTO poll_errors VALUES (NEW.last_error); END});
+            if ($fail_write) {
+                $db->do(q{CREATE TRIGGER refuse_error BEFORE UPDATE OF last_error ON RSS_FEED
+                    BEGIN SELECT RAISE(ABORT,'private writer detail'); END});
+            }
+            my $feed=$r->get_feed('#one','Alpha');
+            my $p=Mediabot::RSS::Poller->new(repo=>$r,
+                fetcher=>sub {{ok=>0,error=>'http_status',detail=>'503'}});
+            my $result=$p->poll_feed($feed);
+            $db->do('DROP TRIGGER refuse_error') if $fail_write;
+            my $runtime=_runtime1111($db);
+            my $handled=$runtime->_worker_done($feed,{ok=>1,value=>$result});
+            push @observed,[$handled,$runtime->queued_count,
+                $db->selectcol_arrayref('SELECT note FROM poll_errors'),_failure_state1111($db)];
+        }
+        my @expected;
+        for my $note ('http_status: 503','RSS poll failed (http_status)') {
+            push @expected,[0,0,[$note],['2026-11-03 12:00:00','2026-11-03 12:00:00',
+                $note,'old','saved','prior']];
+        }
+        $assert->is($json902->encode(\@observed),$json902->encode(\@expected),
+            'MB1111: record a fetch failure once, retry a refused child write and keep driver details out of the fallback');
+    }
+
 };
 
 { package Pacing1080; sub status {{active=>1}} }

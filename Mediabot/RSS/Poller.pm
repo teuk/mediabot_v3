@@ -58,14 +58,14 @@ sub poll_feed {
     if (!$res || ref($res) ne 'HASH') {
         my $detail = $@ || 'fetcher returned no result';
         my $err = { error => 'fetch_exception', detail => $detail };
-        eval { $self->repo->record_poll_error($id, _clean_error($err)) };
-        return { ok => 0, error => 'fetch_exception', detail => $detail };
+        my $recorded = eval { $self->repo->record_poll_error($id, _clean_error($err)) };
+        return { ok => 0, %$err, error_recorded => $recorded ? 1 : 0 };
     }
 
     if (!$res->{ok}) {
         my $error = _clean_error($res);
-        eval { $self->repo->record_poll_error($id, $error) };
-        return { %$res, ok => 0 };
+        my $recorded = eval { $self->repo->record_poll_error($id, $error) };
+        return { %$res, ok => 0, error_recorded => $recorded ? 1 : 0 };
     }
 
     if ($res->{not_modified}) {

@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1111 — Keep RSS retry intervals after worker-side failures
+
+- Record an unsuccessful worker result in the parent when the worker
+  could not persist its poll attempt, including isolated DB failures.
+  Use the feed's normal interval to avoid retrying on every scheduler tick.
+- Do not repeat a fetch error already recorded by the worker. The fallback
+  stores a bounded error code and preserves successful poll timestamps,
+  HTTP validators and pending articles.
+- Exercise retry timing and the parent fallback against a real SQL
+  repository with an isolated connection failure and a refused child write.
+
+
 ### MB1110 — Measure public command cooldowns by elapsed time
 
 - Use the monotonic clock for public command admission, as in private.

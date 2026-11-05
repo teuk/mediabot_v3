@@ -276,6 +276,16 @@ sub _worker_done {
 
     my $value = $result->{value};
     unless ($value->{ok}) {
+        # A worker can complete its protocol successfully without recording
+        # a poll attempt (for example if its isolated DB connection failed).
+        # Advance the same due-feed clock from the parent, without copying a
+        # raw child diagnostic into the database or recording the error twice.
+        unless ($value->{error_recorded}) {
+            my $code = $value->{error};
+            $code = 'unknown' unless defined($code) && !ref($code)
+                && $code =~ /\A[a-z][a-z0-9_]{0,47}\z/;
+            $self->_record_parent_error($id, "RSS poll failed ($code)");
+        }
         my $detail = $value->{detail} // $value->{error} // 'poll failed';
         $self->_log(2, "rss_poll_dispatch: poll failed feed=$id: $detail");
         return 0;
