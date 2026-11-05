@@ -7,9 +7,7 @@
 #          present sur plusieurs canaux partages avec le bot. Apres ce fix
 #          on ne logout que si le user n'est plus sur AUCUN autre canal.
 #
-#   - B2 : Completer le cache cleanup de purgeChannel_ctx (mb125-B1) avec
-#          les caches oublies: _quote_last_rand, _quote_bynick_last,
-#          _karma_log, _quotegame, _duel_*, _karma_brigade, _karma_cooldown.
+# MB1104: purge cleanup is exercised natively by the MB933 fixture in case 386.
 # =============================================================================
 
 use strict;
@@ -83,143 +81,7 @@ my $case = sub {
             "B1 arrays vides -> logout");
     }
 
-    # -------------------------------------------------------------------------
-    # B2: simulation du cache cleanup additionnel de purgeChannel_ctx
-    # -------------------------------------------------------------------------
-    my $purge_additional = sub {
-        my ($self, $sChannel) = @_;
-        my @keys = ($sChannel, lc($sChannel));
 
-        for my $chan_key (@keys) {
-            delete $self->{_quote_last_rand}{$chan_key}  if $self->{_quote_last_rand};
-            delete $self->{_quotegame}{$chan_key}        if $self->{_quotegame};
-            delete $self->{_karma_log}{$chan_key}        if $self->{_karma_log};
-            for my $duel (qw(_duel_stats _duel_cooldown _duel_streak _duel_last_result)) {
-                delete $self->{$duel}{$chan_key} if $self->{$duel};
-            }
-            delete $self->{_karma_cooldown}{$chan_key}   if $self->{_karma_cooldown};
-        }
-
-        if ($self->{_quote_bynick_last}) {
-            for my $bk (keys %{ $self->{_quote_bynick_last} }) {
-                my $colon = index($bk, ':');
-                next if $colon < 0;
-                my $bk_chan = substr($bk, 0, $colon);
-                delete $self->{_quote_bynick_last}{$bk}
-                    if $bk_chan eq $sChannel || lc($bk_chan) eq lc($sChannel);
-            }
-        }
-
-        if ($self->{_karma_brigade}) {
-            for my $bk (keys %{ $self->{_karma_brigade} }) {
-                my $last_colon = rindex($bk, ':');
-                next if $last_colon < 0;
-                my $bk_chan = substr($bk, $last_colon + 1);
-                delete $self->{_karma_brigade}{$bk}
-                    if $bk_chan eq $sChannel || lc($bk_chan) eq lc($sChannel);
-            }
-        }
-    };
-
-    my $bot = {
-        _quote_last_rand => {
-            '#chanA' => 42,
-            '#chanB' => 99,
-        },
-        _quote_bynick_last => {
-            '#chanA:bob'   => 1,
-            '#chanA:alice' => 2,
-            '#chanB:bob'   => 3,
-        },
-        _quotegame => {
-            '#chanA' => { active => 1 },
-            '#chanB' => { active => 0 },
-        },
-        _karma_log => {
-            '#chanA' => [{ts => 1}, {ts => 2}],
-            '#chanB' => [{ts => 3}],
-        },
-        _karma_brigade => {
-            'brigade:alice:#chanA' => { hits => [1,2,3] },
-            'brigade:dave:#chanB'  => { hits => [4] },
-            'brigade:bob:#chanA'   => { hits => [5,6] },
-        },
-        _karma_cooldown => {
-            '#chanA' => { 'bob:alice' => time() },
-            '#chanB' => { 'alice:dave' => time() },
-        },
-        _duel_stats => {
-            '#chanA' => { bob => { wins => 5 } },
-            '#chanB' => { alice => { wins => 2 } },
-        },
-        _duel_cooldown => {
-            '#chanA' => { bob => time() },
-            '#chanB' => { dave => time() },
-        },
-        _duel_streak => {
-            '#chanA' => { bob => 3 },
-            '#chanB' => { alice => 1 },
-        },
-        _duel_last_result => {
-            '#chanA' => 'bob beat alice',
-            '#chanB' => 'dave beat eric',
-        },
-    };
-
-    $purge_additional->($bot, '#chanA');
-
-    # Verifier: #chanA disparait partout, #chanB intact
-    $assert->(!exists $bot->{_quote_last_rand}{'#chanA'},
-        "B2 _quote_last_rand #chanA removed");
-    $assert->( exists $bot->{_quote_last_rand}{'#chanB'},
-        "B2 _quote_last_rand #chanB preserved");
-
-    $assert->(!exists $bot->{_quote_bynick_last}{'#chanA:bob'},
-        "B2 _quote_bynick_last #chanA:bob removed");
-    $assert->(!exists $bot->{_quote_bynick_last}{'#chanA:alice'},
-        "B2 _quote_bynick_last #chanA:alice removed");
-    $assert->( exists $bot->{_quote_bynick_last}{'#chanB:bob'},
-        "B2 _quote_bynick_last #chanB:bob preserved");
-
-    $assert->(!exists $bot->{_quotegame}{'#chanA'},
-        "B2 _quotegame #chanA removed");
-    $assert->( exists $bot->{_quotegame}{'#chanB'},
-        "B2 _quotegame #chanB preserved");
-
-    $assert->(!exists $bot->{_karma_log}{'#chanA'},
-        "B2 _karma_log #chanA removed");
-    $assert->( exists $bot->{_karma_log}{'#chanB'},
-        "B2 _karma_log #chanB preserved");
-
-    $assert->(!exists $bot->{_karma_brigade}{'brigade:alice:#chanA'},
-        "B2 _karma_brigade brigade:alice:#chanA removed");
-    $assert->(!exists $bot->{_karma_brigade}{'brigade:bob:#chanA'},
-        "B2 _karma_brigade brigade:bob:#chanA removed");
-    $assert->( exists $bot->{_karma_brigade}{'brigade:dave:#chanB'},
-        "B2 _karma_brigade brigade:dave:#chanB preserved");
-
-    $assert->(!exists $bot->{_karma_cooldown}{'#chanA'},
-        "B2 _karma_cooldown #chanA removed");
-    $assert->( exists $bot->{_karma_cooldown}{'#chanB'},
-        "B2 _karma_cooldown #chanB preserved");
-
-    for my $d (qw(_duel_stats _duel_cooldown _duel_streak _duel_last_result)) {
-        $assert->(!exists $bot->{$d}{'#chanA'},
-            "B2 $d #chanA removed");
-        $assert->( exists $bot->{$d}{'#chanB'},
-            "B2 $d #chanB preserved");
-    }
-
-    # Regression POC : si on N'avait PAS le cleanup additionnel, ces caches
-    # resteraient et un futur !chanadd #chanA reutiliserait les vieux ids.
-    {
-        my $bot2 = {
-            _quote_last_rand => { '#oldchan' => 42 },
-        };
-        # Pas de purge -> la cle reste
-        $assert->(exists $bot2->{_quote_last_rand}{'#oldchan'},
-            "B2 REGRESSION-POC: sans purge, cle survit (proves the bug)");
-    }
 };
 
 # ---------------------------------------------------------------------------

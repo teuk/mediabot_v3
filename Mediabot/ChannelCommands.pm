@@ -941,6 +941,18 @@ sub purgeChannel_ctx {
         delete $self->{_cmd_cooldown_conf}{$chan_key}  if $self->{_cmd_cooldown_conf};
     }
 
+    # Command admission stores timestamps as "command:channel", unlike the
+    # channel-keyed overrides above. Retire every command for this exact
+    # channel identity only after the purge transaction has committed.
+    if (my $cooldowns = $self->{_cmd_cooldown}) {
+        for my $cooldown_key (keys %$cooldowns) {
+            my $colon = index($cooldown_key, ':');
+            next if $colon < 0;
+            delete $cooldowns->{$cooldown_key}
+                if lc(substr($cooldown_key, $colon + 1)) eq $key;
+        }
+    }
+
     if ($self->{_chanset_cache}) {
         for my $ck (keys %{ $self->{_chanset_cache} }) {
             delete $self->{_chanset_cache}{$ck}

@@ -95,6 +95,11 @@ sub setup {
     for my $cache (qw(_badword_cache _af_params _chan_flood _chan_flood_conf _cmd_cooldown _cmd_cooldown_conf _quote_last_rand _quotegame _karma_log _duel_stats _duel_cooldown _duel_streak _duel_last_result _karma_cooldown)) {
         $bot->{$cache}={'#MiXeD'=>1,'#mixed'=>1,'#other'=>2};
     }
+    $bot->{_cmd_cooldown}{'ai:#mixed'}=101;
+    $bot->{_cmd_cooldown}{'actualites:#MiXeD'}=102;
+    $bot->{_cmd_cooldown}{'custom:#MIXED'}=103;
+    $bot->{_cmd_cooldown}{'ai:#other'}=201;
+    $bot->{_cmd_cooldown}{'ai:#mixed-other'}=202;
     $bot->{_chanset_cache}={"#MiXeD\0a"=>1,"#mixed\0b"=>1,"#other\0c"=>2};
     $bot->{_uchan_level_cache}={"1\0#mixed"=>1,"2\0#other"=>2};
     $bot->{_quote_bynick_last}={'#MiXeD:One'=>1,'#mixed:one'=>1,'#other:Other'=>2};
@@ -212,7 +217,51 @@ sub run_checks {
                 check(!exists($b->{channels}{'#mixed'}) && exists($b->{channels}{'#other'}) && !exists($b->{_badword_cache}{'#mixed'}) && $b->{_badword_cache}{'#other'}==2,'cache scope');
                 check(!exists($b->{channel_nicklist_timers}{'#mixed'}) && exists($b->{channel_nicklist_timers}{'#other'}),'timer scope');
                 check(@{$b->{irc}{sent}}==1 && $b->{irc}{sent}[0][0] eq 'PART' && $r->{wire}[0][1] eq 'Channel #MiXeD purged.','success delivery changed');
+                my $expected={channels=>['#other'],timers=>{'#other'=>0},
+                    map {$_=>{'#other'=>2}} qw(_badword_cache _af_params _chan_flood _chan_flood_conf _cmd_cooldown _cmd_cooldown_conf _quote_last_rand _quotegame _karma_log _duel_stats _duel_cooldown _duel_streak _duel_last_result _karma_cooldown)};
+                $expected->{hChannelsNicks}={'#other'=>{Other=>1}};
+                $expected->{_cmd_cooldown}={'#other'=>2,'ai:#other'=>201,'ai:#mixed-other'=>202};
+                $expected->{_chanset_cache}={"#other\0c"=>2};
+                $expected->{_uchan_level_cache}={"2\0#other"=>2};
+                $expected->{_quote_bynick_last}={'#other:Other'=>2};
+                $expected->{_karma_brigade}={'brigade:Other:#other'=>2};
+                $expected->{_ignore_cache}=undef;
+                check(cache_state($b) eq $json->encode($expected),'committed purge retained target cache data or changed another channel');
                 check(peer_state($dir) eq db_state($db),'purge not committed');
+            }
+        });
+        $group->('purge releases native cooldowns for re-registration without resetting other channels or private admission',sub {
+            for my $channel ('#MiXeD','#mixed','#MIXED','#m.i+x[ed]','#m:ixed') {
+                for my $imported (0,1) {
+                    my ($b,$db)=setup(0);
+                    $db->do('UPDATE CHANNEL SET name=? WHERE id_channel=7',undef,$channel);
+                    my $object=delete $b->{channels}{'#mixed'};$b->{channels}{lc $channel}=$object;
+                    $b->{_cmd_cooldown_conf}={};
+                    $b->{_cmd_cooldown}={'legacy'=>9};
+                    $b->{_private_cmd_cooldown}={'ai:operator'=>12345};
+                    for my $command (qw(ai news custom)) {
+                        check(Mediabot::Helpers::checkCmdCooldown($b,$channel,$command,3600)==0,'first command refused');
+                        check(Mediabot::Helpers::checkCmdCooldown($b,$channel,$command,3600)>0,'native command reservation absent');
+                    }
+                    for my $other ('#other',$channel.'-other','#prefix'.$channel,'#prefix:'.$channel) {
+                        check(Mediabot::Helpers::checkCmdCooldown($b,$other,'ai',3600)==0,'control reservation refused');
+                    }
+                    $b->{_cmd_cooldown}{'old:'.uc($channel)}=111;
+                    my %expected=map {$_=>$b->{_cmd_cooldown}{$_}} ('legacy','ai:#other',
+                        'ai:'.lc($channel.'-other'),'ai:'.lc('#prefix'.$channel),'ai:'.lc('#prefix:'.$channel));
+                    my $r=invoke($b,'purge',args=>[$channel],imported=>$imported);
+                    check(!$r->{error} && $r->{wire}[0][1] eq "Channel $channel purged.",'native purge refused');
+                    check($json->encode($b->{_cmd_cooldown}) eq $json->encode(\%expected),'cooldown key scope changed');
+                    check($json->encode($b->{_private_cmd_cooldown}) eq '{"ai:operator":12345}','private state reset');
+                    # Re-register the same channel name, then enter the real admission guard.
+                    $db->do('INSERT INTO CHANNEL VALUES(7,?,1,?,?,?)',undef,$channel,'+nt','Re-added','');
+                    $b->{channels}{lc $channel}=$object;
+                    for my $command (qw(ai news custom)) {
+                        check(Mediabot::Helpers::checkCmdCooldown($b,$channel,$command,3600)==0,'re-added channel retained an old cooldown');
+                        check(Mediabot::Helpers::checkCmdCooldown($b,$channel,$command,3600)>0,'re-added channel failed to acquire a new cooldown');
+                    }
+                    check(Mediabot::Helpers::checkCmdCooldown($b,'#other','ai',3600)>0,'other channel lost its cooldown');
+                }
             }
         });
         $group->('archive, cascade and deferred commit failures preserve rows, caches and IRC membership',sub {

@@ -8,19 +8,6 @@ my $case = sub {
     my ($assert) = @_;
     my $root = File::Spec->catdir($Bin, '..', '..');
 
-    my $cc_file = File::Spec->catfile($root, 'Mediabot', 'ChannelCommands.pm');
-    open my $cfh, '<', $cc_file or do { $assert->(0, "cannot open ChannelCommands.pm: $!"); return; };
-    my $cc = do { local $/; <$cfh> };
-    close $cfh;
-
-    $assert->($cc =~ /purgeChannel_ctx\(\): cleared runtime caches/, 'purgeChannel_ctx logs runtime cache cleanup');
-
-    for my $cache (qw(_badword_cache _af_params _chan_flood _chan_flood_conf _cmd_cooldown _cmd_cooldown_conf _chanset_cache _uchan_level_cache)) {
-        $assert->($cc =~ /\Q$cache\E/, "purgeChannel_ctx references $cache");
-    }
-
-    $assert->($cc =~ /gethChannelNicks/ && $cc =~ /sethChannelNicks/, 'purgeChannel_ctx clears in-memory channel nicklist');
-
     my $pl_file = File::Spec->catfile($root, 'mediabot.pl');
     open my $pfh, '<', $pl_file or do { $assert->(0, "cannot open mediabot.pl: $!"); return; };
     my $pl = do { local $/; <$pfh> };
@@ -44,7 +31,7 @@ my $case = sub {
     my $raw = do { local $/; <$probe> };
     my $closed = close $probe;
     my $results = eval { JSON::PP->new->utf8->decode($raw // '') };
-    $assert->($closed && ref($results) eq 'ARRAY' && @$results == 4,
+    $assert->($closed && ref($results) eq 'ARRAY' && @$results == 5,
         'MB933: native channel purge probe completed');
     for my $result (@{ref($results) eq 'ARRAY' ? $results : []}) {
         $assert->($result->{ok}, 'MB933: ' . $result->{name}

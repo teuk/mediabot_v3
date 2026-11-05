@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1104 — Retire command cooldowns with purged channels
+
+- Clear public command cooldown timestamps by their actual command:channel
+  identity after a channel purge commits. A re-added channel can start with
+  fresh admission instead of inheriting reservations from its deleted state.
+- Match the whole case-normalized channel after the first separator, retaining
+  other channels, similar names, private cooldowns and existing rollback rules.
+- Extend the existing native SQLite purge fixture with complete cache-state
+  checks and ten purge/re-registration cycles through real cooldown admission.
+  Remove ten source pins and 23 copied cleanup assertions now covered natively;
+  one new grouped check replaces them: 32 fewer assertions, no new test process.
+
+
 ### MB1103 — Never turn an invalid timed ban into a permanent ban
 
 - Bound temporary bans to 2,147,483,647 whole seconds. Compare normalized
