@@ -1,5 +1,19 @@
 ## [Unreleased] — 3.8dev
 
+### MB1106 — Preserve newer passwords during lazy bcrypt migration
+
+- Let login and ident upgrade a legacy credential only if the stored bytes
+  still match the value that was verified. A password reset committed before
+  the upgrade wins, even when the two values compare equal under the column
+  collation.
+- Treat a successful SQL statement with zero affected rows as a skipped
+  upgrade. Keep driver details out of migration logs and preserve the
+  authentication outcome of the already verified request.
+- Exercise both paths with two real SQLite connections and bcrypt. Replace
+  duplicate source pins with tests for normal migration, a concurrent update,
+  rejected credentials and a failed write.
+
+
 ### MB1105 — Bound the lifetime of metrics HTTP connections
 
 - Close metrics HTTP connections ten seconds after acceptance if the client

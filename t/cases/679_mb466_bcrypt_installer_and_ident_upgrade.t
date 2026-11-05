@@ -1,113 +1,97 @@
-# t/cases/679_mb466_bcrypt_installer_and_ident_upgrade.t
-# =============================================================================
-# mb466 — Complétion de la migration bcrypt lazy (plan §2.5, direction 3.3).
-#
-# Deux défauts corrigés au-dessus de mb465 :
-#   B1. install/cpan_install.sh n'installait PAS Crypt::Bcrypt. Sur une fresh
-#       install (jalon RC B1), le module manquait, $HAVE_BCRYPT valait 0, et
-#       TOUS les nouveaux mots de passe retombaient silencieusement en
-#       double-SHA1 — mb465 devenait inerte là où on veut le tester.
-#   B2. Le chemin `ident` (checkAuthByUser) vérifiait en multi-format (mb465-B6)
-#       mais ne migrait JAMAIS les hashes legacy, contrairement au chemin
-#       `login` (verify_credentials). La logique de re-hash est désormais
-#       factorisée dans Auth::maybe_upgrade_hash() et appelée par les DEUX
-#       chemins.
-#
-# La sandbox n'a pas Crypt::Bcrypt : on exécute donc réellement le contrat de
-# gating de maybe_upgrade_hash (qui court-circuite proprement sans le module et
-# sans DB), et on vérifie le câblage par scan de source.
-# =============================================================================
-
 use strict;
 use warnings;
-BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
+use Test::More;
+use Digest::SHA qw(sha1 sha1_hex);
 use File::Spec;
+use File::Temp qw(tempdir);
+use Mediabot::Auth;
+use Mediabot::LoginCommands ();
 
-sub _slurp_679 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; local $/; <$fh> }
+{
+    open my $fh, '<', 'install/cpan_install.sh' or die $!;
+    local $/;
+    my ($modules) = <$fh> =~ /PERL_MODULES=\((.*?)\)/s;
+    like($modules // '', qr/"Crypt::Bcrypt"/, 'CPAN installer provisions bcrypt');
+}
 
-return sub {
-    my ($assert) = @_;
+SKIP: {
+    skip 'SQLite and bcrypt required for the native migration fixture', 8
+        unless eval { require DBI; require DBD::SQLite; require Crypt::Bcrypt; 1 };
 
-    # -------------------------------------------------------------------------
-    # MB466-B1 — Crypt::Bcrypt est dans le programme d'installation CPAN
-    # -------------------------------------------------------------------------
-    my $inst = _slurp_679(File::Spec->catfile('.', 'install', 'cpan_install.sh'));
+    my $dir = tempdir(CLEANUP => 1);
+    my $dsn = 'dbi:SQLite:dbname=' . File::Spec->catfile($dir, 'auth.sqlite');
+    my $opts = { RaiseError => 1, PrintError => 0 };
+    my $dbh = DBI->connect($dsn, '', '', $opts);
+    my $writer = DBI->connect($dsn, '', '', $opts);
+    $dbh->do('CREATE TABLE USER (id_user INTEGER PRIMARY KEY, nickname TEXT, password TEXT COLLATE NOCASE)');
+    $dbh->do('CREATE TABLE USER_HOSTMASK (id_user_hostmask INTEGER PRIMARY KEY, id_user INTEGER, hostmask TEXT)');
+    $dbh->do('INSERT INTO USER (id_user, nickname) VALUES (1, ?)', undef, 'fixture');
 
-    # Le module doit figurer dans le tableau PERL_MODULES (entrée entre guillemets).
-    $assert->like($inst, qr/"Crypt::Bcrypt"/,
-        'cpan_install.sh: Crypt::Bcrypt présent dans PERL_MODULES (mb466-B1)');
+    my $log = bless [], 'MB466Log';
+    my $auth = Mediabot::Auth->new(dbh => $dbh, logger => $log);
+    my $bot = { dbh => $dbh, auth => $auth, logger => $log };
+    my $message = bless {}, 'MB466Message';
+    my $seed = sub { $writer->do('UPDATE USER SET password = ? WHERE id_user = 1', undef, $_[0]) };
+    my $stored = sub { $dbh->selectrow_array('SELECT password FROM USER WHERE id_user = 1') };
+    my $login = sub { $auth->verify_credentials(1, 'caller', $_[0]) };
+    my $ident = sub { [Mediabot::LoginCommands::checkAuthByUser($bot, $message, 'fixture', $_[0])] };
+    my $migrated = sub { scalar grep { /password hash upgraded to bcrypt/ } @$log };
+    my $rehash = sub { Crypt::Bcrypt::bcrypt($_[0], '2b', 4, '0123456789abcdef') };
+    my ($race, $hash_calls);
+    no warnings 'redefine';
+    local *Mediabot::Helpers::make_password_hash = sub {
+        ++$hash_calls;
+        $race->() if $race;
+        return $rehash->($_[0]);
+    };
 
-    # Garde-fou : il doit être DANS le tableau PERL_MODULES, pas ailleurs.
-    my ($modules_block) = $inst =~ /PERL_MODULES=\((.*?)\)/s;
-    $modules_block //= '';
-    $assert->like($modules_block, qr/"Crypt::Bcrypt"/,
-        'cpan_install.sh: l\'entrée est bien dans le tableau PERL_MODULES');
+    my $legacy = '*' . uc(sha1_hex(sha1('legacy-fixture')));
+    $seed->($legacy);
+    ok($login->('legacy-fixture') && Crypt::Bcrypt::bcrypt_check('legacy-fixture', $stored->())
+            && $migrated->() == 1,
+        'login upgrades an unchanged MySQL hash and confirms the write');
+    my $calls = $hash_calls;
+    ok($login->('legacy-fixture') && $hash_calls == $calls,
+        'login does not rehash an account that already uses bcrypt');
 
-    # -------------------------------------------------------------------------
-    # MB466-B2 — maybe_upgrade_hash existe et respecte son contrat de gating
-    # -------------------------------------------------------------------------
-    my $auth_ok = eval { require Mediabot::Auth; 1 };
-    $assert->ok($auth_ok, 'Mediabot::Auth se charge');
+    $seed->('legacy-ident');
+    is_deeply($ident->('legacy-ident'), [1, 0], 'ident inserts the expected hostmask');
+    ok(Crypt::Bcrypt::bcrypt_check('legacy-ident', $stored->())
+            && $migrated->() == 2 && join(',', @{$ident->('legacy-ident')}) eq '1,1',
+        'ident upgrades the verified value and preserves duplicate hostmask behavior');
 
-    if ($auth_ok) {
-        $assert->ok(Mediabot::Auth->can('maybe_upgrade_hash'),
-            'Auth::maybe_upgrade_hash défini (helper partagé mb466-B2)');
+    $seed->($legacy);
+    $calls = $hash_calls;
+    ok(!$login->('incorrect-fixture') && join(',', @{$ident->('incorrect-fixture')}) eq '0,0'
+            && $hash_calls == $calls && $stored->() eq $legacy,
+        'failed credentials never attempt a lazy write');
 
-        # Objet Auth minimal : pas de dbh -> l'upgrade doit court-circuiter à 0
-        # sans jamais toucher la base ni mourir.
-        my $auth = bless { logger => undef, dbh => undef }, 'Mediabot::Auth';
+    my $before = $migrated->();
+    my $reset = $rehash->('reset-fixture');
+    $race = sub { $seed->($reset) };
+    ok($login->('legacy-fixture') && $stored->() eq $reset && $migrated->() == $before,
+        'login cannot overwrite a concurrent password reset or report an upgrade');
 
-        # Sans Crypt::Bcrypt (sandbox) OU sans dbh : retour 0, pas d'exception.
-        my $r1 = eval { $auth->maybe_upgrade_hash(42, 's3cret', 'mysql_password_hash', 'bob') };
-        $assert->ok(!$@, 'maybe_upgrade_hash ne meurt jamais (best-effort)' . ($@ ? " ($@)" : ''));
-        $assert->is($r1, 0, 'sans dbh/bcrypt: aucun upgrade, retour 0');
+    $before = $migrated->();
+    $seed->('case-fixture');
+    $race = sub { $seed->('CASE-fixture') };
+    ok(join(',', @{$ident->('case-fixture')}) eq '1,1'
+            && $stored->() eq 'CASE-fixture' && $migrated->() == $before,
+        'ident refuses a stale value even under a case-insensitive password collation');
 
-        # $why == 'bcrypt' : rien à upgrader, court-circuit immédiat (retour 0)
-        # même si un jour un dbh est présent — on teste la garde en amont.
-        my $r2 = eval { $auth->maybe_upgrade_hash(42, 's3cret', 'bcrypt', 'bob') };
-        $assert->is($r2, 0, 'why=bcrypt: pas de re-hash inutile (retour 0)');
+    $seed->($legacy);
+    $race = undef;
+    $before = $migrated->();
+    $dbh->do(q{CREATE TRIGGER refuse_upgrade BEFORE UPDATE OF password ON USER
+        BEGIN SELECT RAISE(ABORT, 'private-fixture-driver-detail'); END});
+    ok($login->('legacy-fixture') && $stored->() eq $legacy && $migrated->() == $before
+            && !(grep { /private-fixture-driver-detail/ } @$log),
+        'database failure leaves verified login and stored hash intact without raw driver details');
+}
 
-        # $why undef : garde défensive, pas d'exception.
-        my $r3 = eval { $auth->maybe_upgrade_hash(42, 's3cret', undef, 'bob') };
-        $assert->ok(!$@, 'why undef: pas d\'exception');
-        $assert->is($r3, 0, 'why undef: retour 0');
-    }
+done_testing;
 
-    # -------------------------------------------------------------------------
-    # MB466-B2 — câblage : les DEUX chemins appellent le helper partagé
-    # -------------------------------------------------------------------------
-    my $asrc = _slurp_679(File::Spec->catfile('.', 'Mediabot', 'Auth.pm'));
-
-    my ($mu) = $asrc =~ /(sub maybe_upgrade_hash \{.*?\n\}\n)/s; $mu //= '';
-    $assert->like($mu, qr/\$HAVE_BCRYPT/,
-        'maybe_upgrade_hash: gated sur la disponibilité de Crypt::Bcrypt');
-    $assert->like($mu, qr/\$why ne 'bcrypt'/,
-        'maybe_upgrade_hash: ne re-hash que les hashes NON-bcrypt');
-    $assert->like($mu, qr/UPDATE USER SET password = \? WHERE id_user = \?/,
-        'maybe_upgrade_hash: UPDATE paramétré (aucun changement de schéma)');
-    $assert->like($mu, qr/eval \{/,
-        'maybe_upgrade_hash: best-effort sous eval');
-
-    # Chemin `login` : verify_credentials délègue.
-    my ($vc) = $asrc =~ /(sub verify_credentials \{.*?\n\}\n)/s; $vc //= '';
-    $assert->like($vc, qr/maybe_upgrade_hash\(/,
-        'verify_credentials (login): appelle maybe_upgrade_hash');
-    # Le login ne doit jamais être altéré par l'upgrade.
-    $assert->like($vc, qr/\$ok \? 1 : 0;\n\}/s,
-        'verify_credentials: le résultat du login reste best-effort-safe');
-
-    # Chemin `ident` : checkAuthByUser délègue aussi (nouveauté mb466).
-    my $lsrc = _slurp_679(File::Spec->catfile('.', 'Mediabot', 'LoginCommands.pm'));
-    my ($cabu) = $lsrc =~ /(sub checkAuthByUser \{.*?\n\}\n)/s; $cabu //= '';
-    $assert->like($cabu, qr/maybe_upgrade_hash\(/,
-        'checkAuthByUser (ident): appelle maybe_upgrade_hash');
-    # Il faut le $why du matcher pour gater : la capture doit être en liste.
-    $assert->like($cabu, qr/my \(\$pw_ok, \$pw_why\) = eval \{ Mediabot::Auth::password_matches\(/,
-        'checkAuthByUser: capture ($pw_ok,$pw_why) pour gater l\'upgrade');
-    # L'upgrade ne doit se faire qu'APRÈS le contrôle de succès.
-    $assert->like($cabu, qr/return \(0, 0\) unless \$pw_ok;.*?maybe_upgrade_hash\(/s,
-        'checkAuthByUser: upgrade seulement après un ident réussi');
-    # Best-effort : appel sous eval, ne casse pas l'ident.
-    $assert->like($cabu, qr/eval \{ \$self->\{auth\}->maybe_upgrade_hash\(/,
-        'checkAuthByUser: upgrade best-effort sous eval');
-};
+package MB466Log;
+sub log { push @{$_[0]}, $_[2]; return }
+package MB466Message;
+sub prefix { 'caller!~ident@example.invalid' }

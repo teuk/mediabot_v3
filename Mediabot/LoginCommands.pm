@@ -699,7 +699,7 @@ sub checkAuthByUser {
     # for deterministic legacy hashes — it was already broken for accounts
     # stored in bcrypt, and would break for everyone once make_password_hash
     # emits salted bcrypt (mb465-B1).
-    my $sCheckAuthQuery = "SELECT id_user, password FROM USER WHERE nickname = ?";
+    my $sCheckAuthQuery = "SELECT id_user, password, HEX(password) AS password_hex FROM USER WHERE nickname = ?";
     my $sth = $dbh->prepare($sCheckAuthQuery);
 
     unless ($sth) {
@@ -740,7 +740,7 @@ sub checkAuthByUser {
     # user who only ever idents still ends up stored in bcrypt. Best-effort:
     # maybe_upgrade_hash() swallows and logs any error and never dies.
     if ($self->{auth} && $self->{auth}->can('maybe_upgrade_hash')) {
-        eval { $self->{auth}->maybe_upgrade_hash($id_user, $sPassword, $pw_why, $sUserHandle) };
+        eval { $self->{auth}->maybe_upgrade_hash($id_user, $sPassword, $pw_why, $sUserHandle, $ref->{password_hex}) };
     }
 
     my $sHostmask = getMessageHostmask($self, $message);

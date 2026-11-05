@@ -136,12 +136,6 @@ return sub {
 
     $assert->like(
         $auth,
-        qr/SELECT id_user, nickname, password FROM USER WHERE/,
-        'Mediabot::Auth still owns password lookup for real credential checks'
-    );
-
-    $assert->like(
-        $auth,
         qr/sub verify_credentials/,
         'Mediabot::Auth::verify_credentials remains the password-checking path'
     );

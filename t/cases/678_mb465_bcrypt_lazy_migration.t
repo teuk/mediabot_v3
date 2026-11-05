@@ -104,40 +104,12 @@ return sub {
     # -------------------------------------------------------------------------
     # 3. Câblages (scan de source)
     # -------------------------------------------------------------------------
-    my $asrc = _slurp_678(File::Spec->catfile('.', 'Mediabot', 'Auth.pm'));
-    $assert->like($asrc, qr/sub password_matches \{/,
-        'Auth: wrapper public password_matches présent (mb465-B2)');
-    my ($vc) = $asrc =~ /(sub verify_credentials \{.*?\n\}\n)/s; $vc //= '';
-    # mb466-B2: la logique de re-hash est factorisée dans maybe_upgrade_hash ;
-    # verify_credentials se contente de l'appeler après un login réussi.
-    $assert->like($vc, qr/maybe_upgrade_hash\(/,
-        'verify_credentials: délègue le re-hash lazy à maybe_upgrade_hash (mb466-B2)');
-    $assert->like($vc, qr/if \(\$ok\) \{/,
-        're-hash seulement après un login réussi');
-    $assert->like($vc, qr/\$ok \? 1 : 0;\n\}/s,
-        'le résultat du login reste inchangé par le re-hash (best-effort)');
-
-    # Le helper factorisé porte désormais le contrat B3 (gating + UPDATE).
-    my ($mu) = $asrc =~ /(sub maybe_upgrade_hash \{.*?\n\}\n)/s; $mu //= '';
-    $assert->like($mu, qr/\$why ne 'bcrypt'/,
-        'maybe_upgrade_hash: re-hash seulement pour un hash NON-bcrypt');
-    $assert->like($mu, qr/UPDATE USER SET password = \? WHERE id_user = \?/,
-        'maybe_upgrade_hash: UPDATE paramétré du hash');
-
     my $lsrc = _slurp_678(File::Spec->catfile('.', 'Mediabot', 'LoginCommands.pm'));
     my ($up) = $lsrc =~ /(sub userPass \{.*?\n\}\n)/s; $up //= '';
     $assert->like($up, qr/Mediabot::Auth::password_matches\(\$old_password, \$stored_hash\)/,
         'userPass: ancien mot de passe vérifié multi-format (mb465-B4)');
     $assert->unlike($up, qr/\$stored_hash eq \$old_hash/,
         'userPass: l\'égalité de re-hash (cassée avec bcrypt) est supprimée');
-
-    my ($cabu) = $lsrc =~ /(sub checkAuthByUser \{.*?\n\}\n)/s; $cabu //= '';
-    $assert->like($cabu, qr/SELECT id_user, password FROM USER WHERE nickname = \?/,
-        'checkAuthByUser: lit le hash stocké (mb465-B6)');
-    $assert->like($cabu, qr/Mediabot::Auth::password_matches\(\$sPassword/,
-        'checkAuthByUser: vérifie multi-format');
-    $assert->unlike($cabu, qr/AND password = \?/,
-        'checkAuthByUser: l\'égalité SQL (cassée avec bcrypt) est supprimée');
 
     my ($ca) = $lsrc =~ /(sub checkAuth \{.*?\n\}\n)/s; $ca //= '';
     $assert->like($ca, qr/Digest::SHA::sha1_hex\(Digest::SHA::sha1\(/,

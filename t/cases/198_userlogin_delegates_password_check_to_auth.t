@@ -138,9 +138,4 @@ return sub {
         'Mediabot::Auth::verify_credentials exists'
     );
 
-    $assert->like(
-        $auth,
-        qr/SELECT id_user, nickname, password FROM USER WHERE/,
-        'Mediabot::Auth remains the password lookup owner'
-    );
 };

@@ -73,11 +73,11 @@ sub verify_credentials {
     # Determine lookup key: numeric = id_user, otherwise nickname.
     my ($sql, $val);
     if ($user_id_or_nick =~ /^\d+$/) {
-        $sql = "SELECT id_user, nickname, password FROM USER WHERE id_user = ?";
+        $sql = "SELECT id_user, nickname, password, HEX(password) AS password_hex FROM USER WHERE id_user = ?";
         $val = $user_id_or_nick;
     }
     else {
-        $sql = "SELECT id_user, nickname, password FROM USER WHERE nickname = ?";
+        $sql = "SELECT id_user, nickname, password, HEX(password) AS password_hex FROM USER WHERE nickname = ?";
         $val = $user_id_or_nick;
     }
 
@@ -121,7 +121,7 @@ sub verify_credentials {
     # Best-effort and shared with the `ident` path (checkAuthByUser) via
     # maybe_upgrade_hash() so both routes migrate consistently.
     if ($ok) {
-        $self->maybe_upgrade_hash($uid, $clear, $why, $nick);
+        $self->maybe_upgrade_hash($uid, $clear, $why, $nick, $row->{password_hex});
     }
 
     return $ok ? 1 : 0;
@@ -781,7 +781,7 @@ sub password_matches {
 }
 
 # ---------------------------------------------------------------------------
-# maybe_upgrade_hash($self, $uid, $clear, $why, $nick)
+# maybe_upgrade_hash($self, $uid, $clear, $why, $nick, $verified_hex)
 # mb466-B2 (bcrypt lazy, plan §2.5): shared lazy re-hash helper. After a
 # SUCCESSFUL verification against a LEGACY hash, replace the stored password
 # with a fresh bcrypt one. Factored out of verify_credentials (mb465-B3) so the
@@ -792,37 +792,41 @@ sub password_matches {
 #     (nothing to upgrade for an account already stored in bcrypt);
 #   - best-effort: any error is caught and logged, NEVER propagated — the caller
 #     has already authenticated the user, so a failed upgrade must not matter;
+#   - only writes if the password still has the bytes read alongside it;
 #   - no schema change: the hash prefix identifies the algorithm.
 # Returns 1 if the row was upgraded, 0 otherwise (skipped or failed).
 # ---------------------------------------------------------------------------
 sub maybe_upgrade_hash {
-    my ($self, $uid, $clear, $why, $nick) = @_;
+    my ($self, $uid, $clear, $why, $nick, $verified_hex) = @_;
     # mb466-B2: shared lazy bcrypt upgrade (login + ident).
 
     return 0 unless $HAVE_BCRYPT;
     return 0 unless defined $why && $why ne 'bcrypt';
     return 0 unless defined $uid && $self->{dbh};
+    return 0 unless defined($verified_hex) && length($verified_hex);
 
     my $upgraded = eval {
         require Mediabot::Helpers;
         my $new_hash = Mediabot::Helpers::make_password_hash($clear);
         if (defined $new_hash && $new_hash =~ /^\$2[aby]\$/) {
-            my $sth_up = $self->{dbh}->prepare(
-                'UPDATE USER SET password = ? WHERE id_user = ?');
-            if ($sth_up && $sth_up->execute($new_hash, $uid)) {
-                $sth_up->finish;
-                1;
-            } else {
-                $sth_up->finish if $sth_up;
-                0;
-            }
+            # Compare bytes as read by the database, independent of the
+            # password column's collation and client-side character decoding.
+            my $dbh = $self->{dbh};
+            local $dbh->{PrintError} = 0;
+            my $sth_up = $dbh->prepare(
+                'UPDATE USER SET password = ? WHERE id_user = ? AND HEX(password) = ?')
+                or die "password update prepare failed\n";
+            my $affected = $sth_up->execute($new_hash, $uid, $verified_hex);
+            $sth_up->finish;
+            die "password update failed\n" unless defined $affected;
+            $affected == 1;
         } else {
             0;   # bcrypt indisponible côté Helpers -> on réessaiera au prochain login
         }
     };
 
     if ($@) {
-        $self->_log(2, "maybe_upgrade_hash: lazy bcrypt upgrade failed for id=$uid: $@");
+        $self->_log(2, "maybe_upgrade_hash: lazy bcrypt upgrade failed for id=$uid");
         return 0;
     }
     elsif ($upgraded) {
