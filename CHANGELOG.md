@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1114 — Let only the current database timer write to IRC
+
+- Before writing, a reloaded timer verifies that it is still the exact
+  handle registered for its name. Callbacks from staged, rolled-back or
+  replaced timers stay silent, even when a replacement uses the same name.
+- Keep the active timers running if a reload fails. Exercise actual
+  IO::Async timer events with a private SQLite database and an injected
+  native start failure.
+
+
 ### MB1113 — Publish top sayings only after a complete read
 
 - Give a private database error if !topsay cannot prepare, execute or

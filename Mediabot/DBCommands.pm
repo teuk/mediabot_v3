@@ -148,6 +148,8 @@ sub onStartTimers {
     # timers before the DB load succeeds, otherwise a transient DB error during
     # reconnect would silently disable all DB-backed timers.
     my %hTimers;
+    my $weak_self = $self;
+    weaken($weak_self);
     my $sQuery = "SELECT id_timers, name, duration, command FROM TIMERS";
     my ($sth, $i);
     my $phase = 'prepare';
@@ -175,16 +177,26 @@ sub onStartTimers {
             $self->{logger}->log(1, "Timer $name - id : $id_timers - every $duration $sSecondText - command $command")
                 if $self->{logger};
 
+            my $weak_timer;
             my $timer = IO::Async::Timer::Periodic->new(
                 interval => $duration,
                 on_tick  => sub {
-                    $self->{logger}->log(4, "Timer every $duration seconds : $command")
-                        if $self->{logger};
+                    # Only the published timer may write, even if a queued
+                    # callback survives rollback, removal or replacement.
+                    my $bot = $weak_self or return;
+                    my $owned = $weak_timer or return;
+                    my $current = $bot->{hTimers}{$name} or return;
+                    return unless refaddr($current) == refaddr($owned);
+
+                    $bot->{logger}->log(4, "Timer every $duration seconds : $command")
+                        if $bot->{logger};
 
                     # mb369-B1: écriture via le helper qui refuse CR/LF/NUL.
-                    $self->_timer_irc_write($command, $name);
+                    $bot->_timer_irc_write($command, $name);
                 },
             );
+            $weak_timer = $timer;
+            weaken($weak_timer);
 
             # mb164-B1: stage the fresh timer object only. Do not add/start it yet.
             # We only publish the fresh timer set after the whole reload path has

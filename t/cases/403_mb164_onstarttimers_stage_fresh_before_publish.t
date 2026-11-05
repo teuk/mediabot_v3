@@ -239,6 +239,55 @@ for my $kind (qw(normal empty)) {
 for my $kind (qw(normal disconnected controls add_command)) {
     $out{public}{$kind}=run(entry=>'facade',public=>1,$kind eq 'normal'?():($kind=>1));
 }
+{
+    # Exercise the actual on_tick event on retained Periodic objects, even
+    # after removal. No sleep and no fake implementation of the callback.
+    my $loop=IO::Async::Loop->really_new;
+    my $db=DBI->connect('dbi:SQLite:dbname=:memory:','','',{
+        RaiseError=>1,PrintError=>0,AutoCommit=>1});
+    $db->do('CREATE TABLE TIMERS(id_timers INTEGER PRIMARY KEY,name,duration,command)');
+    $db->do("INSERT INTO TIMERS VALUES(1,'alpha',11,'PRIVMSG #test :original')");
+    my $irc=bless {connected=>1,wire=>[]},'MB925::IRC';
+    my $bot=bless {loop=>$loop,dbh=>$db,irc=>$irc,hTimers=>{}},'Mediabot';
+    my ($attempted,$fail_start);
+    no warnings 'redefine';
+    local *IO::Async::Timer::Periodic::start=sub {
+        my ($t)=@_;
+        my $ok=$start->($t);
+        $attempted=$t;
+        $t->invoke_event('on_tick');
+        die "injected start failure\n" if $fail_start;
+        return $ok;
+    };
+    my $initial=$bot->onStartTimers;
+    my $original=$bot->{hTimers}{alpha};
+    my @before_publish=splice @{$irc->{wire}};
+    $original->invoke_event('on_tick');
+    my @current=splice @{$irc->{wire}};
+
+    $db->do("UPDATE TIMERS SET command='PRIVMSG #test :replacement'");
+    $fail_start=1;
+    my $failed=$bot->onStartTimers;
+    $attempted->invoke_event('on_tick');
+    $original->invoke_event('on_tick');
+    my @rollback=splice @{$irc->{wire}};
+
+    $fail_start=0;
+    my $reloaded=$bot->onStartTimers;
+    my $replacement=$bot->{hTimers}{alpha};
+    $original->invoke_event('on_tick');
+    $replacement->invoke_event('on_tick');
+    my @reload=splice @{$irc->{wire}};
+
+    $bot->_stop_all_runtime_db_timers;
+    $replacement->invoke_event('on_tick');
+    $out{ownership}={
+        returns=>[$initial,$failed,$reloaded],
+        wire=>[\@before_publish,\@current,\@rollback,\@reload,[@{$irc->{wire}}]],
+        live=>[scalar(keys %{$bot->{hTimers}}),scalar($loop->notifiers)],
+    };
+    $db->disconnect;
+}
 print JSON::PP->new->canonical->utf8->encode(\%out);
 MB925_NATIVE
     open my $child, '-|', $^X, '-I.', '-It/lib', '-e', $probe
@@ -326,6 +375,14 @@ MB925_NATIVE
     $assert->(!@bad,
         'MB925 actual Mediabot callbacks resolve the secure writer for reload and authenticated addtimer'
         . (@bad ? ': '.join(',',@bad) : ''));
+
+    my $owned=$data->{ownership};
+    my $original="PRIVMSG #test :original\r\n";
+    my $replacement="PRIVMSG #test :replacement\r\n";
+    $assert->($same->($owned,{returns=>[1,0,1],
+            wire=>[[],[$original],[$original],[$replacement],[]],live=>[0,0]}),
+        'MB1114 staged, rolled-back and retired native timer callbacks cannot write to IRC'
+        . ' (frames by phase: '.join('/',map {scalar @$_} @{$owned->{wire}}).')');
 
     my (@bad_reads,@bad_recovery,@bad_success);
     for my $key (sort keys %{$data->{reads}}) {
