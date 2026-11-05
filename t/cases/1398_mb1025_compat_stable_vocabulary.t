@@ -20,6 +20,7 @@ my $history=DBI->connect('dbi:SQLite:dbname=:memory:','','',
  {RaiseError=>1,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
 $history->do('CREATE TABLE history(nick TEXT,publictext TEXT,ts TEXT)');
 my $insert=$history->prepare('INSERT INTO history VALUES(?,?,?)');
+$history->do('CREATE TABLE proximity(channel TEXT,nick TEXT,u INTEGER)');
 {
  package Mediabot::UserCommands;
  sub botPrivmsg {push @public,[$_[1],$_[2]]}
@@ -46,13 +47,37 @@ my $insert=$history->prepare('INSERT INTO history VALUES(?,?,?)');
   }
   return {live_ok=>1};
  }
- # The independent co-presence component remains empty in this fixture.
+ # Run the real SQLite cursor; inject failures only at the DBI boundary.
  package MB1025DB;
- sub prepare {bless {},'MB1025Statement'}
+ sub prepare {
+  my ($db,$sql)=@_;
+  die 'unexpected query' unless $sql =~ /UNIX_TIMESTAMP/;
+  return undef if ($db->{fault}//'') eq 'prepare';
+  return bless {db=>$db,sth=>$history->prepare(
+   'SELECT nick,u FROM proximity WHERE channel=? AND nick IN (?,?) ORDER BY u')},'MB1025Statement';
+ }
  package MB1025Statement;
- sub execute {1}
- sub fetchrow_hashref {undef}
- sub finish {1}
+ sub execute {
+  my $s=shift;
+  return undef if ($s->{db}{fault}//'') eq 'execute';
+  return $s->{sth}->execute(@_);
+ }
+ sub fetchrow_hashref {
+  my ($s)=@_;
+  if (++$s->{read} == 7) {
+   my $fault=$s->{db}{fault}//'';
+   die "private fetch exception\n" if $fault eq 'fetch_throw';
+   if ($fault eq 'fetch_partial') {
+    $s->{err}=1;
+    return undef;
+   }
+  }
+  return $s->{sth}->fetchrow_hashref;
+ }
+ sub err { $_[0]{err} || $_[0]{sth}->err }
+ sub finish { ++$_[0]{db}{finished}; $_[0]{sth}->finish }
+ package MB1025Metrics;
+ sub inc { push @{$_[0]}, $_[1] }
  package MB1025Context;
  sub bot {$_[0]{bot}}
  sub nick {'Observer'}
@@ -115,6 +140,26 @@ for my $next_mode (qw(ties reverse frequency small empty unicode punctuation can
   $out{$mode}{$encoding}{warnings}=[@warnings];
  }
 }
+if ($ENV{PERL_HASH_SEED} eq '0') {
+ $history->do('DELETE FROM history');
+ $history->{sqlite_unicode}=1;
+ $encoding='characters';
+ for my $who (qw(alice bob)) {$history->do("INSERT INTO history VALUES(?, 'shared words', '2026-11-04')",undef,$who)}
+ for my $n (0..6) {
+  $history->do('INSERT INTO proximity VALUES(?,?,?)',undef,'#test',($n%2?'bob':'alice'),60*$n);
+ }
+ for my $fault (qw(none prepare execute fetch_partial fetch_throw)) {
+  @public=();@notices=();@audit=();@flags=();
+  my $db=bless {fault=>$fault,finished=>0},'MB1025DB';
+  my $metrics=bless [],'MB1025Metrics';
+  my $bot={dbh=>$db,metrics=>$metrics};
+  my $ctx=bless {bot=>$bot},'MB1025Context';
+  my $ok=eval {Mediabot::Stats::Affinity::mbCompat_ctx($ctx);1};
+  my ($score)=map {$_->[1]=~/co-presence ([0-9]+)\/20/ ? 0+$1 : ()} @public;
+  $out{proximity}{$fault}=[$ok?1:0,scalar(@public),$score,[@notices],[@audit],
+    $bot->{_compat_count}{Observer}//0,[@$metrics],$db->{finished}];
+ }
+}
 $insert->finish;$history->disconnect;
 print JSON::PP->new->canonical->utf8->encode(\%out);
 CHILD
@@ -169,4 +214,13 @@ for my $x (@contracts) {
 }
 is_deeply([\@separators,$contracts_ok], [[(map {[0,30]} 1..24)],1],
  'MB1096 emoji and short words earn no points, distinct accents stay distinct, and accounting stays unchanged');
+my $proximity=$runs[0]{proximity};
+is_deeply($proximity->{none},
+ [1,4,1,[],[['#test','compat','alice vs bob = 61%']],1,['mediabot_compat_total'],1],
+ 'a complete co-presence cursor contributes its points and accounts for one successful command');
+my %failures=map {
+ $_=>[1,0,undef,[['Observer','Database error.']],[],0,[],$_ eq 'prepare'?0:1]
+} qw(prepare execute fetch_partial fetch_throw);
+is_deeply({map {$_=>$proximity->{$_}} keys %failures}, \%failures,
+ 'failed and partial co-presence reads produce one private error, clean up and account for no success');
 done_testing;

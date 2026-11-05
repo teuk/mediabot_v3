@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1112 — Require a complete co-presence read for compatibility
+
+- Abort !compat with the existing private database error if the co-presence
+  query cannot prepare, execute or finish reading its rows.
+- Keep zero points for a successful empty result. A failed or partial read
+  cannot publish a score, count as a successful command or award progress.
+- Exercise the real scoring path with complete, empty and interrupted
+  cursors, including both reported errors and exceptions.
+
+
 ### MB1111 — Keep RSS retry intervals after worker-side failures
 
 - Record an unsuccessful worker result in the parent when the worker

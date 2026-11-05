@@ -163,17 +163,19 @@ sub mbCompat_ctx {
 
     # === Dimension 4 : Co-présence (msgs dans 5min suivant l'autre) ==========
     # Requête : compter les paires de messages adjacents (n1 puis n2 dans 5min, et inversement)
-    my $sth_co = $dbh->prepare(q{
-        SELECT cl.nick, UNIX_TIMESTAMP(cl.ts) AS u
-        FROM CHANNEL_LOG cl
-        JOIN CHANNEL c ON c.id_channel = cl.id_channel
-        WHERE c.name = ? AND cl.nick IN (?, ?)
-          AND cl.event_type IN ('public','action')
-          AND cl.ts >= NOW() - INTERVAL 90 DAY
-        ORDER BY cl.ts ASC
-    });
+    my $sth_co;
     my $copresence = 0;
-    if ($sth_co && $sth_co->execute($channel, $n1, $n2)) {
+    my $copresence_ok = eval {
+        $sth_co = $dbh->prepare(q{
+            SELECT cl.nick, UNIX_TIMESTAMP(cl.ts) AS u
+            FROM CHANNEL_LOG cl
+            JOIN CHANNEL c ON c.id_channel = cl.id_channel
+            WHERE c.name = ? AND cl.nick IN (?, ?)
+              AND cl.event_type IN ('public','action')
+              AND cl.ts >= NOW() - INTERVAL 90 DAY
+            ORDER BY cl.ts ASC
+        }) or die "compat_copresence_prepare\n";
+        $sth_co->execute($channel, $n1, $n2) or die "compat_copresence_execute\n";
         my $last_nick = '';
         my $last_ts   = 0;
         while (my $r = $sth_co->fetchrow_hashref) {
@@ -184,7 +186,14 @@ sub mbCompat_ctx {
             $last_nick = $cur;
             $last_ts   = $r->{u};
         }
-        $sth_co->finish;
+        # EOF after a partial result must not become a compatibility score.
+        die "compat_copresence_fetch\n" if $sth_co->err;
+        1;
+    };
+    eval { $sth_co->finish } if $sth_co;
+    unless ($copresence_ok) {
+        botNotice($self, $nick, 'Database error.');
+        return;
     }
     # 100 paires d'échanges proches = 20 points max
     my $copres_score = $copresence >= 100 ? 20 : int($copresence / 5);

@@ -144,6 +144,8 @@ return sub {
             };
             local *MB956Cold::STH::execute=sub {shift;push @bind,[@_];1};
             local *MB956Cold::STH::fetchrow_hashref=sub {shift @{$_[0]{rows}}};
+            # A successful empty DBI cursor has no error at EOF.
+            local *MB956Cold::STH::err=sub {undef};
             local *MB956Cold::STH::finish=sub {1};
             local *MB956Cold::IRC::nick_folded=sub {'mediabot'};
             local *MB956Cold::Message::prefix=sub {'alice!u@fixture.invalid'};
