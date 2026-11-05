@@ -70,6 +70,7 @@ use JSON::MaybeXS;
 use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use List::Util qw/min/;
+use Scalar::Util qw(refaddr);
 use Carp qw(croak);
 use IO::Socket::SSL;
 use HTTP::Tiny;
@@ -1831,6 +1832,10 @@ sub refresh_channel_hashes {
 # Set IRC object
 sub setIrc {
 	my ($self,$irc) = @_;
+	# AntiFlood work belongs to the connection that admitted it.
+	if ((refaddr($self->{irc}) // 0) != (refaddr($irc) // 0)) {
+		delete $self->{_flood_outq};
+	}
 	$self->{irc} = $irc;
 }
 

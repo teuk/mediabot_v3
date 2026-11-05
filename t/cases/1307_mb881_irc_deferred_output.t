@@ -5,6 +5,7 @@ use Test::More;
 use IO::Async::Timer::Countdown;
 use Mediabot::IRC::Output qw(privmsg action);
 use Mediabot::Helpers ();
+use Mediabot::Mediabot ();
 use MB881OutputFixture;
 
 no warnings 'redefine';
@@ -59,6 +60,49 @@ MB881OutputFixture::with_policy(sub {
     privmsg($bot, '#hook', 'dynamic');
     is($armed, 1, 'defer still resolves the legacy arm hook dynamically');
 });
+MB881OutputFixture::with_policy(sub {
+    my $bot = MB881OutputFixture::new_bot();
+    $bot->{loop} = MB881::Loop->new;
+    $bot->{policy}{AntiFlood} = 1; $bot->{blocked} = 1;
+    my $old = $bot->{irc};
+    privmsg($bot, '#test', 'old message'); action($bot, '#test', 'old action');
+    Mediabot::setIrc($bot, $old);
+    is(scalar @{$bot->{_flood_outq}{'#test'}{items}}, 2,
+        'assigning the current IRC object preserves its pending sends');
+
+    my $new = bless {wire => []}, 'MB881::IRC';
+    Mediabot::setIrc($bot, $new);
+    privmsg($bot, '#test', 'new message'); action($bot, '#test', 'new action');
+    $bot->{blocked} = 0;
+    $bot->{loop}->tick;
+    is_deeply([scalar @{$new->{wire}}, scalar @{$bot->{_flood_outq}{'#test'}{items}}],
+        [0, 2], 'a retired drain cannot consume the replacement connection queue');
+    $bot->{loop}->drain;
+    is_deeply([map {$_->{text}} @{$new->{wire}}], ['new message', "\1ACTION new action\1"],
+        'only messages queued for the new IRC connection reach its wire');
+    is_deeply($old->{wire}, [], 'the retired connection also receives no pending sends');
+});
+MB881OutputFixture::with_policy(sub {
+    my $bot = MB881OutputFixture::new_bot();
+    $bot->{loop} = MB881::Loop->new;
+    $bot->{policy}{AntiFlood} = 1; $bot->{blocked} = 1;
+    privmsg($bot, '#test', 'old message');
+    my $new = bless {wire => []}, 'MB881::IRC';
+    {
+        local *Mediabot::IRC::DeferredOutput::botPrivmsg = sub {
+            Mediabot::setIrc($bot, $new);
+            privmsg($bot, '#test', 'first'); privmsg($bot, '#test', 'second');
+        };
+        $bot->{loop}->tick;
+    }
+    is(scalar @{$bot->{loop}{pending}}, 1,
+        'replacement during a drain leaves exactly one timer for the new queue');
+    $bot->{blocked} = 0;
+    $bot->{loop}->drain;
+    is_deeply([map {$_->{text}} @{$new->{wire}}], ['first', 'second'],
+        'new sends during a retired drain retain normal FIFO order');
+});
+
 my $bot = MB881OutputFixture::new_bot(); $bot->{loop} = MB881::Loop->new;
 $bot->{_flood_outq}{'#test'} = {items => [], armed => 0};
 my $drained = 0;

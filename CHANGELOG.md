@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1116 — Keep deferred AntiFlood output on its original connection
+
+- Retire deferred PRIVMSG and ACTION queues when the IRC object changes.
+  A countdown from a retired queue cannot send or rearm another queue.
+- Keep reflood reinsertion scoped to the exact queue being drained.
+  Reusing the current IRC object preserves pending sends and FIFO order.
+
+
 ### MB1115 — Retire removed timers even if cursor cleanup fails
 
 - After a confirmed autocommitted timer deletion, an exception while

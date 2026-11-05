@@ -3,6 +3,7 @@ package Mediabot::IRC::DeferredOutput;
 use strict;
 use warnings;
 use utf8;
+use Scalar::Util qw(refaddr weaken);
 use Mediabot::IRC::Timer ();
 
 # Existing bounded AntiFlood queue. Keep state keys, head reinsertion, timing
@@ -20,9 +21,9 @@ sub _defer_flooded_send {
         if ref($send_options) eq 'HASH' && defined($send_options->{ping_started_at})
             && !ref($send_options->{ping_started_at});
 
-    if (defined($self->{_flood_draining}) && $self->{_flood_draining} eq $to) {
-        # MB1042: only this target's reflood returns to its head. A callback
-        # enqueueing another target must keep its normal cap, FIFO and timer.
+    if ((refaddr($self->{_flood_draining}) // 0) == refaddr($q)) {
+        # Only the exact draining queue may reinsert at its head. Another
+        # target or replacement connection keeps its normal FIFO and timer.
         unshift @{ $q->{items} }, $item;
         return undef;
     }
@@ -40,6 +41,14 @@ sub _defer_flooded_send {
     return 1;
 }
 
+sub _flood_queue_current {
+    my ($self, $to, $expected) = @_;
+    return 0 unless $expected;
+    my $queues = $self->{_flood_outq} or return 0;
+    my $current = $queues->{$to} or return 0;
+    return refaddr($current) == refaddr($expected);
+}
+
 sub _arm_flood_drain {
     my ($self, $to) = @_;
     my $q = $self->{_flood_outq}{$to} or return;
@@ -52,11 +61,16 @@ sub _arm_flood_drain {
         return;
     }
     $q->{armed} = 1;
+    my $expected = $q;
+    weaken($expected);
     my $started = eval {
         Mediabot::IRC::Timer::countdown(
             loop => $loop,
             delay => 2,
-            on_expire => sub { Mediabot::Helpers::_drain_flood_queue($self, $to) },
+            on_expire => sub {
+                return unless _flood_queue_current($self, $to, $expected);
+                Mediabot::Helpers::_drain_flood_queue($self, $to);
+            },
         );
         1;
     };
@@ -77,7 +91,7 @@ sub _drain_flood_queue {
     my $sent = eval {
         if ($item) {
             my ($kind, $msg, $send_options) = @$item;
-            local $self->{_flood_draining} = $to;
+            local $self->{_flood_draining} = $q;
             if ($kind eq 'action') { botAction($self, $to, $msg) }
             else                   { botPrivmsg($self, $to, $msg, $send_options) }
         }
@@ -87,7 +101,8 @@ sub _drain_flood_queue {
     # A send exception must not strand the rest of the queue. Do not retry the
     # attempted item: the transport may have sent it before raising the error.
     my $rearmed = eval {
-        Mediabot::Helpers::_arm_flood_drain($self, $to) if @{ $q->{items} };
+        Mediabot::Helpers::_arm_flood_drain($self, $to)
+            if @{ $q->{items} } && _flood_queue_current($self, $to, $q);
         1;
     };
     my $arm_error = $@;
