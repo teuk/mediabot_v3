@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1108 — Keep Liquidsoap reads within their own deadline
+
+- Wait for the response with a monotonic deadline rather than a process-wide
+  alarm. Keep the caller's timer in place and honor subsecond read timeouts.
+- Do not renew the budget when fragments arrive. Retry interrupted waits
+  and reads with the remaining time; retain the response cap and first frame.
+- Exercise the deadline and caller alarm on loopback alongside the existing
+  normal responses, line-injection checks and connection reset scenarios.
+
+
 ### MB1107 — Resolve IPv6 hosts for whereis
 
 - Look up numeric IPv6 and IPv6-only WHOIS hostnames through the existing

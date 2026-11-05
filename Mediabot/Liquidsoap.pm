@@ -3,6 +3,8 @@ package Mediabot::Liquidsoap;
 use strict;
 use warnings;
 use IO::Socket::INET;
+use IO::Select;
+use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
 
 =head1 NAME
 
@@ -91,36 +93,44 @@ sub command {
         return (0, $err);
     }
 
-    my $response = '';
-    eval {
-        local $SIG{ALRM} = sub { die "read timeout\n" };
-        alarm($timeout);
-
-        while (1) {
-            my $count = sysread($sock, my $chunk, 4096);
-            die "read failed: $!\n" unless defined $count;
-            last unless $count;
-            $response .= $chunk;
-            die "response too large\n" if length($response) > 65536;
-            # MB734: END terminates this command's response. Waiting for EOF
-            # can mistake a later quit response for the command's result.
-            last if $response =~ /(?:\A|\n)END\r?\n/;
-        }
-
-        alarm(0);
-        1;
-    } or do {
-        alarm(0);
-        my $err = $@ || 'unknown read error';
-        chomp $err;
-        close $sock;
+    my ($response, $err) = _read_response($sock, $timeout);
+    close $sock;
+    if (defined $err) {
         $self->_log(1, "read failed from $host:$port: $err");
         return (0, "read failed from $host:$port: $err");
-    };
-
-    close $sock;
+    }
 
     return _decode_response($response);
+}
+
+sub _read_response {
+    my ($sock, $timeout) = @_;
+    # One deadline for the whole frame. Do not use the process-wide alarm:
+    # it can belong to a caller, and the read timeout can be fractional.
+    my $deadline = clock_gettime(CLOCK_MONOTONIC) + $timeout;
+    my $readable = IO::Select->new($sock);
+    my $response = '';
+    while (1) {
+        my $left = $deadline - clock_gettime(CLOCK_MONOTONIC);
+        return (undef, 'read timeout') if $left <= 0;
+        local $! = 0;
+        unless ($readable->can_read($left)) {
+            next if $!{EINTR};
+            return (undef, $! ? "select failed: $!" : 'read timeout');
+        }
+        my $count = sysread($sock, my $chunk, 4096);
+        unless (defined $count) {
+            next if $!{EINTR};
+            return (undef, "read failed: $!");
+        }
+        last unless $count;
+        $response .= $chunk;
+        return (undef, 'response too large') if length($response) > 65536;
+        # MB734: END terminates this command's response. Do not wait for EOF
+        # or consume the quit response as the result of the command.
+        last if $response =~ /(?:\A|\n)END\r?\n/;
+    }
+    return ($response, undef);
 }
 
 sub _decode_response {

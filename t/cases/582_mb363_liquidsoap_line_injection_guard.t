@@ -17,18 +17,10 @@ BEGIN {
     unshift @INC, "$Bin/../..";
 }
 
-use File::Spec;
 use File::Basename qw(dirname);
 use Cwd qw(abs_path);
 use JSON::PP ();
 use Mediabot::Liquidsoap;
-
-sub _slurp_582 {
-    my ($path) = @_;
-    open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
-    local $/;
-    return <$fh>;
-}
 
 return sub {
     my ($assert) = @_;
@@ -88,19 +80,6 @@ return sub {
     $assert->is($err_empty, 'empty Liquidsoap command',
         'empty-command error remains unchanged');
 
-    my $src = _slurp_582(File::Spec->catfile('.', 'Mediabot', 'Liquidsoap.pm'));
-    $assert->like($src, qr/if \$command =~ \/\[\\r\\n\\x00\]\//,
-        'central command guard checks CR, LF and NUL');
-
-    my $guard_pos  = index($src, q{if $command =~ /[\r\n\x00]/;});
-    my $socket_pos = index($src, 'IO::Socket::INET->new(');
-    $assert->ok($guard_pos >= 0 && $socket_pos > $guard_pos,
-        'line-injection guard runs before socket creation');
-
-    $assert->like($src,
-        qr/my \$payload = \$command \. "\\nquit\\n";/,
-        'normal protocol payload remains command plus quit');
-
     # MB915: use real loopback TCP sockets and the real command write/read.
     # A reset is staged at the constructor boundary; only the probe process
     # can receive the default SIGPIPE. The surrounding test runner stays alive.
@@ -110,6 +89,8 @@ use warnings;
 use IO::Socket::INET;
 use Socket qw(SOL_SOCKET SO_LINGER);
 use Scalar::Util qw(refaddr);
+use Time::HiRes ();
+use POSIX qw(_exit);
 use JSON::PP qw(encode_json);
 use Mediabot::Liquidsoap;
 {
@@ -120,6 +101,37 @@ my $kind=shift(@ARGV) // die 'method required';
 my @methods=qw(command push queue skip flush_and_skip);
 my @rows;
 my $constructor=IO::Socket::INET->can('new');
+if ($kind eq 'deadline') {
+    my $server = $constructor->('IO::Socket::INET', LocalAddr=>'127.0.0.1',
+        LocalPort=>0, Proto=>'tcp', Listen=>1) or die "listen: $!";
+    my $port = $server->sockport;
+    my $pid = fork();
+    die "fork: $!" unless defined $pid;
+    if (!$pid) {
+        alarm 3;
+        local $SIG{PIPE} = 'IGNORE';
+        my $peer = $server->accept or _exit(2);
+        $peer->autoflush(1);
+        for (1..18) {
+            last unless print {$peer} "37\n";
+            Time::HiRes::sleep(.025);
+        }
+        # Drain command bytes before closing so EOF is not a TCP reset.
+        shutdown($peer, 1);
+        while (sysread($peer, my $discard, 4096)) {}
+        _exit(0);
+    }
+    close $server;
+    my $liq = Mediabot::Liquidsoap->new(host=>'127.0.0.1',port=>$port,timeout=>.12);
+    my $signals = 0;
+    local $SIG{ALRM} = sub { ++$signals };
+    Time::HiRes::alarm(.04);
+    my ($ok,$error) = $liq->push('/fixture/track.mp3');
+    Time::HiRes::alarm(0);
+    waitpid($pid, 0);
+    print encode_json({rows=>[{ok => $? == 0 && !$ok && $error =~ /read timeout\z/ && $signals == 1 ? 1 : 0}]});
+    exit 0;
+}
 for my $method ($kind eq 'healthy' ? @methods : ($kind)) {
     for my $mode (qw(DEFAULT IGNORE callback)) {
         my $signal_calls=0;
@@ -173,10 +185,10 @@ for my $method ($kind eq 'healthy' ? @methods : ($kind)) {
             close $peer;
         }
         close $listener;
-        alarm 0;
+        my $alarm_preserved=Time::HiRes::alarm(0) > 0;
         my $ok=$restored && !$signal_calls && !@warnings && @reply==2 && !defined(fileno($client));
         if ($healthy) {
-            $ok &&= $wire eq $command{$method}."\nquit\n" && $reply[1] eq $body{$method}
+            $ok &&= $alarm_preserved && $wire eq $command{$method}."\nquit\n" && $reply[1] eq $body{$method}
                 && $reply[0]==($method eq 'flush_and_skip' ? 0 : 1) && !@{$log->{rows}};
         } else {
             $ok &&= !$reply[0] && $reply[1]=~/\Awrite failed to 127\.0\.0\.1:\Q$port\E:/
@@ -189,16 +201,19 @@ for my $method ($kind eq 'healthy' ? @methods : ($kind)) {
 print encode_json({rows=>\@rows});
 MB915_PROBE
     my $root=dirname(dirname(abs_path($INC{'Mediabot/Liquidsoap.pm'})));
-    for my $method (qw(command push queue skip flush_and_skip healthy)) {
+    for my $method (qw(command push queue skip flush_and_skip healthy deadline)) {
         open my $run,'-|',$^X,'-I'.$root,'-e',$probe,$method or die $!;
         my $raw=do {local $/;<$run> // ''};
         close $run;my $status=$?;
         my $result=eval {JSON::PP::decode_json($raw)};
         my $rows=ref($result) eq 'HASH' ? $result->{rows} : undef;
-        my $count=$method eq 'healthy' ? 15 : 3;
+        my $count=$method eq 'healthy' ? 15 : $method eq 'deadline' ? 1 : 3;
         my $ok=$status==0 && ref($rows) eq 'ARRAY' && @$rows==$count
             && !grep {!$_->{ok}} @$rows;
-        $assert->ok($ok,"mb915: $method preserves socket outcomes and caller signal handlers")
+        my $description = $method eq 'deadline'
+            ? 'mb1108: a trickling response cannot extend the subsecond read budget'
+            : "mb915: $method preserves socket outcomes and caller signal handlers";
+        $assert->ok($ok,$description)
             or warn "MB915 probe $method failed: status=$status\n";
     }
 };
