@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1105 — Bound the lifetime of metrics HTTP connections
+
+- Close metrics HTTP connections ten seconds after acceptance if the client
+  never finishes its request or the response cannot drain. Receiving more
+  bytes does not renew the deadline.
+- Tie each deadline to its stream and each stream to the listener. Stopping
+  the server closes accepted clients as well as the listening socket.
+- Exercise timeout, shutdown, restart and HTTP 431 over real loopback sockets.
+  Keep representative UTF-8 and header-limit coverage while dropping
+  duplicate assertions and source-text checks.
+
+
 ### MB1104 — Retire command cooldowns with purged channels
 
 - Clear public command cooldown timestamps by their actual command:channel

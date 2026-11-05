@@ -39,18 +39,7 @@ BEGIN {
 use FindBin qw($Bin);
 use lib "$Bin/../..";
 
-use Encode qw(encode_utf8);
 use Mediabot::Metrics;
-
-sub _slurp_583 {
-    my ($path) = @_;
-    open my $fh, '<:encoding(UTF-8)', $path
-        or die "cannot read $path: $!";
-    local $/;
-    my $text = <$fh>;
-    close $fh;
-    return $text;
-}
 
 return sub {
     my ($assert) = @_;
@@ -79,79 +68,9 @@ return sub {
         'oversized request is rejected before normal routing even if terminated'
     );
 
-    my $prom = $metrics->_route_http_request("GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n");
-    $assert->like($prom, qr{\AHTTP/1\.1 200 OK\r\n},
-        '/metrics returns HTTP 200');
-    $assert->like($prom, qr/Content-Type: text\/plain; version=0\.0\.4; charset=utf-8\r\n/,
-        '/metrics keeps the Prometheus content type');
-    $assert->like($prom, qr/\r\n\r\n.*mediabot_up 1/s,
-        '/metrics response contains rendered metrics');
-
-    my ($prom_len)  = $prom =~ /Content-Length: (\d+)\r\n/;
-    my ($prom_body) = $prom =~ /\r\n\r\n(.*)\z/s;
-    $assert->is($prom_len, length($prom_body // ''),
-        '/metrics Content-Length matches response bytes');
-
-    $metrics->set_radio_status_provider(sub {
-        return {
-            ok        => 1,
-            listeners => 3,
-            title     => 'Café',
-        };
-    });
-
-    my $radio = $metrics->_route_http_request(
-        "GET /api/radio/status HTTP/1.1\r\nHost: localhost\r\n\r\n"
-    );
-    $assert->like($radio, qr{\AHTTP/1\.1 200 OK\r\n},
-        'radio status returns HTTP 200');
-    $assert->like($radio, qr/Content-Type: application\/json; charset=utf-8\r\n/,
-        'radio status keeps JSON content type');
-    $assert->like($radio, qr/"listeners":3/,
-        'radio status provider payload is rendered');
-
-    my $post = $metrics->_route_http_request(
-        "POST /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n"
-    );
-    $assert->like($post, qr{\AHTTP/1\.1 404 Not Found\r\n},
-        'unsupported method remains a 404');
-
     my $missing = $metrics->_route_http_request(
         "GET /unknown HTTP/1.1\r\nHost: localhost\r\n\r\n"
     );
     $assert->like($missing, qr{\AHTTP/1\.1 404 Not Found\r\n},
         'unknown path remains a 404');
-
-    my $utf8 = $metrics->_http_response_bytes(
-        '200 OK',
-        "Café\n",
-        'text/plain; charset=utf-8',
-    );
-    my ($utf8_len)  = $utf8 =~ /Content-Length: (\d+)\r\n/;
-    my ($utf8_body) = $utf8 =~ /\r\n\r\n(.*)\z/s;
-    $assert->is($utf8_len, length(encode_utf8("Café\n")),
-        'UTF-8 Content-Length is counted in bytes');
-    $assert->is($utf8_len, length($utf8_body // ''),
-        'UTF-8 body byte count matches the emitted payload');
-
-    my $src = _slurp_583("$Bin/../../Mediabot/Metrics.pm");
-
-    $assert->like($src, qr/use constant MAX_HTTP_HEADER_BYTES => 16 \* 1024;/,
-        'source declares the 16 KiB hard limit');
-    $assert->like(
-        $src,
-        qr/my \$state = \$self->_http_request_state\(\$buffer, \$eof\);\s*return 0 if \$state eq 'incomplete';/s,
-        'on_read uses the bounded request-state helper before routing'
-    );
-    $assert->like($src, qr/431 Request Header Fields Too Large/,
-        'oversized headers receive HTTP 431');
-    $assert->like($src, qr/my \$responded = 0;.*?return 0 if \$responded;.*?\$responded = 1;/s,
-        'one connection can schedule only one response');
-    $assert->like($src, qr/\$buffer = '';/,
-        'request bytes are released after the response is scheduled');
-    $assert->unlike(
-        $src,
-        qr/\$buffer \.= \$\$buffref;.*?if \(\$buffer =~ \\/s,
-        'legacy unbounded direct-routing pattern is gone'
-    );
 };

@@ -5,11 +5,14 @@ use warnings;
 
 use IO::Socket::INET;
 use IO::Async::Listener;
+use IO::Async::Timer::Countdown;
 use JSON::MaybeXS qw(encode_json);
 use POSIX qw(isfinite);
 use Encode qw(encode_utf8);   # mb129-B3: Content-Length doit etre en bytes
 
 use constant MAX_HTTP_HEADER_BYTES => 16 * 1024;
+
+sub _http_connection_timeout { 10 }
 
 sub new {
     my ($class, %args) = @_;
@@ -545,7 +548,10 @@ sub start_http_server {
                 on_read => sub {
                     my ($stream, $buffref, $eof) = @_;
 
-                    return 0 if $responded;
+                    if ($responded) {
+                        $$buffref = '';
+                        return 0;
+                    }
 
                     $buffer .= $$buffref;
                     $$buffref = '';
@@ -574,7 +580,18 @@ sub start_http_server {
                 },
             );
 
-            $self->{loop}->add($stream);
+            # One deadline covers both incoming headers and a stalled response.
+            # Removing the stream also removes its timer from the loop.
+            my $deadline = IO::Async::Timer::Countdown->new(
+                delay => $self->_http_connection_timeout,
+                on_expire => sub {
+                    my $client = $_[0]->parent;
+                    $client->close_now if $client;
+                },
+            );
+            $stream->add_child($deadline);
+            $listener->add_child($stream);
+            $deadline->start;
         },
     );
 
@@ -588,10 +605,9 @@ sub start_http_server {
 
 sub stop_http_server {
     my ($self) = @_;
-    return 1 unless $self->{listener};
-
-    eval { $self->{loop}->remove($self->{listener}); };
-    $self->{listener} = undef;
+    my $listener = delete $self->{listener} or return 1;
+    $_->close_now for $listener->children;
+    $listener->close;
     return 1;
 }
 
