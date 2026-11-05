@@ -546,7 +546,9 @@ sub mbRemTimer_ctx {
     }
 
     my $rows = $sth->rows;
-    $sth->finish;
+    # The autocommitted DELETE has already succeeded. Closing the cursor
+    # must not prevent revoking the corresponding runtime timer.
+    eval { $sth->finish };
 
     if (!defined($rows) || $rows < 1) {
         # mb148-B1: runtime says the timer exists, but the DB row is already

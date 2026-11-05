@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1115 — Retire removed timers even if cursor cleanup fails
+
+- After a confirmed autocommitted timer deletion, an exception while
+  closing the SQL cursor no longer prevents stopping the runtime timer.
+  Apply the same cleanup when the stored row was already absent.
+- Keep the timer running if the database deletion fails. Verify both
+  outcomes with real SQLite deletes and native timer handles.
+
+
 ### MB1114 — Let only the current database timer write to IRC
 
 - Before writing, a reloaded timer verifies that it is still the exact

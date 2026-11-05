@@ -18,7 +18,27 @@ use MockUser;
     our $AUTOLOAD;
     sub AUTOLOAD {die 'Unexpected database call'}
     sub DESTROY {}
+    package MB1115::DBI; our @ISA = ('DBI');
+    package MB1115::DBI::db; our @ISA = ('DBI::db');
+    sub prepare {
+        my ($db,$sql,@rest) = @_;
+        my $sth = $db->SUPER::prepare($sql,@rest);
+        if ($sth && $sql eq 'DELETE FROM TIMERS WHERE name = ?') {
+            $sth->{private_mb1115_fault} = $db->{private_mb1115_fault};
+        }
+        return $sth;
+    }
+    package MB1115::DBI::st; our @ISA = ('DBI::st');
+    sub finish {
+        my ($sth) = @_;
+        my $ok = $sth->SUPER::finish;
+        my $fault = $sth->{private_mb1115_fault} // '';
+        die "fixture cursor close failed\n" if $fault eq 'throw';
+        return undef if $fault eq 'false';
+        return $ok;
+    }
 }
+$INC{'MB1115/DBI.pm'} = __FILE__;
 my (@audit, @warnings);
 local $SIG{__WARN__} = sub {push @warnings, @_};
 no warnings qw(redefine once);
@@ -26,9 +46,11 @@ local *Mediabot::DBCommands::logBot = sub {push @audit, [@_[2..$#_]]; 1};
 my $tmp = tempdir(CLEANUP => 1);
 my $serial = 0;
 sub fixture_1410 {
-    my ($mode, $raise) = @_;
+    my ($mode, $raise, $cleanup_fault) = @_;
     my $db = DBI->connect('dbi:SQLite:dbname='.$tmp.'/'.++$serial.'.sqlite', '', '',
-        {RaiseError => $raise, PrintError => 0, AutoCommit => 1});
+        {RaiseError => $raise, PrintError => 0, AutoCommit => 1,
+            ($cleanup_fault ? (RootClass => 'MB1115::DBI') : ())});
+    $db->{private_mb1115_fault} = $cleanup_fault if $cleanup_fault;
     $db->do('CREATE TABLE TIMERS(name TEXT PRIMARY KEY, duration INTEGER, command TEXT)');
     $db->do("INSERT INTO TIMERS VALUES('pulse',3600,'PING :timer')");
     $db->do('CREATE TABLE unrelated(value INTEGER)');
@@ -99,16 +121,19 @@ for my $mode (qw(prepare execute)) {
         'caller rollback remains caller-owned and cannot resurrect a supposedly removed timer');
     cleanup_1410($db,$loop,$timer,$other);
 }
-for my $mode (qw(success absent)) {
-    my ($bot,$db,$loop,$timer,$other) = fixture_1410($mode,1);
+for my $scenario ([qw(success)], [qw(absent)], [qw(success throw)],
+        [qw(absent throw)], [qw(success false)]) {
+    my ($mode,$fault) = @$scenario;
+    my $label = join('/',@$scenario);
+    my ($bot,$db,$loop,$timer,$other) = fixture_1410($mode,1,$fault);
     @audit = ();
     my $error = invoke_1410($bot,['pulse']);
     my $message = $mode eq 'absent' ? 'Timer pulse removed from runtime (not found in database)' : 'Timer pulse removed';
     is_deeply([$error,$bot->{wire},live_1410($bot,$timer),
         $db->selectrow_array('SELECT COUNT(*) FROM TIMERS'),scalar @audit],
-        ['',[$message],[0,0,0],0,1], "$mode: confirmed removal retains native stop/detach and one audit");
+        ['',[$message],[0,0,0],0,1], "$label: confirmed removal retains native stop/detach and one audit");
     ok($other->is_running && $other->loop && $bot->{hTimers}{other},
-        "$mode: confirmed removal is scoped to the requested timer");
+        "$label: confirmed removal is scoped to the requested timer");
     cleanup_1410($db,$loop,$timer,$other);
 }
 {
