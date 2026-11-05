@@ -11,7 +11,7 @@
 # en bindant le nombre de secondes (ou NULL -> permanent). Les deux côtés
 # partagent désormais l'horloge du serveur.
 #
-# Pas de DBI réel : validation par (a) la garde "secondes" et (b) scan de source.
+# MB1103: native duration/storage checks live in case 69; keep SQL-clock wiring here.
 # =============================================================================
 
 use strict;
@@ -25,12 +25,6 @@ BEGIN {
 
 use File::Spec;
 
-# Reproduction de la normalisation mb350 du paramètre expires_seconds.
-sub _norm_secs {
-    my ($s) = @_;
-    return (defined($s) && $s =~ /^\d+$/ && $s > 0) ? $s : undef;
-}
-
 sub _slurp_569 {
     my ($path) = @_;
     open my $fh, '<:encoding(UTF-8)', $path or die "cannot read $path: $!";
@@ -40,14 +34,6 @@ sub _slurp_569 {
 
 return sub {
     my ($assert) = @_;
-
-    # --- 1. Garde "secondes" : timed vs permanent -------------------------
-    $assert->is(_norm_secs(3600), 3600, '3600s -> ban temporisé');
-    $assert->is(_norm_secs(1),    1,    '1s -> temporisé');
-    $assert->ok(!defined _norm_secs(0),     '0 -> permanent (NULL)');
-    $assert->ok(!defined _norm_secs(undef), 'undef -> permanent (NULL)');
-    $assert->ok(!defined _norm_secs(-5),    'négatif -> permanent (NULL)');
-    $assert->ok(!defined _norm_secs('abc'), 'non numérique -> permanent (NULL)');
 
     # --- 2. Scan source ChannelBan.pm ------------------------------------
     my $cb = _slurp_569(File::Spec->catfile('.', 'Mediabot', 'ChannelBan.pm'));

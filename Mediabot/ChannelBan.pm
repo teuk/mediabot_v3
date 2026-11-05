@@ -26,6 +26,21 @@ use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
 # =============================================================================
 
 use constant MIN_BAN_LEVEL => 75;
+use constant MAX_BAN_SECONDS => 2_147_483_647;
+
+# Compare decimal text before coercion or multiplication. In particular, a
+# huge digit string must never become Inf/scientific notation and later be
+# mistaken for SQL NULL (a permanent ban).
+sub _duration_seconds {
+    my ($digits, $factor) = @_;
+    return unless defined($digits) && !ref($digits) && $digits =~ /\A[0-9]+\z/;
+    $digits =~ s/\A0+//;
+    $digits = '0' if $digits eq '';
+    my $limit = '' . int(MAX_BAN_SECONDS / $factor);
+    return if length($digits) > length($limit)
+        || (length($digits) == length($limit) && $digits gt $limit);
+    return $digits * $factor;
+}
 
 
 sub _log {
@@ -80,26 +95,17 @@ sub parse_duration {
     my ($self, $text) = @_;
 
     $text = '' unless defined $text;
+    return (undef, undef, 'duration must be plain text') if ref($text);
     $text =~ s/^\s+|\s+$//g;
 
     return (0, 'permanent', undef) if $text eq '';
     return (0, 'permanent', undef) if $text =~ /^(?:perm|permanent|never)$/i;
 
-    if ($text =~ /^(\d+)$/) {
-        my $minutes = int($1);
-        # A bare "0" should be written as "perm" — caught above.
-        # A plain number of 0 minutes is meaningless as a timed ban.
-        return (undef, undef, "duration cannot be zero — use 'perm' for permanent bans")
-            if $minutes == 0;
-        return ($minutes * 60, "${minutes}m", undef);
-    }
-
-    unless ($text =~ /^(\d+)([mhdw])$/i) {
+    unless ($text =~ /\A([0-9]+)([mhdw]?)\z/i) {
         return (undef, undef, "invalid duration '$text' (use 10m, 2h, 3d, 1w, or permanent)");
     }
-
-    my ($n, $unit) = (int($1), lc($2));
-    return (undef, undef, "duration must be positive") if $n <= 0;
+    my ($digits, $suffix) = ($1, lc($2));
+    my $unit = $suffix || 'm';
 
     my %mult = (
         m => 60,
@@ -108,7 +114,14 @@ sub parse_duration {
         w => 604800,
     );
 
-    return ($n * $mult{$unit}, "$n$unit", undef);
+    my $seconds = _duration_seconds($digits, $mult{$unit});
+    return (undef, undef, 'duration exceeds maximum of 2147483647 seconds; use perm for a permanent ban')
+        unless defined $seconds;
+    return (undef, undef, $suffix eq ''
+        ? "duration cannot be zero — use 'perm' for permanent bans"
+        : 'duration must be positive') unless $seconds > 0;
+    my $n = int($digits); # now known to fit before formatting the label
+    return ($seconds, "$n$unit", undef);
 }
 
 # mb401-R1: expires_sql_from_seconds() supprimée. Plus aucun appelant depuis
@@ -376,6 +389,14 @@ sub add_ban {
     return (undef, "missing id_channel") unless $id_channel;
     return (undef, "missing mask")       unless $mask;
 
+    my $expires_seconds;
+    if (defined $args{expires_seconds}) {
+        $expires_seconds = _duration_seconds($args{expires_seconds}, 1);
+        return (undef, 'invalid ban duration: expected 0 to 2147483647 whole seconds')
+            unless defined $expires_seconds;
+        $expires_seconds = undef if $expires_seconds == 0;
+    }
+
     if (my $err = $self->validate_mask($mask)) {
         return (undef, $err);
     }
@@ -418,8 +439,6 @@ sub add_ban {
     # Rétro-compat : si un appelant fournit encore expires_seconds non défini mais
     # un ancien expires_at, on retombe sur "permanent" (NULL) — les deux appelants
     # internes passent désormais expires_seconds.
-    my $expires_seconds = $args{expires_seconds};
-    $expires_seconds = undef unless defined($expires_seconds) && $expires_seconds =~ /^\d+$/ && $expires_seconds > 0;
 
     unless ($sth && $sth->execute(
         $id_channel,

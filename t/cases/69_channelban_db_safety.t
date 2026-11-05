@@ -326,6 +326,35 @@ for my $state (qw(nominal reconnected self_reconnect unavailable legacy)) {
         rows => rows($b)};
     $b->{dbh}->disconnect; delete $b->{channel_ban}; delete $cb->{bot};
 }
+
+# MB1103: call the real parser and INSERT path, including the SQL expiry.
+{
+    my $cb=bless {},'Mediabot::ChannelBan';
+    my @input=('10m','0002H','35791394','596523h','24855d','3550w',
+        ('0'x350).'10m','35791395m','596524h','24856d','3551w',
+        ('9'x32).'w',('9'x309).'h');
+    $out{duration_parse}=[map {my @v=$cb->parse_duration($_);$v[0]="$v[0]" if defined($v[0]);\@v} @input];
+}
+for my $raise (0,1) {
+    for my $value (1,600,2147483647,'00010',0,'0000',undef,
+            2147483648,('9'x309),'Inf','NaN','1e3',-1,'',1.5,[],{},"10\n") {
+        my ($b,$cb,$trace,$dir)=fixture();$b->{dbh}{RaiseError}=$raise;
+        my @warnings;local $SIG{__WARN__}=sub {push @warnings,@_};
+        my @result=$cb->add_ban(id_channel=>1,mask=>'*!*new@new.example',
+            ban_level=>100,expires_seconds=>$value,source=>'irc');
+        my @inserts=grep {$_->[0]=~/INSERT INTO CHANNEL_BAN/} @{$trace->{binds}};
+        my $expiry=$b->{dbh}->selectcol_arrayref('SELECT expires_at FROM CHANNEL_BAN WHERE id_channel_ban=78');
+        push @{$out{duration_store}},[\@result,scalar(@{rows($b)}),\@inserts,$expiry,\@warnings];
+        # A rejected API value must not poison the same helper's next request.
+        if (@result && defined($result[1])) {
+            my @next=$cb->add_ban(id_channel=>1,mask=>'*!*next@next.example',
+                ban_level=>100,expires_seconds=>600,source=>'irc');
+            push @{$out{duration_recovery}},[\@next,
+                $b->{dbh}->selectcol_arrayref('SELECT expires_at FROM CHANNEL_BAN WHERE id_channel_ban=78')];
+        }
+        $b->{dbh}->disconnect;delete $b->{channel_ban};delete $cb->{bot};
+    }
+}
 print JSON::PP->new->canonical->utf8->encode(\%out);
 MB922_NATIVE
     open my $native, '-|', $^X, '-I.', '-It/lib', '-e', $probe
@@ -381,4 +410,25 @@ MB922_NATIVE
             ['mediabot_channel_bans_expired_total'],
             [[10,0,'system','expired'],[21,1,undef,undef],[35,1,undef,undef],[77,0,undef,undef]]]),
         'the same helper recovers after outage and the real expiry pipeline removes only the due ban');
+    my $limit_error='duration exceeds maximum of 2147483647 seconds; use perm for a permanent ban';
+    $assert->is($json->encode($r->{duration_parse}),$json->encode([
+        ['600','10m',undef],['7200','2h',undef],['2147483640','35791394m',undef],
+        ['2147482800','596523h',undef],['2147472000','24855d',undef],['2147040000','3550w',undef],
+        ['600','10m',undef],map {[undef,undef,$limit_error]} 1..6]),
+        'native duration parsing preserves units/leading zeros and rejects huge or out-of-range values before numeric coercion');
+    my @wanted;
+    for (0,1) {
+        for my $seconds (1,600,2147483647,10,undef,undef,undef) {
+            my $date=!defined($seconds)?undef:$seconds==1?'2026-10-23 12:00:01'
+                :$seconds==600?'2026-10-23 12:10:00':$seconds==10?'2026-10-23 12:00:10':'2094-11-10 15:14:07';
+            # SQL text is already checked independently; bind six owns expiry.
+            push @wanted,[[78,undef],5,$seconds,[$date],[]];
+        }
+        push @wanted,map {[[undef,'invalid ban duration: expected 0 to 2147483647 whole seconds'],4,undef,[],[]]} 1..11;
+    }
+    my @stored=map {[$_->[0],$_->[1],@{$_->[2]}?$_->[2][0][7]:undef,$_->[3],$_->[4]]} @{$r->{duration_store}};
+    $assert->is($json->encode([\@stored,$r->{duration_recovery}]),$json->encode([
+        \@wanted,[map {[[78,undef],['2026-10-23 12:10:00']]} 1..22]]),
+        'native INSERT never turns invalid seconds into permanent rows; explicit permanence, exact SQL expiry and recovery work with RaiseError on/off');
+
 };

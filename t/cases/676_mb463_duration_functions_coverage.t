@@ -2,18 +2,11 @@
 # =============================================================================
 # mb463 — Couverture réelle des fonctions de durée (jusqu'ici sans test).
 #
-# Trois fonctions pures et auto-contenues, critiques mais non couvertes :
-#   - ChannelBan::parse_duration            (durée de ban -> secondes)
-#   - External::Spotify::_spotify_duration_from_ms   (ms -> "…m …s")
-#   - External::Spotify::_spotify_duration_from_iso  (ISO8601 -> "…m …s")
-#
-# Ce test n'utilise PAS de réplique : il EXTRAIT le corps réel de chaque sub
-# depuis le fichier source et l'exécute (eval). Il teste donc le vrai code et
-# se ré-extrait à chaque run, donc il protège contre une régression future
-# (un refactor qui casse le format ou la décomposition fera échouer la suite).
-#
-# Aucun de ces subs ne charge le module complet (ils n'appellent ni $self-> ni
-# d'autres subs), ce qui permet l'exécution isolée en sandbox.
+# MB1103: ChannelBan parsing is exercised through its real module in cases
+# 06/69 and real commands in case 09. Keep only the two independent Spotify
+# formatting helpers here; copying one function out of ChannelBan drops its
+# validation helpers and no longer exercises the native duration contract.
+# No network or bot process is used by these Spotify checks.
 # =============================================================================
 
 use strict;
@@ -44,38 +37,6 @@ sub _load_real_sub {
 
 return sub {
     my ($assert) = @_;
-
-    # -------------------------------------------------------------------------
-    # 1. ChannelBan::parse_duration($self, $text) — $self ignoré
-    # -------------------------------------------------------------------------
-    my $pd = _load_real_sub('Mediabot/ChannelBan.pm', 'parse_duration');
-    $assert->ok(defined $pd, 'parse_duration extraite et compilée');
-
-    my @pd_cases = (
-        # [ input,        [secs, label, err_defined?] ]
-        [ '',    [0, 'permanent', 0] ],
-        [ 'perm',      [0, 'permanent', 0] ],
-        [ 'permanent', [0, 'permanent', 0] ],
-        [ 'never',     [0, 'permanent', 0] ],
-        [ '5',    [300, '5m', 0] ],     # nombre nu = minutes
-        [ '10m',  [600, '10m', 0] ],
-        [ '2h',   [7200, '2h', 0] ],
-        [ '3d',   [259200, '3d', 0] ],
-        [ '1w',   [604800, '1w', 0] ],
-    );
-    for my $c (@pd_cases) {
-        my ($in, $exp) = @$c;
-        my ($secs, $label, $err) = $pd->(undef, $in);
-        $assert->is($secs,  $exp->[0], "parse_duration('$in') secondes = $exp->[0]");
-        $assert->is($label, $exp->[1], "parse_duration('$in') label = $exp->[1]");
-        $assert->ok(!defined($err), "parse_duration('$in') sans erreur");
-    }
-    # Cas d'erreur : 0, 0m, invalide -> erreur définie, secondes undef
-    for my $bad ('0', '0m', 'xyz', '5x') {
-        my ($secs, $label, $err) = $pd->(undef, $bad);
-        $assert->ok(!defined($secs) && defined($err),
-            "parse_duration('$bad') rejeté (erreur définie)");
-    }
 
     # -------------------------------------------------------------------------
     # 2. _spotify_duration_from_ms($ms)

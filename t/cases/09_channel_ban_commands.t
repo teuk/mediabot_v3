@@ -533,4 +533,21 @@ return sub {
         $assert->ok($txt =~ /Unbanned #51/, 'unban : success notice');
         $assert->is(scalar @{ $cb->{removed} }, 1, 'unban : mark_removed called');
     }
+    # MB1103: the real command parser must refuse before storing or issuing MODE/KICK.
+    {
+        require JSON::PP;
+        my (@actual,@wanted);
+        for my $command (qw(ban kickban kb)) {
+            for my $duration ('35791395m',('9'x32).'w',('9'x309).'h') {
+                my ($bot,$irc,undef,$cb)=_make_test_bot(actor_level=>100);
+                my $ctx=_ctx(bot=>$bot,command=>$command,args=>['*!*bad@evil.example',$duration]);
+                my $ok=eval {$command eq 'ban'?channelBan_ctx($ctx):channelKickBan_ctx($ctx);1};
+                push @actual,[$ok?1:0,scalar(@{$cb->{added}}),$irc->{sent_messages},[_notice_texts($irc)]];
+                push @wanted,[1,0,[],['duration exceeds maximum of 2147483647 seconds; use perm for a permanent ban']];
+            }
+        }
+        $assert->is(JSON::PP->new->canonical->encode(\@actual),JSON::PP->new->canonical->encode(\@wanted),
+            'ban/kickban/kb reject overlarge durations with one notice and no storage, MODE or KICK');
+    }
+
 };

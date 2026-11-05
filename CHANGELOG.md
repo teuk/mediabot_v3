@@ -1,5 +1,21 @@
 ## [Unreleased] — 3.8dev
 
+### MB1103 — Never turn an invalid timed ban into a permanent ban
+
+- Bound temporary bans to 2,147,483,647 whole seconds. Compare normalized
+  decimal digits before numeric coercion/multiplication, so oversized minute,
+  hour, day or week inputs cannot become scientific notation or infinity.
+- Reject invalid, fractional, negative or oversized expires_seconds before
+  lookup/INSERT instead of silently substituting SQL NULL. Preserve explicit
+  zero/undefined permanence, ordinary durations, leading zeros and SQL-owned
+  expiration timestamps. Public ban/kickban/kb refuse before MODE or KICK.
+- Extend the existing native SQLite ban probe and command fixture with three
+  grouped checks. Remove six copied normalization assertions that endorsed
+  invalid-seconds-to-permanent behavior and 32 extracted parser assertions
+  superseded by native unit/storage coverage. Keep SQL-clock and Spotify tests.
+  Thirty-five fewer assertions, with no new test process, dependency or schema.
+
+
 ### MB1102 — Confirm radar reads before announcing activity
 
 - Require each standard radar query to prepare, execute and finish fetching
