@@ -19,8 +19,12 @@ use Mediabot::Helpers ();
     sub DESTROY {}
 }
 my @warnings; local $SIG{__WARN__} = sub {push @warnings, @_};
-my ($bot, $party, $stream);
+my ($bot, $party, $stream, $mono);
+no warnings qw(redefine once);
+local *Time::HiRes::clock_gettime = sub { $mono };
 sub setup_1409 {
+    $main::now = 1_900_000_000;
+    $mono = 0; # A new bucket must admit even at the monotonic clock origin.
     $bot = {logger => bless({}, 'MB1036::Log'), metrics => bless({}, 'MB1036::Metrics'),
         dbh => bless({}, 'MB1036::NoIO'), irc => bless({}, 'MB1036::NoIO')};
     $stream = bless({text => ''}, 'MB1036::Stream');
@@ -45,10 +49,15 @@ is_deeply($bot->{_cmd_cooldown_conf}, {'#test' => {actualites => 90}},
     'operator configuration uses the same channel and command identity as admission');
 is_deeply([map {guard_1409('#TEST', $_)} @aliases], [0,90,90,90],
     'setting an alias resets the actual active group and enforces its new duration');
-$main::now += 89;
-is(guard_1409('#tEsT', 'ACTU'), 1, 'the configured alias group blocks until its last second');
-++$main::now;
-is(guard_1409('#test', 'actualite'), 0, 'the exact configured deadline permits the next request');
+$main::now += 86400;
+$mono += 89;
+my $after_forward = guard_1409('#tEsT', 'ACTU');
+$main::now -= 172800;
+$mono += .875;
+my $after_backward = guard_1409('#TEST', 'news');
+$mono += .125;
+is_deeply([$after_forward, $after_backward, guard_1409('#test', 'actualite')],
+    [1, 1, 0], 'wall clock jumps do not bypass or prolong the public delay, which rounds up until the exact expiry');
 my $listing = operator_1409('.cmdcooldown');
 like($listing, qr/Active cooldowns:.*#test\s+!actualites\s+1m30s/s,
     'the existing no-argument listing is reachable through the real dispatcher');

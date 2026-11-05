@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::IRC::CaseMapping qw(fold_irc);
+use POSIX qw(ceil);
 use Time::HiRes ();
 
 our @EXPORT_OK = qw(_af_conf_int checkCmdCooldown checkChanFlood checkNickFlood);
@@ -76,10 +77,7 @@ sub _private_cooldown_wait {
             $deadline = $expires if !defined($deadline) || $expires < $deadline;
         }
     }
-    my $remaining = $deadline - $now;
-    my $wait = int($remaining);
-    ++$wait if $wait < $remaining;
-    return $wait;
+    return ceil($deadline - $now);
 }
 
 sub checkCmdCooldown {
@@ -128,15 +126,17 @@ sub checkCmdCooldown {
         $wait_cd = _private_cooldown_wait($self, $private_nick, $cooldown_cmd, $cooldown);
     }
     else {
-        my $now = time();
+        # As in private, admission is based on elapsed time. A wall-clock
+        # correction must not release a command early or extend its wait.
+        my $now = Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
         my $key = $cooldown_cmd . ':' . lc($channel);
-        my $last = $self->{_cmd_cooldown}{$key} // 0;
-        my $elapsed = $now - $last;
-        if ($elapsed >= $cooldown) {
+        my $last = $self->{_cmd_cooldown}{$key};
+        my $remaining = defined($last) ? ($last + $cooldown) - $now : 0;
+        if ($remaining <= 0) {
             $self->{_cmd_cooldown}{$key} = $now;
             return 0;
         }
-        $wait_cd = $cooldown - $elapsed;
+        $wait_cd = ceil($remaining);
     }
 
     if ($wait_cd > 0) {

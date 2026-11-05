@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1110 — Measure public command cooldowns by elapsed time
+
+- Use the monotonic clock for public command admission, as in private.
+  A wall-clock correction no longer releases a blocked command early or
+  extends its cooldown. Round remaining time up to whole seconds.
+- Keep public channel keys, command aliases, operator overrides and purge
+  behavior. A missing reservation admits immediately, including when the
+  monotonic clock starts at zero.
+- Exercise forward and backward wall-clock jumps, fractional waits and
+  exact expiry through the native operator and command-admission fixture.
+
+
 ### MB1109 — Keep one karma history per channel
 
 - Key the bounded in-memory karma history by the same lowercase channel
