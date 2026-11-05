@@ -1275,7 +1275,7 @@ sub mbDashboard_ctx {
     for my $h (0..23) { if ($hours[$h] > $peak_c) { $peak_c = $hours[$h]; $peak_h = $h; } }
 
     # 5. Karma vortex — top giver / top receiver des 7 derniers jours (ring buffer)
-    my $klog = $self->{_karma_log}{$channel} // [];
+    my $klog = $self->{_karma_log}{lc($channel // '')} // [];
     my $since_ts = time() - 7*86400;
     my %givers; my %receivers; my $kpos = 0; my $kneg = 0;
     for my $e (@$klog) {

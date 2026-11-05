@@ -141,7 +141,7 @@ sub mbCompat_ctx {
     my $vocab_score = int($jaccard * 30);
 
     # === Dimension 3 : Échanges karma mutuels (ring buffer) =================
-    my $klog = $self->{_karma_log}{$channel} // [];
+    my $klog = $self->{_karma_log}{lc($channel // '')} // [];
     my $karma_n1_to_n2 = 0; my $karma_n2_to_n1 = 0;
     my $karma_n1_to_n2_pos = 0; my $karma_n2_to_n1_pos = 0;
     for my $e (@$klog) {

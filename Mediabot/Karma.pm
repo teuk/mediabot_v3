@@ -60,7 +60,7 @@ sub mbKarma_ctx {
     if (@args && lc($args[0]) eq 'log') {
         shift @args;
         my $filter = @args ? lc($args[0]) : undef;
-        my $klog   = $self->{_karma_log}{$channel} // [];
+        my $klog   = $self->{_karma_log}{lc($channel // '')} // [];
         unless (@$klog) {
             botPrivmsg($self, $channel, "$nick: no karma history on $channel."); return 1;
         }
@@ -350,7 +350,7 @@ sub processKarma {
                         'karma_given', $nick, $channel);
             }
             else {
-                for my $e (@{ $self->{_karma_log}{$channel} // [] }) {
+                for my $e (@{ $self->{_karma_log}{$channel_key} // [] }) {
                     $given_pos++ if defined $e->{from}
                         && lc($e->{from}) eq lc($nick)
                         && ($e->{delta} // '') eq '+1';
@@ -362,8 +362,8 @@ sub processKarma {
             if ($@) { $self->{logger}->log(1, "achievements check_karma error: $@"); }
         }
 
-        # I4: append to in-memory karma log (ring buffer, max 20 per channel)
-        my $klog = $self->{_karma_log}{$channel} //= [];
+        # Keep one chronological ring per channel, using the same key as admission.
+        my $klog = $self->{_karma_log}{$channel_key} //= [];
         push @$klog, {
             ts    => time(),
             nick  => $target,
@@ -441,7 +441,7 @@ sub mbKarmaHist_ctx {
     my $kh_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
     my @klog_mem_entries;
     if ($kh_chan) {
-        @klog_mem_entries = @{ $self->{_karma_log}{$kh_chan} // [] };
+        @klog_mem_entries = @{ $self->{_karma_log}{lc $kh_chan} // [] };
     } else {
         for my $ch (sort keys %{ $self->{_karma_log} // {} }) {
             push @klog_mem_entries, @{ $self->{_karma_log}{$ch} // [] };
@@ -630,7 +630,7 @@ sub mbKarmaInfo_ctx {
     my $klog_chan = (!$all_chans && defined $channel && $channel =~ /^#/) ? $channel : undef;
     my @entries;
     if ($klog_chan) {
-        my $klog = $self->{_karma_log}{$klog_chan} // [];
+        my $klog = $self->{_karma_log}{lc $klog_chan} // [];
         @entries = grep { lc($_->{nick}) eq $target && ($_->{ts}//0) >= $since } @$klog;
     } else {
         # PM ou mode all: search across all channels
@@ -655,7 +655,7 @@ sub mbKarmaInfo_ctx {
     # KI1/fix2: use all_entries (collected across channels) for @given too
     my @all_entries_for_given;
     if ($klog_chan) {
-        @all_entries_for_given = @{ $self->{_karma_log}{$klog_chan} // [] };
+        @all_entries_for_given = @{ $self->{_karma_log}{lc $klog_chan} // [] };
     } else {
         for my $ch (keys %{ $self->{_karma_log} // {} }) {
             push @all_entries_for_given, @{ $self->{_karma_log}{$ch} // [] };
@@ -722,7 +722,7 @@ sub mbKarmaGraph_ctx {
     # Remove 'graph' keyword if called as '!karma graph'
     shift @args if (@args && lc($args[0]) eq 'graph');
     my $target  = @args ? lc($args[0]) : lc($nick);
-    my $klog    = $self->{_karma_log}{$channel} // [];
+    my $klog    = $self->{_karma_log}{lc($channel // '')} // [];
     my $now     = time();
     my $days    = 7;
     # MB1035: count observations separately from their net change. Opposite
@@ -843,7 +843,7 @@ sub mbKarmaDiff_ctx {
         my $kd_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
         my @all_entries;
         if ($kd_chan) {
-            @all_entries = @{ $self->{_karma_log}{$kd_chan} // [] };
+            @all_entries = @{ $self->{_karma_log}{lc $kd_chan} // [] };
         } else {
             for my $ch (keys %{ $self->{_karma_log} // {} }) {
                 push @all_entries, @{ $self->{_karma_log}{$ch} // [] };
@@ -895,7 +895,7 @@ sub mbKarmaDiff_ctx {
     my $kd_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
     my @kd_entries_all;
     if ($kd_chan) {
-        push @kd_entries_all, @{ $self->{_karma_log}{$kd_chan} // [] };
+        push @kd_entries_all, @{ $self->{_karma_log}{lc $kd_chan} // [] };
     } else {
         for my $ch (keys %{ $self->{_karma_log} // {} }) {
             push @kd_entries_all, @{ $self->{_karma_log}{$ch} // [] };
@@ -983,7 +983,7 @@ sub mbKarmaTop_ctx {
     }
 
     # EE1: compute 24h delta per nick from _karma_log ring buffer
-    my $klog    = $self->{_karma_log}{$channel} // [];
+    my $klog    = $self->{_karma_log}{lc($channel // '')} // [];
     my $now_ee1 = time();
     my %delta24;
     for my $e (@$klog) {

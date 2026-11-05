@@ -6,6 +6,7 @@ use File::Temp qw(tempdir);
 BEGIN { *CORE::GLOBAL::time = sub { 1_900_000_000 } }
 use Mediabot::Mediabot;
 use Mediabot::Context;
+use Mediabot::Partyline::Commands ();
 
 {
     package MB982::DBI; our @ISA=('DBI');
@@ -21,7 +22,9 @@ use Mediabot::Context;
     package MB982::DBI::st; our @ISA=('DBI::st');
     package MB982::Bot; our @ISA=('Mediabot');
     sub gethChannelsNicksOnChan { @{$_[0]{fixture_nicks}} }
-    package MB982::Channel; sub get_id {1}
+    package MB982::Channel; sub get_id { $_[0]{id} // 1 }
+    package MB982::IRC; sub nick_folded { 'Bob' }
+    package MB982::Stream; sub write { $_[0]{text} .= $_[1]; 1 }
     package MB982::Log; sub log {1}
     package MB982::Metrics; sub inc {$_[0]{counts}{$_[1]}++;1}
     package MB982::Achievements;
@@ -65,17 +68,18 @@ sub setup_1358 {
     return ($bot,$peer);
 }
 sub invoke_1358 {
-    my ($entry,$bot,$voter,$op,$target,$text)=@_;
+    my ($entry,$bot,$voter,$op,$target,$text,$channel)=@_;
+    $channel //= '#test';
     @wire=();@warnings=();
     my $ok=eval {
         if ($entry eq 'registry') {
-            my $ctx=Mediabot::Context->new(bot=>$bot,nick=>$voter,channel=>'#test',
+            my $ctx=Mediabot::Context->new(bot=>$bot,nick=>$voter,channel=>$channel,
                 command=>'karma',args=>[$op,$target]);
             $ctx->{_user_fetched}=1;
             $bot->command_registry->handler_for('karma','public')->($ctx);
         } else {
             no strict 'refs';
-            &{"${entry}::processKarma"}($bot,$voter,'#test',defined($text)?$text:"$target$op");
+            &{"${entry}::processKarma"}($bot,$voter,$channel,defined($text)?$text:"$target$op");
         }
         1;
     };
@@ -93,7 +97,6 @@ for my $entry (qw(Mediabot::Karma registry)) {
             is(score_1358($peer,$target),10+$delta,"$label: full intended target changes");
             is($peer->selectrow_array('SELECT COUNT(*) FROM KARMA WHERE id_channel=1 AND score!=10'),1,
                 "$label: no suffix or unrelated nick is changed");
-            is(score_1358($peer,'Bob'),10,"$label: Bob does not receive a vote intended for a compound nick");
             is($peer->selectrow_array('SELECT COUNT(*) FROM KARMA WHERE id_channel=2 AND score!=90'),0,
                 "$label: another channel is untouched");
             is_deeply($peer->selectall_arrayref('SELECT nick,delta,from_nick,score FROM KARMA_LOG'),
@@ -156,5 +159,55 @@ for my $entry ('Mediabot::Karma') {
     is(score_1358($peer,'PlainNick'),9,'brigade refusal does not suppress a later valid target');
     is(score_1358($peer,'Bob'),10,'brigade tracking does not substitute the suffix');
     is($bot->{metrics}{counts}{mediabot_karma_brigade_blocks},1,'compound target brigade is counted once');
+}
+{
+    my ($bot,$peer)=setup_1358();
+    $bot->{channels}{'#zother'}=bless {id=>2}, 'MB982::Channel';
+    $bot->{irc}=bless {}, 'MB982::IRC';
+    my @errors = (
+        invoke_1358('registry',$bot,'First','+','Alice-Bob',undef,'#TeSt'),
+        invoke_1358('Mediabot::Karma',$bot,'Second','++','Alice-Bob',undef,'#TEST'),
+        invoke_1358('Mediabot::Karma',$bot,'Outside','--','Alice-Bob',undef,'#ZOther'),
+    );
+    is_deeply([\@errors, [sort keys %{$bot->{_karma_log}}],
+               $peer->selectall_arrayref('SELECT id_channel, score FROM KARMA WHERE nick=? ORDER BY id_channel',
+                   undef, 'alice-bob')],
+        [['','',''], ['#test','#zother'], [[1,12],[2,89]]],
+        'mixed spelling shares one memory ring and the same SQL channel; the other channel is isolated');
+
+    # Test the memory fallback rather than a successful durable history read.
+    $peer->do('DROP TABLE KARMA_LOG');
+    local *Mediabot::UserCommands::logBot = sub { 1 };
+    my $render = sub {
+        my ($cmd,@args)=@_;
+        @wire=();
+        my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>'#tEsT',
+            command=>$cmd,args=>\@args);
+        $ctx->{_user_fetched}=1;
+        $bot->command_registry->handler_for($cmd,'public')->($ctx);
+        return [@wire];
+    };
+    my @views = (
+        ['karma', ['log','alice-bob'], qr/by Second.*by First/s],
+        ['karmahist', ['alice-bob'], qr/\(\+2\/-0\) \[memory\]/],
+        ['karmgraph', ['alice-bob'], qr/net: \+2/],
+        ['karmadiff', ['alice-bob'], qr/\+2 in last 24h \(2 vote\(s\), score: \+12\)/],
+        ['karmainfo', ['alice-bob'], qr/received \+2/],
+        ['karmatop', ['1'], qr/alice-bob\s+\+12 \(\x{2191}2 today\)/],
+    );
+    my @bad;
+    for my $view (@views) {
+        my ($cmd,$args,$pattern)=@$view;
+        my $lines=$render->($cmd,@$args);
+        my $text=join("\n",map {$_->[2]} @$lines);
+        push @bad,$cmd unless @$lines && $text =~ $pattern && $text !~ /Outside/
+            && !grep { $_->[0] ne 'public' || $_->[1] ne '#tEsT' } @$lines;
+    }
+    is_deeply(\@bad, [], 'IRC history views agree and retain the requested spelling on the wire');
+
+    my $stream=bless {text=>''}, 'MB982::Stream';
+    Mediabot::Partyline::Commands::_cmd_karmahist({bot=>$bot},$stream,1,'alice-bob');
+    ok($stream->{text} =~ /by Second.*by First/s && $stream->{text} !~ /Outside/,
+        'Partyline reads the same two events in reverse order');
 }
 done_testing;

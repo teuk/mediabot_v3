@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1109 — Keep one karma history per channel
+
+- Key the bounded in-memory karma history by the same lowercase channel
+  identity as the channel cache. Varying the letter case no longer splits
+  the vote history or hides recent changes from IRC, Partyline or the stats commands.
+- Keep the requested channel spelling in replies and keep SQL writes and
+  all-channel reads unchanged. The existing purge can now find the live ring.
+- Exercise mixed-case writes and reads in the native SQLite fixture, including
+  fallback history and another channel with the same target.
+
+
 ### MB1108 — Keep Liquidsoap reads within their own deadline
 
 - Wait for the response with a monotonic deadline rather than a process-wide

@@ -2981,7 +2981,7 @@ sub _cmd_karmahist {
         $stream->write("Not on any channel.\r\n"); return;
     }
 
-    my $klog = $bot->{_karma_log}{$chan} // [];
+    my $klog = $bot->{_karma_log}{lc($chan // '')} // [];
     unless (@$klog) {
         $stream->write("No karma history for $chan.\r\n"); return;
     }

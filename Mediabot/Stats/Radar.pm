@@ -247,7 +247,7 @@ sub mbRadar_ctx {
     }
 
     # 5. Karma vortex — récent karma activity > 5 votes dernière heure
-    my $klog = $self->{_karma_log}{$channel} // [];
+    my $klog = $self->{_karma_log}{lc($channel // '')} // [];
     my $now = time();
     my $recent_karma = scalar grep { ($_->{ts}//0) >= $now - 3600 } @$klog;
     if ($recent_karma >= 5) {
