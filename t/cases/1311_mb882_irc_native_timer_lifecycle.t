@@ -8,6 +8,7 @@ use Mediabot::IRC::Timer qw(countdown);
 use Mediabot::IRC::PacedOutput qw(queue_notices queue_privmsg_chunks);
 use Mediabot::IRC::Output qw(privmsg action);
 use MB881OutputFixture;
+use Mediabot::UserCommands ();
 
 sub timer_count {scalar grep {$_->isa('IO::Async::Timer::Countdown')} $_[0]->notifiers}
 no warnings qw(redefine once);
@@ -242,4 +243,67 @@ our ($bool_calls_1094,$string_calls_1094)=(0,0);
         'MB1094: immediate no-loop output still propagates the original exception object without queue state');
 }
 
+sub quotegame_fixture {
+    my $bot = MB881OutputFixture::new_bot();
+    $bot->{loop} = IO::Async::Loop->really_new;
+    my $round = $bot->{_quotegame}{'#test'} = {
+        active => 1, author => 'Author', deadline => 0, token => 'round',
+    };
+    return ($bot, $round, $bot->{loop});
+}
+{
+    my ($bot, $round, $loop) = quotegame_fixture();
+    Mediabot::UserCommands::_quotegame_start_timer($bot, '#test', 'round', 60);
+    my $probe = $round->{timer}; weaken($probe);
+    $bot->{loop} = IO::Async::Loop->really_new;
+    Mediabot::UserCommands::_quotegame_cancel_timer($bot, '#test');
+    is_deeply([timer_count($loop), defined($probe) ? 1 : 0], [0,0],
+        'cancelling a quote timer detaches it from its owning loop and frees the notifier');
+}
+{
+    my ($bot, $round, $loop) = quotegame_fixture();
+    my @wire;
+    local *Mediabot::Helpers::botPrivmsg = sub {push @wire, $_[2]; 1};
+    Mediabot::UserCommands::_quotegame_start_timer($bot, '#test', 'round', 60);
+    my $retired = $round->{timer}{on_expire};
+    Mediabot::UserCommands::_quotegame_start_timer($bot, '#test', 'round', 60);
+    my $replacement = refaddr($round->{timer});
+    $retired->();
+    is_deeply([$round->{active}, refaddr($round->{timer}), scalar @wire, timer_count($loop)],
+        [1, $replacement, 0, 1], 'an old expiry cannot close a rearmed quote round with the same token');
+    $loop->loop_once(0.01);
+    is_deeply([$round->{active}, scalar @wire, timer_count($loop)], [0,1,0],
+        'only the current quote timer closes the round and announces the answer');
+}
+{
+    my ($bot, $round, $loop) = quotegame_fixture();
+    my $error = bless {}, 'MB1119::QuoteSendError';
+    local *Mediabot::Helpers::botPrivmsg = sub {die $error};
+    Mediabot::UserCommands::_quotegame_start_timer($bot, '#test', 'round', 60);
+    my $probe = $round->{timer}; weaken($probe);
+    my $ok = eval {$loop->loop_once(0.01); 1};
+    my $got = $@;
+    is_deeply([!$ok && (refaddr($got) // 0) == refaddr($error) ? 1 : 0,
+        $round->{active}, timer_count($loop), defined($probe) ? 1 : 0],
+        [1,0,0,0], 'quote expiry frees its notifier even when sending throws');
+}
+{
+    my ($bot, $round, $loop) = quotegame_fixture();
+    my @wire;
+    local *Mediabot::Helpers::botPrivmsg = sub {push @wire, $_[2]; 1};
+    my $start = IO::Async::Timer::Countdown->can('start');
+    my $ok;
+    {
+        local *IO::Async::Timer::Countdown::start = sub {
+            $start->(@_);
+            die "injected quote timer start failure\n";
+        };
+        $ok = eval {Mediabot::UserCommands::_quotegame_start_timer($bot, '#test', 'round', 60); 1};
+    }
+    is_deeply([$ok ? 1 : 0, $round->{active}, timer_count($loop), exists($round->{timer}) ? 1 : 0],
+        [1,1,0,0], 'quote timer setup failure retains the round for lazy expiry and detaches the failed arm');
+    Mediabot::UserCommands::checkQuotegameAnswer($bot, 'Player', '#test', 'late');
+    is_deeply([$round->{active}, scalar @wire, timer_count($loop)], [0,1,0],
+        'lazy quote expiry still works once after timer setup fails');
+}
 done_testing;

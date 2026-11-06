@@ -93,10 +93,10 @@ return sub {
     # --- 2. Scan de source : chaque site corrigé porte la rupture ---------
     # Robuste : on vérifie la présence du tag mb326-B1 et d'un `undef $...timer;`
     # plutôt qu'un contexte exact (espaces/accents fragiles).
+    # Quotegame uses the shared countdown; case 1311 checks its lifetime.
     my %checks = (
         'Mediabot/Mediabot.pm'        => [ qr/mb326-B1/, qr/undef \$who_timer;/, qr/undef \$timer;/ ],
         'Mediabot/IRC/Timer.pm'  => [ qr/mb326-B1/, qr/undef \$timer;/ ],
-        'Mediabot/Games/QuoteGame.pm' => [ qr/mb326-B1/, qr/undef \$timer;/ ],
         'Mediabot/Radio/Request.pm'   => [ qr/mb326-B1/, qr/undef \$timer;/ ],
     );
 

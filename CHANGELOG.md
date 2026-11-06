@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1119 — Release Quotegame timers safely
+
+- Use the shared countdown cleanup for Quotegame and detach cancelled
+  timers from their owning loop. An old expiry cannot close a rearmed round.
+- Release the timer before announcing the answer. If setup fails, keep
+  the existing deadline check on the next channel message.
+
+
 ### MB1118 — Keep paced PRIVMSG replies on their original IRC connection
 
 - Drop unfinished paced replies and queued successors when IRC is replaced.

@@ -4,7 +4,9 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use Scalar::Util qw(refaddr weaken);
 use Mediabot::Helpers ();
+use Mediabot::IRC::Timer qw(countdown);
 
 our @EXPORT_OK = qw(
     _quotegame_cancel_timer
@@ -32,11 +34,11 @@ sub _quotegame_cancel_timer {
     my $qg = $self->{_quotegame}{$channel} or return;
 
     my $timer = delete $qg->{timer};
-    delete $qg->{timer_token};
+    delete $qg->{timer_arm};
 
     return unless $timer;
 
-    my $loop = eval { $self->getLoop } || $self->{loop};
+    my $loop = eval { $timer->loop };
     eval { $timer->stop if $timer->can('stop') };
     eval { $loop->remove($timer) if $loop };
 }
@@ -44,6 +46,8 @@ sub _quotegame_cancel_timer {
 sub _quotegame_start_timer {
     my ($self, $channel, $token, $delay) = @_;
     return unless $self && defined $channel && defined $token;
+    my $round = $self->{_quotegame}{$channel} or return;
+    return unless $round->{active};
 
     $delay ||= 60;
 
@@ -55,47 +59,50 @@ sub _quotegame_start_timer {
         return;
     }
 
-    require IO::Async::Timer::Countdown;
-
     Mediabot::UserCommands::_quotegame_cancel_timer($self, $channel);
 
-    my $timer;
-    $timer = IO::Async::Timer::Countdown->new(
-        delay => $delay,
-        on_expire => sub {
-            my $loop_now = eval { $self->getLoop } || $self->{loop};
-
-            my $qg = $self->{_quotegame}{$channel};
-            if ($qg && $qg->{active}
-                    && defined($qg->{timer_token})
-                    && $qg->{timer_token} eq $token) {
-
-                $qg->{active} = 0;
+    # Each arm has its own identity, even when the round token is unchanged.
+    my $arm = $round->{timer_arm} = {};
+    my $bot = $self;
+    weaken($bot);
+    my $owned_round = sub {
+        return unless $bot;
+        my $qg = $bot->{_quotegame}{$channel} or return;
+        return $qg if (refaddr($qg->{timer_arm}) // 0) == refaddr($arm);
+        return;
+    };
+    my $timer = eval {
+        countdown(
+            loop => $loop,
+            delay => $delay,
+            on_expire => sub {
+                my $qg = $owned_round->() or return;
                 delete $qg->{timer};
-                delete $qg->{timer_token};
-
+                delete $qg->{timer_arm};
+                return unless $qg->{active};
+                $qg->{active} = 0;
                 my $author = defined($qg->{author}) ? $qg->{author} : 'unknown';
                 Mediabot::Helpers::botPrivmsg(
-                    $self,
+                    $bot,
                     $channel,
                     "\x{23F0} Time's up! The answer was: \x02$author\x02"
                 );
-            }
-
-            # mb326-B1: toujours libérer ce timer (retrait du loop + rupture du
-            # cycle closure<->timer), y compris sur le chemin "stale/superseded"
-            # (token remplacé par un nouveau round) qui faisait auparavant un
-            # return sec et laissait le timer dans le loop ET dans le cycle.
-            eval { $loop_now->remove($timer) if $loop_now && $timer };
-            undef $timer;
-        },
-    );
-
-    $self->{_quotegame}{$channel}{timer}       = $timer;
-    $self->{_quotegame}{$channel}{timer_token} = $token;
-
-    $loop->add($timer);
-    $timer->start;
+            },
+        );
+    };
+    my $current = $owned_round->();
+    if (!$current) {
+        eval { $timer->stop } if $timer;
+        eval { $loop->remove($timer) } if $timer;
+        return;
+    }
+    unless ($timer) {
+        delete $current->{timer_arm};
+        eval { $self->{logger}->log(2, "Quotegame: timer setup failed, keeping lazy timeout only") };
+        return;
+    }
+    $current->{timer} = $timer;
+    return $timer;
 }
 
 
