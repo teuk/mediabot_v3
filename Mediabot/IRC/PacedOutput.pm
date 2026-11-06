@@ -225,9 +225,15 @@ sub queueBotNotices {
     my $delay_step = 1.5;
     $self->{_notice_queue_timers} ||= [];
     my $timers = $self->{_notice_queue_timers};
+    # setIrc retires this registry when the transport changes. A nick on
+    # the replacement connection must never receive old private output.
+    my $is_current = sub {
+        return (refaddr($self->{_notice_queue_timers}) // 0) == refaddr($timers);
+    };
     my $base_delay = scalar(grep { defined $_ } @$timers) * $delay_step;
 
     for my $i (0 .. $#lines) {
+        last unless $is_current->();
         my $line = $lines[$i];
         my $timer;
 
@@ -236,7 +242,10 @@ sub queueBotNotices {
                 loop => $loop,
                 delay => $base_delay + ($i * $delay_step),
                 on_expire => sub {
-                    my $sent = eval { botNotice($self, $nick, $line); 1 };
+                    my $sent = eval {
+                        botNotice($self, $nick, $line) if $is_current->();
+                        1;
+                    };
                     my $error = $@;
                     my $expired_id = refaddr($timer);
                     @$timers = grep {
@@ -254,7 +263,7 @@ sub queueBotNotices {
 
         unless ($started) {
             undef $timer;
-            botNotice($self, $nick, $line);
+            botNotice($self, $nick, $line) if $is_current->();
         }
     }
 

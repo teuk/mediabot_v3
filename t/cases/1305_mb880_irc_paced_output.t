@@ -4,6 +4,7 @@ use Test::More;
 use Scalar::Util qw(weaken);
 use IO::Async::Timer::Countdown;
 use Mediabot::Helpers ();
+use Mediabot::Mediabot ();
 use Mediabot::External::Claude ();
 use Mediabot::IRC::PacedOutput qw(queue_privmsg_chunks queue_notices);
 use Mediabot::CommandAsync ();
@@ -104,6 +105,45 @@ $reject->{loop}{reject} = 1;
 queue_notices($reject, 'nick', 'rescue');
 is_deeply(\@wire, [['notice', 'nick', 'rescue']], 'failed NOTICE scheduling retains immediate fallback');
 is_deeply($reject->{_notice_queue_timers}, [], 'failed scheduling releases its timer slot');
+
+{
+    @wire = ();
+    my $old = bless {}, 'MB880::Transport';
+    my $new = bless {}, 'MB880::Transport';
+    my $bot = bless {loop => MB880::Loop->new, irc => $old}, 'MB880::Bot';
+    queue_notices($bot, 'nick', qw(first pending));
+    Mediabot::setIrc($bot, $old);
+    $bot->{loop}->tick;
+    is_deeply(\@wire, [['notice', 'nick', 'first']],
+        'reassigning the same IRC object keeps its queued notices');
+
+    @wire = ();
+    my $retired = $bot->{_notice_queue_timers};
+    Mediabot::setIrc($bot, $new);
+    queue_notices($bot, 'nick', qw(fresh next));
+    is_deeply($bot->{loop}{delays}, [0, 1.5, 0, 1.5],
+        'retired NOTICE slots do not delay a fresh connection');
+    $bot->{loop}->tick;
+    is_deeply([\@wire, $retired, scalar @{$bot->{_notice_queue_timers}}], [[], [], 2],
+        'retired NOTICE expiry cleans only its own slot and sends nothing');
+    $bot->{loop}->drain;
+    is_deeply([\@wire, $bot->{_notice_queue_timers}],
+        [[['notice', 'nick', 'fresh'], ['notice', 'nick', 'next']], []],
+        'only current-connection notices reach the nick in order');
+}
+{
+    @wire = ();
+    my $bot = bless {loop => MB880::Loop->new, irc => bless({}, 'MB880::Transport')}, 'MB880::Bot';
+    my $attempts = 0;
+    local *MB880::Loop::add = sub {
+        $attempts++;
+        Mediabot::setIrc($bot, bless({}, 'MB880::Transport'));
+        die "fixture connection changed during arm\n";
+    };
+    queue_notices($bot, 'nick', qw(old fallback));
+    is_deeply([$attempts, \@wire], [1, []],
+        'a connection change during timer setup suppresses fallback and remaining arms');
+}
 
 @wire = ();
 my ($intents, $truncated, $collected, $error) = Mediabot::CommandAsync::_collect_intents_run(sub {

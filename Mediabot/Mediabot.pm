@@ -1832,9 +1832,10 @@ sub refresh_channel_hashes {
 # Set IRC object
 sub setIrc {
 	my ($self,$irc) = @_;
-	# AntiFlood work belongs to the connection that admitted it.
+	# Deferred sends belong to the connection that admitted them.
 	if ((refaddr($self->{irc}) // 0) != (refaddr($irc) // 0)) {
 		delete $self->{_flood_outq};
+		delete $self->{_notice_queue_timers};
 	}
 	$self->{irc} = $irc;
 }

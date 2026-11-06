@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1117 — Drop paced private notices when the IRC connection changes
+
+- Start a fresh NOTICE queue for a replacement connection. Old timers
+  release their slots without sending to the same nick on the new connection
+  or adding to its pacing delay.
+- Suppress fallback sends if the connection changes during timer setup.
+  Keep same-connection FIFO, pacing and fallback unchanged.
+
+
 ### MB1116 — Keep deferred AntiFlood output on its original connection
 
 - Retire deferred PRIVMSG and ACTION queues when the IRC object changes.
