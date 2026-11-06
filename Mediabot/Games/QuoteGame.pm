@@ -165,22 +165,29 @@ sub mbQuotegame_ctx {
         return 1;
     }
 
-    # Récupérer une quote aléatoire qui n'est PAS de l'auteur du bot
-    # Et idéalement d'un user encore actif (au moins 1 msg dans CHANNEL_LOG)
+    # Read one eligible quote before changing the round or announcing it.
     my $dbh = $self->{dbh};
-    my $sth = $dbh->prepare(q{
-        SELECT q.id_quotes, q.quotetext, u.nickname AS author
-        FROM QUOTES q
-        JOIN CHANNEL c ON c.id_channel = q.id_channel
-        JOIN USER    u ON u.id_user    = q.id_user
-        WHERE c.name = ? AND LENGTH(q.quotetext) >= 20
-        ORDER BY RAND()
-        LIMIT 1
-    });
-    unless ($sth && $sth->execute($channel)) {
-        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+    my ($sth, $row);
+    my $read_ok = eval {
+        $sth = $dbh && $dbh->prepare(q{
+            SELECT q.id_quotes, q.quotetext, u.nickname AS author
+            FROM QUOTES q
+            JOIN CHANNEL c ON c.id_channel = q.id_channel
+            JOIN USER    u ON u.id_user    = q.id_user
+            WHERE c.name = ? AND LENGTH(q.quotetext) >= 20
+            ORDER BY RAND()
+            LIMIT 1
+        }) or die "quotegame_prepare\n";
+        $sth->execute($channel) or die "quotegame_execute\n";
+        $row = $sth->fetchrow_hashref;
+        die "quotegame_fetch\n" if $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
+        botNotice($self, $nick, 'Database error.');
+        return;
     }
-    my $row = $sth->fetchrow_hashref; $sth->finish;
     unless ($row && $row->{quotetext}) {
         botPrivmsg($self, $channel, 'No quotes long enough for the game on this channel.');
         return 1;

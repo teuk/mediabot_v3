@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1120 — Distinguish Quotegame database failures from empty reads
+
+- Give the requester a private database error on failed prepare, execute
+  or fetch. Keep the current score and round state.
+- Report no eligible quotes only after a confirmed read. Close the
+  statement without letting cleanup mask the query outcome.
+
+
 ### MB1119 — Release Quotegame timers safely
 
 - Use the shared countdown cleanup for Quotegame and detach cancelled

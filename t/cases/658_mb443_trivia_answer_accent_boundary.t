@@ -73,7 +73,25 @@ use Mediabot::UserCommands;
   my$sth=$s->SUPER::prepare($sql,@rest);$sth->{private_mb920}=$st if$sth&&$st;return$sth;
  }
  package MB920::DBI::st; our @ISA=('DBI::st');
- sub execute {my($s,@bind)=@_;my$st=$s->{private_mb920};push @{$st->{binds}},\@bind if$st;return$s->SUPER::execute(@bind)}
+ sub execute {
+  my($s,@bind)=@_;my$st=$s->{private_mb920};push @{$st->{binds}},\@bind if$st;
+  return $s->set_err(9001, 'fixture execute failure') if $st && ($st->{fault}//'') eq 'execute';
+  return $s->SUPER::execute(@bind);
+ }
+ sub fetchrow_hashref {
+  my($s,@args)=@_;my$st=$s->{private_mb920};
+  return $s->set_err(9002, 'fixture fetch failure') if $st && ($st->{fault}//'') eq 'fetch';
+  return $s->SUPER::fetchrow_hashref(@args);
+ }
+ sub finish {
+  my($s)=@_;my$st=$s->{private_mb920};
+  my$ok=$s->SUPER::finish;
+  if($st && $st->{read_case}) {
+   ++$st->{finishes};
+   die "fixture cursor close failed\n" if ($st->{fault}//'') eq 'finish';
+  }
+  return $ok;
+ }
  package MB920::Bot; sub getLoop {$_[0]{loop}}
  package MB920::Channel; sub get_id {1}
  package MB920::Metrics; sub inc {$_[0]{counts}{$_[1]}++}
@@ -151,6 +169,24 @@ for my$mode(qw(characters wire bytes)){
   }
  }
 }
+for my $raise (0, 1) {
+ for my $fault (qw(missing prepare execute fetch empty finish)) {
+  my ($b,$s)=fixture('characters');
+  my $db=$b->{dbh};
+  $db->do('DROP TABLE QUOTES') if $fault eq 'prepare';
+  $db->{RaiseError}=$raise;
+  delete $b->{dbh} if $fault eq 'missing';
+  my $previous=$b->{_quotegame}{'#test'}={active=>0,scores=>{Player=>3}};
+  @{$s}{qw(read_case fault finishes)}=(1,$fault,0);
+  my $ok=eval {Mediabot::UserCommands::mbQuotegame_ctx(bless({bot=>$b},'MB920::Ctx'));1};
+  my $same=$b->{_quotegame}{'#test'} == $previous ? 1 : 0;
+  $out{quote_reads}{"$raise/$fault"}=[
+   $ok ? 1 : 0, $same, $previous->{scores}{Player},
+   scalar($b->{loop}->notifiers), $s->{finishes}, [map {[@$_[0,1]]} @{$s->{out}}]
+  ];
+  $db->disconnect;
+ }
+}
 print JSON::PP->new->canonical->utf8->encode(\%out);
 MB920_NATIVE
     open my $native, '-|', $^X, '-I.', '-It/lib', '-e', $probe
@@ -160,6 +196,21 @@ MB920_NATIVE
     $assert->is($? >> 8, 0, 'native Unicode game probe completes');
     my $r = JSON::PP::decode_json($output);
     my $json = JSON::PP->new->canonical;
+    my (%failures, %empty);
+    for my $raise (0, 1) {
+        for my $fault (qw(missing prepare execute fetch)) {
+            $failures{"$raise/$fault"} = [1, 1, 3, 0,
+                $fault =~ /^(?:missing|prepare)$/ ? 0 : 1, [['Player','Database error.']]];
+        }
+        for my $fault (qw(empty finish)) {
+            $empty{"$raise/$fault"} = [1, 1, 3, 0, 1,
+                [['#test','No quotes long enough for the game on this channel.']]];
+        }
+    }
+    $assert->is($json->encode({map {$_ => $r->{quote_reads}{$_}} keys %failures}),
+        $json->encode(\%failures), 'quotegame SQL failures report privately, close cursors and keep scores without starting a round');
+    $assert->is($json->encode({map {$_ => $r->{quote_reads}{$_}} keys %empty}),
+        $json->encode(\%empty), 'confirmed empty quotegame reads still report no quotes even if cursor cleanup throws');
     for my $game (qw(trivia quote)) {
         my (@actual, @expected);
         for my $mode (qw(characters wire bytes)) {
