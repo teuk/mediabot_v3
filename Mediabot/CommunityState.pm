@@ -197,25 +197,8 @@ sub mbRemind_ctx {
     }
 
     if (@args && lc($args[0]) eq 'cancel') {
-        my $id = $args[1];
-        unless (defined $id && $id =~ /^\d+$/) {
-            botNotice($self, $nick, 'Syntax: remind cancel <id>  (use remind list)');
-            return;
-        }
-        my $sth_del = $self->{dbh}->prepare(q{
-            DELETE FROM REMINDERS
-            WHERE id_reminder = ? AND from_nick = ? AND delivered = 0
-        });
-        if ($sth_del && $sth_del->execute($id, lc($nick))) {
-            my $rows = $sth_del->rows; $sth_del->finish;
-            if ($rows > 0) {
-                botNotice($self, $nick, "Reminder #$id cancelled.");
-                logBot($self, $ctx->message, $channel, 'remind_cancel', $id);
-            } else {
-                botNotice($self, $nick, "Reminder #$id not found or already delivered.");
-            }
-        }
-        return 1;
+        shift @args;
+        return mbRemindCancel_ctx($ctx, \@args);
     }
 
     # X6: !remind ! <nick> <msg> — high-priority reminder
@@ -278,7 +261,7 @@ sub mbRemind_ctx {
     $message =~ s/^\s+|\s+$//g;
     # MB961: control tags are metadata, never a substitute for message text.
     unless (defined $target && $target ne '' && $message ne '') {
-        botNotice($self, $nick, "Syntax: remind <nick> <msg>  |  remind daily HH:MM <nick> <msg>  |  remind weekly <day> HH:MM <nick> <msg>  |  remind list  |  remind cancel <id>");
+        botNotice($self, $nick, "Syntax: remind <nick> <msg>  |  remind daily HH:MM <nick> <msg>  |  remind weekly <day> HH:MM <nick> <msg>  |  remind list  |  remind cancel <id>/all");
         return;
     }
     $message = '[!] ' . $message if $remind_urgent;
@@ -841,53 +824,60 @@ sub mbRemindSnooze_ctx {
 }
 
 # ---------------------------------------------------------------------------
-# mbRemindCancel_ctx --- !remind cancel <id>
-# Cancel a pending reminder by ID (must be from the calling nick).
+# mbRemindCancel_ctx --- !remind cancel <id>|all
+# Only pending reminders created by the calling nick can be cancelled.
 # ---------------------------------------------------------------------------
 sub mbRemindCancel_ctx {
-    my ($ctx) = @_;
+    my ($ctx, $args) = @_;
 
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
-    my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-
-    my $id = shift @args;
-    # EE6: !remindcancel all — cancel all pending reminders set by caller
-    if (defined $id && lc($id) eq 'all') {
-        my $sth_a = $self->{dbh}->prepare(q{
-            UPDATE REMINDERS SET delivered = 1
-            WHERE from_nick = ? AND delivered = 0
-        });
-        unless ($sth_a && $sth_a->execute(lc($nick))) {
-            botNotice($self, $nick, 'DB error.'); return;
-        }
-        my $rows = $sth_a->rows; $sth_a->finish;
-        botNotice($self, $nick, "$rows pending reminder(s) cancelled.");
-        return 1;
+    $args //= $ctx->args;
+    my ($id, $all);
+    if (ref($args) eq 'ARRAY' && @$args == 1 && defined($args->[0]) && !ref($args->[0])) {
+        my $arg = $args->[0];
+        $all = lc($arg) eq 'all';
+        # Keep BIGINT UNSIGNED identifiers exact; numeric coercion can round.
+        ($id) = $arg =~ /\A0*([1-9][0-9]{0,19})\z/ unless $all;
+        undef $id if defined($id) && length($id) == 20 && $id gt '18446744073709551615';
     }
-    unless (defined $id && $id =~ /^\d+$/) {
+    unless ($all || defined($id)) {
         botNotice($self, $nick, 'Syntax: remind cancel <id>|all  (see !remindlist)');
         return;
     }
 
-    my $sth = $self->{dbh}->prepare(q{
-        UPDATE REMINDERS SET delivered = 2
-        WHERE id_reminder = ? AND from_nick = ? AND delivered = 0
-    });
-    unless ($sth && $sth->execute($id, lc($nick))) {
+    # State 2 means cancelled; state 1 is reserved for delivery. Keep
+    # ownership and the pending check in the same statement as the write.
+    my $sql = 'UPDATE REMINDERS SET delivered = 2 WHERE from_nick = ? AND delivered = 0';
+    $sql .= ' AND id_reminder = ?' unless $all;
+    my ($sth, $rows);
+    my $ok = eval {
+        $sth = $self->{dbh}->prepare($sql) or die "prepare failed\n";
+        my @bind = (lc($nick));
+        push @bind, $id unless $all;
+        $sth->execute(@bind) or die "execute failed\n";
+        $rows = $sth->rows;
+        die "unknown affected rows\n" unless defined($rows) && $rows >= 0;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($ok) {
+        eval { $self->{logger}->log(1, 'mbRemindCancel_ctx() database write failed.') }
+            if $self->{logger};
         botNotice($self, $nick, 'Database error.');
-        $sth->finish if $sth;
         return;
     }
-    my $rows = $sth->rows;
-    $sth->finish;
 
-    if ($rows > 0) {
+    if ($all) {
+        botNotice($self, $nick, sprintf('%d pending reminder(s) cancelled.', $rows));
+    } elsif ($rows > 0) {
         botNotice($self, $nick, "Reminder #$id cancelled.");
     } else {
         botNotice($self, $nick, "Reminder #$id not found or already delivered.");
     }
+    eval { logBot($self, $ctx->message, $channel, 'remind_cancel', $all ? 'all' : $id) }
+        if $rows > 0;
     return 1;
 }
 

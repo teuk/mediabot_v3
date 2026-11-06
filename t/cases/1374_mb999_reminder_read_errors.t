@@ -14,10 +14,15 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
     sub prepare {
         my ($db, $sql, @rest) = @_;
         my $read = $sql =~ /SELECT\s+r\.id_reminder\b/i;
+        my $cancel = $sql =~ /\A\s*(?:UPDATE|DELETE FROM)\s+REMINDERS\b/i;
         return $db->set_err(1,'private reminder prepare detail')
-            if $read && ($db->{private_fault}//'') eq 'prepare';
+            if ($read && ($db->{private_fault}//'') eq 'prepare')
+                || ($cancel && ($db->{private_fault}//'') eq 'cancel_prepare');
         my $sth = $db->SUPER::prepare($sql, @rest);
-        $sth->{private_read} = $read ? 1 : 0 if $sth;
+        if ($sth) {
+            $sth->{private_read} = $read ? 1 : 0;
+            $sth->{private_cancel} = $cancel ? 1 : 0;
+        }
         return $sth;
     }
     package MB999::DBI::st; our @ISA = ('DBI::st');
@@ -25,7 +30,8 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         my ($sth, @bind) = @_;
         $sth->{private_fetched} = 0;
         return $sth->set_err(1,'private reminder execute detail')
-            if $sth->{private_read} && ($sth->{Database}{private_fault}//'') eq 'execute';
+            if ($sth->{private_read} && ($sth->{Database}{private_fault}//'') eq 'execute')
+                || ($sth->{private_cancel} && ($sth->{Database}{private_fault}//'') eq 'cancel_execute');
         return $sth->SUPER::execute(@bind);
     }
     sub fetchrow_hashref {
@@ -44,6 +50,13 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
             $sth->{Database}{private_finished}++;
             $sth->set_err(undef,undef); # cleanup must not erase a failed-read decision
             die "private cleanup detail\n" if $sth->{Database}{private_cleanup_failure};
+        }
+        if ($sth->{private_cancel}) {
+            $sth->{Database}{private_cancel_finished}++;
+            if (($sth->{Database}{private_fault}//'') eq 'cancel_finish') {
+                $sth->SUPER::finish;
+                die "private cancel cleanup detail\n";
+            }
         }
         return $sth->SUPER::finish;
     }
@@ -170,5 +183,53 @@ for my $kind (qw(show list remindlist)) {
     is_deeply(\@healthy,\@expected_healthy,
         'cleanup failure alone does not turn a confirmed complete read into an error');
 }
-is_deeply(\@warnings,[],'reminder reads emit no warnings');
+sub cancel_1374 {
+    my ($bot,$cmd,@args)=@_;
+    @wire=();@audit=();
+    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Caller',channel=>'#test',
+        command=>$cmd,args=>['cancel',@args]);
+    my $ok=eval {$bot->command_registry->handler_for($cmd,'public')->($ctx);1};
+    return [$ok?'':"$@",dclone(\@wire),dclone(\@audit)];
+}
+for my $cmd (qw(remind tell)) {
+    my ($bot,$db)=setup_1374(1);
+    my $before=rows_1374($db);
+    my @actual;
+    for my $args ([],['all','extra'],['4','extra'],['４'],['0'],['18446744073709551616']) {
+        push @actual,cancel_1374($bot,$cmd,@$args);
+    }
+    is_deeply([\@actual,rows_1374($db)],
+        [[map {['',[['notice','Caller','Syntax: remind cancel <id>|all  (see !remindlist)']],[]]} 1..6],$before],
+        "$cmd: invalid syntax cannot cancel a single reminder or all reminders");
+
+    @actual=map {cancel_1374($bot,$cmd,$_)} qw(4 4 1 ALL all);
+    my @expected_rows=map {my @row=@$_;$row[6]=2 if $row[0]>=4 && $row[0]<=6;\@row} @$before;
+    is_deeply([\@actual,rows_1374($db)],
+        [[
+            ['', [['notice','Caller','Reminder #4 cancelled.']], [['#test','remind_cancel','4']]],
+            ['', [['notice','Caller','Reminder #4 not found or already delivered.']], []],
+            ['', [['notice','Caller','Reminder #1 not found or already delivered.']], []],
+            ['', [['notice','Caller','2 pending reminder(s) cancelled.']], [['#test','remind_cancel','all']]],
+            ['', [['notice','Caller','0 pending reminder(s) cancelled.']], []],
+        ],\@expected_rows],
+        "$cmd: single and bulk cancellation only mark the caller's pending rows, with truthful counts and audit");
+}
+{
+    my (@actual,@expected);
+    for my $raise (0,1) {for my $fault (qw(cancel_prepare cancel_execute cancel_finish)) {
+        my ($bot,$db)=setup_1374($raise);
+        my $before=rows_1374($db);
+        $db->{private_fault}=$fault;
+        my $result=cancel_1374($bot,$raise ? 'tell' : 'remind','all');
+        $db->{private_fault}='';
+        my $saved=$fault eq 'cancel_finish';
+        my $want=$saved ? ['', [['notice','Caller','3 pending reminder(s) cancelled.']], [['#test','remind_cancel','all']]]
+            : ['', [['notice','Caller','Database error.']], []];
+        my @rows=map {my @row=@$_;$row[6]=2 if $saved && $row[0]>=4 && $row[0]<=6;\@row} @$before;
+        push @actual,[$raise,$fault,$result,rows_1374($db),$db->{private_cancel_finished}//0];
+        push @expected,[$raise,$fault,$want,\@rows,$fault eq 'cancel_prepare' ? 0 : 1];
+    }}
+    is_deeply(\@actual,\@expected,'DBI errors stay private, statements finish, and a cleanup exception cannot undo a confirmed cancellation');
+}
+is_deeply(\@warnings,[],'reminder reads and cancellations emit no warnings');
 done_testing;

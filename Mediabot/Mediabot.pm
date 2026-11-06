@@ -2185,13 +2185,7 @@ sub _builtin_public_command_handlers {
         calc         => sub { my ($ctx) = @_; mbCalc_ctx($ctx) },
         convert      => sub { my ($ctx) = @_; mbConvert_ctx($ctx) },     # mb479: unit conversion
         '8ball'      => sub { my ($ctx) = @_; mb8ball_ctx($ctx) },
-        remind       => sub { my ($ctx) = @_;
-            my @a = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-            if (@a && lc($a[0]) eq 'cancel') {
-                shift @{ $ctx->args };
-                mbRemindCancel_ctx($ctx);
-            } else { mbRemind_ctx($ctx) }
-        },
+        remind       => sub { my ($ctx) = @_; mbRemind_ctx($ctx) },
         remindlist   => sub { my ($ctx) = @_; mbRemindList_ctx($ctx) },
         tell         => sub { my ($ctx) = @_; mbRemind_ctx($ctx) },   # mb474: leave a message, delivered when the target returns
         calclast     => sub { my ($ctx) = @_; mbCalcLast_ctx($ctx) },

@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1127 — Unify reminder cancellation
+
+- Share one cancellation path between `remind` and `tell`. Single and
+  bulk requests only mark the caller's pending reminders as cancelled.
+- Reject trailing arguments before any write. Report database failures
+  privately and use the confirmed number of affected rows.
+
+
 ### MB1126 — Restore channel karma shorthand
 
 - Accept `nick++` and `nick--` in ordinary channel messages when the literal
