@@ -4,6 +4,7 @@ use utf8;
 use Test::More;
 use IO::Async::Loop;
 use IO::Async::Timer::Countdown;
+use Scalar::Util qw(refaddr);
 use Time::HiRes ();
 use Mediabot::Scheduler;
 
@@ -116,6 +117,85 @@ for my $mode (qw(periodic calendar)) {
     my $r=exercise_1416('periodic',bless({},'MB1043::StringError'),no_logger=>1,no_metrics=>1);
     is_deeply([@$r{qw(escaped calls healthy)},$r->{info}{callback_exceptions},$r->{coercions},$r->{notifiers}],
         [0,1,1,1,[0,0],0], 'exception isolation also works without a logger or metrics projection');
+}
+for my $class (qw(MB1043::StringError MB1043::BoolError MB1043::FalseError)) {
+    my $loop = IO::Async::Loop->really_new;
+    my $logger = bless({rows=>[]},'MB1043::Logger');
+    my $s = Mediabot::Scheduler->new(loop=>$loop, logger=>$logger);
+    my ($runs,$resolutions)=(0,0);
+    $bool_calls=$string_calls=0;
+    $s->add(name=>'calendar',interval=>3600,autostart=>1,
+        cb=>sub {++$runs; $s->stop('calendar') if $runs==2},
+        next_run_cb=>sub {
+            die bless({},$class) if ++$resolutions==2;
+            return time()+60;
+        });
+    my $first=$s->{_tasks}{calendar}{timer};
+    my $safe=eval {$loop->loop_once(0);1};
+    my $info=$s->task_info('calendar');
+    my @errors=map {$_->[1]} grep {$_->[0]==1} @{$logger->{rows}};
+    my $before=[$safe?1:0,$runs,$info->{started},$info->{next_run},$first->loop?1:0,
+        [$bool_calls,$string_calls],\@errors];
+    my $recovered=eval {
+        die "calendar restart refused\n" unless $s->start('calendar');
+        $loop->loop_once(0);1;
+    };
+    $s->remove('calendar');
+    is_deeply([$before,$recovered?1:0,$runs,$resolutions,scalar($loop->notifiers)],
+        [[1,1,0,0,0,[0,0],[
+            "Scheduler: cannot arm calendar task 'calendar': non-scalar task exception",
+            "Scheduler: calendar task 'calendar' stopped because re-arm failed",
+        ]],1,2,3,0],
+        "$class: a failed calendar resolver stops its task cleanly and permits a fresh start");
+}
+{
+    my $loop=IO::Async::Loop->really_new;
+    my $s=Mediabot::Scheduler->new(loop=>$loop);
+    $s->add(name=>'periodic',interval=>3600,cb=>sub {});
+    my $timer=$s->{_tasks}{periodic}{timer};
+    my $native=$timer->can('start');
+    $bool_calls=$string_calls=0;
+    my ($result,$safe);
+    {
+        local *IO::Async::Timer::Periodic::start=sub {
+            $native->(@_);
+            die bless({},'MB1043::BoolError');
+        };
+        $safe=eval {$result=$s->start('periodic');1};
+    }
+    my $info=$s->task_info('periodic');
+    my $before=[$safe?1:0,$result,$info->{started},$info->{next_run},
+        $timer->is_running?1:0,$bool_calls,$string_calls];
+    my $recovered=$s->start('periodic') && $timer->is_running;
+    $s->remove('periodic');
+    is_deeply([$before,$recovered?1:0,scalar($loop->notifiers)],
+        [[1,0,0,0,0,0,0],1,0],
+        'an object exception after a partial periodic start cannot skip rollback or prevent recovery');
+}
+{
+    my $loop=IO::Async::Loop->really_new;
+    my $s=Mediabot::Scheduler->new(loop=>$loop);
+    my $native=$loop->can('add');
+    my $error=bless({},'MB1043::BoolError');
+    my $caught;
+    $bool_calls=$string_calls=0;
+    {
+        local *IO::Async::Loop::add=sub {
+            $native->(@_);
+            die $error;
+        };
+        eval {$s->add(name=>'periodic',interval=>3600,cb=>sub {});1};
+        $caught=$@;
+    }
+    my $before=[(refaddr($caught)//0)==refaddr($error)?1:0,
+        defined($s->task_info('periodic'))?1:0,scalar($loop->notifiers),
+        $bool_calls,$string_calls];
+    $s->remove('periodic') if $s->task_info('periodic');
+    $s->add(name=>'periodic',interval=>3600,cb=>sub {},autostart=>1);
+    my $recovered=$s->task_info('periodic')->{started};
+    $s->remove('periodic');
+    is_deeply([$before,$recovered,scalar($loop->notifiers)],[[1,0,0,0,0],1,0],
+        'a failed registration rethrows the original object after detaching the partially added timer');
 }
 is_deeply(\@warnings, [], 'native periodic/calendar exception and success paths are warning-free');
 done_testing;

@@ -17,6 +17,15 @@ use Scalar::Util qw(weaken refaddr);
 
 our $VERSION = '1.11';
 
+sub _exception_text {
+    my ($error, $fallback) = @_;
+    # Testing an exception object's truth or string value can throw again.
+    return 'non-scalar task exception' if ref($error);
+    my $text = defined($error) && length($error) ? $error : $fallback;
+    $text =~ s/\s+/ /g;
+    return substr($text, 0, 512);
+}
+
 # mb556-B1: optional Prometheus projection (mb550 pattern) plus the timed
 # task-callback helper shared by the periodic and calendar paths. Any task
 # slower than one second names itself at level 3, and every duration feeds
@@ -60,12 +69,8 @@ sub _run_task_callback {
         $self->_log(3, sprintf("SLOW SCHEDULER: task '%s' took %.2fs", $name, $elapsed));
     }
     if (!$ok) {
-        # MB1043: exception objects may overload bool/string conversion, even
-        # by throwing again. Never coerce them outside the callback's guard.
-        my $clean = ref($err) ? 'non-scalar task exception'
-            : defined($err) && length($err) ? $err : 'unknown task exception';
-        $clean =~ s/\s+/ /g;
-        $self->_log(1, "Scheduler: task '$name' error: " . substr($clean, 0, 512));
+        $self->_log(1, "Scheduler: task '$name' error: "
+            . _exception_text($err, 'unknown task exception'));
     }
 
     return 1;
@@ -173,7 +178,7 @@ sub add {
             1;
         };
         unless ($ok) {
-            my $error = $@ || "Scheduler: failed to add timer '$name' to loop\n";
+            my $error = $@;
             # Constructor/add may fail after publishing partial ownership.
             # Revoke only this registration, preserving a same-name successor.
             my $current = $self->{_tasks}{$name};
@@ -181,7 +186,8 @@ sub add {
                 if $current && refaddr($current) == refaddr($task);
             eval { $timer->stop if $timer };
             eval { $self->{loop}->remove($timer) if $timer };
-            die $error;
+            die $error if ref($error) || (defined($error) && length($error));
+            die "Scheduler: failed to add timer '$name' to loop\n";
         }
     }
 
@@ -233,15 +239,16 @@ sub _arm_calendar {
     my $generation = $task->{generation};
 
     my $now = time();
-    my $next = eval { $task->{next_run_cb}->($now) };
+    my $next;
+    my $resolved = eval { $next = $task->{next_run_cb}->($now); 1 };
     my $next_error = $@;
     # MB839: computing the next date is caller code too. A lifecycle change
     # there invalidates this arm before any timer is created or published.
     my $current = $self->{_tasks}{$name};
     return 0 unless $current && refaddr($current) == $task_addr
         && $current->{generation} == $generation && $current->{started};
-    if ($next_error || !defined($next) || ref($next) || "$next" !~ /^\d+$/ || $next <= $now) {
-        (my $err = $next_error || "invalid next epoch") =~ s/\s+/ /g;
+    if (!$resolved || !defined($next) || ref($next) || "$next" !~ /^\d+$/ || $next <= $now) {
+        my $err = _exception_text($next_error, 'invalid next epoch');
         $self->_log(1, "Scheduler: cannot arm calendar task '$name': $err");
         return 0;
     }
@@ -309,7 +316,7 @@ sub _arm_calendar {
     };
 
     unless ($ok) {
-        my $err = $@ || 'unknown error';
+        my $err = _exception_text($@, 'unknown error');
         # A reentrant restart may already own a different timer. Clean only
         # this provisional occurrence, detaching it before cleanup hooks run.
         if ($owned && $task->{timer} && refaddr($task->{timer}) == refaddr($owned)) {
@@ -318,7 +325,6 @@ sub _arm_calendar {
         }
         eval { $owned->stop if $owned && $owned->can('stop') };
         eval { $self->{loop}->remove($owned) if $owned };
-        $err =~ s/\s+/ /g;
         $self->_log(1, "Scheduler: failed to arm '$name': $err");
         return 0;
     }
@@ -346,7 +352,7 @@ sub remove {
     };
 
     if (!$ok) {
-        (my $err = $@ || 'unknown error') =~ s/\s+/ /g;
+        my $err = _exception_text($@, 'unknown error');
         $self->_log(1, "Scheduler: failed to remove '$name': $err");
         return 0;
     }
@@ -387,7 +393,7 @@ sub start {
     };
 
     if (!$ok) {
-        (my $err = $@ || 'unknown error') =~ s/\s+/ /g;
+        my $err = _exception_text($@, 'unknown error');
         # Do not undo a stop/restart/replacement performed by a resolver.
         my $current = $self->{_tasks}{$name};
         return 0 unless $current && refaddr($current) == refaddr($task)
@@ -429,7 +435,7 @@ sub stop {
     };
 
     if (!$ok) {
-        (my $err = $@ || 'unknown error') =~ s/\s+/ /g;
+        my $err = _exception_text($@, 'unknown error');
         $self->_log(1, "Scheduler: failed to stop '$name': $err");
         return 0;
     }

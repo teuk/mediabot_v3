@@ -1,5 +1,11 @@
 ## [Unreleased] — 3.8dev
 
+### MB1123 — Recover scheduler tasks after object exceptions
+
+- Keep exception formatting from interrupting timer cleanup. A failed
+  calendar re-arm or partial periodic start leaves a task that can be restarted.
+
+
 ### MB1122 — Keep unsent RSS articles pending
 
 - Only acknowledge automatic RSS announcements after the connected IRC
