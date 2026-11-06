@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1125 — Finish worker termination without leaving children behind
+
+- Send KILL before the finalization backstop releases a worker whose child
+  is still running. Preserve the first timeout or cancellation and reject
+  cancellation from a process that inherited the worker handle.
+
+
 ### MB1124 — Keep forked workers inside their process boundary
 
 - Report false or overloaded child exceptions as failures. Exit the child

@@ -256,7 +256,9 @@ sub is_done {
 
 sub cancel {
     my ($self, $reason) = @_;
-    return 0 if !$self || $self->{finalized};
+    return 0 if !$self || ($self->{owner_pid} // 0) != $$
+        || $self->{finalized} || $self->{timed_out};
+    return 1 if $self->{cancelled};
 
     $self->{cancelled} = 1;
     $self->{cancel_reason} = _clean_scalar(
@@ -429,6 +431,7 @@ sub _begin_termination {
     return if $self->{finalized};
 
     if ($kind eq 'timeout') {
+        return if $self->{cancelled} || $self->{timed_out};
         $self->{timed_out} = 1;
     }
 
@@ -455,6 +458,9 @@ sub _begin_termination {
                 $self->{force_grace},
                 sub {
                     return if $self->{finalized};
+                    # If the backstop runs before the grace timer, cleanup
+                    # will disarm that timer. Escalate before completing.
+                    $self->_signal_child('KILL') unless $self->{child_done};
                     $self->{forced} = 1;
                     $self->_maybe_finish;
                 },
@@ -473,7 +479,7 @@ sub _begin_termination {
 
 sub _signal_child {
     my ($self, $signal) = @_;
-    return 0 unless $self->{pid};
+    return 0 unless $self->{pid} && ($self->{owner_pid} // 0) == $$ && !$self->{child_done};
 
     if ($signal eq 'TERM') {
         return 0 if $self->{term_sent};
@@ -846,7 +852,11 @@ The parent owns process completion through C<watch_process>. The child writes
 a bounded newline-delimited JSON record stream to a dedicated pipe: zero or more
 C<progress> records followed by exactly one terminal C<result> record. Existing
 children may ignore the progress emitter passed as their first argument.
-Timeout uses TERM, then KILL, plus a liveness backstop. Completion is guarded so
+Timeout and cancellation use TERM, then KILL, plus a liveness backstop. The
+backstop escalates before releasing the worker if the grace timer has not
+already done so. Only the process that launched a worker can cancel it.
+The first timeout or cancellation determines the outcome; repeated
+cancellation preserves the initial reason. Completion is guarded so
 C<on_done> runs at most once.
 
 The child callback is the consumer boundary. Consumers that inherit live DBI or
