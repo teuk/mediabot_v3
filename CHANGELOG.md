@@ -1,5 +1,11 @@
 ## [Unreleased] — 3.8dev
 
+### MB1121 — Share Quotegame rounds across channel letter case
+
+- Use one round, countdown and scoreboard for `#Test` and `#test`.
+  Keep the original channel spelling in database queries and IRC replies.
+
+
 ### MB1120 — Distinguish Quotegame database failures from empty reads
 
 - Give the requester a private database error on failed prepare, execute

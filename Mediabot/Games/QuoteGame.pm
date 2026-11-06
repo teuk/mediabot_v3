@@ -31,7 +31,7 @@ sub _quotegame_cancel_timer {
     my ($self, $channel) = @_;
     return unless $self && defined $channel;
 
-    my $qg = $self->{_quotegame}{$channel} or return;
+    my $qg = $self->{_quotegame}{lc $channel} or return;
 
     my $timer = delete $qg->{timer};
     delete $qg->{timer_arm};
@@ -46,7 +46,8 @@ sub _quotegame_cancel_timer {
 sub _quotegame_start_timer {
     my ($self, $channel, $token, $delay) = @_;
     return unless $self && defined $channel && defined $token;
-    my $round = $self->{_quotegame}{$channel} or return;
+    my $key = lc $channel;
+    my $round = $self->{_quotegame}{$key} or return;
     return unless $round->{active};
 
     $delay ||= 60;
@@ -67,7 +68,7 @@ sub _quotegame_start_timer {
     weaken($bot);
     my $owned_round = sub {
         return unless $bot;
-        my $qg = $bot->{_quotegame}{$channel} or return;
+        my $qg = $bot->{_quotegame}{$key} or return;
         return $qg if (refaddr($qg->{timer_arm}) // 0) == refaddr($arm);
         return;
     };
@@ -130,9 +131,13 @@ sub mbQuotegame_ctx {
         }
     }
 
+    # Share the channel cache's lowercase identity. The original target
+    # spelling still belongs to SQL binds and outbound messages.
+    my $key = lc $channel;
+    my $qg = $self->{_quotegame}{$key};
+
     # !quotegame stop
     if (@args && lc($args[0]) eq 'stop') {
-        my $qg = $self->{_quotegame}{$channel};
         if ($qg && $qg->{active}) {
             Mediabot::UserCommands::_quotegame_cancel_timer($self, $channel);
             $qg->{active} = 0;
@@ -146,7 +151,7 @@ sub mbQuotegame_ctx {
 
     # !quotegame top
     if (@args && lc($args[0]) eq 'top') {
-        my $scores = $self->{_quotegame}{$channel}{scores} // {};
+        my $scores = $qg && $qg->{scores} ? $qg->{scores} : {};
         unless (%$scores) {
             botPrivmsg($self, $channel, 'No quotegame scores yet on this channel.'); return 1;
         }
@@ -158,7 +163,6 @@ sub mbQuotegame_ctx {
     }
 
     # Vérifier qu'il n'y a pas déjà une question active
-    my $qg = $self->{_quotegame}{$channel};
     if ($qg && $qg->{active}) {
         botPrivmsg($self, $channel,
             "\x{23F3} Quotegame already in progress (use \x02!quotegame stop\x02 to abort).");
@@ -195,7 +199,7 @@ sub mbQuotegame_ctx {
 
     # Préserver les scores cumulés
     my $prev_scores = ($qg && $qg->{scores}) ? $qg->{scores} : {};
-    $self->{_quotegame}{$channel} = {
+    $self->{_quotegame}{$key} = {
         active     => 1,
         id_quote   => $row->{id_quotes},
         author     => $row->{author},
@@ -224,7 +228,7 @@ sub mbQuotegame_ctx {
     botPrivmsg($self, $channel,
         "\x{1F4DC} \x02Quotegame!\x02 Who said: \"\x02$masked\x02\"  \x{2014}  60s to answer with the nick");
 
-    Mediabot::UserCommands::_quotegame_start_timer($self, $channel, $self->{_quotegame}{$channel}{token}, 60);
+    Mediabot::UserCommands::_quotegame_start_timer($self, $channel, $self->{_quotegame}{$key}{token}, 60);
 
     return 1;
 }
@@ -236,7 +240,7 @@ sub mbQuotegame_ctx {
 sub checkQuotegameAnswer {
     my ($self, $sNick, $sChannel, $sMsg) = @_;
     return unless defined $sChannel && $sChannel =~ /^#/;
-    my $qg = $self->{_quotegame}{$sChannel} or return;
+    my $qg = $self->{_quotegame}{lc $sChannel} or return;
     return unless $qg->{active};
 
     # Timeout passé

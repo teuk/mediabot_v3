@@ -97,7 +97,8 @@ use Mediabot::UserCommands;
  package MB920::Metrics; sub inc {$_[0]{counts}{$_[1]}++}
  package MB920::Log; sub log {push @{$_[0]{events}},[$_[1],$_[2]];1}
  package MB920::Ctx;
- sub bot {$_[0]{bot}} sub channel {'#test'} sub nick {'Player'} sub args {[]} sub message {undef}
+ sub bot {$_[0]{bot}} sub channel {$_[0]{channel} // '#test'} sub nick {'Player'}
+ sub args {$_[0]{args} // []} sub message {undef}
 }
 $INC{'MB920/DBI.pm'}=__FILE__;
 sub fixture {
@@ -187,6 +188,51 @@ for my $raise (0, 1) {
   $db->disconnect;
  }
 }
+{
+ my ($b,$s)=fixture('characters');
+ my $db=$b->{dbh};
+ $db->do(q{UPDATE CHANNEL SET name = '#Test'});
+ $db->do(q{INSERT INTO USER VALUES(1,'Author')});
+ $db->do(q{INSERT INTO QUOTES VALUES(1,1,1,'This is a sufficiently long quote by Author.')});
+ my $run=sub {
+  my ($channel,@args)=@_;
+  Mediabot::UserCommands::mbQuotegame_ctx(bless({bot=>$b,channel=>$channel,args=>\@args},'MB920::Ctx'));
+ };
+ my $view=sub {my $line=$s->{out}[-1]; return [$line->[0],$line->[1]]};
+ $run->('#Test');
+ my $opened=$view->();
+ my $after_open=scalar @{$s->{sql}};
+ $run->('#TEST');
+ my $duplicate=$view->();
+ my $after_duplicate=scalar @{$s->{sql}};
+ Mediabot::UserCommands::checkQuotegameAnswer($b,'Player','#tEsT','Author');
+ my $answered=$view->();
+ my $remaining=scalar($b->{loop}->notifiers);
+ $run->('#TEST','top');
+ my $top=$view->();
+
+ $run->('#Test');
+ $run->('#test','stop');
+ my $stopped=$view->();
+ my $after_stop=scalar($b->{loop}->notifiers);
+ $run->('#Test');
+ my $timed=$b->{_quotegame}{'#test'} // $b->{_quotegame}{'#Test'};
+ $timed->{timer}{on_expire}->() if $timed && $timed->{timer};
+ my $expired=$view->();
+ my @keys=sort keys %{$b->{_quotegame}};
+ $out{quote_case}={
+  opened=>[$opened->[0],$opened->[1]=~/Who said/ ? 1 : 0],
+  duplicate=>[$duplicate->[0],$duplicate->[1]=~/already in progress/ ? 1 : 0,
+   $after_duplicate-$after_open],
+  answered=>[$answered->[0],$answered->[1]=~/Correct.*score: 1/s ? 1 : 0,$remaining],
+  top=>[$top->[0],$top->[1]=~/Player:1/ ? 1 : 0],
+  stopped=>[$stopped->[0],$stopped->[1]=~/Quotegame stopped/ ? 1 : 0,$after_stop],
+  expired=>[$expired->[0],$expired->[1]=~/Time's up/ ? 1 : 0,scalar($b->{loop}->notifiers)],
+  keys=>\@keys,
+ };
+ Mediabot::UserCommands::_quotegame_cancel_timer($b,$_) for @keys;
+ $db->disconnect;
+}
 print JSON::PP->new->canonical->utf8->encode(\%out);
 MB920_NATIVE
     open my $native, '-|', $^X, '-I.', '-It/lib', '-e', $probe
@@ -196,6 +242,10 @@ MB920_NATIVE
     $assert->is($? >> 8, 0, 'native Unicode game probe completes');
     my $r = JSON::PP::decode_json($output);
     my $json = JSON::PP->new->canonical;
+    $assert->is($json->encode($r->{quote_case}), $json->encode({
+        opened=>['#Test',1], duplicate=>['#TEST',1,0], answered=>['#tEsT',1,0],
+        top=>['#TEST',1], stopped=>['#test',1,0], expired=>['#Test',1,0], keys=>['#test'],
+    }), 'quotegame shares a round, timer and score across channel letter case without changing reply targets');
     my (%failures, %empty);
     for my $raise (0, 1) {
         for my $fault (qw(missing prepare execute fetch)) {
