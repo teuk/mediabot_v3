@@ -7,6 +7,7 @@ use Scalar::Util qw(weaken);
 use IO::Async::Loop;
 use IO::Async::Timer::Countdown;
 use Mediabot::Helpers ();
+use Mediabot::Mediabot ();
 use Mediabot::IRC::PacedOutput qw(queue_privmsg_chunks);
 use MB881OutputFixture;
 
@@ -80,5 +81,61 @@ MB881OutputFixture::with_policy(sub {
     $_->() for @callbacks;
     is(scalar @{$bot->{irc}{wire}}, 4, 'retained failed and completed native expiries remain inert after single recovery');
     is_deeply($bot->{_external_ai_output_queues}, {}, 'native recovered queue is removed');
+});
+MB881OutputFixture::with_policy(sub {
+    @callbacks = (); @requested_delays = ();
+    my $bot = MB881OutputFixture::new_bot(); $bot->{loop} = IO::Async::Loop->really_new;
+    my $old = $bot->{irc};
+    my $guard_calls = 0;
+    queue_privmsg_chunks($bot, '#test', [qw(old1 old2)], 10_000, 'fixture',
+        {can_send => sub {++$guard_calls; 1}});
+    Mediabot::setIrc($bot, $old);
+    queue_privmsg_chunks($bot, '#test', ['old_successor'], 0);
+    is_deeply([map {$_->{text}} @{$old->{wire}}], ['old1'],
+        'assigning the same IRC object retains the pending batch and ordering');
+
+    my $retired = $callbacks[0];
+    my $fresh = bless {wire => []}, 'MB881::IRC';
+    Mediabot::setIrc($bot, $fresh);
+    queue_privmsg_chunks($bot, '#test', [qw(fresh1 fresh2)], 10_000);
+    $retired->();
+    is_deeply([[map {$_->{text}} @{$fresh->{wire}}], $guard_calls, timer_count($bot->{loop})],
+        [['fresh1'], 1, 1], 'retired expiry leaves the fresh queue, timer and old guard alone');
+    finish_loop($bot->{loop});
+    is_deeply([[map {$_->{text}} @{$fresh->{wire}}], $bot->{_external_ai_output_queues}],
+        [[qw(fresh1 fresh2)], {}], 'only the fresh paced batch reaches the replacement IRC connection');
+    my $weak = $bot; weaken($weak); undef $bot;
+    ok(!defined $weak, 'retained expiries from both connections release the completed bot');
+});
+MB881OutputFixture::with_policy(sub {
+    @callbacks = (); @requested_delays = ();
+    my $bot = MB881OutputFixture::new_bot(); $bot->{loop} = IO::Async::Loop->really_new;
+    my $fresh = bless {wire => []}, 'MB881::IRC';
+    queue_privmsg_chunks($bot, '#test', [qw(old1 old2)], 10_000, 'fixture',
+        {can_send => sub {Mediabot::setIrc($bot, $fresh); 1}});
+    is_deeply([$fresh->{wire}, timer_count($bot->{loop})], [[], 0],
+        'a connection change inside the send guard suppresses the old chunk and rearm');
+    finish_loop($bot->{loop});
+});
+MB881OutputFixture::with_policy(sub {
+    @callbacks = (); @requested_delays = ();
+    my $bot = MB881OutputFixture::new_bot(); $bot->{loop} = IO::Async::Loop->really_new;
+    my $fresh = bless {wire => []}, 'MB881::IRC';
+    my $send = MB881::IRC->can('do_PRIVMSG');
+    local *MB881::IRC::do_PRIVMSG = sub {
+        my ($irc, %args) = @_;
+        my $result = $send->(@_);
+        if ($args{text} eq 'switch') {
+            Mediabot::setIrc($bot, $fresh);
+            queue_privmsg_chunks($bot, '#test', [qw(new1 new2)], 10_000);
+        }
+        return $result;
+    };
+    queue_privmsg_chunks($bot, '#test', [qw(switch stale)], 10_000);
+    is_deeply([[map {$_->{text}} @{$fresh->{wire}}], timer_count($bot->{loop})],
+        [['new1'], 1], 'replacement during send starts an independent batch without rearming the old one');
+    finish_loop($bot->{loop});
+    is_deeply([map {$_->{text}} @{$fresh->{wire}}], [qw(new1 new2)],
+        'the old pump cannot append to or remove the replacement batch');
 });
 done_testing;

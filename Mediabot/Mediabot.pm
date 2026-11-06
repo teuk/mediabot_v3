@@ -1836,6 +1836,7 @@ sub setIrc {
 	if ((refaddr($self->{irc}) // 0) != (refaddr($irc) // 0)) {
 		delete $self->{_flood_outq};
 		delete $self->{_notice_queue_timers};
+		delete $self->{_external_ai_output_queues};
 	}
 	$self->{irc} = $irc;
 }

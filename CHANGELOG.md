@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1118 — Keep paced PRIVMSG replies on their original IRC connection
+
+- Drop unfinished paced replies and queued successors when IRC is replaced.
+  A retired pump cannot send to or rearm the replacement connection.
+- Preserve same-connection order and timer recovery. Exercise both late
+  timers and connection changes inside the guard or the send itself.
+
+
 ### MB1117 — Drop paced private notices when the IRC connection changes
 
 - Start a fresh NOTICE queue for a replacement connection. Old timers

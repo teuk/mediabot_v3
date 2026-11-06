@@ -95,8 +95,7 @@ return sub {
         'callback output bypasses IRC pacing once the parent answer is ready'
     );
 
-    # Exercise the actual helper body in isolation with a deterministic fake
-    # loop and fake countdown timers.
+    # Exercise the real module with a deterministic fake loop and timers.
     my $probe = <<'PROBE';
 use Mediabot::IRC::Output ();
 use Mediabot::IRC::Timer ();
@@ -159,17 +158,14 @@ BEGIN {
     }
 }
 
-{
-    package MB312::Probe;
-HELPER_BODY
-}
+use Mediabot::IRC::PacedOutput qw(queue_privmsg_chunks);
 
 my $bot = bless {
     loop   => MB312::Loop->new,
     logger => MB312::Logger->new,
 }, 'MB312::Bot';
 
-my $count = MB312::Probe::_queue_irc_chunks(
+my $count = queue_privmsg_chunks(
     $bot,
     '#test',
     ['one', 'two', 'three'],
@@ -189,10 +185,10 @@ print "step3=" . join(',', @Mediabot::Helpers::SENT) . "\n";
 @Mediabot::Helpers::SENT = ();
 @IO::Async::Timer::Countdown::PENDING = ();
 
-MB312::Probe::_queue_irc_chunks(
+queue_privmsg_chunks(
     $bot, '#serial', ['a1', 'a2'], 100_000, 'first'
 );
-MB312::Probe::_queue_irc_chunks(
+queue_privmsg_chunks(
     $bot, '#serial', ['b1', 'b2'], 100_000, 'second'
 );
 
@@ -205,13 +201,11 @@ print "queue_left=" . (exists($bot->{_external_ai_output_queues}{'#serial'}) ? 1
 
 @Mediabot::Helpers::SENT = ();
 my $fallback = bless { logger => MB312::Logger->new }, 'MB312::Bot';
-MB312::Probe::_queue_irc_chunks(
+queue_privmsg_chunks(
     $fallback, '#fallback', ['x', 'y'], 750_000, 'fallback'
 );
 print "fallback=" . join(',', @Mediabot::Helpers::SENT) . "\n";
 PROBE
-
-    $probe =~ s/HELPER_BODY/$queue/;
 
     open my $fh, '-|', $^X, '-I.', '-It/lib', '-e', $probe
         or die "could not start MB312 probe: $!";

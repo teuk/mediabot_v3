@@ -105,6 +105,23 @@ sub _queue_irc_chunks {
 
     my ($pump, $schedule);
 
+    my $is_current = sub {
+        my $registered = $self->{_external_ai_output_queues} or return 0;
+        return (refaddr($registered->{$key}) // 0) == refaddr($state);
+    };
+    my $finish = sub {
+        # Retire only this pump's state, even if a new connection has already
+        # registered another queue for the same target.
+        delete $queues->{$key}
+            if (refaddr($queues->{$key}) // 0) == refaddr($state);
+        $state->{current} = undef;
+        $state->{batches} = [];
+        $state->{active} = 0;
+        undef $pump;
+        undef $schedule;
+        return;
+    };
+
     $schedule = sub {
         my ($delay) = @_;
 
@@ -132,6 +149,7 @@ sub _queue_irc_chunks {
     };
 
     $pump = sub {
+        return $finish->() unless $is_current->();
         my $batch = $state->{current};
 
         unless ($batch) {
@@ -139,18 +157,13 @@ sub _queue_irc_chunks {
             $state->{current} = $batch if $batch;
         }
 
-        unless ($batch) {
-            delete $queues->{$key};
-            $pump     = undef;
-            $schedule = undef;
-            return;
-        }
+        return $finish->() unless $batch;
 
         # A revoked or failed guard drops this batch only. The normal boundary
         # delay and successor ordering still apply; unguarded callers are unchanged.
-        if ($batch->{can_send} && !eval { $batch->{can_send}->() }) {
-            @{ $batch->{chunks} } = ();
-        }
+        my $allowed = !$batch->{can_send} || eval { $batch->{can_send}->() };
+        return $finish->() unless $is_current->();
+        @{ $batch->{chunks} } = () unless $allowed;
         my $chunk = shift @{ $batch->{chunks} };
 
         if (defined($chunk) && $chunk ne '') {
@@ -177,6 +190,7 @@ sub _queue_irc_chunks {
             }
         }
 
+        return $finish->() unless $is_current->();
         if (@{ $batch->{chunks} }) {
             $schedule->($batch->{delay});
             return;
@@ -190,9 +204,7 @@ sub _queue_irc_chunks {
             return;
         }
 
-        delete $queues->{$key};
-        $pump     = undef;
-        $schedule = undef;
+        return $finish->();
     };
 
     $pump->();
