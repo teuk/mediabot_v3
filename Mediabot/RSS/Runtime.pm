@@ -540,9 +540,13 @@ sub _drain_channel {
             my $slot = eval { $self->{pacing}->reserve($q->{channel}, feed_id => $item->{feed_id}) };
             $allowed = $slot && $slot->{allowed};
         }
+        # SQL is the retry queue. Acceptance into AntiFlood's volatile queue
+        # would otherwise mark an article announced before any send.
         my $accepted = eval {
-            $allowed ? Mediabot::Helpers::botPrivmsg($self->{bot}, $q->{channel}, $item->{line},
-                $paced ? {no_defer => 1} : undef) : 0
+            $allowed && $self->{bot}{irc}->is_connected
+                ? Mediabot::Helpers::botPrivmsg($self->{bot}, $q->{channel}, $item->{line},
+                    {no_defer => 1})
+                : 0
         };
         if ($accepted) {
             my $marked = eval {

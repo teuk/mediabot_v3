@@ -8,6 +8,9 @@ use Mediabot::RSS::Fetcher;
 use Mediabot::RSS::Repository;
 use Mediabot::RSS::Poller;
 use Mediabot::RSS::Runtime;
+use MB881OutputFixture;
+use File::Temp qw(tempdir);
+use IO::Async::Loop;
 use DBI;
 use DBD::SQLite::Constants qw(SQLITE_SELECT SQLITE_DENY SQLITE_OK);
 use JSON::PP;
@@ -352,6 +355,49 @@ return sub {
             'MB1111: record a fetch failure once, retry a refused child write and keep driver details out of the fallback');
     }
 
+    MB881OutputFixture::with_policy(sub {
+        my @observed;
+        no warnings qw(redefine once);
+        local *MB881::IRC::is_connected = sub {$_[0]{connected}};
+        my $send=MB881::IRC->can('do_PRIVMSG');
+        local *MB881::IRC::do_PRIVMSG = sub {return $_[0]{connected} ? $send->(@_) : undef};
+        for my $blocked (qw(flood offline)) {
+            my ($repo,$db)=_fixture1080(1);
+            $db->do('UPDATE RSS_ITEM SET item_key=? WHERE id_rss_item=1',undef,'a'x64);
+            my $bot=MB881OutputFixture::new_bot();
+            $bot->{dbh}=$db;
+            $bot->{db}=bless {parent_handle=>$db},'MB1111::DB';
+            # Only RSS uses the fixture database; output has a warm empty
+            # badword cache, just as it would after a successful empty read.
+            $bot->{_badword_cache}{'#one'}={ts=>time(),words=>[]};
+            $bot->{policy}{AntiFlood}=1;
+            $bot->{blocked}=($blocked eq 'flood');
+            $bot->{irc}{connected}=($blocked ne 'offline');
+            my $dir=tempdir(CLEANUP=>1);
+            my $runtime=Mediabot::RSS::Runtime->new(bot=>$bot,
+                loop=>IO::Async::Loop->new,
+                pacing=>Mediabot::RSS::Pacing->new(path=>"$dir/pacing.json"));
+            my $attempt=sub {
+                my $pending=$repo->pending_items(1,1)->[0];
+                return unless $pending && ($pending->{item_key}//'') eq 'a'x64;
+                $runtime->_enqueue_announcements(feed_id=>1,channel=>'#one',
+                    items=>[{item_key=>$pending->{item_key},line=>$pending->{title}}]);
+            };
+            $attempt->();
+            push @observed,[$blocked,_pending1080($db),
+                scalar(@{$bot->{irc}{wire}}),exists($bot->{_flood_outq})?1:0];
+            $bot->{blocked}=0;
+            $bot->{irc}{connected}=1;
+            $attempt->();
+            push @observed,[_pending1080($db),
+                [map {[$_->{target},$_->{text}]} @{$bot->{irc}{wire}}],$runtime->queued_count];
+            $db->disconnect;
+        }
+        $assert->is($json902->encode(\@observed),$json902->encode([
+            ['flood','1,2,3',0,0],['2,3',[['#one','Old one']],0],
+            ['offline','1,2,3',0,0],['2,3',[['#one','Old one']],0],
+        ]), 'MB1122: unpaced RSS acknowledges only an immediate connected send; AntiFlood and offline attempts remain pending for the next poll');
+    });
 };
 
 { package Pacing1080; sub status {{active=>1}} }

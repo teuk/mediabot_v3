@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1122 — Keep unsent RSS articles pending
+
+- Only acknowledge automatic RSS announcements after the connected IRC
+  output path accepts an immediate send. Retry articles refused by AntiFlood
+  or during disconnection through the existing polling schedule.
+
+
 ### MB1121 — Share Quotegame rounds across channel letter case
 
 - Use one round, countdown and scoreboard for `#Test` and `#test`.
