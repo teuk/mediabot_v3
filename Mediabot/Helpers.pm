@@ -3825,24 +3825,19 @@ sub getNickInfoWhois {
 # /auth <nick> — Triggers a WHOIS to identify if a user is known/authenticated
 
 sub channelNicksRemove {
-	my ($self,$sChannel,$sNick) = @_;
-	my %hChannelsNicks;
-	if (defined($self->{hChannelsNicks})) {
-		%hChannelsNicks = %{$self->{hChannelsNicks}};
-	}
-    # mb107-B1: guard contre canal inexistant ou liste vide
-    return unless defined $hChannelsNicks{$sChannel}
-               && ref($hChannelsNicks{$sChannel}) eq 'ARRAY'
-               && @{$hChannelsNicks{$sChannel}};
-	my $index;
-	for ($index=0;$index<=$#{$hChannelsNicks{$sChannel}};$index++ ) {
-		my $currentNick = @{$hChannelsNicks{$sChannel}}[$index];
-		if ( $currentNick eq $sNick) {
-			splice(@{$hChannelsNicks{$sChannel}}, $index, 1);
-			last;
-		}
-	}
-	%{$self->{hChannelsNicks}} = %hChannelsNicks;
+    my ($self, $channel, $nick) = @_;
+    return unless defined($channel) && length($channel) && defined($nick) && length($nick);
+    my ($channel_key, $nick_key) = (lc($channel), lc($nick));
+    # PART/KICK/QUIT may spell the target differently from NAMES. Remove it
+    # from every matching list, including chunks awaiting end-of-NAMES.
+    for my $lists (@{$self}{qw(hChannelsNicks hChannelsNicksTmp)}) {
+        next unless ref($lists) eq 'HASH';
+        for my $stored (keys %$lists) {
+            next unless lc($stored) eq $channel_key && ref($lists->{$stored}) eq 'ARRAY';
+            @{$lists->{$stored}} = grep { !defined($_) || lc($_) ne $nick_key } @{$lists->{$stored}};
+        }
+    }
+    return;
 }
 
 

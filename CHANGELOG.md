@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1126 — Restore channel karma shorthand
+
+- Accept `nick++` and `nick--` in ordinary channel messages when the literal
+  nick is present. Keep explicit votes, cooldowns and anti-abuse checks.
+- Remove departed nicks from current and buffered NAMES lists across
+  channel and nick letter case. Clear stale lists when the bot rejoins.
+
+
 ### MB1125 — Finish worker termination without leaving children behind
 
 - Send KILL before the finalization backstop releases a worker whose child

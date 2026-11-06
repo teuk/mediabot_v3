@@ -18,6 +18,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Helpers ();
+use Mediabot::IRC::Target qw(is_channel);
 
 our @EXPORT_OK = qw(
     mbKarma_ctx
@@ -86,8 +87,7 @@ sub mbKarma_ctx {
         return mbKarmaTop_ctx($ctx);
     }
 
-    # NEW: explicit karma vote syntax — !karma + <nick> or !karma - <nick>
-    # Replaces the fragile nick++/nick-- auto-detection (triggered on e.g. Notepad++).
+    # Explicit votes keep their historical decorated-nick matching.
     if (@args >= 2 && ($args[0] eq '+' || $args[0] eq '-' || $args[0] eq '++' || $args[0] eq '--')) {
         my $op     = ($args[0] eq '+' || $args[0] eq '++') ? '++' : '--';
         my $ktarget = lc($args[1]);
@@ -131,7 +131,7 @@ sub mbKarma_ctx {
         }
         # Route through processKarma with a synthetic text
         my $synthetic = "$ktarget$op";
-        eval { processKarma($self, $nick, $channel, $synthetic) };
+        eval { processKarma($self, $nick, $channel, $synthetic, { decorated_aliases => 1 }) };
         botNotice($self, $nick, "Error: $@") if $@;
         return 1;
     }
@@ -190,36 +190,42 @@ sub mbKarma_ctx {
 # Called from on_message_PRIVMSG. Detects nick++ / nick-- patterns.
 # ---------------------------------------------------------------------------
 sub processKarma {
-    my ($self, $nick, $channel, $text) = @_;
+    my ($self, $nick, $channel, $text, $options) = @_;
 
     # MB982: a hyphen belongs to the nick, including before a -- operator.
     # Keep '+' outside the candidate so the ++ operator is not consumed.
-    return unless defined $text && $text =~ /[^\s+]{2,}(\+\+|--)/;
+    return unless is_channel($channel) && defined($nick) && length($nick)
+        && defined($text) && $text =~ /(?:\+\+|--)/;
 
-    # mb413-R1: id canal via le helper central (cache d'abord, mb411).
-    my $id_channel = Mediabot::Helpers::channel_id_cached($self, $channel);
-    return unless $id_channel;
+    my $id_channel;
     # One channel identity for both admission guards, matching the channel
     # cache. Keep the received spelling for wire output and stored history.
     my $channel_key = lc $channel;
 
-    # NOTE: nick++/nick-- auto-detection is kept but gated:
-    #   1. The ++ or -- must be at end-of-word (not followed by non-space/non-punct)
-    #   2. The target nick must be present on the channel
-    # Use '!karma + <nick>' for reliable explicit votes.
     my $karma_hits = 0;  # C2/fix: cap at 3 karma changes per message
-    my @chan_nicks_pk = eval { $self->gethChannelsNicksOnChan($channel) };
     # Match a whole token: never fall back to a suffix of an absent/long nick.
     # A lazy candidate keeps punctuation after the operator outside the nick.
-    KARMA_VOTE: while ($text =~ /(?<!\S)([^\s+]{2,32}?)(\+\+|--)(?![\w+\-])/g) {
-        last if ++$karma_hits > 3;
+    my $present;
+    KARMA_VOTE: while ($text =~ /(?<!\S)([^\s+]{1,32}?)(\+\+|--)(?![\w+\-])/g) {
         my ($target, $op) = (lc($1), $2);
-        # PRESENCE CHECK: target must be on the channel
-        my $on_chan = grep {
-            lc($_) eq $target
-            || lc(do { (my $t = $_) =~ s/\[.*?\]//g; $t }) eq $target
-        } @chan_nicks_pk;
-        unless ($on_chan) { next; }  # silently skip — not on channel
+        unless ($present) {
+            my @nicks = eval { $self->gethChannelsNicksOnChan($channel) };
+            $present = {};
+            for my $name (@nicks) {
+                next unless defined($name) && !ref($name);
+                my $key = lc $name;
+                $present->{$key} = 1;
+                if ($options && $options->{decorated_aliases}) {
+                    $key =~ s/\[.*?\]//g;
+                    $present->{$key} = 1;
+                }
+            }
+        }
+        next unless $present->{$target}; # Absent nicks are silently ignored.
+        last if ++$karma_hits > 3;
+        # Ordinary words such as Notepad++ need no database lookup.
+        $id_channel //= Mediabot::Helpers::channel_id_cached($self, $channel);
+        return unless $id_channel;
         # Self-karma: block and notify — mb86-B4: metrics ajoutées ici, check Y2 redondant supprimé
         if ($target eq lc($nick) || $target eq lc(do { (my $t = $nick) =~ s/\[.*?\]//g; $t })) {
             Mediabot::Helpers::botPrivmsg($self, $channel,

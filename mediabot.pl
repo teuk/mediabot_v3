@@ -3623,9 +3623,10 @@ sub on_message_QUIT {
     my ($self,$message,$hints) = @_;
 
     log_debug_args('on_message_QUIT', $message);
-    my %hChannelsNicks = ();
-    if (defined($mediabot->gethChannelNicks())) {
-        %hChannelsNicks = %{$mediabot->gethChannelNicks()};
+    my %nick_channels;
+    for my $lists (@{$mediabot}{qw(hChannelsNicks hChannelsNicksTmp)}) {
+        next unless ref($lists) eq 'HASH';
+        $nick_channels{lc $_} = 1 for keys %$lists;
     }
     my ($text) = @{$hints}{qw<text>};
     unless(defined($text)) { $text="";}
@@ -3649,7 +3650,7 @@ sub on_message_QUIT {
         $mediabot->{logger}->log(2, "NS1: netsplit QUIT suppressed for $sNick (msg: $text)");
         # NS5: do NOT purge Claude history on netsplit QUITs — user will rejoin
         # Only remove from in-memory nicklist (fast, no DB)
-        for my $sChannel (keys %hChannelsNicks) {
+        for my $sChannel (keys %nick_channels) {
             $mediabot->channelNicksRemove($sChannel, $sNick);
         }
         # Track netsplit counter
@@ -3683,7 +3684,7 @@ sub on_message_QUIT {
         last_msg   => $text,
     ) };
 
-    for my $sChannel (keys %hChannelsNicks) {
+    for my $sChannel (keys %nick_channels) {
         $mediabot->channelNicksRemove($sChannel,$sNick);
     }
     # Clear in-memory auth session on genuine QUIT
@@ -3948,8 +3949,6 @@ sub _on_message_PRIVMSG_body {
         # F13: deliver pending reminders on every public channel message
         eval { Mediabot::UserCommands::deliverReminders($mediabot, $who, $where) };
         if ($@) { $mediabot->{logger}->log(1, "deliverReminders error: $@"); }
-        # F24: nick++/nick-- auto-detection DISABLED — use '!karma + <nick>' / '!karma - <nick>'
-        # eval { Mediabot::UserCommands::processKarma($mediabot, $who, $where, $what) };
         # F38: check trivia answers on every public message — $@ distinct (mb85-B1)
         eval { Mediabot::UserCommands::checkTriviaAnswer($mediabot, $who, $where, $what) };
         if ($@) { $mediabot->{logger}->log(1, "checkTriviaAnswer error: $@"); }
@@ -4299,6 +4298,15 @@ sub _on_message_PRIVMSG_body {
             $mediabot->displayUrlTitle($message,$who,$where,$what);
         }
         else {
+            # Shorthand belongs to ordinary channel text. A command argument,
+            # URL preview, CTCP action or bot echo must not become a vote.
+            unless ($from_conversation_bot || index($line, "\x01") >= 0) {
+                my $ok = eval {
+                    Mediabot::UserCommands::processKarma($mediabot, $who, $where, $line);
+                    1;
+                };
+                $mediabot->{logger}->log(1, 'Karma shorthand processing failed') unless $ok;
+            }
             my $sCurrentNick = $self->nick_folded;
             # mb370-B1: enregistre le débit de conversation du canal (en mémoire)
             # pour piloter le taux de chatter HailoChatter adaptatif.
@@ -4768,6 +4776,13 @@ sub on_message_JOIN {
         host    => $sHost, is_self => ($sNick eq $self->nick ? 1 : 0)); };
 
     if ( $sNick eq $self->nick ) {
+        # A new membership starts with no old NAMES data. Until this JOIN's
+        # nicklist arrives, stale entries must not authorize shorthand votes.
+        my $channel_key = lc $target_name;
+        for my $lists (@{$mediabot}{qw(hChannelsNicks hChannelsNicksTmp)}) {
+            next unless ref($lists) eq 'HASH';
+            delete $lists->{$_} for grep { lc($_) eq $channel_key } keys %$lists;
+        }
         # mb701-B: only the real self-JOIN event grants joined state and a new
         # channel generation. Configured/auto-join intent is never sufficient.
         eval { $mediabot->{wit_runtime_state}->mark_joined($target_name) if $mediabot->{wit_runtime_state}; };

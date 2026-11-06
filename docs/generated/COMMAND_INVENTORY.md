@@ -126,7 +126,7 @@ Source version line: `3.8dev`
 | `ignores` | admin | registry-public, registry-private | `ignores` | List ignore entries. |  |
 | `invite` | operator+ | registry-public, registry-private | `invite #channel <nick>` | Invite a nick to a channel. |  |
 | `join` | admin | registry-public, registry-private | `join #channel` | Make the bot join a channel. |  |
-| `karma` | public | registry-public | `karma [+/-/++/--] [nick]` | Show karma or vote: !karma + <nick> / !karma - <nick>. Requires nick on channel. |  |
+| `karma` | public | registry-public | `karma [+/-/++/--] [nick]` | Show karma or vote: !karma + <nick>, !karma - <nick>, nick++ or nick--. Votes require the nick on the channel. |  |
 | `karmadiff` | public | registry-public | `karmadiff [nick]` | Show karma delta for nick in the last 24h. |  |
 | `karmahist` | public | registry-public | `karmahist [nick]` | Show the last 5 karma changes on the channel (optionally filtered by nick). |  |
 | `karmainfo` | public | registry-public | `karmainfo <nick>` | Detailed karma stats: received, given, top voter. |  |

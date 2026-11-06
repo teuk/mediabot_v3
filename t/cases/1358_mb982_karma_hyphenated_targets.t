@@ -7,6 +7,10 @@ BEGIN { *CORE::GLOBAL::time = sub { 1_900_000_000 } }
 use Mediabot::Mediabot;
 use Mediabot::Context;
 use Mediabot::Partyline::Commands ();
+use Mediabot::DCC ();
+use Mediabot::IRC::Target ();
+use Mediabot::Spark::Identity ();
+use Mediabot::Update ();
 
 {
     package MB982::DBI; our @ISA=('DBI');
@@ -31,6 +35,44 @@ use Mediabot::Partyline::Commands ();
     sub bump_progress { $_[0]{given}{$_[2]} += $_[4]; $_[0]{given}{$_[2]} }
     sub progress {$_[0]{given}{$_[2]}//0}
     sub check_karma {push @{$_[0]{calls}},[@_[1..5]];1}
+
+    package MB1126::Bot; our @ISA=('Mediabot');
+    sub isIgnored {$_[4] eq 'ignored Bob++'}
+    sub observe_public_word {}
+    sub getMessageNickIdentHost {return (($_[1] // ''),'ident','host')}
+    sub observe_channel_event {}
+    sub is_hailo_excluded_nick {0}
+    sub hailo_observe_public_line {}
+    sub hailo_record_activity {}
+    sub hailo_should_chatter {0}
+    sub checkResponder {100}
+    sub getIdChansetList {undef}
+    sub logBotAction {}
+    sub displayUrlTitle {}
+    sub mbCommandPrivate {}
+    sub mbCommandPublic {
+        my ($bot,$message,$channel,$nick,$trigger,$command,@args)=@_;
+        return unless $command eq 'karma';
+        my $ctx=Mediabot::Context->new(bot=>$bot,nick=>$nick,channel=>$channel,
+            command=>$command,args=>\@args);
+        $ctx->{_user_fetched}=1;
+        $bot->command_registry->handler_for($command,'public')->($ctx);
+    }
+    package MB1126::Conf;
+    sub get {
+        my (undef,$key)=@_;
+        return '!' if $key eq 'main.MAIN_PROG_CMD_CHAR';
+        return 'Relay' if $key eq 'main.BOT_NICKS';
+        return;
+    }
+    package MB1126::IRC;
+    sub nick {'Mediabot'}
+    sub nick_folded {'mediabot'}
+    package MB1126::Exclusion;
+    sub classify_public_line {
+        my (undef,%args)=@_;
+        return {excluded=>($args{nick} eq 'Excluded'),reason=>'declared_bot'};
+    }
 }
 $INC{'MB982/DBI.pm'}=__FILE__;
 my $tmp=tempdir(CLEANUP=>1);my $serial=0;
@@ -209,5 +251,87 @@ for my $entry ('Mediabot::Karma') {
     Mediabot::Partyline::Commands::_cmd_karmahist({bot=>$bot},$stream,1,'alice-bob');
     ok($stream->{text} =~ /by Second.*by First/s && $stream->{text} !~ /Outside/,
         'Partyline reads the same two events in reverse order');
+}
+
+{
+    # Compile the production ingress handler without starting the daemon.
+    package MB1126::Ingress;
+    our ($mediabot,$bNickTriggerCommand,$BOTNICK_WASNOT_TRIGGERED,$MAIN_PROG_DAEMON,$sFullParams);
+    sub _irc_target_is_channel { Mediabot::IRC::Target::is_channel(@_) }
+    sub _private_message_is_sensitive {0}
+    sub _private_payload_log_summary {'[fixture]'}
+    sub log_debug_args {}
+    sub _spark_observe_public_line {}
+    Mediabot::DCC->import(qw(parse_ctcp_payload is_ctcp_chat is_dcc_chat));
+    my $source=do {open my $fh,'<:encoding(UTF-8)','mediabot.pl' or die $!;local $/;<$fh>};
+    for my $name (qw(_on_message_PRIVMSG_body on_message_JOIN on_message_QUIT)) {
+        my ($handler)=$source =~ /^(sub \Q$name\E \{.*?^\})/ms;
+        die "$name handler not found" unless defined $handler;
+        eval "$handler\n1" or die $@;
+    }
+}
+
+{
+    my ($bot,$peer)=setup_1358();
+    bless $bot,'MB1126::Bot';
+    $bot->{conf}=bless {},'MB1126::Conf';
+    $bot->{conversation_exclusion}=bless {},'MB1126::Exclusion';
+    $bot->{hChannelsNicks}={'#test'=>['Bob','Carol','Te[u]K','Notepad[away]','Voter'],
+        '#other'=>['Notepad','Dave'], '#unregistered'=>['Bob']};
+    $bot->{hChannelsNicksTmp}={'#test'=>['Bob','Carol'], '#sync'=>['Gone','Here']};
+    $peer->do('CREATE TABLE CHANNEL (id_channel INTEGER, name TEXT)');
+    my $irc=bless {},'MB1126::IRC';
+    local $MB1126::Ingress::mediabot=$bot;
+    local *Mediabot::Helpers::chanset_enabled=sub {0};
+    local *Mediabot::UserCommands::deliverReminders=sub {};
+    local *Mediabot::UserCommands::checkTriviaAnswer=sub {};
+    local *Mediabot::UserCommands::checkQuotegameAnswer=sub {};
+    local *Mediabot::Update::update_completion_on_join=sub {};
+    local *MB982::Metrics::set=sub {};
+    @wire=();
+    @warnings=();
+    my $say=sub {
+        my ($nick,$target,$text)=@_;
+        MB1126::Ingress::_on_message_PRIVMSG_body($irc,undef,
+            {prefix_nick=>$nick,targets=>$target,text=>$text});
+    };
+    $say->('Voter','#TeSt','bOB++');
+    $say->('Other','#TeSt','merci CAROL--, Te[u]K++ !');
+    is_deeply($peer->selectall_arrayref('SELECT nick,delta,from_nick FROM KARMA_LOG ORDER BY rowid'),
+        [['bob',1,'Voter'],['carol',-1,'Other'],['te[u]k',1,'Other']],
+        'plain PRIVMSG reaches real SQL for both operators and literal nicks on the current channel');
+
+    for my $line (
+        ['Other','#test','Notepad++ Dave-- Absent-Bob++ Bob+++ Carol--extra'],
+        ['Other','#test','!echo Bob++'],
+        ['Other','#test','!karma + Carol Bob++'],
+        ['Other','#test','https://example.invalid/Bob++'],
+        ['Other','Mediabot','Bob++'],
+        ['Other','#unregistered','Bob++'],
+        ['Other','#test',"\x01ACTION Bob++ \x01"],
+        ['Relay','#test','Bob++'],
+        ['Mediabot','#test','Bob++'],
+        ['Excluded','#test','Bob++'],
+        ['Other','#test','ignored Bob++'],
+        ['Voter','#TEST','!karma - Bob'], # same cooldown as the bare vote
+        ['Voter','#TEST','VOTER++'],
+    ) {$say->(@$line)}
+    $bot->channelNicksRemove('#TEST','bOB');
+    my @pending_after_part=@{$bot->{hChannelsNicksTmp}{'#test'}};
+    MB1126::Ingress::on_message_QUIT($irc,'gONE',{text=>'a.example b.example'});
+    $say->('New','#test','Bob++');
+    $say->('New','#test','!karma - Carol');
+    $say->('New','#test','!karma + Notepad'); # keep historical explicit aliases
+    MB1126::Ingress::on_message_JOIN($irc,'Mediabot',{target_name=>'#TEST'});
+    $say->('AfterJoin','#test','Carol++');
+    my $before_names=$peer->selectrow_array("SELECT COUNT(*) FROM KARMA_LOG WHERE from_nick='AfterJoin'");
+    my $stale=exists $bot->{hChannelsNicksTmp}{'#test'};
+    $bot->sethChannelsNicksOnChan('#TeSt','Carol');
+    $say->('AfterJoin','#test','Carol++');
+    is_deeply([$peer->selectall_arrayref('SELECT nick,delta,from_nick FROM KARMA_LOG ORDER BY rowid'),
+        \@pending_after_part,$bot->{hChannelsNicksTmp}{'#sync'},$before_names,$stale?1:0,scalar(@warnings)],
+        [[['bob',1,'Voter'],['carol',-1,'Other'],['te[u]k',1,'Other'],['carol',-1,'New'],['notepad',1,'New'],
+          ['carol',1,'AfterJoin']],['Carol'],['Here'],0,0,0],
+        'explicit votes still work; shorthand ignores ineligible messages and stale nicklists after PART, QUIT or rejoin');
 }
 done_testing;
