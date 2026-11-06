@@ -141,7 +141,10 @@ sub start {
     }
 
     if ($pid == 0) {
-        $self->_child_main($read_fh, $write_fh);
+        # The normal child path exits itself after sending its result. An
+        # unexpected throw or return must never resume the inherited caller.
+        eval { $self->_child_main($read_fh, $write_fh) };
+        POSIX::_exit(1);
     }
 
     $self->{pid}      = $pid;
@@ -290,9 +293,9 @@ sub _child_main {
         return _write_all($write_fh, $payload);
     };
 
-    my $record;
-    my $value = eval { $self->{child}->($emit_progress) };
-    if ($@) {
+    my ($record, $value);
+    my $child_ok = eval { $value = $self->{child}->($emit_progress); 1 };
+    if (!$child_ok) {
         $record = {
             protocol => $PROTOCOL_VERSION,
             type     => 'result',

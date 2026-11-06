@@ -1,5 +1,11 @@
 ## [Unreleased] — 3.8dev
 
+### MB1124 — Keep forked workers inside their process boundary
+
+- Report false or overloaded child exceptions as failures. Exit the child
+  if its entry point unexpectedly throws or returns, without resuming the caller.
+
+
 ### MB1123 — Recover scheduler tasks after object exceptions
 
 - Keep exception formatting from interrupting timer cleanup. A failed

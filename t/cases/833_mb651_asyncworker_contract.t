@@ -23,7 +23,17 @@ BEGIN {
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use POSIX qw(WNOHANG);
 use Time::HiRes ();
+use JSON::PP ();
 use Mediabot::AsyncWorker;
+
+{
+    package AW1124::FalseException;
+    use overload 'bool' => sub {0}, fallback => 1;
+
+    package AW1124::ThrowingException;
+    use overload 'bool' => sub {die "unexpected bool conversion\n"},
+        '""' => sub {die "unexpected string conversion\n"}, fallback => 1;
+}
 
 {
     package IO::Async::Stream;
@@ -375,6 +385,50 @@ return sub {
         'mb651-833: child exception identifies its stage');
     $assert->like($died[0]{detail}, qr/synthetic child explosion/,
         'mb651-833: bounded exception detail reaches the parent');
+
+    # Keep a guard in the test caller: on the broken implementation the
+    # exception can unwind past start() in the actual forked process.
+    {
+        my $parent=$$;
+        my @observed;
+        for my $case (qw(false_exception throwing_exception child_main_failure child_main_return false_return)) {
+            my $loop=AW651::Loop->new;
+            my @done;
+            my $child=sub {
+                die bless({},'AW1124::FalseException') if $case eq 'false_exception';
+                die bless({},'AW1124::ThrowingException') if $case eq 'throwing_exception';
+                return 0;
+            };
+            my $worker;
+            my $launched=eval {
+                no warnings 'redefine';
+                my $native=Mediabot::AsyncWorker->can('_child_main');
+                local *Mediabot::AsyncWorker::_child_main=sub {
+                    die "fixture worker bootstrap failure\n" if $case eq 'child_main_failure';
+                    return if $case eq 'child_main_return';
+                    $native->(@_);
+                };
+                $worker=Mediabot::AsyncWorker->start(
+                    loop=>$loop,timeout=>1,child=>$child,
+                    on_done=>sub {push @done,$_[0]},
+                );
+                1;
+            };
+            POSIX::_exit(73) if $$ != $parent;
+            $loop->run_until(sub {@done},2);
+            my $result=$done[0] // {};
+            push @observed,[$case,$launched && $worker?1:0,scalar(@done),
+                $result->{ok},$result->{error},$result->{stage},$result->{exit},$result->{value}];
+        }
+        my $json=JSON::PP->new->canonical;
+        $assert->is($json->encode(\@observed),$json->encode([
+            ['false_exception',1,1,0,'worker_exception','child',0,undef],
+            ['throwing_exception',1,1,0,'worker_exception','child',0,undef],
+            ['child_main_failure',1,1,0,'worker_exit','process_exit',1,undef],
+            ['child_main_return',1,1,0,'worker_exit','process_exit',1,undef],
+            ['false_return',1,1,1,undef,undef,0,0],
+        ]),'MB1124: false or overloaded exceptions are failures, and a forked worker never returns to the launch caller');
+    }
 
     # Oversized JSON is replaced inside the child by a bounded error envelope.
     my $loop_big = AW651::Loop->new;
