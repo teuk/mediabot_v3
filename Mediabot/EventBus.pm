@@ -4,7 +4,8 @@ use strict;
 use warnings;
 use utf8;
 
-use Scalar::Util qw(refaddr);
+use Scalar::Util qw(refaddr looks_like_number);
+use POSIX qw(isfinite);
 
 # ---------------------------------------------------------------------------
 # Mediabot::EventBus
@@ -60,6 +61,11 @@ sub _listener_priority {
     # Perl's implicit ref stringification warnings.
     return 0 unless defined $value;
     return 0 if ref($value);
+    # MB1137: reject malformed/non-finite scalars before integer conversion
+    # and sorting. NaN makes numeric comparisons undefined; numeric prefixes
+    # such as "12oops" must not acquire an unintended priority.
+    return 0 unless looks_like_number($value);
+    return 0 unless isfinite(0 + $value);
     return int($value);
 }
 

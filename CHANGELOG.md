@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1137 — Keep EventBus priority ordering finite and warning-free
+
+- Fall back to priority zero for malformed numeric strings, NaN, infinity and
+  overflowing numeric priorities before sorting plugin listeners.
+- Preserve finite numeric conversion, equal-priority registration order,
+  one-shot cleanup and listener exception isolation.
+
 ### MB1136 — Reject non-ASCII digits in version identities
 
 - Reject Unicode digits in major, minor and development fields before numeric
