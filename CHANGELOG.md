@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1129 — Keep update completion pending until the IRC write
+
+- Consume the post-update marker after the IRC socket write completes.
+  AntiFlood refusals, disconnects and write failures leave it on disk.
+- Keep one write in flight and retry on the next matching login or self-JOIN.
+
+
 ### MB1128 — Keep Wiktionary definitions readable on IRC
 
 - Decode `!define` arguments before joining them and encode the query

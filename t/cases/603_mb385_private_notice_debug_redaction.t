@@ -1,165 +1,98 @@
 # t/cases/603_mb385_private_notice_debug_redaction.t
 use strict;
 use warnings;
+use Test::More;
 use FindBin qw($Bin);
-use File::Spec;
+use lib "$Bin/../..";
+use Mediabot::Helpers ();
 
-sub _slurp_mb385 {
-    my ($path) = @_;
-    open my $fh, '<', $path or die "cannot open $path: $!";
-    local $/;
-    return <$fh>;
+my @action_logs;
+no warnings 'redefine';
+local *Mediabot::Helpers::logBotAction = sub { push @action_logs, [@_]; return 1; };
+
+{
+    package MB385::Logger;
+    sub new { bless { rows => [] }, shift }
+    sub log { my ($self, $level, $text) = @_; push @{ $self->{rows} }, [$level, $text]; 1 }
+}
+{
+    package MB385::IRC;
+    sub new { bless { sent => [] }, shift }
+    sub nick_folded { 'mediabot' }
+    sub do_NOTICE {
+        my ($self, %args) = @_;
+        $self->{requested_result}++ if defined wantarray;
+        push @{ $self->{sent} }, { %args };
+        return 1;
+    }
+}
+{
+    package MB385::Metrics;
+    sub new { bless { inc => [] }, shift }
+    sub inc { my ($self, @args) = @_; push @{ $self->{inc} }, \@args; 1 }
 }
 
-sub _extract_between_mb385 {
-    my ($src, $start, $next) = @_;
-    return $1 if $src =~ /(sub\s+\Q$start\E\s*\{.*?)(?=\nsub\s+\Q$next\E\s*\{)/s;
-    return;
-}
+my $logger  = MB385::Logger->new;
+my $irc     = MB385::IRC->new;
+my $metrics = MB385::Metrics->new;
+my $bot = bless {
+    logger  => $logger,
+    irc     => $irc,
+    metrics => $metrics,
+}, 'MB385::Bot';
 
-my $case = sub {
-    my ($assert) = @_;
+my $secret = 'SWORD-FISH-PRIVATE-385';
+my $account = 'account-' . ('x' x 430);
+my $wire_text = "identify $account $secret";
 
-    my $root = File::Spec->catdir($Bin, '..', '..');
-    my $helpers_file = File::Spec->catfile($root, 'Mediabot', 'Helpers.pm');
-    my $src = _slurp_mb385($helpers_file);
+Mediabot::Helpers::botNotice($bot, 'NickServ', $wire_text);
 
-    my $is_channel = _extract_between_mb385(
-        $src, '_is_irc_channel_target', '_redact_irc_service_secret_for_log'
-    );
-    my $redact = _extract_between_mb385(
-        $src, '_redact_irc_service_secret_for_log', '_split_text_for_irc'
-    );
-    my $split = _extract_between_mb385(
-        $src, '_split_text_for_irc', 'botPrivmsg'
-    );
-    my $sender = _slurp_mb385(File::Spec->catfile($root, 'Mediabot', 'IRC', 'Sender.pm'));
-    my ($notice) = $sender =~ /(sub botNotice \{.*?^\})/ms;
+my $all_logs = join("\n", map { $_->[1] // '' } @{ $logger->{rows} });
+my $wire = join('', map { $_->{text} // '' } @{ $irc->{sent} });
 
-    $assert->(defined($is_channel), 'channel-target helper extracted');
-    $assert->(defined($redact), 'outbound redaction helper extracted');
-    $assert->(defined($split), 'IRC byte splitter extracted');
-    $assert->(defined($notice), 'botNotice extracted');
-    return unless defined($is_channel) && defined($redact)
-        && defined($split) && defined($notice);
+ok($wire eq $wire_text,
+    'private NOTICE wire payload is unchanged across chunks');
+ok(index($all_logs, $secret) < 0,
+    'private NOTICE secret is absent from every log level');
+ok(index($all_logs, '****') >= 0,
+    'private NOTICE logs contain the redaction marker');
+ok(scalar(@{ $irc->{sent} }) > 1,
+    'long private NOTICE is split on the wire');
+ok(
+    !grep({ ($_->[0] // -1) == 4 && index($_->[1] // '', $secret) >= 0 } @{ $logger->{rows} }),
+    'level-4 diagnostic never contains the private secret'
+);
 
-    my $ok = eval qq{
-        package MB385::Harness;
-        use strict;
-        use warnings;
-        use Encode qw(encode);
-        our \@ACTION_LOGS;
-        sub logBotAction { push \@ACTION_LOGS, [\@_]; return 1; }
-        $is_channel
-        $redact
-        $split
-        $notice
-        1;
-    };
-    $assert->($ok, 'helpers and botNotice compile in isolated harness');
-    return unless $ok;
+my $normal_logger = MB385::Logger->new;
+my $normal_irc = MB385::IRC->new;
+my $normal_bot = bless {
+    logger  => $normal_logger,
+    irc     => $normal_irc,
+    metrics => MB385::Metrics->new,
+}, 'MB385::Bot';
 
-    {
-        package MB385::Logger;
-        sub new { bless { rows => [] }, shift }
-        sub log { my ($self, $level, $text) = @_; push @{ $self->{rows} }, [$level, $text]; 1 }
-    }
-    {
-        package MB385::IRC;
-        sub new { bless { sent => [] }, shift }
-        sub nick_folded { 'mediabot' }
-        sub do_NOTICE {
-            my ($self, %args) = @_;
-            push @{ $self->{sent} }, { %args };
-            return 1;
-        }
-    }
-    {
-        package MB385::Metrics;
-        sub new { bless { inc => [] }, shift }
-        sub inc { my ($self, @args) = @_; push @{ $self->{inc} }, \@args; 1 }
-    }
+Mediabot::Helpers::botNotice($normal_bot, 'Te[u]K', 'ordinary private reply');
+my $normal_logs = join("\n", map { $_->[1] // '' } @{ $normal_logger->{rows} });
+ok(index($normal_logs, 'ordinary private reply') >= 0,
+    'ordinary private NOTICE visibility is preserved');
 
-    my $logger  = MB385::Logger->new;
-    my $irc     = MB385::IRC->new;
-    my $metrics = MB385::Metrics->new;
-    my $bot = bless {
-        logger  => $logger,
-        irc     => $irc,
-        metrics => $metrics,
-    }, 'MB385::Bot';
+my $channel_logger = MB385::Logger->new;
+my $channel_irc = MB385::IRC->new;
+my $channel_bot = bless {
+    logger  => $channel_logger,
+    irc     => $channel_irc,
+    metrics => MB385::Metrics->new,
+}, 'MB385::Bot';
 
-    my $secret = 'SWORD-FISH-PRIVATE-385';
-    my $account = 'account-' . ('x' x 430);
-    my $wire_text = "identify $account $secret";
+Mediabot::Helpers::botNotice($channel_bot, '#teuk', 'identify public-demo-value');
+my $channel_logs = join("\n", map { $_->[1] // '' } @{ $channel_logger->{rows} });
+ok(index($channel_logs, 'identify public-demo-value') >= 0,
+    'channel NOTICE logs retain visible channel text');
+ok(scalar(@action_logs) == 1,
+    'channel NOTICE action logging remains active');
 
-    MB385::Harness::botNotice($bot, 'NickServ', $wire_text);
+ok(!$irc->{requested_result} && !$normal_irc->{requested_result}
+        && !$channel_irc->{requested_result},
+    'ordinary NOTICE does not request a transport Future');
 
-    my $all_logs = join("\n", map { $_->[1] // '' } @{ $logger->{rows} });
-    my $wire = join('', map { $_->{text} // '' } @{ $irc->{sent} });
-
-    $assert->($wire eq $wire_text,
-        'private NOTICE wire payload is unchanged across chunks');
-    $assert->(index($all_logs, $secret) < 0,
-        'private NOTICE secret is absent from every log level');
-    $assert->(index($all_logs, '****') >= 0,
-        'private NOTICE logs contain the redaction marker');
-    $assert->(scalar(@{ $irc->{sent} }) > 1,
-        'long private NOTICE is split on the wire');
-    $assert->(
-        !grep({ ($_->[0] // -1) == 4 && index($_->[1] // '', $secret) >= 0 } @{ $logger->{rows} }),
-        'level-4 diagnostic never contains the private secret'
-    );
-
-    my $normal_logger = MB385::Logger->new;
-    my $normal_irc = MB385::IRC->new;
-    my $normal_bot = bless {
-        logger  => $normal_logger,
-        irc     => $normal_irc,
-        metrics => MB385::Metrics->new,
-    }, 'MB385::Bot';
-
-    MB385::Harness::botNotice($normal_bot, 'Te[u]K', 'ordinary private reply');
-    my $normal_logs = join("\n", map { $_->[1] // '' } @{ $normal_logger->{rows} });
-    $assert->(index($normal_logs, 'ordinary private reply') >= 0,
-        'ordinary private NOTICE visibility is preserved');
-
-    my $channel_logger = MB385::Logger->new;
-    my $channel_irc = MB385::IRC->new;
-    my $channel_bot = bless {
-        logger  => $channel_logger,
-        irc     => $channel_irc,
-        metrics => MB385::Metrics->new,
-    }, 'MB385::Bot';
-
-    @MB385::Harness::ACTION_LOGS = ();
-    MB385::Harness::botNotice($channel_bot, '#teuk', 'identify public-demo-value');
-    my $channel_logs = join("\n", map { $_->[1] // '' } @{ $channel_logger->{rows} });
-    $assert->(index($channel_logs, 'identify public-demo-value') >= 0,
-        'channel NOTICE logs retain visible channel text');
-    $assert->(scalar(@MB385::Harness::ACTION_LOGS) == 1,
-        'channel NOTICE action logging remains active');
-
-    $assert->($notice =~ /mb385-B1/,
-        'botNotice contains the MB385 marker');
-    $assert->($notice !~ /text='\$text'/,
-        'raw private text is absent from the initial debug statement');
-    $assert->($notice =~ /_split_text_for_irc\(\$safe_log_text, 400\)/,
-        'private log splitting happens after complete-message redaction');
-};
-
-if (caller) { return $case; }
-
-my $tests = 0;
-my $fail  = 0;
-my $assert = sub {
-    my ($ok, $name) = @_;
-    $tests++;
-    $name = 'unnamed assertion' unless defined $name && $name ne '';
-    if ($ok) { print "ok $tests - $name\n"; }
-    else { print "not ok $tests - $name\n"; $fail++; }
-};
-
-$case->($assert);
-print "1..$tests\n";
-exit($fail ? 1 : 0);
+done_testing;

@@ -39,8 +39,10 @@ use utf8;
 use Cwd qw(realpath);
 use File::Basename qw(basename dirname);
 use File::Spec;
+use Future ();
 use JSON::PP qw(decode_json);
 use POSIX qw(setsid strftime);
+use Scalar::Util qw(blessed weaken);
 
 use Exporter 'import';
 our @EXPORT_OK = qw(
@@ -477,6 +479,54 @@ sub _completion_message {
     return "\x0309Update completed.\x0f Version: \x02$version\x02";
 }
 
+sub _send_completion_notice {
+    my ($self, $data, $target) = @_;
+    return 0 if exists $self->{_update_completion_write};
+
+    my @writes;
+    {
+        # Reserve the marker before invoking any output or logging callbacks.
+        local $self->{_update_completion_write} = 1;
+        my $started = eval {
+            return 0 unless $self->{irc} && $self->{irc}->is_connected;
+            my $text = _completion_message($data->{version});
+            my $options = { no_defer => 1, write_futures => \@writes };
+            if ($data->{kind} eq 'channel') {
+                Mediabot::Helpers::botPrivmsg($self, $target, $text, $options);
+            }
+            else {
+                Mediabot::Helpers::botNotice($self, $target, $text, $options);
+            }
+            1;
+        };
+        unless ($started) {
+            eval { $self->{logger}->log(1, 'update completion: output failed; marker kept') };
+            return 0;
+        }
+    }
+
+    # Rejection (including AntiFlood) submits no write. A queued or failed
+    # write must leave the marker on disk for the next eligible login/JOIN.
+    return 0 unless @writes && !grep { !blessed($_) || !$_->isa('Future') } @writes;
+    my $write = @writes == 1 ? $writes[0] : Future->needs_all(@writes);
+    $self->{_update_completion_write} = $write;
+    my $owner = $self;
+    weaken($owner);
+    $write->on_ready(sub {
+        my ($ready) = @_;
+        $ready->failure if $ready->is_failed;
+        my $bot = $owner or return;
+        delete $bot->{_update_completion_write};
+        unless ($ready->is_done) {
+            eval { $bot->{logger}->log(1, 'update completion: IRC write failed; marker kept') };
+            return;
+        }
+        _finish_completion_notice($bot, $data);
+        eval { $bot->{logger}->log(1, "update completion: wrote to $target version $data->{version}") };
+    });
+    return $write->is_done ? 1 : 0;
+}
+
 # Appel au login uniquement pour une commande lancee en prive. Pour une cible
 # canal, on attend le JOIN reel du bot : envoyer avant le JOIN echouerait sur
 # les canaux +n et casserait precisement la garantie recherchee.
@@ -485,12 +535,7 @@ sub update_completion_on_login {
     my $data = _load_completion_notice($self) or return 0;
     return 0 unless $data->{kind} eq 'notice';
 
-    Mediabot::Helpers::botNotice($self, $data->{target},
-        _completion_message($data->{version}));
-    _finish_completion_notice($self, $data);
-    eval { $self->{logger}->log(1,
-        "update completion: notified $data->{target} version $data->{version}") };
-    return 1;
+    return _send_completion_notice($self, $data, $data->{target});
 }
 
 # Pour une commande lancee sur un canal, la notification part au premier JOIN
@@ -504,12 +549,7 @@ sub update_completion_on_join {
     return 0 unless $data->{kind} eq 'channel';
     return 0 unless lc($data->{target}) eq lc($channel);
 
-    Mediabot::Helpers::botPrivmsg($self, $channel,
-        _completion_message($data->{version}));
-    _finish_completion_notice($self, $data);
-    eval { $self->{logger}->log(1,
-        "update completion: notified $channel version $data->{version}") };
-    return 1;
+    return _send_completion_notice($self, $data, $channel);
 }
 
 sub update_ctx {

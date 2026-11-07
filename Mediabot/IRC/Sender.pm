@@ -78,6 +78,19 @@ sub _timed_ping_text {
     return sprintf('POng ! [%.3fs]', $elapsed);
 }
 
+# Only callers that need to acknowledge durable work request write Futures.
+# Leave the ordinary send in void context: the IRC stream then allocates none.
+sub _write_irc_chunk {
+    my ($irc, $method, $target, $text, $options) = @_;
+    if (ref($options) eq 'HASH' && ref($options->{write_futures}) eq 'ARRAY') {
+        push @{ $options->{write_futures} }, scalar $irc->$method(target => $target, text => $text);
+    }
+    else {
+        $irc->$method(target => $target, text => $text);
+    }
+    return;
+}
+
 sub botPrivmsg {
     my ($self, $sTo, $sMsg, $send_options) = @_;
 
@@ -186,7 +199,7 @@ sub botPrivmsg {
             next unless defined($chunk) && $chunk ne '';
             $chunk = encode("UTF-8", $chunk) if utf8::is_utf8($chunk);
             $self->{metrics}->inc('mediabot_privmsg_out_total') if $self->{metrics};
-            $self->{irc}->do_PRIVMSG(target => $sTo, text => $chunk);
+            _write_irc_chunk($self->{irc}, 'do_PRIVMSG', $sTo, $chunk, $send_options);
         }
     } else {
         $self->{logger}->log(0, "botAction() ERROR no message specified to send to target");
@@ -304,7 +317,7 @@ sub botAction {
 }
 
 sub botNotice {
-    my ($self, $target, $text) = @_;
+    my ($self, $target, $text, $send_options) = @_;
 
     # Sanity check: both target and message must be defined and non-empty
     unless (defined $target && $target ne '') {
@@ -362,10 +375,7 @@ sub botNotice {
 
         # Envoi du NOTICE
         $self->{metrics}->inc('mediabot_notice_out_total') if $self->{metrics};
-        $self->{irc}->do_NOTICE(
-            target => $target,
-            text   => $encoded_text
-        );
+        _write_irc_chunk($self->{irc}, 'do_NOTICE', $target, $encoded_text, $send_options);
 
         if ($is_channel_target) {
             # Channel logs and action history retain the original visible text.
