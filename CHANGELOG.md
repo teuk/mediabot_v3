@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1138 — Preserve Hailo queue identity during filtered selection
+
+- Remove the exact accepted reply when a selection predicate prunes or consumes
+  the queue, instead of taking another reply at a stale array index.
+- Skip removed candidates, defer newly enqueued entries to the next selection,
+  and preserve FIFO, expiry accounting and predicate exception isolation.
+
 ### MB1137 — Keep EventBus priority ordering finite and warning-free
 
 - Fall back to priority zero for malformed numeric strings, NaN, infinity and

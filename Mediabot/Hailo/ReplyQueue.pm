@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 
 use Carp qw(croak);
+use Scalar::Util qw(refaddr);
 use Time::HiRes ();
 
 our $VERSION = '1.0';
@@ -130,10 +131,18 @@ sub take_next {
     $self->_prune;
     return shift @{ $self->{queue} } unless $predicate;
 
-    for my $index (0 .. $#{ $self->{queue} }) {
-        my $entry = $self->{queue}[$index];
+    # MB1138: predicates are caller code and may prune or consume the queue.
+    # Visit only the initial candidates, and remove the exact accepted entry
+    # from its current position rather than using a stale array index.
+    my @candidates = @{ $self->{queue} };
+    for my $entry (@candidates) {
+        my $address = refaddr($entry);
+        next unless grep { refaddr($_) == $address } @{ $self->{queue} };
         next unless eval { $predicate->($entry) };
-        return splice(@{ $self->{queue} }, $index, 1);
+        for my $index (0 .. $#{ $self->{queue} }) {
+            next unless refaddr($self->{queue}[$index]) == $address;
+            return splice(@{ $self->{queue} }, $index, 1);
+        }
     }
     return undef;
 }
