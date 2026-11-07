@@ -76,7 +76,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) or on() vector(-1)",
+          "expr": "max(up{job=\"$job\",instance=\"$instance\"}) or on() vector(-1)",
           "legendFormat": "Collecte des statistiques",
           "editorMode": "code",
           "format": "time_series",
@@ -164,7 +164,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(max(mediabot_irc_connected{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)) or on() vector(-1)",
+          "expr": "(max(mediabot_irc_connected{job=\"$job\",instance=\"$instance\"}) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)) or on() vector(-1)",
           "legendFormat": "Connexion IRC",
           "editorMode": "code",
           "format": "time_series",
@@ -252,7 +252,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "((max(mediabot_db_up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) or on() max(mediabot_db_connected{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)) or on() vector(-1)",
+          "expr": "((max(mediabot_db_up{job=\"$job\",instance=\"$instance\"}) or on() max(mediabot_db_connected{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)) or on() vector(-1)",
           "legendFormat": "Base du bot",
           "editorMode": "code",
           "format": "time_series",
@@ -340,7 +340,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "max(mediabot_current_channels{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "max(mediabot_current_channels{job=\"$job\",instance=\"$instance\"}) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Salons rejoints",
           "editorMode": "code",
           "format": "time_series",
@@ -411,7 +411,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(60 * sum(rate(mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "(60 * sum(rate(mediabot_channel_lines_in_total{job=\"$job\",instance=\"$instance\"}[5m])) or on() (0 * (max(up{job=\"$job\",instance=\"$instance\"}) == 1) and on() mediabot_build_info{job=\"$job\",instance=\"$instance\"} unless on() mediabot_channel_lines_in_total{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Messages lus",
           "editorMode": "code",
           "format": "time_series",
@@ -466,7 +466,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(60 * sum(rate(mediabot_commands_public_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_commands_public_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "(60 * sum(rate(mediabot_commands_public_total{job=\"$job\",instance=\"$instance\"}[5m])) or on() (0 * (max(up{job=\"$job\",instance=\"$instance\"}) == 1) and on() mediabot_build_info{job=\"$job\",instance=\"$instance\"} unless on() mediabot_commands_public_total{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Commandes publiques",
           "editorMode": "code",
           "format": "time_series",
@@ -521,7 +521,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(60 * sum(rate(mediabot_urltitle_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_urltitle_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "(60 * sum(rate(mediabot_urltitle_requests_total{job=\"$job\",instance=\"$instance\"}[5m])) or on() (0 * (max(up{job=\"$job\",instance=\"$instance\"}) == 1) and on() mediabot_build_info{job=\"$job\",instance=\"$instance\"} unless on() mediabot_urltitle_requests_total{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Analyses de liens",
           "editorMode": "code",
           "format": "time_series",
@@ -576,7 +576,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(60 * sum(rate(mediabot_privmsg_out_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_privmsg_out_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "(60 * sum(rate(mediabot_privmsg_out_total{job=\"$job\",instance=\"$instance\"}[5m])) or on() (0 * (max(up{job=\"$job\",instance=\"$instance\"}) == 1) and on() mediabot_build_info{job=\"$job\",instance=\"$instance\"} unless on() mediabot_privmsg_out_total{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Messages envoyés",
           "editorMode": "code",
           "format": "time_series",
@@ -631,7 +631,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(60 * sum(rate(mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "(60 * sum(rate(mediabot_channel_lines_in_total{job=\"$job\",instance=\"$instance\"}[5m])) or on() (0 * (max(up{job=\"$job\",instance=\"$instance\"}) == 1) and on() mediabot_build_info{job=\"$job\",instance=\"$instance\"} unless on() mediabot_channel_lines_in_total{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Messages lus",
           "editorMode": "code",
           "format": "time_series",
@@ -644,7 +644,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(60 * sum(rate(mediabot_privmsg_out_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_privmsg_out_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "(60 * sum(rate(mediabot_privmsg_out_total{job=\"$job\",instance=\"$instance\"}[5m])) or on() (0 * (max(up{job=\"$job\",instance=\"$instance\"}) == 1) and on() mediabot_build_info{job=\"$job\",instance=\"$instance\"} unless on() mediabot_privmsg_out_total{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Messages envoyés",
           "editorMode": "code",
           "format": "time_series",
@@ -738,7 +738,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(60 * sum(rate(mediabot_commands_public_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_commands_public_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "(60 * sum(rate(mediabot_commands_public_total{job=\"$job\",instance=\"$instance\"}[5m])) or on() (0 * (max(up{job=\"$job\",instance=\"$instance\"}) == 1) and on() mediabot_build_info{job=\"$job\",instance=\"$instance\"} unless on() mediabot_commands_public_total{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Commandes publiques",
           "editorMode": "code",
           "format": "time_series",
@@ -751,7 +751,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(60 * sum(rate(mediabot_urltitle_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_urltitle_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "(60 * sum(rate(mediabot_urltitle_requests_total{job=\"$job\",instance=\"$instance\"}[5m])) or on() (0 * (max(up{job=\"$job\",instance=\"$instance\"}) == 1) and on() mediabot_build_info{job=\"$job\",instance=\"$instance\"} unless on() mediabot_urltitle_requests_total{job=\"$job\",instance=\"$instance\"})) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "Analyses de liens",
           "editorMode": "code",
           "format": "time_series",
@@ -861,7 +861,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sort_desc(topk(6, 60 * sum by (channel) (rate(mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[15m])) > 0)) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "sort_desc(topk(6, 60 * sum by (channel) (rate(mediabot_channel_lines_in_total{job=\"$job\",instance=\"$instance\"}[15m])) > 0)) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "{{channel}}",
           "editorMode": "code",
           "format": "time_series",
@@ -918,7 +918,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sort_desc(topk(6, 60 * sum by (command) (rate(mediabot_channel_commands_by_name_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[15m])) > 0)) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "expr": "sort_desc(topk(6, 60 * sum by (command) (rate(mediabot_channel_commands_by_name_total{job=\"$job\",instance=\"$instance\"}[15m])) > 0)) and on() (max(up{job=\"$job\",instance=\"$instance\"}) == 1)",
           "legendFormat": "{{command}}",
           "editorMode": "code",
           "format": "time_series",
@@ -1009,8 +1009,8 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "query": "label_values(mediabot_up{job=~\"${job:regex}\"}, instance)",
-        "definition": "label_values(mediabot_up{job=~\"${job:regex}\"}, instance)",
+        "query": "label_values(mediabot_up{job=\"$job\"}, instance)",
+        "definition": "label_values(mediabot_up{job=\"$job\"}, instance)",
         "current": {},
         "options": [],
         "refresh": 1,

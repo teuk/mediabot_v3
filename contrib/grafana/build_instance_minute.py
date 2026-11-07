@@ -6,7 +6,7 @@ from pathlib import Path
 
 FILE = Path(__file__).with_name("grafana_mediabot_instance_minute.json")
 DATASOURCE = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
-SELECT = 'job=~"${job:regex}",instance=~"${instance:regex}"'
+SELECT = 'job="$job",instance="$instance"'
 WINDOW = "5m"
 COLORS = {"read": "#2DD4BF", "sent": "#60A5FA", "commands": "#A78BFA", "links": "#FBBF24"}
 
@@ -171,8 +171,8 @@ def build():
              "query": "label_values(mediabot_up, job)", "definition": "label_values(mediabot_up, job)",
              "current": {}, "options": [], "refresh": 1, "hide": 0, "multi": False, "includeAll": False},
             {"name": "instance", "label": "Instance", "type": "query", "datasource": DATASOURCE,
-             "query": 'label_values(mediabot_up{job=~"${job:regex}"}, instance)',
-             "definition": 'label_values(mediabot_up{job=~"${job:regex}"}, instance)',
+             "query": 'label_values(mediabot_up{job="$job"}, instance)',
+             "definition": 'label_values(mediabot_up{job="$job"}, instance)',
              "current": {}, "options": [], "refresh": 1, "hide": 0, "multi": False, "includeAll": False},
         ]},
     }
