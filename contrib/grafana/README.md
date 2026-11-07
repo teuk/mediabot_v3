@@ -1,4 +1,10 @@
-# Mediabot Fleet Dream — Hourly Grafana dashboard
+# Mediabot Grafana dashboards
+
+For one bot, start with [**Mediabot · En direct**](INSTANCE_MINUTE.md) ([guide en français](INSTANCE_MINUTE.fr.md)). It shows the bot’s status, messages, commands and link requests per minute.
+
+The rest of this page covers the hourly fleet view and the other dashboards.
+
+## Mediabot Fleet Dream — Hourly Grafana dashboard
 
 ## File
 

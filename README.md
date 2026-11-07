@@ -354,7 +354,7 @@ Install optional components only after the IRC bot is healthy:
 | --- | --- |
 | mbweb web console | [mbweb console](https://github.com/teuk/mediabot_v3/wiki/Mbweb-console) and [`contrib/mbweb/README.md`](contrib/mbweb/README.md) |
 | Shared radio requests | [Radio](https://github.com/teuk/mediabot_v3/wiki/Radio) and [`docs/RADIO.md`](docs/RADIO.md) |
-| Prometheus and Grafana | [Monitoring guide](https://github.com/teuk/mediabot_v3/wiki/Monitoring-with-Prometheus-and-Grafana) |
+| Prometheus and Grafana | [Monitoring guide](https://github.com/teuk/mediabot_v3/wiki/Monitoring-with-Prometheus-and-Grafana) · [Grafana dashboard for one instance](contrib/grafana/INSTANCE_MINUTE.md) |
 | TCP/DCC Partyline | [Partyline guide](https://github.com/teuk/mediabot_v3/wiki/Partyline) |
 | Plugins and external scripts | [Developing plugins](https://github.com/teuk/mediabot_v3/wiki/Developing-plugins) |
 

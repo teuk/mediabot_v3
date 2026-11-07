@@ -1,0 +1,1023 @@
+{
+  "id": null,
+  "uid": "mediabot-instance-minute",
+  "title": "Mediabot · En direct",
+  "description": "Une seule instance Mediabot : état du bot, rythme des conversations, commandes publiques et analyses de liens.",
+  "tags": [
+    "mediabot",
+    "irc",
+    "instance"
+  ],
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "style": "dark",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "timepicker": {
+    "refresh_intervals": [
+      "30s",
+      "1m",
+      "5m"
+    ],
+    "time_options": [
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "7d"
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "## Mediabot · En direct\nUne instance, son état et son activité récente. **/min** = rythme moyen ; **—** = mesure indisponible."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Collecte des statistiques",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Prometheus arrive à lire les métriques de l’instance.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) or on() vector(-1)",
+          "legendFormat": "Collecte des statistiques",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Interrompue",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Disponible",
+                  "color": "green",
+                  "index": 1
+                },
+                "-1": {
+                  "text": "Non mesuré",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Connexion IRC",
+      "gridPos": {
+        "x": 6,
+        "y": 3,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Le bot est connecté au réseau IRC.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(max(mediabot_irc_connected{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)) or on() vector(-1)",
+          "legendFormat": "Connexion IRC",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Déconnecté",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Connecté",
+                  "color": "green",
+                  "index": 1
+                },
+                "-1": {
+                  "text": "Non mesuré",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Base du bot",
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Dernier état connu de la connexion à la base de Mediabot.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "((max(mediabot_db_up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) or on() max(mediabot_db_connected{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)) or on() vector(-1)",
+          "legendFormat": "Base du bot",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Indisponible",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Disponible",
+                  "color": "green",
+                  "index": 1
+                },
+                "-1": {
+                  "text": "Non mesuré",
+                  "color": "gray",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Salons rejoints",
+      "gridPos": {
+        "x": 18,
+        "y": 3,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Nombre de salons IRC rejoints actuellement.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max(mediabot_current_channels{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Salons rejoints",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#94A3B8"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "### Activité par minute\nMoyenne sur **5 minutes**, pour que les petits échanges restent lisibles."
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Messages lus",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Lignes publiques comptées par Mediabot dans ses salons.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(60 * sum(rate(mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Messages lus",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: /min",
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2DD4BF"
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Commandes publiques",
+      "gridPos": {
+        "x": 6,
+        "y": 9,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Commandes IRC publiques comptabilisées par le bot.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(60 * sum(rate(mediabot_commands_public_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_commands_public_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Commandes publiques",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: /min",
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#A78BFA"
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Analyses de liens",
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Demandes d’analyse de liens détectées. Le compteur ne mesure pas les aperçus réussis.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(60 * sum(rate(mediabot_urltitle_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_urltitle_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Analyses de liens",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: /min",
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#FBBF24"
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Messages envoyés",
+      "gridPos": {
+        "x": 18,
+        "y": 9,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Messages IRC envoyés par le bot, en salon ou en privé. Les notices sont exclues.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(60 * sum(rate(mediabot_privmsg_out_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_privmsg_out_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Messages envoyés",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: /min",
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#60A5FA"
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "last"
+          ]
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Conversations · lu et envoyé",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Rythme par minute, calculé sur cinq minutes glissantes. Un trou indique que la collecte ne permet pas de calculer le rythme.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(60 * sum(rate(mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Messages lus",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(60 * sum(rate(mediabot_privmsg_out_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_privmsg_out_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Messages envoyés",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: /min",
+          "noValue": "—",
+          "decimals": 2,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 13,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "/min",
+            "lineInterpolation": "linear",
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Messages lus"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2DD4BF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Messages envoyés"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#60A5FA"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Interactions · commandes et liens",
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Rythme par minute, calculé sur cinq minutes glissantes. Un trou indique que la collecte ne permet pas de calculer le rythme.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(60 * sum(rate(mediabot_commands_public_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_commands_public_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Commandes publiques",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(60 * sum(rate(mediabot_urltitle_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[5m])) or on() (0 * (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1) and on() mediabot_build_info{job=~\"${job:regex}\",instance=~\"${instance:regex}\"} unless on() mediabot_urltitle_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "Analyses de liens",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: /min",
+          "noValue": "—",
+          "decimals": 2,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 13,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "/min",
+            "lineInterpolation": "linear",
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Commandes publiques"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#A78BFA"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Analyses de liens"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FBBF24"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "### Ce qui s’anime · 15 dernières minutes"
+      }
+    },
+    {
+      "id": 14,
+      "type": "bargauge",
+      "title": "Salons les plus actifs",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Jusqu’à six salons avec une activité mesurée. Les noms de salons proviennent du bot ; aucun contenu de message.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sort_desc(topk(6, 60 * sum by (channel) (rate(mediabot_channel_lines_in_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[15m])) > 0)) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "{{channel}}",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: /min",
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2DD4BF"
+          },
+          "decimals": 2,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "valueMode": "color",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "bargauge",
+      "title": "Commandes publiques les plus utilisées",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Jusqu’à six commandes publiques avec une activité mesurée. Seul leur nom est affiché.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sort_desc(topk(6, 60 * sum by (command) (rate(mediabot_channel_commands_by_name_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[15m])) > 0)) and on() (max(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}) == 1)",
+          "legendFormat": "{{command}}",
+          "editorMode": "code",
+          "format": "time_series",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: /min",
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#A78BFA"
+          },
+          "decimals": 2,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "valueMode": "color",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "**Comment lire le tableau :** 0,20/min correspond à environ une action toutes les cinq minutes. Un classement vide signifie qu’aucune hausse n’a été mesurée, ou que la collecte est interrompue."
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Source Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "options": [],
+        "refresh": 1,
+        "hide": 0,
+        "multi": false,
+        "includeAll": false
+      },
+      {
+        "name": "job",
+        "label": "Collecte",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": "label_values(mediabot_up, job)",
+        "definition": "label_values(mediabot_up, job)",
+        "current": {},
+        "options": [],
+        "refresh": 1,
+        "hide": 0,
+        "multi": false,
+        "includeAll": false
+      },
+      {
+        "name": "instance",
+        "label": "Instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": "label_values(mediabot_up{job=~\"${job:regex}\"}, instance)",
+        "definition": "label_values(mediabot_up{job=~\"${job:regex}\"}, instance)",
+        "current": {},
+        "options": [],
+        "refresh": 1,
+        "hide": 0,
+        "multi": false,
+        "includeAll": false
+      }
+    ]
+  }
+}
