@@ -736,24 +736,39 @@ sub render_radio_status_json {
         });
     }
 
-    my $payload = eval { $provider->() };
-    if ($@) {
-        my $err = $@ || 'unknown provider error';
-        $self->_log("ERROR", "Radio status provider failed: $err");
-        return encode_json({
-            ok    => 0,
-            error => "radio status provider failed: $err",
-        });
+    # MB1130: success is separate from $@, which can be a false or hostile
+    # exception object. Never invoke its boolean/string overloads.
+    my $payload;
+    my $provided = eval { $payload = $provider->(); 1 };
+    unless ($provided) {
+        return $self->_radio_status_error('radio status provider failed', $@);
     }
 
-    if (!$payload || ref($payload) ne 'HASH') {
+    if (ref($payload) ne 'HASH') {
         return encode_json({
             ok    => 0,
             error => 'radio status provider returned invalid payload',
         });
     }
 
-    return encode_json($payload);
+    # A valid outer HASH can still contain cycles, objects or code references.
+    # Keep serialization failures inside the endpoint, not the event loop.
+    my $json;
+    my $encoded = eval { $json = encode_json($payload); 1 };
+    unless ($encoded) {
+        return $self->_radio_status_error('radio status encoding failed', $@);
+    }
+    return $json;
+}
+
+sub _radio_status_error {
+    my ($self, $message, $error) = @_;
+    my $detail = ref($error) ? 'non-scalar exception'
+        : defined($error) && length($error) ? $error : 'unknown error';
+    $self->_log('ERROR', "$message: $detail");
+    # Diagnostics may contain paths, credentials or raw provider data.
+    # Keep them in the local log rather than the unauthenticated response.
+    return encode_json({ok => 0, error => $message});
 }
 
 1;

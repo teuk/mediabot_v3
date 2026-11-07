@@ -139,4 +139,53 @@ sub get847 {
         'expired connections do not disrupt later requests');
     $m->stop_http_server;
 }
+# MB1130: errors must remain valid HTTP/JSON, including real socket requests.
+{
+    package MB1130FalseException;
+    use overload bool => sub {0}, '""' => sub {'hidden detail'}, fallback => 1;
+    package MB1130HostileException;
+    use overload bool => sub {die 'boolean overload called'},
+        '""' => sub {die 'string overload called'}, fallback => 1;
+    package MB1130Log;
+    sub new {bless {lines => []}, shift}
+    sub log {push @{$_[0]{lines}}, [$_[1], $_[2]]}
+}
+{
+    my $log = MB1130Log->new;
+    my $loop = IO::Async::Loop->really_new;
+    my $m = Mediabot::Metrics->new(enabled => 1, loop => $loop, logger => $log);
+    $m->{port} = 0;
+    die 'Cannot start radio failure fixture' unless $m->start_http_server;
+    my @cases = (
+        ['plain exception', sub {die "private-token-1130\n"}, 'radio status provider failed'],
+        ['false exception', sub {die bless({}, 'MB1130FalseException')}, 'radio status provider failed'],
+        ['hostile exception', sub {die bless({}, 'MB1130HostileException')}, 'radio status provider failed'],
+        ['code reference', sub {{callback => sub {}}}, 'radio status encoding failed'],
+        ['cycle', sub {my $p = {}; $p->{self} = $p; $p}, 'radio status encoding failed'],
+        ['invalid payload', sub {[]}, 'radio status provider returned invalid payload'],
+    );
+    for my $case (@cases) {
+        my ($name, $provider, $expected) = @$case;
+        $m->set_radio_status_provider($provider);
+        my ($bytes, $error);
+        my $ok = eval {$bytes = $m->_route_http_request(get847('/api/radio/status')); 1};
+        ok($ok, "$name: routing contains the failure");
+        next unless $ok;
+        my ($head, $body) = response847($bytes);
+        is_deeply(decode_json($body), {ok => 0, error => $expected},
+            "$name: stable error without internal details");
+        ($head, $body) = response847(scrape847($m, get847('/api/radio/status')));
+        is_deeply(decode_json($body), {ok => 0, error => $expected},
+            "$name: real HTTP request also completes with valid JSON");
+        $m->set_radio_status_provider(sub {{ok => 1, title => 'Été 🎶'}});
+        (undef, $body) = response847(scrape847($m, get847('/api/radio/status')));
+        is_deeply(decode_json($body), {ok => 1, title => 'Été 🎶'},
+            "$name: next request recovers with Unicode intact");
+    }
+    ok(scalar(grep {$_->[0] == 0 && $_->[1] =~ /private-token-1130/} @{$log->{lines}}),
+        'plain diagnostic remains in the local error log');
+    like(scrape847($m, get847('/metrics')), qr/\AHTTP\/1[.]1 200 OK/,
+        'radio errors leave Prometheus endpoint working');
+    $m->stop_http_server;
+}
 done_testing;

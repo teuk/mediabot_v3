@@ -8,6 +8,14 @@
   French, with a sample scrape configuration and troubleshooting.
 
 
+### MB1130 — Contain radio status provider and JSON failures
+
+- Keep `/api/radio/status` responses valid when providers throw exception
+  objects or return data that cannot be encoded as JSON.
+- Keep diagnostic details in the local log; expose stable error messages
+  through the HTTP endpoint. Preserve successful UTF-8 responses.
+
+
 ### MB1129 — Keep update completion pending until the IRC write
 
 - Consume the post-update marker after the IRC socket write completes.
