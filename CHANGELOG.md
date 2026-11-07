@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1131 — Reject malformed metric labels without losing existing series
+
+- Reject invalid label containers, names and reference values before changing
+  counters, gauges or histograms; never collapse them into unlabelled series.
+- Reserve the histogram `le` label for generated bucket boundaries. Preserve
+  Unicode, escaping, empty labels and valid subsequent observations.
+
 ### MB1130 — See one Mediabot instance live in Grafana
 
 - Add an importable dashboard for one bot with IRC and database status,

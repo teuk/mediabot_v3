@@ -296,7 +296,9 @@ sub observe {
     my $entry = $self->{metrics}{$name} or return;
     return unless ($entry->{type} || '') eq 'histogram';
 
+    return if ref($labels) eq 'HASH' && exists $labels->{le};
     my $key = $self->_labels_key($labels);
+    return unless defined $key;
     my $buckets = $entry->{buckets};
     my $h = $entry->{values}{$key} //= {
         counts => [ (0) x (scalar(@$buckets) + 1) ],
@@ -333,6 +335,7 @@ sub add {
     my $entry = $self->{metrics}{$name} or return;
     return if ($entry->{type} || '') eq 'histogram';
     my $key   = $self->_labels_key($labels);
+    return unless defined $key;
     my $sum = ($entry->{values}{$key} // 0) + $value;
     return unless isfinite($sum);
 
@@ -349,6 +352,7 @@ sub set {
     my $entry = $self->{metrics}{$name} or return;
     return if ($entry->{type} || '') eq 'histogram';
     my $key   = $self->_labels_key($labels);
+    return unless defined $key;
 
     $entry->{values}{$key} = 0 + $value;
     return 1;
@@ -360,6 +364,7 @@ sub get {
 
     my $entry = $self->{metrics}{$name} or return undef;
     my $key   = $self->_labels_key($labels);
+    return unless defined $key;
 
     return $entry->{values}{$key};
 }
@@ -649,10 +654,15 @@ sub _declare {
 
 sub _labels_key {
     my ($self, $labels) = @_;
-    return '' unless $labels && ref $labels eq 'HASH' && %$labels;
+    # MB1131: reject the whole invalid label set, never alias it to the
+    # unlabelled series or coerce a reference supplied by a metrics caller.
+    return '' unless defined $labels;
+    return undef unless ref($labels) eq 'HASH';
 
     my @pairs;
     for my $k (sort keys %$labels) {
+        return undef unless $k =~ /\A[a-zA-Z_][a-zA-Z0-9_]*\z/;
+        return undef if ref($labels->{$k});
         my $v = defined $labels->{$k} ? $labels->{$k} : '';
         $v =~ s/\\/\\\\/g;
         $v =~ s/"/\\"/g;
