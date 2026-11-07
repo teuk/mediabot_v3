@@ -171,8 +171,11 @@ sub truncate_utf8 {
 
     return $s if length($s) <= $max;
     my $cut   = substr($s, 0, $max);
-    my $chars = Encode::decode('UTF-8', $cut, Encode::FB_DEFAULT);
-    $chars =~ s/\x{FFFD}+\z//;
+    # MB1134: stop before an incomplete trailing sequence, rather than
+    # deleting U+FFFD characters that may genuinely belong to the input.
+    # Complete malformed sequences retain Encode's replacement policy.
+    my $chars = Encode::decode('UTF-8', $cut,
+        Encode::FB_DEFAULT | Encode::STOP_AT_PARTIAL | Encode::LEAVE_SRC);
     # MB1133: a character suffix would upgrade encoded prefix bytes as
     # Latin-1, corrupting accents and inflating their wire size. Keep this
     # branch entirely byte-oriented; pre-encoded suffixes remain unchanged.

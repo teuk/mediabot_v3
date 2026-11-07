@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1134 — Preserve replacement characters at UTF-8 truncation boundaries
+
+- Stop decoding before incomplete trailing UTF-8 sequences instead of deleting
+  genuine U+FFFD characters from the retained message prefix.
+- Preserve replacement markers for malformed complete bytes, encoded output,
+  caller buffers and the existing suffix-outside-budget contract.
+
 ### MB1133 — Preserve raw UTF-8 when appending a truncation suffix
 
 - Encode character suffixes before appending them to truncated UTF-8 bytes,
