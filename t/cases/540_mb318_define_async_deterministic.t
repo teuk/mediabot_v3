@@ -253,11 +253,7 @@ return sub {
         'result uses Context reply routing for public and private commands'
     );
 
-    # Execute the pure selection helper to prove preferred-language and
-    # deterministic fallback behavior independently of network dependencies.
-    my $compiled = eval "package MB318::Probe;\n$pick\n1;";
-    $assert->ok($compiled, 'definition selector compiles in isolation');
-
+    # Exercise the real selector for preferred-language and fallback behavior.
     my $data = {
         zz => [
             {
@@ -280,7 +276,7 @@ return sub {
     };
 
     my ($preferred_entry, $preferred_text, $preferred_lang)
-        = MB318::Probe::_define_pick_entry($data, 'en');
+        = Mediabot::External::Wiktionary::_define_pick_entry($data, 'en');
 
     $assert->is(
         $preferred_text,
@@ -295,7 +291,7 @@ return sub {
     );
 
     my ($fallback_entry, $fallback_text, $fallback_lang)
-        = MB318::Probe::_define_pick_entry($data, 'fr');
+        = Mediabot::External::Wiktionary::_define_pick_entry($data, 'fr');
 
     $assert->is(
         $fallback_text,
@@ -310,7 +306,7 @@ return sub {
     );
 
     my ($bad_entry, $bad_text, $bad_lang)
-        = MB318::Probe::_define_pick_entry(
+        = Mediabot::External::Wiktionary::_define_pick_entry(
             {
                 en => [
                     undef,

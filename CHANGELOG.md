@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1128 — Keep Wiktionary definitions readable on IRC
+
+- Decode `!define` arguments before joining them and encode the query
+  only when building the Wiktionary URL, preserving accents in the reply.
+- Skip definitions that are empty after removing HTML and decoding entities.
+  Keep the configured language first and the existing fallback order.
+
+
 ### MB1127 — Unify reminder cancellation
 
 - Share one cancellation path between `remind` and `tell`. Single and

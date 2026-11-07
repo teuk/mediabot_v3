@@ -28,7 +28,7 @@ use Exporter 'import';
 use Try::Tiny;
 use Mediabot::Helpers;
 # Keep legacy lookup symbols; Wiktionary owns source and async adaptation.
-use Mediabot::External::Wiktionary qw(_define_pick_entry _define_lookup_sync _define_lookup_async);
+use Mediabot::External::Wiktionary qw(_define_pick_entry _define_lookup_sync _define_lookup_async _define_word_text);
 use Mediabot::External::OpenTriviaDB qw(_trivia_parse_api_content _trivia_fetch_sync);
 # Account-level readers and profile views keep their historical facade names.
 use Mediabot::Users::Levels qw(
@@ -1796,7 +1796,14 @@ sub mbDefine_ctx {
     my $self = $ctx->bot;
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    my $word = join('_', @args);
+    # Decode each argument before joining: command callers can supply both
+    # UTF-8 bytes and character strings, which Perl cannot mix implicitly.
+    my @words = map { scalar _define_word_text($_) } @args;
+    if (grep { !defined($_) || /[\x00-\x1f\x7f-\x9f]/ } @words) {
+        $ctx->reply_private('Invalid word.');
+        return;
+    }
+    my $word = join('_', @words);
     $word =~ s/^\s+|\s+$//g;
 
     unless ($word ne '') {
@@ -1804,11 +1811,7 @@ sub mbDefine_ctx {
         return;
     }
 
-    # mb436-B1: validation byte-safe. Les args viennent d'IRC en OCTETS UTF-8 ;
-    # avec [^\w\s-] les octets d'accent (0xC3, 0xA9...) étaient rejetés, donc
-    # "!define café" répondait "Invalid word.". On autorise les octets >= 0x80
-    # (séquences UTF-8 multi-octets) comme faisant partie du mot.
-    if ($word =~ /[^\w\s\x80-\xFF-]/ || length($word) > 64) {
+    if ($word =~ /[^\w\s-]/ || _utf8_text_bytes($word) > 64) {
         $ctx->reply_private('Invalid word.');
         return;
     }
