@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1133 — Preserve raw UTF-8 when appending a truncation suffix
+
+- Encode character suffixes before appending them to truncated UTF-8 bytes,
+  preventing mojibake and inflated IRC wire lengths.
+- Preserve already encoded suffixes, character input, caller buffers and
+  the legacy contract that the suffix sits outside the content budget.
+
 ### MB1132 — Preserve Unicode in mixed search arguments
 
 - Decode each Wikipedia and DuckDuckGo argument before joining the query,

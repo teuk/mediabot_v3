@@ -173,7 +173,12 @@ sub truncate_utf8 {
     my $cut   = substr($s, 0, $max);
     my $chars = Encode::decode('UTF-8', $cut, Encode::FB_DEFAULT);
     $chars =~ s/\x{FFFD}+\z//;
-    return Encode::encode('UTF-8', $chars) . $ellipsis;
+    # MB1133: a character suffix would upgrade encoded prefix bytes as
+    # Latin-1, corrupting accents and inflating their wire size. Keep this
+    # branch entirely byte-oriented; pre-encoded suffixes remain unchanged.
+    my $suffix = utf8::is_utf8($ellipsis)
+        ? Encode::encode('UTF-8', $ellipsis) : $ellipsis;
+    return Encode::encode('UTF-8', $chars) . $suffix;
 }
 
 1;
