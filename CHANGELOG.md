@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1136 — Reject non-ASCII digits in version identities
+
+- Reject Unicode digits in major, minor and development fields before numeric
+  conversion or version ordering, avoiding warnings and misleading comparisons.
+- Preserve ASCII stable/development formats, leading-zero normalization,
+  timestamp separators and long development identifiers.
+
 ### MB1135 — Evaluate long calculator sign chains without recursion warnings
 
 - Consume consecutive unary plus/minus signs iteratively, avoiding deep

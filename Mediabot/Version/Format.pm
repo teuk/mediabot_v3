@@ -36,7 +36,9 @@ sub _version_parts {
         : _usable_local_version($value);
     return undef unless defined $value;
 
-    if ($value =~ /\A(\d+)\.(\d+)\z/) {
+    # MB1136: Unicode \d matches characters that Perl's numeric conversion
+    # does not accept. Reject them before constructing or ordering versions.
+    if ($value =~ /\A([0-9]+)\.([0-9]+)\z/) {
         return {
             major => 0 + $1,
             minor => 0 + $2,
@@ -46,10 +48,10 @@ sub _version_parts {
         };
     }
 
-    if ($value =~ /\A(\d+)\.(\d+)dev[-_]?(\d[\d_]*)\z/) {
+    if ($value =~ /\A([0-9]+)\.([0-9]+)dev[-_]?([0-9][0-9_]*)\z/) {
         my ($major, $minor, $dev) = ($1, $2, $3);
         $dev =~ s/_//g;
-        $dev =~ s/\A0+(?=\d)//;
+        $dev =~ s/\A0+(?=[0-9])//;
 
         return {
             major => 0 + $major,
