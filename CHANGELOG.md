@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1130 — See one Mediabot instance live in Grafana
+
+- Add an importable dashboard for one bot with IRC and database status,
+  per-minute activity and recent channel and command rankings.
+- Document setup from the metrics endpoint to Grafana in English and
+  French, with a sample scrape configuration and troubleshooting.
+
+
 ### MB1129 — Keep update completion pending until the IRC write
 
 - Consume the post-update marker after the IRC socket write completes.
