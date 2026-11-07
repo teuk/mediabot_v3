@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1135 — Evaluate long calculator sign chains without recursion warnings
+
+- Consume consecutive unary plus/minus signs iteratively, avoiding deep
+  recursion warnings for valid expressions within the 128-character limit.
+- Preserve sign parity, exponent precedence, signed exponents and existing
+  length, numeric, domain and division-by-zero guards.
+
 ### MB1134 — Preserve replacement characters at UTF-8 truncation boundaries
 
 - Stop decoding before incomplete trailing UTF-8 sequences instead of deleting

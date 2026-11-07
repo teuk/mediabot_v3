@@ -414,14 +414,23 @@ sub _parse_mul {
 sub _parse_unary {
     my ($self) = @_;
 
-    return $self->_parse_unary if $self->_accept_op('+');
-
-    if ($self->_accept_op('-')) {
-        my $value = $self->_parse_unary;
-        return Mediabot::SafeCalc::_checked(sub { -$value });
+    # MB1135: a valid 128-character input can contain 127 unary signs.
+    # Consume them iteratively to avoid Perl's deep-recursion warning while
+    # leaving exponentiation (including signed exponents) tighter-binding.
+    my $negative = 0;
+    while (1) {
+        next if $self->_accept_op('+');
+        if ($self->_accept_op('-')) {
+            $negative = !$negative;
+            next;
+        }
+        last;
     }
 
-    return $self->_parse_power;
+    my $value = $self->_parse_power;
+    return $negative
+        ? Mediabot::SafeCalc::_checked(sub { -$value })
+        : $value;
 }
 
 sub _parse_power {
