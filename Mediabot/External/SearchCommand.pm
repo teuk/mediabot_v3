@@ -23,9 +23,19 @@ sub _query {
     my ($args) = @_;
     return unless ref($args) eq 'ARRAY' && @$args && @$args <= 32;
     return if grep {!defined($_) || ref($_)} @$args;
-    my $text = join ' ', @$args;
-    return if length($text) > 640;
-    $text = eval {decode('UTF-8', $text, FB_CROAK | LEAVE_SRC)} unless utf8::is_utf8($text);
+    # MB1132: joining bytes to a character scalar upgrades the bytes as
+    # Latin-1. Decode each argument first, without modifying caller values.
+    my $raw_length = @$args - 1;
+    my @parts;
+    for my $arg (@$args) {
+        $raw_length += length($arg);
+        return if $raw_length > 640;
+        my $part = utf8::is_utf8($arg) ? $arg
+            : eval {decode('UTF-8', $arg, FB_CROAK | LEAVE_SRC)};
+        return unless defined $part;
+        push @parts, $part;
+    }
+    my $text = join ' ', @parts;
     return unless defined($text) && $text !~ /[\x00-\x1f\x7f]/;
     $text =~ s/\s+/ /g;
     $text =~ s/^\s+|\s+$//g;

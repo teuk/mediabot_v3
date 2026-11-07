@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1132 — Preserve Unicode in mixed search arguments
+
+- Decode each Wikipedia and DuckDuckGo argument before joining the query,
+  preserving accents when UTF-8 bytes and decoded text are mixed.
+- Reject malformed UTF-8 even beside decoded arguments; preserve caller
+  values and the existing query size, argument count and control limits.
+
 ### MB1131 — Reject malformed metric labels without losing existing series
 
 - Reject invalid label containers, names and reference values before changing
