@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1161 — Validate Spark dry-run generation identities
+
+- Require ASCII generation IDs in inflight identity checks and log metadata,
+  preventing Unicode suffixes from coercing to a current generation.
+- Omit malformed log IDs without numeric warnings; valid inflight work
+  still completes and releases its channel normally.
+
 ### MB1160 — Validate Spark dry-run log channels
 
 - Apply the public channel contract before formatting AI dry-run logs,

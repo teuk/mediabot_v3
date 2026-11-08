@@ -90,7 +90,7 @@ sub capture_kind {
 sub generation_is_current {
     my ($self, $channel, $generation) = @_;
     croak 'dry-run object is required' unless ref($self);
-    return 0 unless _plain_scalar($generation) && "$generation" =~ /^[1-9]\d{0,14}\z/;
+    return 0 unless _plain_scalar($generation) && "$generation" =~ /^[1-9][0-9]{0,14}\z/;
     my $current = $self->capture_generation($channel);
     return defined($current) && $current == int($generation) ? 1 : 0;
 }
@@ -233,7 +233,7 @@ sub format_ai_dryrun_log {
     );
 
     if (_plain_scalar($summary->{generation})
-        && "$summary->{generation}" =~ /^[1-9]\d{0,14}\z/) {
+        && "$summary->{generation}" =~ /^[1-9][0-9]{0,14}\z/) {
         push @parts, 'generation=' . int($summary->{generation});
     }
 
