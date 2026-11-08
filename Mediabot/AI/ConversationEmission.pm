@@ -42,7 +42,7 @@ sub _plain_scalar {
 
 sub _positive_generation {
     my ($value) = @_;
-    return undef unless _plain_scalar($value) && "$value" =~ /^[1-9]\d{0,14}\z/;
+    return undef unless _plain_scalar($value) && "$value" =~ /^[1-9][0-9]{0,14}\z/;
     my $n = int($value);
     return $n;
 }

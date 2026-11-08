@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1156 — Reject malformed Wit emission generation identities
+
+- Require ASCII digits throughout request and current generation IDs at the
+  final emission gate, preventing Unicode suffixes from coercing to a match.
+- Retain stale-generation rejection, valid 15-digit IDs and authorization
+  ordering without numeric warnings for malformed values.
+
 ### MB1155 — Validate Meta-AI integer settings before conversion
 
 - Require complete ASCII digit strings for integer settings, rejecting
