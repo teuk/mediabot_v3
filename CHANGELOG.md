@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1150 — Honor collector closing deadlines starting at zero
+
+- Treat zero as a valid closing timestamp in Portal and Mosaic snapshots,
+  so events closed at clock origin expire at the configured deadline.
+- Preserve inactive/collecting behavior, missing-timestamp handling and
+  positive or fractional closing timestamps.
+
 ### MB1149 — Reject non-finite state clocks before mutation
 
 - Reject infinite and overflowing injected clock values in Spark state and

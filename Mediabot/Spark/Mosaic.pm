@@ -331,9 +331,9 @@ sub snapshot {
     my $timed_out = 0;
     if ($phase eq 'closing') {
         my $now = $self->_now();
-        my $started = $state->{closing_started_at} // 0;
+        my $started = $state->{closing_started_at};
         $timed_out = 1
-            if $started > 0
+            if defined($started) && $started >= 0
                 && $now >= $started
                 && ($now - $started) >= $self->{closing_timeout_seconds};
     }
