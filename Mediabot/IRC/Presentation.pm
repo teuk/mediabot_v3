@@ -32,10 +32,17 @@ sub _decode_entity {
 
     my $value;
     if ($entity =~ /\A#x([0-9a-f]+)\z/i) {
-        $value = hex($1);
+        my $digits = $1;
+        $digits =~ s/\A0+//;
+        # MB1147: bound significant digits before conversion to avoid overflow.
+        return "&$entity;" if length($digits) > 6;
+        $value = hex(length($digits) ? $digits : '0');
     }
-    elsif ($entity =~ /\A#(\d+)\z/) {
-        $value = int($1);
+    elsif ($entity =~ /\A#([0-9]+)\z/) {
+        my $digits = $1;
+        $digits =~ s/\A0+//;
+        return "&$entity;" if length($digits) > 7;
+        $value = int(length($digits) ? $digits : '0');
     }
 
     return "&$entity;"
@@ -81,7 +88,7 @@ sub _markdown_to_irc {
     $text =~ s{</?(?:code|pre)\b[^>]*>}{}ig;
     $text =~ s{<(https?://[^>\s]+)>}{$1}gi;
     $text =~ s{</?[a-z][^>]*>}{}ig;
-    $text =~ s/&([a-z]+|#\d+|#x[0-9a-f]+);/_decode_entity($1)/ige;
+    $text =~ s/&([a-z]+|#[0-9]+|#x[0-9a-f]+);/_decode_entity($1)/ige;
 
     $text =~ s{!\[([^\]\n]*)\]\((https?://[^\s)]+)(?:\s+"[^"]*")?\)}{
         length($1) ? "$1 <$2>" : $2;

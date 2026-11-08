@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1147 — Decode numeric entities without coercion or overflow
+
+- Require ASCII decimal digits and bound significant numeric digits before
+  converting HTML entities in IRC reply presentation.
+- Preserve malformed entities literally without conversion warnings, while
+  retaining valid Unicode boundaries, leading zeros and inline-code literals.
+
 ### MB1146 — Respect countdown completion during loop attachment
 
 - Skip start when loop attachment has already triggered inline expiration
