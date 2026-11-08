@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1139 — Normalize AI request purposes consistently
+
+- Use the trimmed purpose for passage-catalogue validation so surrounding
+  whitespace cannot bypass required identifiers or reject valid catalogues.
+- Build requests and summaries with that same normalized purpose while
+  preserving caller data, purpose case and the generic default.
+
 ### MB1138 — Preserve Hailo queue identity during filtered selection
 
 - Remove the exact accepted reply when a selection predicate prunes or consumes

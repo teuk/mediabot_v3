@@ -61,12 +61,13 @@ sub validate_request {
     );
     return 'provider is unknown' unless defined $provider;
 
-    if (exists $request->{purpose}) {
-        my $purpose = _clean_short_scalar($request->{purpose}, 64);
-        return 'purpose must be a short identifier'
-            unless defined($purpose) && $purpose =~ /^[a-z][a-z0-9_.-]*\z/i;
-    }
-    my $passage_contract=($request->{purpose}//'')=~/\Ameta_(?:synthesis_passages|passage_repair)\z/;
+    # MB1139: the cleaned identifier must also drive purpose-specific
+    # validation, not just the generic syntax check.
+    my $purpose = exists($request->{purpose})
+        ? _clean_short_scalar($request->{purpose}, 64) : 'generic';
+    return 'purpose must be a short identifier'
+        unless defined($purpose) && $purpose =~ /^[a-z][a-z0-9_.-]*\z/i;
+    my $passage_contract=$purpose=~/\Ameta_(?:synthesis_passages|passage_repair)\z/;
     return 'passage_ids require a passage selection purpose' if exists($request->{passage_ids}) && !$passage_contract;
     if ($passage_contract) {
         my $ids=$request->{passage_ids};my %seen;
@@ -163,7 +164,7 @@ sub build_request {
 
     my %request = (
         provider => $provider,
-        purpose  => exists($args{purpose}) ? "$args{purpose}" : 'generic',
+        purpose  => exists($args{purpose}) ? _clean_short_scalar($args{purpose}, 64) : 'generic',
         messages => [
             map {
                 +{
@@ -204,7 +205,7 @@ sub request_summary {
         provider => normalize_provider(
             exists($request->{provider}) ? $request->{provider} : 'auto'
         ),
-        purpose => exists($request->{purpose}) ? "$request->{purpose}" : 'generic',
+        purpose => exists($request->{purpose}) ? _clean_short_scalar($request->{purpose}, 64) : 'generic',
         model => exists($request->{model}) && defined($request->{model})
             ? "$request->{model}" : undef,
         messages => scalar(@$messages),
