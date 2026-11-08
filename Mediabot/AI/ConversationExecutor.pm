@@ -167,21 +167,25 @@ sub submit_dryrun {
 
     my $request = _request_from_args(%args);
     my $started;
+    # MB1141: completion belongs to this submission. Mark it before calling
+    # consumer code so exceptions and late callbacks cannot deliver twice.
+    my $completed = 0;
+    my $complete = sub {
+        return if $completed;
+        $completed = 1;
+        $on_done->(_consume_client_result($_[0]));
+    };
 
     my $ok = eval {
         $started = $self->{client}->submit(
             $request,
-            on_done => sub {
-                my ($client_result) = @_;
-                my $result = _consume_client_result($client_result);
-                $on_done->($result);
-            },
+            on_done => $complete,
         );
         1;
     };
 
     unless ($ok) {
-        $on_done->(_provider_failure({ error => 'client_exception' }));
+        $complete->({ ok => 0, error => 'client_exception' });
         return 0;
     }
 

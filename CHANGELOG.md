@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1141 — Deliver conversation completions at most once
+
+- Guard each asynchronous conversation submission before invoking consumer
+  code. Duplicate or late callbacks cannot replace the first result.
+- A client exception after completion, including a synchronous consumer
+  exception, no longer invokes the consumer again with a provider failure.
+- Preserve launch return values and independent subsequent submissions.
+
 ### MB1140 — Reject ambiguous Unicode digits in AI integer limits
 
 - Require ASCII decimal digits for token limits and request timeouts before
