@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1143 — Keep inline code literal in IRC replies
+
+- Protect matching single-line backtick spans before Markdown, HTML, entity
+  and escape processing so code markers and tags remain visible text.
+- Preserve surrounding emphasis, escaped backticks, IRC control filtering,
+  byte budgets and truncation; retain ordinary fenced-block handling.
+
 ### MB1142 — Preserve Unicode digits when removing IRC colours
 
 - Match only ASCII digits in IRC colour codes in Wit/Quip inputs, conversation

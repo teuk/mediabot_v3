@@ -59,10 +59,18 @@ sub _markdown_to_irc {
     $text =~ s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;
     $text =~ s/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]//g;
 
+    # Fences carry no useful presentation on IRC; retain their contents.
+    $text =~ s/^\s*```[^`\n]*$//mg;
+
     my @literal;
-    $text =~ s{\\([\\`*_{}\[\]()#+.!>|~\-])}{
+    # MB1143: scan escapes and inline code together so an escaped backtick
+    # cannot open code, while escapes inside code remain literal content.
+    $text =~ s{
+        \\([\\`*_{}\[\]()#+.!>|~\-])
+        | (?<!`)(`{1,3})(?!`)([^\n]+?)(?<!`)\2(?!`)
+    }{
         my $slot = scalar @literal;
-        push @literal, $1;
+        push @literal, defined($1) ? $1 : $3;
         "\x{f0000}$slot\x{f0001}";
     }gex;
 
@@ -74,10 +82,6 @@ sub _markdown_to_irc {
     $text =~ s{<(https?://[^>\s]+)>}{$1}gi;
     $text =~ s{</?[a-z][^>]*>}{}ig;
     $text =~ s/&([a-z]+|#\d+|#x[0-9a-f]+);/_decode_entity($1)/ige;
-
-    # Fences carry no useful presentation on IRC; retain their contents.
-    $text =~ s/^\s*```[^\n]*$//mg;
-    $text =~ s/`{1,3}([^`\n]+)`{1,3}/$1/g;
 
     $text =~ s{!\[([^\]\n]*)\]\((https?://[^\s)]+)(?:\s+"[^"]*")?\)}{
         length($1) ? "$1 <$2>" : $2;
