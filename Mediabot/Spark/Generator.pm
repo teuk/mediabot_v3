@@ -58,7 +58,7 @@ sub _clean_line {
     return undef unless _plain_scalar($value);
     my $text = "$value";
     $text =~ s/[\x02\x0f\x16\x1d\x1f]//g;
-    $text =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;
+    $text =~ s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;
     $text =~ s/[\x00-\x1f\x7f]/ /g;
     $text =~ s/^\s+|\s+$//g;
     $text =~ s/\s{2,}/ /g;
@@ -290,7 +290,7 @@ sub _clean_generated {
     return undef unless _plain_scalar($value);
     my $text = "$value";
     $text =~ s/[\x02\x0f\x16\x1d\x1f]//g;
-    $text =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;
+    $text =~ s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;
     return undef if $text =~ /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
     $text =~ s/^\s+|\s+$//g;
     return undef unless length $text;

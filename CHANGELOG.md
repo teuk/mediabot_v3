@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1162 — Preserve Unicode digits in Spark generation
+
+- Restrict IRC color parameters to ASCII digits when cleaning context,
+  contributions and generated content.
+- Preserve visible Unicode numbers after color controls in single-line
+  responses and every fork field while still stripping valid IRC colors.
+
 ### MB1161 — Validate Spark dry-run generation identities
 
 - Require ASCII generation IDs in inflight identity checks and log metadata,
