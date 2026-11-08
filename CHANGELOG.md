@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1154 — Preserve explicit numeric signs in Hailo edits
+
+- Include attached plus, ASCII minus and Unicode minus signs in numeric
+  anchors so provider edits cannot silently add, remove or reverse them.
+- Retain punctuation repairs that preserve signed numbers, including
+  decimal quantities and Unicode digits.
+
 ### MB1153 — Preserve English contracted negation in Hailo edits
 
 - Recognize fourteen additional English negative contractions in post-editor

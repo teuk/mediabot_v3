@@ -68,7 +68,8 @@ sub _numbers {
     my ($text) = @_;
     # The same quantities in a different order can describe the opposite
     # result ("21 puis 22" versus "22 puis 21").
-    return "$text" =~ /(?<!\p{N})(\p{N}+)(?!\p{N})/gu;
+    # Preserve explicit signs as well: -5 and +5 must not share an anchor.
+    return "$text" =~ /(?<!\p{N})([+\-\x{2212}]?\p{N}+)(?!\p{N})/gu;
 }
 
 sub _preserves_anchor {
