@@ -131,7 +131,7 @@ sub validate_request {
     if (exists $request->{max_output_tokens}) {
         my $v = $request->{max_output_tokens};
         return 'max_output_tokens must be an integer between 1 and 100000'
-            unless _plain_scalar($v) && "$v" =~ /^\d+\z/
+            unless _plain_scalar($v) && "$v" =~ /\A[0-9]+\z/
                 && $v >= 1 && $v <= 100_000;
     }
 
@@ -145,7 +145,7 @@ sub validate_request {
     if (exists $request->{timeout_seconds}) {
         my $v = $request->{timeout_seconds};
         return 'timeout_seconds must be an integer between 1 and 300'
-            unless _plain_scalar($v) && "$v" =~ /^\d+\z/
+            unless _plain_scalar($v) && "$v" =~ /\A[0-9]+\z/
                 && $v >= 1 && $v <= 300;
     }
 

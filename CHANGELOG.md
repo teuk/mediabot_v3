@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1140 — Reject ambiguous Unicode digits in AI integer limits
+
+- Require ASCII decimal digits for token limits and request timeouts before
+  numeric comparison or conversion. Mixed-script values can no longer be
+  silently truncated to their ASCII prefix or emit conversion warnings.
+- Preserve valid ranges, leading zeros and caller data; reject invalid limits
+  consistently in builders, summaries and cache identities.
+
 ### MB1139 — Normalize AI request purposes consistently
 
 - Use the trimmed purpose for passage-catalogue validation so surrounding
