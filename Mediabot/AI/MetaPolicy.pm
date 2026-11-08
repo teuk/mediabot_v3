@@ -142,7 +142,7 @@ sub settings {
     my $get = sub { my $v = eval { $conf->get('meta_ai.'.$_[0]) }; return $_[1] unless defined $v;
         return join(' ', @$v) if ref($v) eq 'ARRAY'; return ref($v) ? $_[1] : "$v" };
     my $int = sub { my ($k,$d,$lo,$hi)=@_; my $v=$get->($k,$d);
-        return $d unless $v =~ /^\d+$/ && $v >= $lo && $v <= $hi; return int $v };
+        return $d unless $v =~ /\A[0-9]+\z/ && $v >= $lo && $v <= $hi; return int $v };
     my %channels = map { fold($_) => 1 } grep { /^#[^\s,:\x00-\x1f]{1,79}$/ }
         split /[\s,]+/, $get->('CHANNELS','');
     my (%seen, @providers);

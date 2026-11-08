@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1155 — Validate Meta-AI integer settings before conversion
+
+- Require complete ASCII digit strings for integer settings, rejecting
+  Unicode digit lookalikes and trailing newlines before numeric conversion.
+- Preserve per-setting defaults, inclusive bounds and ASCII leading zeros,
+  avoiding warnings and accidental zero values for malformed configuration.
+
 ### MB1154 — Preserve explicit numeric signs in Hailo edits
 
 - Include attached plus, ASCII minus and Unicode minus signs in numeric
