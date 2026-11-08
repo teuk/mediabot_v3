@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1148 — Round policy retry delays up to the deadline
+
+- Round fractional remaining waits up in Wit, Spark cooldown/silence and
+  SparkAction cooldown decisions, preventing advertised retries before the
+  current gate opens.
+- Preserve exact integer waits, minimum-one-second retries and eligibility
+  at the deadline; configured intervals and deadlines are unchanged.
+
 ### MB1147 — Decode numeric entities without coercion or overflow
 
 - Require ASCII decimal digits and bound significant numeric digits before

@@ -5,6 +5,7 @@ use warnings;
 
 use Exporter 'import';
 use Scalar::Util qw(looks_like_number);
+use POSIX qw(ceil);
 
 use Mediabot::AI qw(normalize_provider);
 
@@ -176,7 +177,7 @@ sub evaluate_candidate {
         if (defined($now) && defined($last) && $now >= $last) {
             my $elapsed = $now - $last;
             if ($elapsed < $min_interval) {
-                my $retry = int($min_interval - $elapsed);
+                my $retry = ceil($min_interval - $elapsed);
                 $retry = 1 if $retry < 1;
 
                 return _decision(

@@ -5,6 +5,7 @@ use warnings;
 
 use Exporter 'import';
 use Scalar::Util qw(looks_like_number);
+use POSIX qw(ceil);
 
 our $VERSION = '1.0';
 our @EXPORT_OK = qw(
@@ -112,7 +113,7 @@ sub evaluate_spark_start {
 
     my $cooldown_until = _time_value($args{cooldown_until});
     if (defined($cooldown_until) && $cooldown_until > $now) {
-        my $retry = int($cooldown_until - $now);
+        my $retry = ceil($cooldown_until - $now);
         $retry = 1 if $retry < 1;
         return _decision(
             action              => 'skip',
@@ -134,7 +135,7 @@ sub evaluate_spark_start {
 
     my $quiet_for = $now - $last_human_at;
     if ($quiet_for < $min_silence) {
-        my $retry = int($min_silence - $quiet_for);
+        my $retry = ceil($min_silence - $quiet_for);
         $retry = 1 if $retry < 1;
         return _decision(
             action              => 'skip',
