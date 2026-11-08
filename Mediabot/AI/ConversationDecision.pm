@@ -58,7 +58,7 @@ sub _strip_irc_formatting {
     # Standard IRC formatting controls: bold/reset/reverse/italic/underline.
     $text =~ s/[\x02\x0f\x16\x1d\x1f]//g;
     # mIRC colour sequences, including optional background colour.
-    $text =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;
+    $text =~ s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;
     # Any remaining C0/DEL control byte is not valid reply content.
     $text =~ s/[\x00-\x1f\x7f]//g;
 

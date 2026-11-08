@@ -15,7 +15,7 @@ sub _text {
     croak 'invalid Quip text' unless defined($text) && !ref($text)
         && length($text) && length($text) <= $max
         && $text !~ /[\x00\r\n]/;
-    $text =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;
+    $text =~ s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;
     $text =~ s/[\x00-\x1f\x7f]//g;
     croak 'empty Quip text' unless $text =~ /\S/;
     return "$text";

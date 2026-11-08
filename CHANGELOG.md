@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1142 — Preserve Unicode digits when removing IRC colours
+
+- Match only ASCII digits in IRC colour codes in Wit/Quip inputs, conversation
+  decisions and AI reply presentation. Arabic, Persian and fullwidth digits
+  next to colour controls remain message content instead of disappearing.
+- Retain foreground/background colour stripping, input immutability and
+  numeric-only conversation messages.
+
 ### MB1141 — Deliver conversation completions at most once
 
 - Guard each asynchronous conversation submission before invoking consumer

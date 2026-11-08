@@ -65,7 +65,7 @@ sub _clean_message {
     # Strip IRC presentation controls before sending untrusted channel text to
     # a provider. Preserve printable Unicode and ordinary punctuation.
     $text =~ s/[\x02\x0f\x16\x1d\x1f]//g;
-    $text =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;
+    $text =~ s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;
     $text =~ s/[\x01-\x08\x0b\x0c\x0e\x11-\x15\x17-\x1c\x1e\x7f]//g;
     $text =~ s/\t+/ /g;
     $text =~ s/^\s+|\s+$//g;
