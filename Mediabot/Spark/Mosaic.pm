@@ -182,7 +182,7 @@ sub _word_from_message {
     return (undef, 'not_contribution') unless _plain_scalar($value);
 
     my $line = "$value";
-    $line =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;
+    $line =~ s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;
     $line =~ s/[\x02\x0f\x16\x1d\x1f]//g;
     return (undef, 'invalid_word') if $line =~ /[\x00-\x1f\x7f]/;
     $line =~ s/^\s+|\s+$//g;

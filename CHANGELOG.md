@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1151 — Preserve Unicode digits in Spark input collectors
+
+- Restrict IRC colour parameters to ASCII digits in Observer, Portal and
+  Mosaic, preserving visible Unicode digits in context and contributions.
+- Keep non-ASCII background suffixes literal, so Mosaic validates the actual
+  visible word instead of accepting text after silently removing characters.
+
 ### MB1150 — Honor collector closing deadlines starting at zero
 
 - Treat zero as a valid closing timestamp in Portal and Mosaic snapshots,
