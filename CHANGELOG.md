@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1145 — Keep RandomQuote countdowns consistent at the deadline
+
+- Sample the clock once per scheduled status calculation, using the same
+  instant for the deadline comparison and remaining-wait subtraction.
+- Prevent negative waits when a deadline passes between clock reads; retain
+  zero for overdue schedules and unchanged defaults for unscheduled channels.
+
 ### MB1144 — Reject malformed RandomQuote revision tickets
 
 - Validate callback revisions against the persisted integer contract before

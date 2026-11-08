@@ -105,9 +105,11 @@ sub _status {
     my ($self, $row, $default) = @_;
     die 'invalid RandomQuote default interval' unless _number($default, 604800) && $default >= 900;
     my $interval = $row && $row->{interval} ? $row->{interval} : $default;
+    # MB1145: use one clock sample for both the deadline check and subtraction.
+    my $now = $row ? $self->{now}->() : undef;
     return {interval => $interval, custom => $row && $row->{interval} ? 1 : 0,
         next_at => $row ? $row->{next_at} : undef,
-        wait => $row ? ($row->{next_at} > $self->{now}->() ? $row->{next_at} - $self->{now}->() : 0) : $interval,
+        wait => $row ? ($row->{next_at} > $now ? $row->{next_at} - $now : 0) : $interval,
         last_id => $row ? $row->{last_id} : 0,
         revision => $row ? $row->{revision} : 0};
 }
