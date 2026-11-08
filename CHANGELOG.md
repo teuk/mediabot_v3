@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1146 — Respect countdown completion during loop attachment
+
+- Skip start when loop attachment has already triggered inline expiration
+  and cleanup, avoiding an undefined-timer exception after successful work.
+- Preserve callback arguments, original exceptions, one-shot cleanup and
+  independently scheduled successor timers.
+
 ### MB1145 — Keep RandomQuote countdowns consistent at the deadline
 
 - Sample the clock once per scheduled status calculation, using the same

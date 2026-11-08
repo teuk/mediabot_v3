@@ -48,7 +48,9 @@ sub countdown {
         $setup_owner = $timer;
         weaken($timer);
         $loop->add($timer);
-        $timer->start;
+        # MB1146: add() may expire inline and release the timer already.
+        # Do not restart completed work or dereference its cleared owner.
+        $timer->start unless $finished;
         1;
     };
     unless ($started) {
