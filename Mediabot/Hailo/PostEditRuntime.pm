@@ -286,7 +286,7 @@ sub submit {
         && length(encode_utf8($polished)) <= 400;
     return { accepted => 0, reason => 'invalid_generation' }
         unless _plain($args{request_generation})
-            && "$args{request_generation}" =~ /^[1-9]\d{0,14}\z/;
+            && "$args{request_generation}" =~ /^[1-9][0-9]{0,14}\z/;
 
     my $job = {
         channel           => "$args{channel}",

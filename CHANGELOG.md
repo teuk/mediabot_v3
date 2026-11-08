@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1158 — Reject malformed Hailo generations before queueing
+
+- Require ASCII request generation IDs before creating a post-edit job,
+  preventing Unicode suffixes from coercing to a valid live generation.
+- Reject invalid submissions without editor, authorization or send callbacks;
+  a subsequent valid request continues normally.
+
 ### MB1157 — Reject malformed Spark event generation identities
 
 - Require ASCII generation IDs in State, Portal and Mosaic, preventing
