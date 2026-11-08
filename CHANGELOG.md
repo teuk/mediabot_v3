@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1153 — Preserve English contracted negation in Hailo edits
+
+- Recognize fourteen additional English negative contractions in post-editor
+  meaning checks, preventing their silent addition or removal by a provider.
+- Cover straight and curly apostrophes while retaining punctuation repairs
+  that preserve the original contracted negation.
+
 ### MB1152 — Recognize only ASCII Hailo nickname bucket markers
 
 - Restrict nickname bucket keys and output markers to their generated ASCII

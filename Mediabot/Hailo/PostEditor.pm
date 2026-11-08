@@ -57,7 +57,7 @@ sub _negative_markers {
     $copy =~ tr/’/'/;
     my @words = $copy =~ /([\p{L}]+(?:'[\p{L}]+)?)/gu;
     my @markers = grep {
-        /\A(?:pas|jamais|aucun|aucune|non|ni|sans|not|never|no|nothing|without|cannot|can't|don't|didn't|won't|nunca|nadie|sin)\z/u
+        /\A(?:pas|jamais|aucun|aucune|non|ni|sans|not|never|no|nothing|without|cannot|can't|don't|didn't|won't|isn't|aren't|wasn't|weren't|doesn't|haven't|hasn't|hadn't|wouldn't|couldn't|shouldn't|mustn't|needn't|shan't|nunca|nadie|sin)\z/u
     } @words;
     # Grammatical gender agreement can change aucun/aucune without changing
     # the negative quantifier. Keep other markers distinct: pas != jamais.
