@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1163 — Consolidate regression tests and avoid duplicate validation
+
+- Consolidate eleven SafeCalc, UTF-8, Spark and Hailo test files into five,
+  retaining unique regression scenarios and removing six historical files.
+- Remove eight duplicated SafeCalc assertions, 195 redundant UTF-8 decode
+  checks and 120 equivalent collector timing cross-product assertions.
+- Keep all UTF-8 byte cut points, timestamp classes, timeout values and
+  before/at/after deadline checks. Retained tests detect seven injected or
+  historical regressions.
+- Pre-commit packages now run targeted tests followed by the complete suite
+  once; the fast development lane remains available independently.
+
 ### MB1162 — Preserve Unicode digits in Spark generation
 
 - Restrict IRC color parameters to ASCII digits when cleaning context,

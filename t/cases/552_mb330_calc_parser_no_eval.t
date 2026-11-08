@@ -80,6 +80,7 @@ return sub {
         'unlink(passwd)',
         '9x999999',
         'system(ls)',
+        'chr(65)', 'exec(sh)', 'rmdir(foo)', 'chdir(bar)', 'eval(2)',
         '`id`',
         '2;system(ls)',
         'sqrt(1,2)',
@@ -100,6 +101,7 @@ return sub {
     my $safe = _slurp_552(File::Spec->catfile('.', 'Mediabot', 'SafeCalc.pm'));
     my $db   = _slurp_552(File::Spec->catfile('.', 'Mediabot', 'DBCommands.pm'));
 
+    $assert->like($db, qr/use Mediabot::SafeCalc/, 'DBCommands imports SafeCalc');
     $assert->like($safe, qr/sub _parse_power/, 'SafeCalc contains a real precedence parser');
     $assert->like($safe, qr/MAX_EXPONENT_ABS/, 'SafeCalc caps exponents');
     $assert->like($safe, qr/MAX_ABS_RESULT/, 'SafeCalc caps result magnitude');
