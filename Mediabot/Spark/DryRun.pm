@@ -212,7 +212,7 @@ sub submit_candidate {
 
 sub format_ai_dryrun_log {
     my ($channel, $summary) = @_;
-    return undef unless _plain_scalar($channel) && "$channel" =~ /^#/;
+    return undef unless _plain_scalar($channel) && "$channel" =~ /^#[^\s,:\x00-\x1f\x7f]{1,79}\z/;
     return undef unless ref($summary) eq 'HASH';
 
     my $action = _safe_token($summary->{action}, 32);

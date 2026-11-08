@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1160 — Validate Spark dry-run log channels
+
+- Apply the public channel contract before formatting AI dry-run logs,
+  rejecting control characters, separators and invalid channel lengths.
+- Prevent malformed channel values from forging extra log lines while
+  preserving the exact log format for valid channels.
+
 ### MB1159 — Reject malformed generations at Spark delivery
 
 - Require ASCII request and current generation IDs at the Sender boundary,
