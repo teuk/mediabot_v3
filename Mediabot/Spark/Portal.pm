@@ -52,7 +52,7 @@ sub _nick_key {
 sub _generation {
     my ($value) = @_;
     return undef unless _plain_scalar($value)
-        && "$value" =~ /^[1-9]\d{0,14}\z/;
+        && "$value" =~ /^[1-9][0-9]{0,14}\z/;
     return int($value);
 }
 

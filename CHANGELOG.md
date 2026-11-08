@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1157 — Reject malformed Spark event generation identities
+
+- Require ASCII generation IDs in State, Portal and Mosaic, preventing
+  Unicode suffixes from coercing to a current event identity.
+- Reject malformed collector begin, collect and closing operations before
+  altering active contributions or phase; valid generations remain usable.
+
 ### MB1156 — Reject malformed Wit emission generation identities
 
 - Require ASCII digits throughout request and current generation IDs at the
