@@ -159,6 +159,8 @@ sub claim {
 }
 sub consume {
     my ($self,$channel,$revision)=@_;my $key=_channel($channel);
+    # MB1144: ticket identities must not use Perl's numeric-prefix coercion.
+    return 0 unless _number($revision, 9999999999);
     return $self->_locked(1,sub {
         my ($state)=@_;my $row=$state->{channels}{lc($key)};
         return (0,0) unless $row && $row->{pending} && $row->{revision} == $revision;
@@ -167,6 +169,7 @@ sub consume {
 }
 sub note_sent {
     my ($self,$channel,$revision,$id)=@_;my $key=_channel($channel);
+    return 0 unless _number($revision, 9999999999);
     die 'invalid RandomQuote id' unless defined($id) && !ref($id) && "$id" =~ /\A[1-9][0-9]{0,14}\z/;
     return $self->_locked(1,sub {
         my ($state)=@_;my $row=$state->{channels}{lc($key)};

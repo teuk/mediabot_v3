@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1144 — Reject malformed RandomQuote revision tickets
+
+- Validate callback revisions against the persisted integer contract before
+  consuming attempts or recording sent quotes. Numeric prefixes, floats and
+  other malformed values can no longer match a live revision by coercion.
+- Reject invalid revisions without conversion warnings, file writes or lock
+  creation; preserve valid ticket ownership and replay protection.
+
 ### MB1143 — Keep inline code literal in IRC replies
 
 - Protect matching single-line backtick spans before Markdown, HTML, entity
