@@ -6,6 +6,7 @@ use warnings;
 use Carp qw(croak);
 use Exporter 'import';
 use Scalar::Util qw(looks_like_number);
+use POSIX qw(isfinite);
 use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
 
 our $VERSION = '1.0';
@@ -89,7 +90,7 @@ sub _now {
     my ($self) = @_;
     my $now = $self->{clock}->();
     croak 'clock must return a non-negative numeric value'
-        unless _plain_scalar($now) && looks_like_number($now) && $now >= 0;
+        unless _plain_scalar($now) && looks_like_number($now) && isfinite(0 + $now) && $now >= 0;
     return 0 + $now;
 }
 

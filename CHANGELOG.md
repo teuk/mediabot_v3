@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1149 — Reject non-finite state clocks before mutation
+
+- Reject infinite and overflowing injected clock values in Spark state and
+  the conversation flood guard before they can poison channel timestamps.
+- Preserve channel state on rejection and allow recovery with a valid clock;
+  finite non-negative timestamps retain their existing behavior.
+
 ### MB1148 — Round policy retry delays up to the deadline
 
 - Round fractional remaining waits up in Wit, Spark cooldown/silence and
