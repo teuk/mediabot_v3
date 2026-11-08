@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1159 — Reject malformed generations at Spark delivery
+
+- Require ASCII request and current generation IDs at the Sender boundary,
+  preventing Unicode suffixes from coercing to a matching event identity.
+- Block malformed identities before transport and cooldown updates, leaving
+  the next valid delivery available without numeric conversion warnings.
+
 ### MB1158 — Reject malformed Hailo generations before queueing
 
 - Require ASCII request generation IDs before creating a post-edit job,
