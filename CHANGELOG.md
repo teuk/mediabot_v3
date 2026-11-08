@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1152 — Recognize only ASCII Hailo nickname bucket markers
+
+- Restrict nickname bucket keys and output markers to their generated ASCII
+  format, preserving Unicode lookalikes as literal text.
+- Avoid numeric conversion warnings and accidental nickname substitution;
+  all 32 valid buckets and speaker fallback retain their existing behavior.
+
 ### MB1151 — Preserve Unicode digits in Spark input collectors
 
 - Restrict IRC colour parameters to ASCII digits in Observer, Portal and

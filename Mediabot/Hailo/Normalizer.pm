@@ -248,7 +248,7 @@ sub rehydrate_hailo_output {
     }
     if (ref($args{bucket_nicks}) eq 'HASH') {
         for my $token (keys %{ $args{bucket_nicks} }) {
-            next unless $token =~ /^\Q$NICK_PREFIX\E\d{2}\Q$NICK_SUFFIX\E\z/;
+            next unless $token =~ /^\Q$NICK_PREFIX\E[0-9]{2}\Q$NICK_SUFFIX\E\z/;
             for my $nick (@{ ref($args{bucket_nicks}{$token}) eq 'ARRAY'
                     ? $args{bucket_nicks}{$token} : [] }) {
                 push @{ $buckets{$token} }, $nick if _plain($nick) && length($nick);
@@ -256,7 +256,7 @@ sub rehydrate_hailo_output {
         }
     }
 
-    $line =~ s{\b\Q$NICK_PREFIX\E(\d{2})\Q$NICK_SUFFIX\E\b}{
+    $line =~ s{\b\Q$NICK_PREFIX\E([0-9]{2})\Q$NICK_SUFFIX\E\b}{
         my $token = sprintf('%s%02d%s', $NICK_PREFIX, $1, $NICK_SUFFIX);
         my @pool = _nick_list($buckets{$token});
         @pool ? $pool[0] : (length($speaker) ? $speaker : '');
