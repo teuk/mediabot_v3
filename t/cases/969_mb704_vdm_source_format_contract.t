@@ -32,6 +32,40 @@ return sub {
     $assert->ok(!defined(vdm_item_id({ url => 'https://example.invalid/no-id' })),
         'mb704-969: missing item id fails closed');
 
+
+    # MB1185: recognize the same numeric article route as vdm_article_url.
+    for my $url (
+        'https://www.viedemerde.fr/article/513869',
+        'http://viedemerde.fr/article/513869',
+        'https://www.viedemerde.fr/article/513869?source=rss',
+        'https://www.viedemerde.fr/article/513869#999',
+        'https://www.viedemerde.fr/article/513869?article=999',
+        'HTTPS://WWW.VIEDEMERDE.FR/article/513869'
+    ) {
+        $assert->is(vdm_item_id({url=>$url}), '513869',
+            'mb1185: canonical article path supplies the story ID');
+    }
+    $assert->is(vdm_item_id({guid=>'https://www.viedemerde.fr/article/999999999999'}),
+        '999999999999', 'mb1185: canonical GUID supports the full twelve-digit route');
+    for my $url (
+        'https://example.invalid/article/513869',
+        'https://www.viedemerde.fr.evil.invalid/article/513869',
+        'https://www.viedemerde.fr/article/0',
+        'https://www.viedemerde.fr/article/0513869',
+        'https://www.viedemerde.fr/article/1000000000000',
+        'https://www.viedemerde.fr/article/513869/more',
+        "https://www.viedemerde.fr/article/١٢٣",
+        "https://www.viedemerde.fr/article/513869\n"
+    ) {
+        $assert->ok(!defined(vdm_item_id({url=>$url})),
+            'mb1185: unsupported canonical route is not accepted');
+    }
+    $assert->is(vdm_item_id({id=>'42',url=>'https://www.viedemerde.fr/article/513869'}),
+        '42', 'mb1185: explicit ID retains precedence');
+    $assert->is(vdm_item_id({guid=>'https://www.viedemerde.fr/article/42',
+        url=>'https://www.viedemerde.fr/article/513869'}),
+        '42', 'mb1185: GUID retains precedence over URL');
+
     my $story = "Aujourd'hui, le sort a choisi le mauvais chaudron. VDM";
     my $line = format_vdm_line(id => 513869, story => $story);
 

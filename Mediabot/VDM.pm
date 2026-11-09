@@ -80,6 +80,9 @@ sub vdm_item_id {
         my $value = $item->{$field};
         next unless defined($value) && !ref($value);
 
+        # MB1185: the canonical numeric route is also emitted by
+        # VDM::Source::vdm_article_url. Prefer its path over query/fragment IDs.
+        return $1 if $value =~ m{\Ahttps?://(?:www\.)?viedemerde\.fr/article/([1-9][0-9]{0,11})(?:[?#][^\x00-\x20\x7f]*)?\z}i;
         return $1 if $value =~ /_([0-9]+)\.html(?:[?#].*)?\z/i;
         return $1 if $value =~ m{/([0-9]+)\.html(?:[?#].*)?\z}i;
         return $1 if $value =~ /(?:\A|[?&])(?:id|article)=([0-9]+)(?:[&#]|\z)/i;

@@ -59,6 +59,17 @@ XML
     $assert->is($a->{items}[0]{id}, '424242',
         'mb704-970: Atom item id is normalized through the same VDM id contract');
 
+
+    for my $case ([$rss, 'bien-tente_513869.html', '513869'],
+                  [$atom, 'une-journee_424242.html', '424242']) {
+        my ($document, $old_path, $id) = @$case;
+        $document =~ s/\Q$old_path\E/$id/g;
+        my $parsed = parse_vdm_feed_document($document);
+        $assert->ok($parsed->{ok}, 'mb1185: canonical numeric article route survives feed parsing');
+        $assert->is($parsed->{items}[0]{id}, $id,
+            'mb1185: RSS and Atom preserve canonical article identity');
+    }
+
     $assert->is(parse_vdm_feed_document('<html/>')->{error}, 'unsupported_feed',
         'mb704-970: non-feed input fails closed');
     $assert->is(parse_vdm_feed_document('<!DOCTYPE rss><rss/>')->{error}, 'forbidden_doctype',
