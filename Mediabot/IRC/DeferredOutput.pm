@@ -60,6 +60,27 @@ sub _flood_queue_current {
     return refaddr($current) == refaddr($expected);
 }
 
+# Read existing silence deadlines without charging budgets, refreshing SQL,
+# or creating AntiFlood state. Keep ordinary retries at two seconds: skipping
+# full windows here would change the existing single-line silence policy.
+sub _flood_retry_delay {
+    my ($self, $to, $now) = @_;
+    $now = time() unless defined $now;
+    my $delay = 2;
+    my $channels = $self->{_af};
+    my $channel = $channels ? $channels->{$to} : undef;
+    my $global = $self->{_global_af};
+    for my $state ($global, $channel) {
+        next unless $state;
+        my $until = $state->{silenced_until} // 0;
+        my $remaining = $until - $now;
+        $delay = $remaining if $remaining > $delay;
+    }
+    # Re-enter the normal sender at least every ten seconds so chanset/config
+    # changes and clock adjustments cannot strand output behind an old timer.
+    return $delay > 10 ? 10 : $delay;
+}
+
 sub _arm_flood_drain {
     my ($self, $to) = @_;
     my $q = $self->{_flood_outq}{$to} or return;
@@ -77,7 +98,7 @@ sub _arm_flood_drain {
     my $started = eval {
         Mediabot::IRC::Timer::countdown(
             loop => $loop,
-            delay => 2,
+            delay => _flood_retry_delay($self, $to),
             on_expire => sub {
                 return unless _flood_queue_current($self, $to, $expected);
                 Mediabot::Helpers::_drain_flood_queue($self, $to);

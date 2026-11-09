@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1172 — Sleep deferred output through known AntiFlood silences
+
+- Derive queue retry delay from the later active channel/global silence,
+  keeping a two-second pacing floor and ten-second policy checkpoints.
+- Read deadlines without mutating budgets, querying SQL or refreshing caches;
+  continue to re-enter the normal sender for admission and current policy.
+- Preserve threshold-triggered silences, FIFO, queue retirement and timer
+  error recovery. Full windows without a silence retain ordinary retries.
+- Extend the existing line-cost suite with deterministic deadline and actual
+  timer-arming checks; no new test file or service/schema changes.
+
+
 ### MB1171 — Account for physical IRC lines in AntiFlood admission
 
 - Charge channel and global budgets for the actual PRIVMSG/ACTION chunk count.

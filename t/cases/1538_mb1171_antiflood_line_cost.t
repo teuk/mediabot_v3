@@ -96,4 +96,59 @@ for my $kind ('privmsg','action') {
  is_deeply([map {length($_->[1])} @{$bot->{_flood_outq}{'#test'}{items}}],[400,400,100,4],
      'legacy unsplit queue entry expands at the head without reversing lines');
 }
+
+# MB1172: computed retries are read-only and preserve admission policy.
+{
+ my $now=1800000000;
+ my $delay=\&Mediabot::IRC::DeferredOutput::_flood_retry_delay;
+ my $bot={};
+ is($delay->($bot,'#test',$now),2,'unknown policy retains two-second retry');
+ is_deeply($bot,{},'reading deadlines does not autovivify state');
+ $bot={_global_af=>{silenced_until=>$now+6,hits=>[$now]},
+       _af=>{'#test'=>{silenced_until=>$now+8,nbmsg=>4,first=>$now}}};
+ is($delay->($bot,'#test',$now),8,'wait for the later of channel and global silence');
+ is($delay->($bot,'#other',$now),6,'another channel only waits for global silence');
+ is($delay->($bot,'#test',$now+7),2,'retain minimum pacing near deadline');
+ is($delay->($bot,'#test',$now+8),2,'exact expiry resumes normal retries');
+ is($delay->($bot,'#test',$now+20),2,'expired deadlines never yield negative delay');
+ is_deeply($bot,{_global_af=>{silenced_until=>$now+6,hits=>[$now]},
+       _af=>{'#test'=>{silenced_until=>$now+8,nbmsg=>4,first=>$now}}},
+       'planning does not charge, prune, reset or extend either budget');
+ $bot->{_af}{'#test'}{silenced_until}=$now+300;
+ is($delay->($bot,'#test',$now),10,'long channel silence uses ten-second checkpoints');
+ $bot->{_global_af}{silenced_until}=$now+120;
+ is($delay->($bot,'#other',$now),10,'long global silence uses ten-second checkpoints');
+ is($delay->($bot,'#test',$now-3600),10,'backward wall-clock jump cannot create an unbounded timer');
+ $bot->{_global_af}{silenced_until}=0;
+ $bot->{_af}{'#test'}{silenced_until}=0;
+ is($delay->($bot,'#test',$now),2,'removing silences restores ordinary pacing');
+ $bot->{_af}{'#test'}{nbmsg}=999;
+ is($delay->($bot,'#test',$now),2,'a full window still enters the existing admission and silence policy');
+}
+{
+ no warnings 'redefine';
+ my @timers; my @drains;
+ local *Mediabot::IRC::Timer::countdown=sub {push @timers,{@_};1};
+ local *Mediabot::Helpers::_drain_flood_queue=sub {push @drains,$_[1];1};
+ my $q={items=>[['privmsg','queued']],armed=>0};
+ my $bot={loop=>bless({},'MB1172::Loop'),_flood_outq=>{'#test'=>$q},
+          _af=>{'#test'=>{silenced_until=>time()+300}}};
+ Mediabot::IRC::DeferredOutput::_arm_flood_drain($bot,'#test');
+ is($timers[0]{delay},10,'real arming uses computed checkpoint');
+ Mediabot::IRC::DeferredOutput::_arm_flood_drain($bot,'#test');
+ is(scalar @timers,1,'already armed queue never gets a duplicate timer');
+ $bot->{_af}{'#test'}{silenced_until}=0;
+ $timers[0]{on_expire}->();
+ is_deeply(\@drains,['#test'],'checkpoint re-enters normal drain after policy changes');
+ $q->{armed}=0;
+ Mediabot::IRC::DeferredOutput::_arm_flood_drain($bot,'#test');
+ is($timers[1]{delay},2,'rearming reads the changed state');
+ $bot->{_flood_outq}{'#test'}={items=>[],armed=>0};
+ $timers[1]{on_expire}->();
+ is(scalar @drains,1,'retired queue callback cannot drain a replacement queue');
+ local *Mediabot::IRC::Timer::countdown=sub {die "MB1172 setup failure\n"};
+ eval {Mediabot::IRC::DeferredOutput::_arm_flood_drain($bot,'#test')};
+ like($@,qr/MB1172 setup failure/,'timer setup errors still propagate');
+ is($bot->{_flood_outq}{'#test'}{armed},0,'failed setup leaves queue rearmable');
+}
 done_testing;
