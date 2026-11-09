@@ -102,6 +102,44 @@ for my $module ('Mediabot::URLShortener','Mediabot::RSS::TinyURL') {
     my $count=$http->{calls};
     is_deeply([$shorten->('https://article.example/fourth',%opts),$http->{calls}],
         ['https://article.example/fourth',$count],"$module: the existing circuit still suppresses HTTP retries");
+    {
+        my $fixture = tempdir(CLEANUP=>1);
+        my $file = "$fixture/bounded.json";
+        my $raw = '{"version":1,"cache":{},"circuit":{}}';
+        no strict 'refs';
+        local ${"${module}::MAX_STATE_BYTES"} = length($raw);
+        for my $suffix ('', ' ') {
+            open my $fh,'>:raw',$file or die "write fixture: $!";
+            print {$fh} $raw.$suffix;close $fh;
+            my ($state,$error)=$module->can('_read_state')->($file);
+            is($error,length($suffix)?'state_too_large':undef,
+                "$module: exact state byte limit and one-byte excess are distinguished");
+            is(defined($state)?1:0,length($suffix)?0:1,
+                "$module: only a size-compliant state is returned");
+        }
+    }
+    # Real filesystem objects: the fallback must not wait, contact HTTP,
+    # truncate the object, or change its permissions.
+    for my $slot ('state', 'lock') {
+        for my $kind ('fifo', 'directory', 'symlink') {
+            my $fixture = tempdir(CLEANUP=>1);
+            my $state = "$fixture/state.json";
+            my $object = $slot eq 'state' ? $state : "$state.lock";
+            if ($kind eq 'fifo') { POSIX::mkfifo($object,0640)==0 or die "mkfifo: $!" }
+            elsif ($kind eq 'directory') { mkdir($object,0750) or die "mkdir: $!" }
+            else { symlink('missing-target',$object) or die "symlink: $!" }
+            my @before = lstat($object);
+            my $calls = $http->{calls};
+            @events=();
+            is_deeply(bounded_1425(sub {$shorten->($next,%opts,state_file=>$state)}),
+                [1,$next,''],"$module: $slot $kind returns original URL without waiting");
+            is_deeply([$http->{calls},scalar(@events),$events[0]{kind}],
+                [$calls,1,'state_error'],"$module: $slot $kind reports state failure without HTTP");
+            my @after = lstat($object);
+            is_deeply([@after[0,1,2]],[@before[0,1,2]],
+                "$module: $slot $kind keeps its inode, type and permissions");
+        }
+    }
     my $formatted=$module->can('format_event')->({kind=>'state_busy',category=>'state_lock_busy',status=>0});
     like($formatted,qr/shared.*busy.*original URL/i,"$module: busy diagnostics explain the fallback without paths or credentials");
 }

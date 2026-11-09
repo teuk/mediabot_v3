@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1167 — Keep URL shortening responsive with invalid state files
+
+- Refuse non-regular cache and lock files in both shortening clients using
+  nonblocking, no-follow opens and checks on the opened file descriptors.
+- Bound cache reads even if the file grows after the initial size check;
+  preserve the exact original URL and skip HTTP when state is unusable.
+- Extend the existing lock regression with real FIFOs, directories, dangling
+  symlinks, preserved object modes, and exact state-size boundary checks.
+
+
 ### MB1166 — Trim French Trivia validation overhead
 
 - Normalize each valid answer choice once during catalogue validation while

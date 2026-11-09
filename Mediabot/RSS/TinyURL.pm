@@ -104,15 +104,26 @@ sub _empty_state {
 
 sub _read_state {
     my ($path) = @_;
-    return (_empty_state(), undef) unless -e $path;
     return (undef, 'state_symlink') if -l $path;
-
-    my $size = -s $path;
-    return (undef, 'state_too_large') if defined($size) && $size > $MAX_STATE_BYTES;
-
-    open my $fh, '<:raw', $path or return (undef, 'state_open');
-    local $/;
-    my $raw = <$fh>;
+    return (_empty_state(), undef) unless -e $path;
+    # Nonblocking open also handles a regular file replaced by a FIFO between
+    # the path check and open. Validate the opened object, not just its name.
+    sysopen(my $fh, $path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
+        or return (undef, 'state_open');
+    return (undef, 'state_type') unless -f $fh;
+    return (undef, 'state_too_large') if -s $fh > $MAX_STATE_BYTES;
+    binmode $fh, ':raw';
+    my $raw = '';
+    while (length($raw) <= $MAX_STATE_BYTES) {
+        my $read = sysread($fh, my $chunk, $MAX_STATE_BYTES + 1 - length($raw));
+        if (!defined $read) {
+            next if $!{EINTR};
+            return (undef, 'state_read');
+        }
+        last unless $read;
+        $raw .= $chunk;
+    }
+    return (undef, 'state_too_large') if length($raw) > $MAX_STATE_BYTES;
     close $fh or return (undef, 'state_close');
 
     my $state = eval { JSON::PP->new->utf8->decode($raw // '') };
@@ -164,9 +175,10 @@ sub _with_locked_state {
     return (undef, 'state_directory') unless -d $dir && -w $dir;
 
     my $lock_path = "$path.lock";
-    sysopen(my $lock_fh, $lock_path, O_RDWR | O_CREAT, 0600)
+    sysopen(my $lock_fh, $lock_path, O_RDWR | O_CREAT | O_NONBLOCK | O_NOFOLLOW, 0600)
         or return (undef, 'state_lock_open');
-    chmod 0600, $lock_path;
+    return (undef, 'state_lock_type') unless -f $lock_fh;
+    chmod 0600, $lock_fh;
     # Another worker may retain this lock throughout its HTTP request. URL
     # presentation must not wait outside the caller's network timeout.
     unless (flock($lock_fh, LOCK_EX | LOCK_NB)) {
