@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1166 — Trim French Trivia validation overhead
+
+- Normalize each valid answer choice once during catalogue validation while
+  retaining the same uniqueness, text and IRC byte-budget checks.
+- Keep full-corpus and attribution validation; use a minimal valid document
+  for malformed-question tests instead of copying unrelated source metadata.
+- Cover normalized answer collisions and answers that normalize to empty.
+
+
 ### MB1165 — Extend bounded cold-probe batching
 
 - Batch twelve additional independent import-order groups across eleven

@@ -59,8 +59,9 @@ sub parse_catalog {
         my (%choices, $bytes);
         $bytes = 0;
         for my $choice (@choices) {
-            die "trivia_fr_catalog_choices\n" unless _text($choice,90) && length(answer_key($choice))
-                && !$choices{answer_key($choice)}++;
+            die "trivia_fr_catalog_choices\n" unless _text($choice,90);
+            my $key = answer_key($choice);
+            die "trivia_fr_catalog_choices\n" unless length($key) && !$choices{$key}++;
             $bytes += length(encode('UTF-8',$choice)) + 4;
         }
         die "trivia_fr_catalog_choices\n" if $bytes > 260;

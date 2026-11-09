@@ -79,13 +79,20 @@ for (1..2) {
 }
 is(Mediabot::External::TriviaFR::fetch(19,undef)->{error},'fr_category','unsupported French category is explicit, without English fallback');
 
-my $one={%$doc,questions=>[dclone($doc->{questions}[0])]};
+# Mutation fixtures need only the parser header and one real question.
+# The complete corpus and attribution metadata are validated above.
+my $one={version=>$doc->{version},language=>$doc->{language},license=>$doc->{license},
+    questions=>[dclone($doc->{questions}[0])]};
+ok(eval {Mediabot::External::TriviaFR::parse_catalog($json->encode($one));1},
+    'minimal mutation fixture is valid before corruption');
 for my $mutation (
     sub {$_[0]{language}='en'}, sub {$_[0]{questions}[0]{correct_answer}=undef},
     sub {$_[0]{questions}[0]{question}="bad\rline"}, sub {$_[0]{questions}[0]{question}='X'x301},
     sub {$_[0]{questions}[0]{category_id}=99}, sub {$_[0]{questions}[0]{difficulty}='impossible'},
     sub {$_[0]{questions}[0]{incorrect_answers}[0]=$_[0]{questions}[0]{correct_answer}},
     sub {push @{$_[0]{questions}},dclone($_[0]{questions}[0])},
+    sub {$_[0]{questions}[0]{correct_answer}='Émile';$_[0]{questions}[0]{incorrect_answers}[0]='emile'},
+    sub {$_[0]{questions}[0]{incorrect_answers}[0]="\x{0301}"},
 ) {
     my $bad=dclone($one);$mutation->($bad);
     ok(!eval {Mediabot::External::TriviaFR::parse_catalog($json->encode($bad));1},'malformed or ambiguous French data is refused');
