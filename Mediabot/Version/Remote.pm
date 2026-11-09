@@ -196,7 +196,10 @@ sub fetch_remote_version {
         }
 
         my $body = $res->{content} // '';
-        $body =~ s/\A\x{FEFF}//;          # BOM eventuel
+        # HTTP::Tiny supplies raw octets; compatibility hooks may return text.
+        # Remove one leading UTF-8 BOM in either representation, never inside
+        # the version or repeatedly (malformed content must remain invalid).
+        $body =~ s/\A(?:\xEF\xBB\xBF|\x{FEFF})//;
         $body =~ s/\s+\z//;
         $body =~ s/\A\s+//;
         if ($body eq '') {

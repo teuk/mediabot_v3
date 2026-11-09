@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1178 — Accept UTF-8 byte-order marks in remote VERSION files
+
+- Recognize the raw UTF-8 BOM returned by HTTP::Tiny as well as the decoded
+  BOM already supported by compatibility hooks. Strip only one at the start.
+- Preserve strict version validation, HTTP diagnostics and mirror fallback;
+  partial, repeated or embedded BOMs and HTML remain invalid.
+- Extend the existing transport diagnostics test with actual HTTP byte
+  fixtures, response preservation and source-attempt counts; no new test file.
+
+
 ### MB1177 — Keep RandomQuote state reads bounded and nonblocking
 
 - Open state and lock files with O_NONBLOCK before checking their descriptor

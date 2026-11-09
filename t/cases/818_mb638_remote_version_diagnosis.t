@@ -95,6 +95,36 @@ return sub {
     $reply = { success => 1, status => 200, content => "\x{FEFF}3.4dev-1\n" };
     $assert->is(($F->($bot))[0], '3.4dev-1', 'mb638-818: un BOM ne casse rien');
 
+
+    # MB1178: HTTP::Tiny returns bytes, unlike the decoded BOM fixture above.
+    for my $case (
+        ["\xEF\xBB\xBF3.8dev-20261109_135719\r\n", '3.8dev-20261109_135719'],
+        ["\x{FEFF}3.8dev-1\n", '3.8dev-1'],
+        ["3.8\r\n", '3.8'],
+        ["\xEF\xBB\xBF \t3.8\r\n", '3.8'],
+        ["\xEF\xBB\xBF", undef],
+        ["\xEF\xBB3.8", undef],
+        ["\xEF\xBB\xBF\xEF\xBB\xBF3.8", undef],
+        ["3.\xEF\xBB\xBF8", undef],
+        ["\xEF\xBB\xBF<html>proxy</html>", undef],
+        ["\xEF\xBB\xBF3.8\n3.9", undef],
+    ) {
+        my ($body,$expected)=@$case;
+        $reply={success=>1,status=>200,content=>$body};
+        @asked=();
+        my ($version,$reason)=$F->($bot);
+        if (defined $expected) {
+            $assert->is($version,$expected,'mb1178: remote VERSION accepts one leading BOM only');
+        } else {
+            $assert->ok(!defined $version,'mb1178: invalid remote VERSION remains undefined');
+        }
+        $assert->ok(defined($expected) ? !defined($reason) : defined($reason),
+            'mb1178: transport keeps success and failure diagnostics consistent');
+        $assert->is($reply->{content},$body,'mb1178: parsing preserves HTTP response bytes');
+        $assert->is(scalar(@asked),defined($expected)?1:2,
+            'mb1178: valid first source stops; invalid source retains mirror fallback');
+    }
+
     # [3] la conf impose UNE URL : c'est un override, pas une URL ajoutee
     @asked = ();
     $reply = { success => 1, status => 200, content => "3.4dev-2\n" };
