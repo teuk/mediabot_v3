@@ -3,6 +3,8 @@ use warnings;
 use File::Temp qw(tempdir);
 use Fcntl qw(:flock :DEFAULT);
 use Mediabot::RSS::Pacing;
+use POSIX ();
+use Time::HiRes qw(alarm);
 
 return sub {
     my ($a) = @_;
@@ -58,4 +60,47 @@ return sub {
     $a->ok(!eval {$new->()->status('#35+ans'); 1}, 'mb809: missing initialized state cannot disable limits');
     symlink "$dir/outside", $path or die $!;
     $a->ok(!eval {$new->()->status('#35+ans'); 1}, 'mb809: state symlink refused');
+    # A broken state path must fail closed without blocking the IRC caller.
+    for my $operation ('status', 'reserve', 'configure') {
+        my $fixture = tempdir(CLEANUP=>1);
+        my $state = "$fixture/state.json";
+        POSIX::mkfifo($state,0640)==0 or die "mkfifo: $!";
+        my @before=lstat($state);
+        my $pacing=Mediabot::RSS::Pacing->new(path=>$state);
+        my $error;
+        {
+            local $SIG{ALRM}=sub {die "test deadline exceeded\n"};
+            eval {alarm(1);$pacing->$operation('#test');1};
+            $error=$@;alarm(0);
+        }
+        $a->like($error,qr/RSS pacing state is not a regular file/,
+            "mb1168: $operation rejects a FIFO immediately with the real state error");
+        my @after=lstat($state);
+        $a->is(join(':',@after[0,1,2]),join(':',@before[0,1,2]),
+            "mb1168: $operation preserves the FIFO inode, type and mode");
+    }
+    {
+        my $fixture=tempdir(CLEANUP=>1);
+        my $state="$fixture/state.json";
+        my $pacing=Mediabot::RSS::Pacing->new(path=>$state);
+        $pacing->configure('#test',gap=>5,daily=>1);
+        unlink "$state.lock" or die $!;
+        POSIX::mkfifo("$state.lock",0640)==0 or die $!;
+        $a->ok(!eval {$pacing->reserve('#test');1},'mb1168: FIFO lock cannot authorize a reservation');
+        $a->is((lstat("$state.lock"))[2]&0777,0640,'mb1168: rejected lock permissions remain untouched');
+    }
+    {
+        my $fixture=tempdir(CLEANUP=>1);
+        my $state="$fixture/state.json";
+        my $pacing=Mediabot::RSS::Pacing->new(path=>$state);
+        $pacing->configure('#test',gap=>5,daily=>1);
+        my $json='{"schema":1,"channels":{}}';
+        for my $size (262144,262145) {
+            open my $fh,'>:raw',$state or die $!;
+            print {$fh} $json.(' 'x($size-length($json)));close $fh;
+            my $ok=eval {$pacing->status('#test');1};
+            $a->is($ok?1:0,$size==262144?1:0,'mb1168: state size boundary is enforced');
+        }
+    }
+
 };

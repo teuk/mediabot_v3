@@ -72,17 +72,28 @@ sub _locked {
         return $result;
     }
     mkdir($dir, 0700) or die 'cannot create RSS pacing directory' unless -d $dir;
-    sysopen(my $lock, "$path.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0600)
+    sysopen(my $lock, "$path.lock", O_CREAT | O_RDWR | O_NOFOLLOW | O_NONBLOCK, 0600)
         or die 'cannot open RSS pacing lock';
     die 'RSS pacing lock is not a regular file' unless -f $lock;
     flock($lock, LOCK_EX | LOCK_NB) or die 'RSS pacing state is busy';
-    chmod(0600, "$path.lock") or die 'cannot protect RSS pacing lock';
+    chmod(0600, $lock) or die 'cannot protect RSS pacing lock';
     my $state = {schema => 1, channels => {}};
     if (-e $path) {
-        sysopen(my $fh, $path, O_RDONLY | O_NOFOLLOW) or die 'cannot read RSS pacing state';
+        sysopen(my $fh, $path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK) or die 'cannot read RSS pacing state';
         die 'RSS pacing state is not a regular file' unless -f $fh;
         die 'RSS pacing state too large' if -s $fh > 262144;
-        local $/; my $raw = <$fh>; close $fh;
+        my $raw = '';
+        while (1) {
+            my $n = sysread($fh, my $chunk, 262145 - length($raw));
+            if (!defined $n) {
+                next if $!{EINTR};
+                die 'cannot read RSS pacing state';
+            }
+            last unless $n;
+            $raw .= $chunk;
+            die 'RSS pacing state too large' if length($raw) > 262144;
+        }
+        close($fh) or die 'cannot close RSS pacing state';
         $state = _validate(JSON::PP->new->utf8->decode($raw));
     }
     my ($result, $dirty) = $cb->($state);

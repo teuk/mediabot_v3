@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1168 — Keep RSS quota state reads nonblocking
+
+- Open pacing state and locks in nonblocking mode so a FIFO state file cannot
+  hang status, reservation or configuration operations before type validation.
+- Bound reads to the existing 256 KiB limit even if the file grows after stat;
+  apply lock permissions through the checked file descriptor.
+- Extend the existing pacing test with real FIFO refusals, preserved object
+  modes and the exact size boundary; existing quotas and history remain intact.
+
+
 ### MB1167 — Keep URL shortening responsive with invalid state files
 
 - Refuse non-regular cache and lock files in both shortening clients using
