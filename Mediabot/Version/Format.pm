@@ -29,6 +29,13 @@ sub _usable_local_version {
     return $value;
 }
 
+# Keep decimal components exact even beyond the native integer/float range.
+sub _canonical_digits {
+    my ($value) = @_;
+    $value =~ s/\A0+(?=[0-9])//;
+    return $value;
+}
+
 sub _version_parts {
     my ($value) = @_;
     $value = defined &Mediabot::Helpers::_usable_local_version
@@ -40,8 +47,8 @@ sub _version_parts {
     # does not accept. Reject them before constructing or ordering versions.
     if ($value =~ /\A([0-9]+)\.([0-9]+)\z/) {
         return {
-            major => 0 + $1,
-            minor => 0 + $2,
+            major => _canonical_digits($1),
+            minor => _canonical_digits($2),
             stage => 1,       # stable is newer than devel at the same base
             type  => 'stable',
             dev   => undef,
@@ -54,8 +61,8 @@ sub _version_parts {
         $dev =~ s/\A0+(?=[0-9])//;
 
         return {
-            major => 0 + $major,
-            minor => 0 + $minor,
+            major => _canonical_digits($major),
+            minor => _canonical_digits($minor),
             stage => 0,
             type  => 'devel',
             dev   => $dev,
@@ -70,6 +77,8 @@ sub _compare_digit_strings {
     $left  = '0' unless defined($left)  && $left  ne '';
     $right = '0' unless defined($right) && $right ne '';
 
+    $left = _canonical_digits($left);
+    $right = _canonical_digits($right);
     return length($left) <=> length($right)
         if length($left) != length($right);
     return $left cmp $right;
@@ -86,8 +95,10 @@ sub _compare_mediabot_versions {
         : _version_parts($right);
     return undef unless $l && $r;
 
-    return $l->{major} <=> $r->{major} if $l->{major} != $r->{major};
-    return $l->{minor} <=> $r->{minor} if $l->{minor} != $r->{minor};
+    for my $field (qw(major minor)) {
+        my $order = _compare_digit_strings($l->{$field}, $r->{$field});
+        return $order if $order;
+    }
     return $l->{stage} <=> $r->{stage} if $l->{stage} != $r->{stage};
 
     return 0 if $l->{stage} == 1;

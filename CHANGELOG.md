@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1176 — Compare version components without numeric rounding
+
+- Keep major/minor components as canonical decimal strings, matching the
+  existing exact comparison of development identifiers. Values beyond native
+  integer/float precision no longer collapse to equality or infinity.
+- Preserve leading-zero normalization, stable/development precedence, Helpers
+  compatibility hooks and ordinary version formatting.
+- Extend the existing version suite with large adjacent components, reverse
+  comparisons, exact details and warning-free parsing; no new test file.
+
+
 ### MB1175 — Refill channel output credit progressively
 
 - Interpret CHANNEL_FLOOD nbmsg_max as burst capacity and duration as full

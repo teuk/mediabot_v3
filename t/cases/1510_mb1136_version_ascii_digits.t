@@ -47,4 +47,32 @@ for my $case (
 ) {
     is(_compare_mediabot_versions($case->[0],$case->[1]) <=> 0,$case->[2], 'ASCII ordering retained');
 }
+
+# MB1176: major/minor components must not round to equal floating values.
+{
+ my @warnings;
+ local $SIG{__WARN__}=sub {push @warnings,@_};
+ for my $pair (
+  ['18446744073709551616','18446744073709551617'],
+  [('9'x80), '1'.('0'x80)],
+  ['1'.('0'x399).'1','1'.('0'x399).'2'],
+ ) {
+  for my $minor (0,1) {
+   my ($a,$b)=map {$minor ? "3.$_" : "$_.8"} @$pair;
+   for my $suffix ('','dev-20261109_120000') {
+    is(_compare_mediabot_versions($a.$suffix,$b.$suffix)<=>0,-1,'large component orders exactly');
+    is(_compare_mediabot_versions($b.$suffix,$a.$suffix)<=>0,1,'reverse comparison remains antisymmetric');
+    is(_compare_mediabot_versions($a.$suffix,$a.$suffix),0,'large component is equal to itself');
+   }
+  }
+ }
+ my $large='1'.('0'x399).'1';
+ is_deeply([getDetailedVersion(undef,"000$large.000$large")],[$large,$large,'stable',undef],
+   'detail API preserves exact canonical digits without scientific notation or infinity');
+ is(_compare_mediabot_versions("000$large.0008dev-000123","$large.8dev123"),0,
+   'leading-zero equivalence also holds for large components');
+ is(_compare_mediabot_versions("$large.8","$large.8dev999")<=>0,1,
+   'stable still follows development at the same exact base');
+ is_deeply(\@warnings,[],'very large ASCII components never trigger numeric warnings');
+}
 done_testing;
