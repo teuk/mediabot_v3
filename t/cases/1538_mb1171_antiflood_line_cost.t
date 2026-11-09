@@ -7,6 +7,9 @@ use Mediabot::IRC::Sender ();
 use Mediabot::IRC::DeferredOutput ();
 use Mediabot::IRC::TextBudget ();
 use FindBin qw($Bin);
+use Mediabot::IRC::OutputBudget ();
+no warnings qw(redefine once);
+local *Mediabot::IRC::OutputBudget::now = sub {$MB1171::Guard::now};
 open my $fh,'<:encoding(UTF-8)',"$Bin/../../Mediabot/Helpers.pm" or die $!;
 my $src=do {local $/;<$fh>};
 my ($guard)=$src =~ /(sub checkAntiFlood \{.*?\n\}\n)/s;die 'guard missing' unless $guard;
@@ -126,7 +129,7 @@ for my $kind ('privmsg','action') {
  is($delay->($bot,'#test',$now),2,'a full window still enters the existing admission and silence policy');
 }
 {
- no warnings 'redefine';
+ no warnings qw(redefine once);
  my @timers; my @drains;
  local *Mediabot::IRC::Timer::countdown=sub {push @timers,{@_};1};
  local *Mediabot::Helpers::_drain_flood_queue=sub {push @drains,$_[1];1};
@@ -207,7 +210,7 @@ for my $foreign (0,1) {
 
 # MB1174: expiration uses elapsed time, independently of wall-clock admission.
 {
- no warnings 'redefine';
+ no warnings qw(redefine once);
  my $now=100;
  local *Mediabot::IRC::DeferredOutput::_flood_queue_now=sub {$now};
  {package MB1174::Metrics;sub inc {$_[0]{$_[1]}++}
@@ -254,5 +257,85 @@ for my $foreign (0,1) {
  $now=220;drain_1171($b);
  is_deeply($b->{_flood_outq}{'#test'}{items},[],'legacy retry also expires at its original deadline');
  is($b->{_flood_outq}{'#test'}{armed},0,'expired empty queue is left unarmed');
+}
+
+# MB1175: progressive channel credit, independently controlled elapsed time.
+{
+ no warnings qw(redefine once);
+ my $elapsed=100;
+ local *Mediabot::IRC::OutputBudget::now=sub {$elapsed};
+ local *MB1171::Guard::_af_conf_int=sub {my($b,$k,$d)=@_;$d};
+ for my $kind ('privmsg','action') {
+  $elapsed=100;
+  my $b=bot_1171(5);
+  my $send=$kind eq 'action'?\&Mediabot::IRC::Sender::botAction:\&Mediabot::IRC::Sender::botPrivmsg;
+  $send->($b,'#test','x'x2200);drain_1171($b) for 1..6;
+  is(scalar @{$b->{irc}{wire}},5,"$kind: initial reserve permits a five-line burst");
+  $elapsed=105.99;drain_1171($b);
+  is(scalar @{$b->{irc}{wire}},5,"$kind: fractional credit cannot admit a whole line early");
+  $elapsed=106;drain_1171($b);
+  is(scalar @{$b->{irc}{wire}},6,"$kind: one queued line resumes after six seconds, not thirty");
+  is(scalar @{$b->{_global_af}{hits}},6,"$kind: progressive admissions still charge the global limit");
+  is($b->{_af}{'#test'}{silenced_until},0,"$kind: waiting does not start a penalty");
+ }
+ $elapsed=100;my $b=bot_1171(5);my $check=\&MB1171::Guard::checkAntiFlood;
+ is($check->($b,'#test',3),0,'multi-line response spends three credits atomically');
+ $elapsed=106;
+ is($check->($b,'#test',3),0,'partial refill can admit another atomic three-line response');
+ is($b->{_af}{'#test'}{bucket}{tokens},0,'admitted batch leaves the expected zero balance');
+ is($check->($b,'#test',2),1,'an unaffordable batch is refused');
+ is(scalar @{$b->{_global_af}{hits}},6,'refused batch does not spend global credit');
+ is($b->{_af}{'#test'}{bucket}{tokens},0,'refused batch does not spend channel credit');
+ $elapsed=1000;Mediabot::IRC::OutputBudget::refresh($b->{_af}{'#test'},5,30);
+ is($b->{_af}{'#test'}{bucket}{tokens},5,'long idle time cannot accumulate more than one reserve');
+ $elapsed=100;$b=bot_1171(5);$check->($b,'#test',5);
+ my $wall=$MB1171::Guard::now;
+ $MB1171::Guard::now+=3600;$b->{_af_params}{'#test'}{ts}=$MB1171::Guard::now;
+ is($check->($b,'#test',2),1,'forward wall-clock jump grants no channel credit');
+ $MB1171::Guard::now=$wall-3600;$b->{_af_params}{'#test'}{ts}=$MB1171::Guard::now;
+ $elapsed=112;
+ is($check->($b,'#test',2),0,'backward wall-clock jump does not stop monotonic refill');
+ $MB1171::Guard::now=$wall;
+ $elapsed=100;$b=bot_1171(5);$check->($b,'#test',5);
+ my $st=$b->{_af}{'#test'};
+ $elapsed=106;Mediabot::IRC::OutputBudget::refresh($st,10,60);
+ is($st->{bucket}{tokens},1,'raising capacity preserves earned credit without a fresh burst');
+ $elapsed=112;Mediabot::IRC::OutputBudget::refresh($st,2,12);
+ is($st->{bucket}{tokens},2,'lowering capacity clamps after refilling at the previous rate');
+ $st->{bucket}{tokens}=0;
+ $elapsed=118;Mediabot::IRC::OutputBudget::refresh($st,2,120);
+ is($st->{bucket}{tokens},1,'period change applies only after settling the old rate');
+ $elapsed=148;Mediabot::IRC::OutputBudget::refresh($st,2,120);
+ is($st->{bucket}{tokens},1.5,'new slower rate governs subsequent elapsed time');
+ $elapsed=140;Mediabot::IRC::OutputBudget::refresh($st,2,120);
+ is_deeply([$st->{bucket}{tokens},$st->{bucket}{at}],[1.5,148],'backward elapsed-clock sample grants nothing and preserves high-water time');
+ $elapsed=148;Mediabot::IRC::OutputBudget::refresh($st,2,120);
+ is($st->{bucket}{tokens},1.5,'returning to the previous sample cannot double refill');
+ $st={nbmsg=>3};Mediabot::IRC::OutputBudget::refresh($st,5,30);
+ is($st->{bucket}{tokens},2,'legacy counter migration preserves spent credit conservatively');
+ $st={};Mediabot::IRC::OutputBudget::refresh($st,0,0);
+ is_deeply([$st->{bucket}{tokens},$st->{bucket}{period}],[0,1],'zero-capacity setting blocks output and zero period cannot divide by zero');
+ $st={};Mediabot::IRC::OutputBudget::refresh($st,'NaN','Inf');
+ is_deeply([$st->{bucket}{capacity},$st->{bucket}{period}],[5,30],'invalid database numbers use finite defaults');
+ # Cleanup must not forget outstanding debt on a deliberately slow channel.
+ $elapsed=100;$b=bot_1171(1);$b->{_af_params}{'#test'}{duration}=1000;$check->($b,'#test');
+ $elapsed=500;$MB1171::Guard::now+=400;
+ $b->{_af_params}{'#quiet'}={ts=>$MB1171::Guard::now,nbmsg_max=>5,duration=>30,timetowait=>300};
+ $check->($b,'#quiet');
+ ok(exists $b->{_af}{'#test'},'cleanup retains a dormant bucket whose refill period exceeds the state TTL');
+ # Expiring a real silence keeps the historical full reset and charges the notice.
+ $elapsed=100;$b=bot_1171(1);$check->($b,'#test');$check->($b,'#test');
+ $MB1171::Guard::now+=300;$elapsed+=300;
+ $b->{_af_params}{'#test'}{ts}=$MB1171::Guard::now;
+ is($check->($b,'#test'),0,'existing silence expiry restores a full channel reserve');
+ is($b->{_af}{'#test'}{bucket}{tokens},0,'first post-silence admission spends its restored credit');
+ $b=bot_1171(5);
+ $b->{_af}{'#test'}={nbmsg=>5,first=>$MB1171::Guard::now-300,silenced_until=>$MB1171::Guard::now};
+ $b->{_global_af}={hits=>[($MB1171::Guard::now)x19],silenced_until=>0};
+ $b->{_af_params}{'#notice'}={ts=>$MB1171::Guard::now,unconfigured=>1};
+ local *MB1171::Guard::botPrivmsg=sub {$check->($_[0],'#notice')};
+ is($check->($b,'#test'),1,'nested silence-lift notification can consume the last global place');
+ is($b->{_af}{'#test'}{bucket}{tokens},5,'late global refusal does not consume channel credit');
+
 }
 done_testing;

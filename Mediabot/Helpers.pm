@@ -1483,6 +1483,8 @@ sub checkAntiFlood {
     my $duration   = $pc->{duration}   // 30;
     my $timetowait = $pc->{timetowait} // 300;
 
+    require Mediabot::IRC::OutputBudget;
+
     # --- In-memory flood state ---
     my $st = $self->{_af}{$sChannel} //= { nbmsg => 0, first => $now, silenced_until => 0 };
 
@@ -1498,6 +1500,7 @@ sub checkAntiFlood {
     if ($st->{silenced_until} && $now >= $st->{silenced_until}) {
         $self->{logger}->log(1, "checkAntiFlood() silence lifted on $sChannel");
         $st->{nbmsg}          = 0;
+        delete $st->{bucket};
         $st->{first}          = $now;
         $st->{silenced_until} = 0;
         # EE5: notify channel that anti-flood silence has been lifted
@@ -1507,30 +1510,27 @@ sub checkAntiFlood {
         };
     }
 
-    # Window expired? Reset
-    if (($now - $st->{first}) >= $duration) {
-        $st->{nbmsg} = 0;
-        $st->{first} = $now;
-    }
-
-    return 1 if ($cost > 1 || $retry) && $st->{nbmsg} + $cost > $nbmsg_max;
-    $st->{nbmsg} += $cost;
-
-    if ($st->{nbmsg} > $nbmsg_max) {
-        unless ($st->{silenced_until}) {
-            $st->{silenced_until} = $now + $timetowait;
-            $self->{logger}->log(1,
-                "checkAntiFlood() AF1: flooding on $sChannel — "
-                . "$st->{nbmsg} msgs in " . ($now - $st->{first})
-                . "s (max $nbmsg_max/$duration s) — silencing ${timetowait}s");
-            noticeConsoleChan($self,
-                "Anti-flood activated on $sChannel ($st->{nbmsg} msgs in "
-                . ($now - $st->{first}) . "s) — silenced for ${timetowait}s");
-            $self->{metrics}->inc('mediabot_antiflood_blocks_total')
-                if $self->{metrics};
-        }
+    my $bucket = Mediabot::IRC::OutputBudget::refresh($st, $nbmsg_max, $duration);
+    # first remains a wall-clock activity marker for legacy cleanup consumers;
+    # all credit accrual is driven exclusively by the monotonic bucket clock.
+    $st->{first} = $now;
+    if ($bucket->{tokens} + 1e-9 < $cost) {
+        return 1 if $cost > 1 || $retry;
+        $st->{silenced_until} = $now + $timetowait;
+        $self->{logger}->log(1,
+            "checkAntiFlood() AF1: output budget exhausted on $sChannel — silencing ${timetowait}s");
+        noticeConsoleChan($self,
+            "Anti-flood activated on $sChannel (output budget exhausted) — silenced for ${timetowait}s");
+        $self->{metrics}->inc('mediabot_antiflood_blocks_total') if $self->{metrics};
         return 1;
     }
+
+    # Recheck global admission before spending channel credit. Nested policy
+    # notifications may have consumed the connection allowance since the probe.
+    return 1 if $global_check->(1);
+    $bucket->{tokens} -= $cost;
+    $bucket->{tokens} = 0 if $bucket->{tokens} < 0;
+    $st->{nbmsg} = $bucket->{capacity} - $bucket->{tokens};
 
     # A7: periodic cleanup of stale flood state
     {
@@ -1541,7 +1541,8 @@ sub checkAntiFlood {
             for my $chan (keys %{ $self->{_af} // {} }) {
                 my $s = $self->{_af}{$chan};
                 delete $self->{_af}{$chan}
-                    if (!$s->{silenced_until} && ($now - ($s->{first} // 0)) > $state_ttl);
+                    if (!$s->{silenced_until} && ($now - ($s->{first} // 0)) > $state_ttl
+                        && (!$s->{bucket} || Mediabot::IRC::OutputBudget::now() - $s->{bucket}{at} >= $s->{bucket}{period}));
             }
             # Also clean params cache
             for my $chan (keys %{ $self->{_af_params} // {} }) {
@@ -1552,7 +1553,7 @@ sub checkAntiFlood {
         }
     }
 
-    return $global_check->(1);
+    return 0;
 }
 # Set or display anti-flood parameters for a given channel (Context version)
 sub leet {

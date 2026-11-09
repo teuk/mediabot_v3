@@ -69,6 +69,9 @@ return sub {
         my $bot={logger=>bless({},'MB1170::Log'),
             _af_params=>{'#busy'=>{ts=>$MB1170::Guard::now,nbmsg_max=>1,duration=>30,timetowait=>300},
                           '#quiet'=>{ts=>$MB1170::Guard::now,unconfigured=>1}}};
+        require Mediabot::IRC::OutputBudget;
+        no warnings 'redefine';
+        local *Mediabot::IRC::OutputBudget::now=sub {$MB1170::Guard::now};
         my $check=\&MB1170::Guard::checkAntiFlood;
         $assert->is($check->($bot,'#busy'),0,'mb1170: first channel admission uses one global slot');
         $assert->is($check->($bot,'#busy'),1,'mb1170: channel limit still blocks the next attempt');

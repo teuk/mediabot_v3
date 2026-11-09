@@ -4582,7 +4582,9 @@ sub _cmd_floodstatus {
             my $sil = $st->{silenced_until} // 0;
             my $status = ($sil && $now < $sil)
                 ? sprintf('SILENCED (%ds remaining)', $sil - $now)
-                : sprintf('%d msgs in window', $st->{nbmsg} // 0);
+                : $st->{bucket}
+                    ? sprintf('%.2f/%g line credits at last check', $st->{bucket}{tokens}, $st->{bucket}{capacity})
+                    : sprintf('%d msgs in legacy window', $st->{nbmsg} // 0);
             $stream->write(sprintf("  %-22s %s\r\n", $chan, $status));
         }
     } else {

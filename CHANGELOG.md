@@ -1,5 +1,19 @@
 ## [Unreleased] — 3.8dev
 
+### MB1175 — Refill channel output credit progressively
+
+- Interpret CHANNEL_FLOOD nbmsg_max as burst capacity and duration as full
+  refill time. Charge physical IRC lines against a monotonic token bucket.
+- Settle elapsed time at the previous rate before adopting changed settings;
+  raising capacity grants no extra burst and lowering it clamps credit.
+- Keep fresh-send silences, non-punitive queued retries, response expiry and
+  the global safety gate. A late global refusal spends no channel credit.
+- Preserve legacy debt conservatively and retain slow-refilling idle buckets
+  during cleanup. Keep historical full reset when a channel silence expires.
+- Update channel/Partyline displays and sample configuration; extend existing
+  behavioral tests without adding another test file. No database migration.
+
+
 ### MB1174 — Expire stale deferred responses as a group
 
 - Bound queued response lifetime to 120 seconds on a monotonic clock, shared

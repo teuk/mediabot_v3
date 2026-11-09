@@ -2962,7 +2962,7 @@ sub userChannelInfo_ctx {
 
                     botNotice(
                         $self, $nick,
-                        "Antiflood parameters : $nbmsg_max messages in $duration seconds, wait for $timetowait seconds, notification : $notif"
+                        "Antiflood parameters : $nbmsg_max lines burst, full refill over $duration seconds, wait for $timetowait seconds, notification : $notif"
                     );
                 } else {
                     botNotice($self, $nick, "Antiflood parameters : not set ?");
@@ -3918,8 +3918,7 @@ sub setChannelAntiFloodParams_ctx {
             my $wait   = $row->{timetowait} // 0;
 
             my $msg = "antifloodset for $target_channel: "
-                    . "$max message"  . ($max    == 1 ? "" : "s")
-                    . " max in $period second" . ($period == 1 ? "" : "s")
+                    . "$max lines burst, full refill over $period seconds"
                     . ", wait $wait second"    . ($wait   == 1 ? "" : "s")
                     . " if breached";
 
@@ -3989,7 +3988,7 @@ sub setChannelAntiFloodParams_ctx {
             $self,
             $nick,
             "Antiflood parameters set for $target_channel: "
-              . "$max_msg messages max in $period_sec sec, wait $wait_sec sec"
+              . "$max_msg lines burst, full refill over $period_sec sec, wait $wait_sec sec"
         );
         return 0;
     } else {
