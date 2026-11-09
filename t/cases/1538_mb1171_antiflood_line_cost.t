@@ -151,4 +151,57 @@ for my $kind ('privmsg','action') {
  like($@,qr/MB1172 setup failure/,'timer setup errors still propagate');
  is($bot->{_flood_outq}{'#test'}{armed},0,'failed setup leaves queue rearmable');
 }
+
+# MB1173: use the real sender/drain/guard chain with the controlled guard clock.
+for my $kind ('privmsg','action') {
+ my $send=$kind eq 'action'?\&Mediabot::IRC::Sender::botAction:\&Mediabot::IRC::Sender::botPrivmsg;
+ my $bot=bot_1171(1);
+ $send->($bot,'#test','x'x500);
+ drain_1171($bot);
+ my $first=$MB1171::Guard::now;
+ drain_1171($bot) for 1..3;
+ is_deeply([scalar @{$bot->{irc}{wire}},$bot->{_af}{'#test'}{nbmsg},
+   $bot->{_af}{'#test'}{silenced_until},scalar @{$bot->{_global_af}{hits}},
+   scalar @{$bot->{_flood_outq}{'#test'}{items}}],[1,1,0,1,1],
+   "$kind: blocked retries preserve counters, silence and pending line");
+ $MB1171::Guard::now=$first+29;drain_1171($bot);
+ is(scalar @{$bot->{irc}{wire}},1,"$kind: no early admission before channel window expires");
+ $MB1171::Guard::now=$first+30;drain_1171($bot);
+ is_deeply([scalar @{$bot->{irc}{wire}},$bot->{_af}{'#test'}{nbmsg},
+   scalar @{$bot->{_global_af}{hits}},scalar @{$bot->{_flood_outq}{'#test'}{items}}],
+   [2,1,1,0],"$kind: exact window expiry resumes and charges the last line once");
+ $bot=bot_1171(20);
+ $send->($bot,'#test','x'x2200);drain_1171($bot) for 1..8;
+ is_deeply([scalar @{$bot->{irc}{wire}},scalar @{$bot->{_global_af}{hits}},
+   $bot->{_global_af}{silenced_until},scalar @{$bot->{_flood_outq}{'#test'}{items}}],
+   [5,5,0,1],"$kind: full global budget queues without a new global silence");
+ $MB1171::Guard::now+=10;drain_1171($bot);
+ is_deeply([scalar @{$bot->{irc}{wire}},scalar @{$bot->{_global_af}{hits}}],
+   [6,1],"$kind: exact global window expiry admits and charges the remaining line");
+ $bot=bot_1171(1);
+ $send->($bot,'#test','one');$send->($bot,'#test','two');
+ my $until=$MB1171::Guard::now+300;
+ is($bot->{_af}{'#test'}{silenced_until},$until,"$kind: a new single-line excess still starts channel silence");
+ drain_1171($bot);
+ is_deeply([scalar @{$bot->{irc}{wire}},$bot->{_af}{'#test'}{silenced_until}],
+   [1,$until],"$kind: retry respects the existing channel silence");
+ $bot=bot_1171(20);
+ $send->($bot,'#test',"line $_") for 1..6;
+ $until=$MB1171::Guard::now+15;
+ is($bot->{_global_af}{silenced_until},$until,"$kind: fresh excess still starts global silence");
+ drain_1171($bot);
+ is_deeply([scalar @{$bot->{irc}{wire}},$bot->{_global_af}{silenced_until}],
+   [5,$until],"$kind: retry respects the existing global silence");
+}
+for my $foreign (0,1) {
+ my $bot=bot_1171(1);
+ Mediabot::IRC::Sender::botPrivmsg($bot,'#test','first');
+ my $old={items=>[],armed=>0};
+ $bot->{_flood_outq}{$foreign?'#other':'#test'}=$old;
+ $bot->{_flood_outq}{'#test'}={items=>[],armed=>0} unless $foreign;
+ local $bot->{_flood_draining}=$old;
+ Mediabot::IRC::Sender::botPrivmsg($bot,'#test','excess');
+ is($bot->{_af}{'#test'}{silenced_until},$MB1171::Guard::now+300,
+    $foreign?'another channel drain cannot waive a new penalty':'a retired queue cannot waive a new penalty');
+}
 done_testing;

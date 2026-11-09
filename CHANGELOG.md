@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1173 — Wait for output capacity without punishing queued retries
+
+- Identify retries by the live channel queue being drained, rather than by
+  caller-supplied options. Other channels and retired queues get no exemption.
+- At a full channel/global budget, keep deferred lines pending without
+  charging rejected attempts or starting a new silence. Charge on admission.
+- Preserve existing active silences, fresh-send penalties, physical-line
+  accounting and FIFO. Retry pacing and configured thresholds are unchanged.
+- Extend the existing line-cost tests with controlled-clock PRIVMSG/ACTION
+  coverage for exact window expiry, active silences and queue identity.
+
+
 ### MB1172 — Sleep deferred output through known AntiFlood silences
 
 - Derive queue retry delay from the later active channel/global silence,

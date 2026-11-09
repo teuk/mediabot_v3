@@ -1382,6 +1382,14 @@ sub checkAntiFlood {
     $cost = 1 unless defined $cost;
     return 1 unless !ref($cost) && $cost =~ /\A[1-9][0-9]*\z/;
 
+    # MB1173: only the live queue currently being drained may wait without
+    # creating a new penalty. Never infer retry status from caller options or
+    # from another channel's (or a retired connection's) queue.
+    my $queues = $self->{_flood_outq};
+    my $queue = $queues ? $queues->{$sChannel} : undef;
+    my $retry = $queue && (Scalar::Util::refaddr($self->{_flood_draining}) // 0)
+        == Scalar::Util::refaddr($queue);
+
     # IMP7: cross-channel global rate limit per bot-output
     # A bot could send to N channels at full per-channel speed — cap globally.
     # Probe without charging: a locally blocked retry is not a new output.
@@ -1406,8 +1414,9 @@ sub checkAntiFlood {
             if $hit_count > int($g_max * 0.7);  # only log when >70% of threshold
         if ($hit_count + $cost > $g_max) {
             # A batch that does not fit is queued as individual lines, not a
-            # flood incident that silences unrelated channels.
-            return 1 if $cost > 1;
+            # flood incident that silences unrelated channels. A queued retry
+            # must likewise wait without creating or extending a silence.
+            return 1 if $cost > 1 || $retry;
             $g->{silenced_until} = $now_g + $g_silence;
             $self->{logger}->log(2, "checkAntiFlood() global flood — silencing ${g_silence}s");
             return 1;
@@ -1504,7 +1513,7 @@ sub checkAntiFlood {
         $st->{first} = $now;
     }
 
-    return 1 if $cost > 1 && $st->{nbmsg} + $cost > $nbmsg_max;
+    return 1 if ($cost > 1 || $retry) && $st->{nbmsg} + $cost > $nbmsg_max;
     $st->{nbmsg} += $cost;
 
     if ($st->{nbmsg} > $nbmsg_max) {
