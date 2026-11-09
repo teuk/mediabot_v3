@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1183 — Prevent collisions with IRC literal placeholders
+
+- Reserve sanitized NUL/SOH boundaries for renderer-generated literal slots.
+- Discard these forbidden controls during entity decoding as well, preventing
+  HTML entities from manufacturing internal markers after input sanitization.
+- Preserve private-use Unicode text, including marker-like numeric strings,
+  without duplicating code spans or interpreting input as array indices.
+- Extend the existing inline-code suite with raw, entity and tag collision cases.
+
+
 ### MB1182 — Align DTC presentation limits with source identity rules
 
 - Accept only positive, canonical quote IDs of at most twelve ASCII digits,

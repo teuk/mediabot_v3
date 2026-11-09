@@ -41,4 +41,31 @@ for my $limit (120,400) {
     like($lines->[-1],qr/ …\z/,'truncation suffix retained');
 }
 is(_markdown_to_irc("`\x0304red\x00`"),'red','code does not bypass input control stripping');
+
+# MB1183: provider text must never impersonate protected literal slots.
+my $private = "\x{f0000}0\x{f0001}";
+my @collisions = (
+    [$private, $private],
+    ["`safe` $private", "safe $private"],
+    ['`safe` &#xF0000;0&#xF0001;', "safe $private"],
+    ["`safe` \x{f0000}<span>0</span>\x{f0001}", "safe $private"],
+    ["`safe` \x{f0000}" . ('9' x 40) . "\x{f0001}", "safe \x{f0000}" . ('9' x 40) . "\x{f0001}"],
+    ["`safe` \x{f0000}\x{0660}\x{f0001}", "safe \x{f0000}\x{0660}\x{f0001}"],
+    ["`safe` \x00" . "0\x01", 'safe 0'],
+    ['`safe` &#0;0&#1;', 'safe 0'],
+    ['`safe` &#x00;0&#x01;', 'safe 0'],
+    ['`safe` &#0;<span>0</span>&#1;', 'safe 0'],
+    ['`&#0;0&#1;` `second`', '&#0;0&#1; second'],
+    ["`$private` `second`", "$private second"],
+);
+my @warnings;
+{
+    local $SIG{__WARN__} = sub { push @warnings, @_ };
+    for my $case (@collisions) {
+        is(_markdown_to_irc($case->[0]), $case->[1], 'literal slots cannot be forged');
+        is_deeply(format_reply($case->[0]), [$case->[1]], 'shared renderer preserves provider text');
+        is_deeply(format_ai_reply($case->[0]), [$case->[1]], 'AI facade preserves provider text');
+    }
+}
+is_deeply(\@warnings, [], 'hostile slot-like text emits no conversion warnings');
 done_testing;

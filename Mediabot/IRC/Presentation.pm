@@ -69,6 +69,8 @@ sub _markdown_to_irc {
     # Fences carry no useful presentation on IRC; retain their contents.
     $text =~ s/^\s*```[^`\n]*$//mg;
 
+    # MB1183: NUL/SOH cannot survive input sanitization. Entity decoding below
+    # must also discard them, so only this renderer can create literal slots.
     my @literal;
     # MB1143: scan escapes and inline code together so an escaped backtick
     # cannot open code, while escapes inside code remain literal content.
@@ -78,7 +80,7 @@ sub _markdown_to_irc {
     }{
         my $slot = scalar @literal;
         push @literal, defined($1) ? $1 : $3;
-        "\x{f0000}$slot\x{f0001}";
+        "\x00$slot\x01";
     }gex;
 
     $text =~ s{<br\s*/?>}{\n}ig;
@@ -88,7 +90,11 @@ sub _markdown_to_irc {
     $text =~ s{</?(?:code|pre)\b[^>]*>}{}ig;
     $text =~ s{<(https?://[^>\s]+)>}{$1}gi;
     $text =~ s{</?[a-z][^>]*>}{}ig;
-    $text =~ s/&([a-z]+|#[0-9]+|#x[0-9a-f]+);/_decode_entity($1)/ige;
+    $text =~ s/&([a-z]+|#[0-9]+|#x[0-9a-f]+);/
+        my $decoded = _decode_entity($1);
+        $decoded =~ tr\/\x00\x01\/\/d;
+        $decoded;
+    /ige;
 
     $text =~ s{!\[([^\]\n]*)\]\((https?://[^\s)]+)(?:\s+"[^"]*")?\)}{
         length($1) ? "$1 <$2>" : $2;
@@ -166,7 +172,7 @@ sub _markdown_to_irc {
     $text =~ s/\*\*|__|~~//g;
     # Escaped markers are literal content, including doubled markers/ticks.
     # Restore them only after removing unescaped Markdown scaffolding.
-    $text =~ s/\x{f0000}(\d+)\x{f0001}/
+    $text =~ s/\x00([0-9]+)\x01/
         defined($literal[$1]) ? $literal[$1] : ''
     /gex;
     $text =~ s/[\t ]+/ /g;
