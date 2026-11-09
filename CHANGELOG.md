@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1179 — Preserve Unicode numbers beside Hailo colour controls
+
+- Restrict IRC decimal colour parameters to ASCII digits in Hailo's
+  normalizer, post-editor and context/final-output cleanup.
+- Preserve literal Arabic-Indic, fullwidth, Devanagari and mathematical
+  digits after colour controls, including mixed and background parameters.
+- Keep ordinary ASCII foreground/background stripping and two-digit limits.
+  Extend the existing Unicode normalization suite; no new test file.
+
+
 ### MB1178 — Accept UTF-8 byte-order marks in remote VERSION files
 
 - Recognize the raw UTF-8 BOM returned by HTTP::Tiny as well as the decoded
