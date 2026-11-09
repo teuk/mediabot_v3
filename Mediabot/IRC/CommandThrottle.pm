@@ -245,7 +245,10 @@ sub checkNickFlood {
         for my $k (keys %{ $self->{_nick_flood} }) {
             my $st = $self->{_nick_flood}{$k};
             my $last = @{ $st->{hits} // [] } ? $st->{hits}[-1] : 0;
-            delete $self->{_nick_flood}{$k} if ($now - $last) > $ttl;
+            # A shorter storage TTL must not erase hits that still contribute
+            # to the configured sliding window. Keep the existing sweep cadence.
+            my $age = $now - $last;
+            delete $self->{_nick_flood}{$k} if $age > $ttl && $age >= $window;
         }
         # A muted nick may never return. Reclaim its expired sanction on the
         # same sweep, while retaining active mutes independently of history TTL.

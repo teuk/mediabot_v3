@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1169 — Preserve active nick-flood windows during cleanup
+
+- Keep nick command history while its newest hit remains inside the configured
+  surveillance window, even when NICKFLOOD_STATE_TTL is shorter.
+- Preserve the existing cleanup cadence, longer TTL behavior and mute cleanup.
+- Extend the existing expired-mute regression with deterministic checks for
+  premature eviction, returning nick admission and exact expiry boundaries.
+
+
 ### MB1168 — Keep RSS quota state reads nonblocking
 
 - Open pacing state and locks in nonblocking mode so a FIFO state file cannot

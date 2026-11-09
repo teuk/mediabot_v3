@@ -129,4 +129,35 @@ is_deeply([$allowed, mute_keys_1391($bot), [sort keys %{$bot->{_nick_flood}}],
         [0, ['absent'], $base-1, [$base], []],
         'returning nick still expires immediately between sweeps and starts ordinary history without warnings');
 }
+{
+    my $long = bot_1391();
+    $long->{conf}{'antiflood.NICKFLOOD_WINDOW'} = 60;
+    $long->{conf}{'antiflood.NICKFLOOD_STATE_TTL'} = 10;
+    my $base = $main::now;
+    is(Mediabot::IRC::CommandThrottle::checkNickFlood($long,'Reader',undef),0,
+        'mb1169: first command starts a long surveillance window');
+    $main::now = $base + 11;
+    Mediabot::IRC::CommandThrottle::checkNickFlood($long,'Observer',undef);
+    is_deeply($long->{_nick_flood}{reader}{hits},[$base],
+        'mb1169: another nick cannot sweep hits still inside the configured window');
+    is(Mediabot::IRC::CommandThrottle::checkNickFlood($long,'READER',undef),1,
+        'mb1169: a returning nick is still blocked after the shorter storage TTL');
+    $main::now = $base + 71;
+    Mediabot::IRC::CommandThrottle::checkNickFlood($long,'Other',undef);
+    ok(!exists($long->{_nick_flood}{reader}),
+        'mb1169: history is reclaimed at the window boundary once the TTL also expired');
+    is(Mediabot::IRC::CommandThrottle::checkNickFlood($long,'Reader',undef),0,
+        'mb1169: a fully expired window permits a fresh command');
+    my $ordinary = bot_1391();
+    my $start = $main::now;
+    Mediabot::IRC::CommandThrottle::checkNickFlood($ordinary,'Reader',undef);
+    $main::now = $start + 120;
+    Mediabot::IRC::CommandThrottle::checkNickFlood($ordinary,'Observer',undef);
+    ok(exists($ordinary->{_nick_flood}{reader}),
+        'mb1169: the existing longer TTL retains its strict expiry boundary');
+    $main::now = $start + 240;
+    Mediabot::IRC::CommandThrottle::checkNickFlood($ordinary,'Other',undef);
+    ok(!exists($ordinary->{_nick_flood}{reader}),
+        'mb1169: ordinary short-window history still expires on the cleanup cadence');
+}
 done_testing;
