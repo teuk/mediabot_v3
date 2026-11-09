@@ -81,5 +81,30 @@ for my $id ('??', undef, 'not-an-id') {
     like(plain862($lines->[0]), qr/^\[\?\?\].*…\z/, 'unknown-ID prefix and visible clipping remain');
 }
 is_deeply(format_quote_lines(15924, "\n \n"), [], 'empty content still produces no quote');
+
+# Public formatter identifiers follow the same bounds as dtc_quote_url().
+for my $bad ('0','01','1234567890123', '9' x 500, [], {}) {
+    is_deeply(format_quote_lines($bad,'A short quote'),
+        format_quote_lines('??','A short quote'),
+        'invalid identifier cannot consume text space or advertise a bogus URL');
+    my $clipped=format_quote_lines($bad,'x' x 600);
+    is(scalar(@$clipped),1,'invalid identifier never adds a destination for clipped text');
+}
+for my $id ('1','999999999999') {
+    my $lines=format_quote_lines($id,'x' x 600);
+    like($lines->[-1],qr{https://danstonchat\.com/quote/\Q$id\E\.html},
+        'valid identifier boundary retains its full quote link');
+}
+my $many=join("\n",map {"Dialogue $_"} 1..12);
+for my $bad ('3١','３','٣',"3\n",'3oops',[],{}) {
+    is_deeply(format_quote_lines(15924,$many,max_lines=>$bad),
+        format_quote_lines(15924,$many),
+        'malformed line limit uses the default without numeric-prefix coercion');
+}
+for my $limit (3,5,10,'03') {
+    is(scalar(@{format_quote_lines(15924,$many,max_lines=>$limit)}),0+$limit,
+        'valid ASCII line limits retain their bounded output');
+}
+
 is_deeply(\@warnings, [], 'ASCII and international clipping emit no warnings');
 done_testing;

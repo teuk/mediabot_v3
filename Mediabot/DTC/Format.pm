@@ -35,9 +35,9 @@ sub format_quote_lines {
     my ($id, $text, %opts) = @_;
     my $max_lines = $opts{max_lines} // MAX_LINES;
     $max_lines = MAX_LINES unless !ref($max_lines)
-        && "$max_lines" =~ /\A\d+\z/ && $max_lines >= 3
+        && "$max_lines" =~ /\A[0-9]+\z/ && $max_lines >= 3
         && $max_lines <= MAX_LINES;
-    $id = '??' unless defined($id) && !ref($id) && $id =~ /\A(?:[0-9]+|\?\?)\z/;
+    $id = '??' unless defined($id) && !ref($id) && $id =~ /\A[1-9][0-9]{0,11}\z/;
     return [] unless defined($text) && !ref($text);
 
     my @lines = grep { length($_) } map { _clean_line($_) } split /\n/, $text;

@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1182 — Align DTC presentation limits with source identity rules
+
+- Accept only positive, canonical quote IDs of at most twelve ASCII digits,
+  matching dtc_quote_url. Invalid IDs use the existing unknown-ID presentation
+  and cannot consume the quote budget or advertise an invalid destination.
+- Validate max_lines with ASCII digits before numeric comparisons, preventing
+  Unicode-digit numeric-prefix coercion and conversion warnings.
+- Extend the existing wire-format suite with identifier and line-limit bounds.
+
+
 ### MB1181 — Keep mixed DTC cards associated with their nearest IDs
 
 - Search permalinks and data-id attributes together in document order rather
