@@ -52,4 +52,33 @@ for my $limit (120,400) {
     is_deeply($bounds[-1],[2,0,0,1,$lines],
         "short styles and restored literal markers preserve the $limit-byte budget, two-line cap, control filtering and plain suffix");
 }
+
+# MB1184: options must use ASCII numbers before Perl numeric coercion.
+my $long_reply = ('**étoile** 🔥 ' x 100);
+for my $option ('wrap_bytes', 'max_lines') {
+    my $default = $option eq 'wrap_bytes' ? 400 : 2;
+    for my $bad ("١", "１２", "120١", "1١", '', '-1', '1.5', 'NaN', [], {}) {
+        my (@warnings, $shared, $ai);
+        {
+            local $SIG{__WARN__} = sub { push @warnings, @_ };
+            $shared = format_reply($long_reply, $option => $bad);
+            $ai = format_ai_reply($long_reply, $option => $bad);
+        }
+        is_deeply($shared, format_reply($long_reply, $option => $default),
+            "$option rejects malformed values without selecting a numeric prefix");
+        is_deeply($ai, $shared, 'AI facade uses identical option validation');
+        is_deeply(\@warnings, [], 'invalid option produces no conversion warnings');
+    }
+}
+for my $case (
+    ['wrap_bytes', 0, 120], ['wrap_bytes', 119, 120],
+    ['wrap_bytes', '00120', 120], ['wrap_bytes', 240, 240],
+    ['wrap_bytes', 401, 400], ['max_lines', 0, 1],
+    ['max_lines', '01', 1], ['max_lines', 2, 2], ['max_lines', 99, 2]
+) {
+    my ($option, $input, $effective) = @$case;
+    is_deeply(format_reply($long_reply, $option => $input),
+        format_reply($long_reply, $option => $effective),
+        'ASCII options retain existing clamping and leading-zero semantics');
+}
 done_testing;

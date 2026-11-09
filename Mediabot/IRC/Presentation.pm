@@ -233,15 +233,16 @@ sub format_ai_reply {
     my ($answer, %options) = @_;
     return [] unless defined($answer) && !ref($answer) && length($answer);
 
+    # MB1184: Perl numeric conversion accepts ASCII digits, not Unicode Nd.
     my $wrap_bytes = $options{wrap_bytes};
     $wrap_bytes = MAX_IRC_BYTES
-        unless defined($wrap_bytes) && "$wrap_bytes" =~ /\A\d+\z/;
+        unless defined($wrap_bytes) && !ref($wrap_bytes) && "$wrap_bytes" =~ /\A[0-9]+\z/;
     $wrap_bytes = 120 if $wrap_bytes < 120;
     $wrap_bytes = MAX_IRC_BYTES if $wrap_bytes > MAX_IRC_BYTES;
 
     my $max_lines = $options{max_lines};
     $max_lines = MAX_IRC_LINES
-        unless defined($max_lines) && "$max_lines" =~ /\A\d+\z/;
+        unless defined($max_lines) && !ref($max_lines) && "$max_lines" =~ /\A[0-9]+\z/;
     $max_lines = 1 if $max_lines < 1;
     $max_lines = MAX_IRC_LINES if $max_lines > MAX_IRC_LINES;
 

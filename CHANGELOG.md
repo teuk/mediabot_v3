@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1184 — Validate IRC reply limits before numeric conversion
+
+- Require non-reference ASCII decimal values for wrap_bytes and max_lines.
+- Malformed Unicode or mixed-script values now use the established defaults
+  rather than becoming zero or a numeric prefix and prematurely truncating text.
+- Preserve byte limits 120..400, line limits 1..2 and ASCII leading zeros.
+- Extend the existing presentation suite through both shared and AI facades.
+
+
 ### MB1183 — Prevent collisions with IRC literal placeholders
 
 - Reserve sanitized NUL/SOH boundaries for renderer-generated literal slots.
