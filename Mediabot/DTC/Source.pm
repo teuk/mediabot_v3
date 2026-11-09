@@ -104,16 +104,20 @@ sub _id_near_block {
     # nearest preceding ID instead of the first ID in a wide window, otherwise
     # adjacent cards can steal each other's identifier.
     my $before = substr($html, $from, $start - $from);
-    my @before_ids = ($before =~ m{/quote/([0-9]+)\.html}ig);
-    return $before_ids[-1] if @before_ids;
-    my @before_data = ($before =~ /\bdata-id\s*=\s*["']([0-9]+)["']/ig);
-    return $before_data[-1] if @before_data;
+    # Compare both supported identifier forms in document order. Giving all
+    # permalinks priority can assign a previous card's ID to a data-id card.
+    my $nearest;
+    while ($before =~ m{/quote/([0-9]+)\.html|\bdata-id\s*=\s*["']([0-9]+)["']}ig) {
+        $nearest = defined($1) ? $1 : $2;
+    }
+    return $nearest if defined $nearest;
 
     my $to = $end + 1600;
     $to = length($html) if $to > length($html);
     my $after = substr($html, $end, $to - $end);
-    return $1 if $after =~ m{/quote/([0-9]+)\.html}i;
-    return $1 if $after =~ /\bdata-id\s*=\s*["']([0-9]+)["']/i;
+    if ($after =~ m{/quote/([0-9]+)\.html|\bdata-id\s*=\s*["']([0-9]+)["']}i) {
+        return defined($1) ? $1 : $2;
+    }
     return undef;
 }
 

@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1181 — Keep mixed DTC cards associated with their nearest IDs
+
+- Search permalinks and data-id attributes together in document order rather
+  than preferring every permalink over every data-id attribute.
+- Keep the nearest preceding identifier, or the first following one when no
+  preceding identifier exists, within the existing bounded lookup windows.
+- Cover mixed random-page cards and following-identifier fallback in the
+  existing parser test. No new project test file.
+
+
 ### MB1180 — Keep Hailo typing parameters finite
 
 - Validate typing coefficient and offset before numeric conversion; malformed

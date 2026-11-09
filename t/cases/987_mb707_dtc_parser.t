@@ -29,4 +29,25 @@ HTML
 
     $assert->is(strip_trailing_numeric_debris("hello\nworld\n42"), "hello\nworld",
         'mb707-987: trailing numeric debris is removed like the Tcl reference');
+
+    # Mixed card formats must not prefer a farther permalink over data-id.
+    for my $pair (
+        ['<a href="/quote/111.html">first</a>', '<article data-id="222">'],
+        ['<article data-id="111">', '<a href="/quote/222.html">second</a>'],
+        ['<article data-id="111">', '<article data-id="222">'],
+    ) {
+        my $cards=$pair->[0].'<div class="entry-content">First quote</div></div></article>'
+            .$pair->[1].'<div class="entry-content">Second quote</div></div></article>';
+        my $parsed=parse_random_quotes($cards);
+        $assert->is(join('|',map {$_->{id}} @$parsed),'111|222',
+            'mb1181: mixed random cards retain their own nearest identifiers');
+        $assert->is(join('|',map {$_->{text}} @$parsed),'First quote|Second quote',
+            'mb1181: identity selection leaves quote text and order unchanged');
+    }
+    for my $tail ('<span data-id="333"></span><a href="/quote/444.html">later</a>',
+                  '<a href="/quote/333.html">first</a><span data-id="444"></span>') {
+        my $card='<div class="entry-content">A quote</div></div>'.$tail;
+        $assert->is(parse_random_quotes($card)->[0]{id},'333',
+            'mb1181: missing preceding identity uses the first following identifier');
+    }
 };
