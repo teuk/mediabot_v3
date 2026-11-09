@@ -154,7 +154,12 @@ sub clear_plugin {
         die "channel_storage_symlink\n" if -l $path;
         die "channel_storage_permissions\n" unless -f $path && (stat($path))[4] == $<;
         next if $name =~ /\.lock\z/;
-        sysopen my $lock, "$path.lock", O_RDWR | O_CREAT | O_NOFOLLOW, 0600 or die "channel_storage_lock\n";
+        sysopen my $lock, "$path.lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0600
+            or die "channel_storage_lock\n";
+        # MB1188: cleanup must honor the same opened-lock contract as commit.
+        my @lock_stat = stat($lock);
+        die "channel_storage_lock\n" unless -f $lock && $lock_stat[4] == $<
+            && !($lock_stat[2] & 0077);
         die "channel_storage_busy\n" unless flock($lock, LOCK_EX | LOCK_NB);
         push @locks, $lock; push @paths, $path;
     }

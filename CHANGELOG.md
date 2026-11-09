@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1188 — Validate collection cleanup locks before deletion
+
+- Apply commit's opened-lock requirements to cleanup: regular file, current
+  owner and no group/other permissions, before taking the nonblocking lock.
+- Open cleanup locks with O_NONBLOCK and preserve the existing lock inodes.
+- Exercise late-channel permission and busy failures in the existing repository
+  suite, verifying all collections remain intact and cleanup can be retried.
+
+
 ### MB1187 — Bound channel collection reads without FIFO blocking
 
 - Open collection state with O_NONBLOCK before checking the opened object,

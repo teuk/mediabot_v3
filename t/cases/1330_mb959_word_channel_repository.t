@@ -95,4 +95,37 @@ my $cleared = Mediabot::Plugin::ChannelRepositoryV3->clear_plugin(directory => "
 is($cleared, 1, 'core cleanup removes only the selected plugin collection');
 is_deeply($a->snapshot->{values}, {}, 'selected collection is empty after owner cleanup');
 is($new->('other-plugin')->snapshot->{values}{keep}, 'foreign', 'owner cleanup preserves another plugin');
+
+# MB1188: cleanup must enforce the same lock permissions as ordinary writes.
+for my $fault ('permissions', 'busy') {
+    my $plugin="cleanup-$fault";
+    my @repos=map {$new->($plugin,$_)} ('#one','#two');
+    $_->commit(expected_revision=>0, changes=>{keep=>'score'}) for @repos;
+    my @paths=sort map {$_->_path(0)} @repos;
+    my $lock_path=$paths[-1].'.lock';
+    my $inode=(stat($lock_path))[1];
+    my $held;
+    if ($fault eq 'permissions') {chmod 0644,$lock_path or die $!}
+    else {
+        open $held,'+<',$lock_path or die $!;
+        flock($held,LOCK_EX|LOCK_NB) or die $!;
+    }
+    my $ok=eval {
+        Mediabot::Plugin::ChannelRepositoryV3->clear_plugin(directory=>"$tmp/data",plugin=>$plugin);
+        1;
+    };
+    my $error=$@;
+    ok(!$ok,"cleanup refuses $fault on a later channel lock");
+    like($error,$fault eq 'permissions' ? qr/\Achannel_storage_lock\n\z/ : qr/\Achannel_storage_busy\n\z/,
+        'cleanup reports its bounded lock error');
+    for my $repo (@repos) {
+        is_deeply($repo->snapshot,{revision=>1,values=>{keep=>'score'}},
+            'refused cleanup preserves every channel collection');
+    }
+    close $held if $held;
+    chmod 0600,$lock_path or die $!;
+    is(Mediabot::Plugin::ChannelRepositoryV3->clear_plugin(directory=>"$tmp/data",plugin=>$plugin),
+        2,'cleanup succeeds after the lock problem is resolved');
+    is((stat($lock_path))[1],$inode,'cleanup preserves the original lock inode');
+}
 done_testing;
