@@ -5,16 +5,51 @@ use warnings;
 use utf8;
 use Scalar::Util qw(refaddr weaken);
 use Mediabot::IRC::Timer ();
+use Time::HiRes ();
 
 # Existing bounded AntiFlood queue. Keep state keys, head reinsertion, timing
 # and dynamic Helpers callbacks; this is separate from explicit paced batches.
 sub botPrivmsg { return Mediabot::Helpers::botPrivmsg(@_); }
 sub botAction { return Mediabot::Helpers::botAction(@_); }
 
+# A response has one monotonic deadline shared by all its remaining lines.
+# Queue retries must retain this identity and never refresh its lifetime.
+sub _flood_queue_now {
+    return Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
+}
+
+sub _expire_flood_output {
+    my ($self, $to, $q, $now) = @_;
+    my (@keep, %expired);
+    for my $item (@{$q->{items}}) {
+        # Old in-memory entries have no trustworthy enqueue timestamp. Give
+        # them one bounded grace period when first observed after an upgrade.
+        my $response = $item->[3] ||= { expires_at => $now + 120 };
+        if ($now >= $response->{expires_at}) {
+            $expired{refaddr($response)}++;
+        } else {
+            push @keep, $item;
+        }
+    }
+    @{$q->{items}} = @keep;
+    for my $lines (values %expired) {
+        eval { $self->{logger}->log(3,
+            "AntiFlood expired one queued response on $to ($lines remaining lines)") };
+        eval { $self->{metrics}->inc('mediabot_antiflood_expired_responses_total') }
+            if $self->{metrics};
+    }
+    return scalar keys %expired;
+}
+
 sub _defer_flooded_send {
     my ($self, $kind, $to, $msg, $send_options) = @_;
 
     my $q = $self->{_flood_outq}{$to} //= { items => [], armed => 0 };
+    my $retry = (refaddr($self->{_flood_draining}) // 0) == refaddr($q);
+    my $now = _flood_queue_now();
+    _expire_flood_output($self, $to, $q, $now) unless $retry;
+    my $response = $retry ? $self->{_flood_response} : undef;
+    $response ||= { expires_at => $now + 120 };
     # Queue physical IRC lines so an oversized response can make progress
     # even when its total cost exceeds the channel or connection allowance.
     my @chunks = Mediabot::Helpers::_split_text_for_irc($msg, $kind eq 'action' ? 391 : 400);
@@ -32,6 +67,7 @@ sub _defer_flooded_send {
             $item->[2] ||= {};
             $item->[2]{flood_source_text} = $source;
         }
+        $item->[3] = $response;
         push @items, $item;
     }
     if (@{$q->{items}} + @items > 30) {
@@ -39,7 +75,7 @@ sub _defer_flooded_send {
             "flood queue full on $to — dropping one $kind message");
         return undef;
     }
-    if ((refaddr($self->{_flood_draining}) // 0) == refaddr($q)) {
+    if ($retry) {
         # Preserve line order ahead of later replies, including a legacy
         # unsplit item already queued before this code was loaded.
         unshift @{$q->{items}}, @items;
@@ -119,11 +155,13 @@ sub _drain_flood_queue {
     my $q = $self->{_flood_outq}{$to} or return;
     $q->{armed} = 0;
 
+    _expire_flood_output($self, $to, $q, _flood_queue_now());
     my $item = shift @{ $q->{items} };
     my $sent = eval {
         if ($item) {
             my ($kind, $msg, $send_options) = @$item;
             local $self->{_flood_draining} = $q;
+            local $self->{_flood_response} = $item->[3];
             if ($kind eq 'action') { botAction($self, $to, $msg, $send_options) }
             else                   { botPrivmsg($self, $to, $msg, $send_options) }
         }

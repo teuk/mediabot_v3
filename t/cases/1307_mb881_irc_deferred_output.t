@@ -22,7 +22,7 @@ MB881OutputFixture::with_policy(sub {
     $bot->{blocked} = 0; $bot->{loop}->tick;
     is_deeply([map {$_->{text}} @{$bot->{irc}{wire}}], ['A'], 'one timer tick sends one queued item');
     $bot->{blocked} = 1; $bot->{loop}->tick;
-    is_deeply($bot->{_flood_outq}{'#test'}{items}, [['action', 'B'], ['privmsg', 'C']], 'reblocked item returns to the head with its kind');
+    is_deeply([map { [@{$_}[0,1]] } @{$bot->{_flood_outq}{'#test'}{items}}], [['action', 'B'], ['privmsg', 'C']], 'reblocked item returns to the head with its kind');
     is(scalar @{$bot->{irc}{wire}}, 1, 'reblocking cannot leak a wire send');
     $bot->{blocked} = 0; $bot->{loop}->drain;
     is_deeply([map {$_->{text}} @{$bot->{irc}{wire}}], ['A', "\1ACTION B\1", 'C'], 'mixed PRIVMSG/ACTION order and envelopes survive deferral');

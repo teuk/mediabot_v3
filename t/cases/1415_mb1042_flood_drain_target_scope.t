@@ -1,3 +1,14 @@
+# Compare delivery payload independently of private queue lifetime metadata.
+# Preserve the optional sender options (including ping stamps) in assertions.
+sub payload_1415_1174 {
+    my ($items) = @_;
+    return [map {
+        my @payload = @{$_}[0,1];
+        push @payload, $_->[2] if defined $_->[2];
+        \@payload;
+    } @$items];
+}
+
 use strict;
 use warnings;
 use utf8;
@@ -57,14 +68,14 @@ my $native_new = IO::Async::Timer::Countdown->can('new');
         $b->{blocked_targets}{'#source'} = 0;
         quiet_1415(sub {$b->{loop}->tick});
         my $q = $b->{_flood_outq}{'#other'};
-        is_deeply([$q->{items}, $q->{armed}, pending_1415($b)],
+        is_deeply([payload_1415_1174($q->{items}), $q->{armed}, pending_1415($b)],
             [[['privmsg','first'],['action','second']],1,1],
             'a new target enqueued by the real log callback keeps FIFO order and arms its own drain');
         $b->{blocked_targets}{'#other'} = 0;
         quiet_1415(sub {$b->{loop}->drain});
         is_deeply(wire_1415($b), [['#source','source'],['#other','first'],['#other',"\1ACTION second\1"]],
             'cross-target work reaches the production sender once with its original message kinds');
-        is_deeply([$q->{items}, $q->{armed}, pending_1415($b), $b->{_flood_draining}], [[],0,0,undef],
+        is_deeply([payload_1415_1174($q->{items}), $q->{armed}, pending_1415($b), $b->{_flood_draining}], [[],0,0,undef],
             'new target completes without stranded payloads, timers or an active drain marker');
         $b->{logger}->remove_console_hook('fixture');
 
@@ -74,7 +85,7 @@ my $native_new = IO::Async::Timer::Countdown->can('new');
         $b->{blocked_targets}{'#source'} = 0;
         quiet_1415(sub {$b->{loop}->tick});
         $q = $b->{_flood_outq}{'#other'};
-        is_deeply([$q->{items}, $q->{armed}, pending_1415($b)],
+        is_deeply([payload_1415_1174($q->{items}), $q->{armed}, pending_1415($b)],
             [[['privmsg','older'],['privmsg','newer']],1,1],
             'an already armed target retains its older head without adding a duplicate timer');
         $b->{blocked_targets}{'#other'} = 0;
@@ -91,14 +102,14 @@ my $native_new = IO::Async::Timer::Countdown->can('new');
         $b->{blocked_targets}{'#source'} = 0;
         quiet_1415(sub {$b->{loop}->tick});
         $q = $b->{_flood_outq}{'#other'};
-        is_deeply([scalar(@{$q->{items}}), $q->{items}[0], $q->{items}[-1], pending_1415($b)],
+        is_deeply([scalar(@{$q->{items}}), payload_1415_1174([$q->{items}[0]])->[0], payload_1415_1174([$q->{items}[-1]])->[0], pending_1415($b)],
             [30,['privmsg','item1'],['privmsg','item30'],1],
             'cross-target enqueue obeys the thirty-item cap and preserves the existing queue');
         $b->{blocked_targets}{'#other'} = 0;
         quiet_1415(sub {$b->{loop}->drain});
         is_deeply(wire_1415($b), [['#source','source'],map {['#other',"item$_"]} 1..30],
             'overflow is not sent later and accepted messages keep their order');
-        is_deeply([$q->{items}, $q->{armed}, pending_1415($b)], [[],0,0],
+        is_deeply([payload_1415_1174($q->{items}), $q->{armed}, pending_1415($b)], [[],0,0],
             'the capped queue still drains completely');
         $b->{logger}->remove_console_hook('fixture');
 
@@ -106,7 +117,7 @@ my $native_new = IO::Async::Timer::Countdown->can('new');
         privmsg($b, '#source', 'retry'); action($b, '#source', 'after');
         quiet_1415(sub {$b->{loop}->tick}); # Still blocked at its own handoff.
         $q = $b->{_flood_outq}{'#source'};
-        is_deeply([$q->{items}, $q->{armed}, pending_1415($b)],
+        is_deeply([payload_1415_1174($q->{items}), $q->{armed}, pending_1415($b)],
             [[['privmsg','retry'],['action','after']],1,1],
             'a genuinely reblocked item for the current target still returns to its head and rearms once');
         $b->{blocked_targets}{'#source'} = 0;

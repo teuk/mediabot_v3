@@ -1,3 +1,14 @@
+# Compare delivery payload independently of private queue lifetime metadata.
+# Preserve the optional sender options (including ping stamps) in assertions.
+sub payload_1306_1174 {
+    my ($items) = @_;
+    return [map {
+        my @payload = @{$_}[0,1];
+        push @payload, $_->[2] if defined $_->[2];
+        \@payload;
+    } @$items];
+}
+
 use strict;
 use warnings;
 use utf8;
@@ -103,7 +114,7 @@ MB881OutputFixture::with_policy(sub {
     is(privmsg($bot, '#test', 'ephemeral', {no_defer => 1}), 0, 'no_defer keeps explicit rejection while flooded');
     ok(!exists $bot->{_flood_outq}, 'no_defer cannot create queued work');
     is(privmsg($bot, '#test', 'durable'), 1, 'ordinary flood deferral retains its acceptance result');
-    is_deeply($bot->{_flood_outq}{'#test'}{items}, [['privmsg', 'durable']], 'ordinary output reaches the same deferred state');
+    is_deeply(payload_1306_1174($bot->{_flood_outq}{'#test'}{items}), [['privmsg', 'durable']], 'ordinary output reaches the same deferred state');
 });
 
 my @leaked;
@@ -457,10 +468,10 @@ MB881OutputFixture::with_policy(sub {
         my $bot=ping_bot_1099();$bot->{policy}{AntiFlood}=1;$bot->{blocked}=1;
         $now=100;$bot->{_privmsg_received_at}=100;
         $bot->mbCommandPublic(undef,'#test','Alice',0,'ping');
-        my $queued=[map {[@$_]} @{$bot->{_flood_outq}{'#test'}{items}}];
+        my $queued=payload_1306_1174($bot->{_flood_outq}{'#test'}{items});
         privmsg($bot,'#test','after');
         $now=102;Mediabot::Helpers::_drain_flood_queue($bot,'#test'); # Still flooded: retain stamp and head.
-        my $reflood=[map {[@$_]} @{$bot->{_flood_outq}{'#test'}{items}}];
+        my $reflood=payload_1306_1174($bot->{_flood_outq}{'#test'}{items});
         $now=103.334;$bot->{blocked}=0;
         Mediabot::Helpers::_drain_flood_queue($bot,'#test');
         Mediabot::Helpers::_drain_flood_queue($bot,'#test');
@@ -469,7 +480,7 @@ MB881OutputFixture::with_policy(sub {
             [[['privmsg','POng ! [0.000s]',{ping_started_at=>100}]],
              [['privmsg','POng ! [0.000s]',{ping_started_at=>100}],['privmsg','after']],
              ['POng ! [3.334s]','after'],[]],
-            'AntiFlood retains only the scalar ping stamp across reflooding, includes queue wait and preserves FIFO/ordinary two-field items');
+            'AntiFlood retains only the scalar ping stamp across reflooding, includes queue wait and preserves FIFO/delivery payload independently of expiry metadata');
     }
     @actual=();@expected=();
     for my $guard (qw(channel nick cooldown badword)) {

@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1174 — Expire stale deferred responses as a group
+
+- Bound queued response lifetime to 120 seconds on a monotonic clock, shared
+  by every physical line. Preserve the original deadline across retries.
+- Discard all remaining expired chunks before admission or queue-capacity
+  checks; already sent prefixes are never replayed. Legacy entries receive
+  one bounded grace period on first observation.
+- Count expired responses once and log remaining line counts without message
+  content or additional IRC output. Keep existing queue and rate limits.
+- Cover expiry boundaries, retries, partial delivery, capacity reclamation
+  and metadata preservation in the existing line-cost suite.
+
+
 ### MB1173 — Wait for output capacity without punishing queued retries
 
 - Identify retries by the live channel queue being drained, rather than by

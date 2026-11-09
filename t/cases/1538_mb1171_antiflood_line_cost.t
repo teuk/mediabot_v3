@@ -204,4 +204,55 @@ for my $foreign (0,1) {
  is($bot->{_af}{'#test'}{silenced_until},$MB1171::Guard::now+300,
     $foreign?'another channel drain cannot waive a new penalty':'a retired queue cannot waive a new penalty');
 }
+
+# MB1174: expiration uses elapsed time, independently of wall-clock admission.
+{
+ no warnings 'redefine';
+ my $now=100;
+ local *Mediabot::IRC::DeferredOutput::_flood_queue_now=sub {$now};
+ {package MB1174::Metrics;sub inc {$_[0]{$_[1]}++}
+  package MB1174::Log;sub log {push @{$_[0]{lines}},$_[2]}}
+ my $make=sub {my $b=bot_1171(20);$b->{metrics}=bless {},'MB1174::Metrics';
+   $b->{logger}=bless {lines=>[]},'MB1174::Log';return $b};
+ my $enqueue=sub {Mediabot::IRC::DeferredOutput::_defer_flooded_send($_[0],$_[1],'#test',$_[2],$_[3])};
+ for my $kind ('privmsg','action') {
+  $now=100;my $b=$make->();$enqueue->($b,$kind,'x'x900,{ping_started_at=>42});
+  my $q=$b->{_flood_outq}{'#test'};my $group=$q->{items}[0][3];
+  is_deeply([map {$_->[3]{expires_at}} @{$q->{items}}],[220,220,220],"$kind: chunks share the initial deadline");
+  ok(!grep({$_->[3] != $group} @{$q->{items}}),"$kind: all chunks share response identity");
+  is($q->{items}[0][2]{ping_started_at},42,"$kind: receipt metadata survives enqueue");
+  $now=150;$enqueue->($b,'privmsg','fresh');
+  $b->{_global_af}={hits=>[],silenced_until=>$MB1171::Guard::now+500};
+  $now=219;drain_1171($b);
+  is($q->{items}[0][3],$group,"$kind: reblocked head retains response identity");
+  is($q->{items}[0][3]{expires_at},220,"$kind: retry never refreshes deadline");
+  is(scalar @{$q->{items}},4,"$kind: response remains queued just before expiry");
+  $now=220;drain_1171($b);
+  is_deeply([map {$_->[1]} @{$q->{items}}],['fresh'],"$kind: exact expiry removes all old chunks, retaining fresh work");
+  is($b->{metrics}{mediabot_antiflood_expired_responses_total},1,"$kind: count response once, not once per chunk");
+  is_deeply($b->{irc}{wire},[],"$kind: expiration emits no channel message");
+  drain_1171($b);
+  is($b->{metrics}{mediabot_antiflood_expired_responses_total},1,"$kind: later drains cannot double count expiration");
+  my @logs=grep {/expired one queued response/} @{$b->{logger}{lines}};
+  is(scalar @logs,1,"$kind: one explicit expiration log");
+  unlike($logs[0],qr/xxxx/,"$kind: expiration log does not expose message content");
+ }
+ $now=100;my $b=$make->();$enqueue->($b,'privmsg','x'x900);
+ drain_1171($b);is(scalar @{$b->{irc}{wire}},1,'first chunk may be delivered while fresh');
+ $now=220;drain_1171($b);
+ is_deeply([scalar @{$b->{irc}{wire}},scalar @{$b->{_flood_outq}{'#test'}{items}},
+   $b->{metrics}{mediabot_antiflood_expired_responses_total}],[1,0,1],
+   'expiry drops remaining chunks without replaying the already delivered prefix');
+ $now=100;$b=$make->();$enqueue->($b,'privmsg','x'x12000);
+ $now=220;ok($enqueue->($b,'privmsg','new'),'expired full queue accepts a fresh response');
+ is_deeply([map {$_->[1]} @{$b->{_flood_outq}{'#test'}{items}}],['new'],'enqueue reclaims all expired slots');
+ is($b->{metrics}{mediabot_antiflood_expired_responses_total},1,'capacity cleanup counts a multi-line response once');
+ $now=100;$b=$make->();$b->{_flood_outq}{'#test'}={items=>[['privmsg','legacy']],armed=>0};
+ $b->{_global_af}={hits=>[],silenced_until=>$MB1171::Guard::now+500};
+ drain_1171($b);$now=219;drain_1171($b);
+ is($b->{_flood_outq}{'#test'}{items}[0][3]{expires_at},220,'legacy entry gets a single bounded grace period');
+ $now=220;drain_1171($b);
+ is_deeply($b->{_flood_outq}{'#test'}{items},[],'legacy retry also expires at its original deadline');
+ is($b->{_flood_outq}{'#test'}{armed},0,'expired empty queue is left unarmed');
+}
 done_testing;

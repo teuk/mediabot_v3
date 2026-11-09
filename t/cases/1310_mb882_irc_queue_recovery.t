@@ -1,3 +1,14 @@
+# Compare delivery payload independently of private queue lifetime metadata.
+# Preserve the optional sender options (including ping stamps) in assertions.
+sub payload_1310_1174 {
+    my ($items) = @_;
+    return [map {
+        my @payload = @{$_}[0,1];
+        push @payload, $_->[2] if defined $_->[2];
+        \@payload;
+    } @$items];
+}
+
 use strict;
 use warnings;
 use Test::More;
@@ -57,7 +68,7 @@ for my $stage (qw(new add-before add-after start)) {
         ok(!$ok, "$stage: AntiFlood arm failure remains visible");
         is(refaddr($got), refaddr($error), "$stage: AntiFlood retains original error");
         is($bot->{_flood_outq}{'#test'}{armed}, 0, "$stage: AntiFlood arm flag is reset");
-        is_deeply($bot->{_flood_outq}{'#test'}{items}, [['privmsg', 'queued']], "$stage: AntiFlood retains pending payload");
+        is_deeply(payload_1310_1174($bot->{_flood_outq}{'#test'}{items}), [['privmsg', 'queued']], "$stage: AntiFlood retains pending payload");
         is(scalar keys %{$bot->{loop}{attached}}, 0, "$stage: AntiFlood partially attached timer is removed");
         $_->() for @{$bot->{loop}{callbacks}};
         is(scalar @{$bot->{irc}{wire}}, 0, "$stage: failed AntiFlood expiry is inert");
@@ -141,7 +152,7 @@ MB881OutputFixture::with_policy(sub {
     my $ok = eval {$bot->{loop}->tick; 1}; my $got = $@;
     ok(!$ok && refaddr($got) == refaddr($error), 'simultaneous AntiFlood send/rearm failure preserves the primary exception');
     is($bot->{_flood_outq}{'#test'}{armed}, 0, 'simultaneous failure resets the arm flag');
-    is_deeply($bot->{_flood_outq}{'#test'}{items}, [['privmsg', 'after']], 'simultaneous failure retains only the unattempted payload');
+    is_deeply(payload_1310_1174($bot->{_flood_outq}{'#test'}{items}), [['privmsg', 'after']], 'simultaneous failure retains only the unattempted payload');
     is(scalar keys %{$bot->{loop}{attached}}, 0, 'simultaneous failure removes both notifiers');
 });
 done_testing;

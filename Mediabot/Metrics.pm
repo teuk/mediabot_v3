@@ -149,6 +149,7 @@ sub new {
     $self->_declare('mediabot_timers_current',         'gauge',   'Current number of active timers');
     $self->_declare('mediabot_channels_managed',       'gauge',   'Current number of managed channels');
     # AF: antiflood metrics
+    $self->_declare('mediabot_antiflood_expired_responses_total', 'counter', 'Queued AntiFlood responses discarded after their lifetime');
     $self->_declare('mediabot_antiflood_blocks_total',  'counter', 'Bot output silenced by checkAntiFlood (AF1)');
     $self->_declare('mediabot_nickflood_blocks_total',  'counter', 'Commands dropped by per-nick flood guard (AF3)');
     $self->_declare('mediabot_chanflood_blocks_total',  'counter', 'Commands dropped by per-channel flood guard (AF4)');
