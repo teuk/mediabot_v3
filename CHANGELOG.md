@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1177 — Keep RandomQuote state reads bounded and nonblocking
+
+- Open state and lock files with O_NONBLOCK before checking their descriptor
+  type, so a named pipe cannot stall the IRC event loop.
+- Protect the opened lock descriptor rather than resolving its path again.
+- Bound actual reads to 256 KiB plus one detection byte, retry interrupted
+  reads and reject read/close errors before changing the schedule.
+- Extend the existing state validation suite with FIFO refusal, recovery,
+  exact size boundaries, preserved bytes and private lock permissions.
+
+
 ### MB1176 — Compare version components without numeric rounding
 
 - Keep major/minor components as canonical decimal strings, matching the

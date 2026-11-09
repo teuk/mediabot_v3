@@ -2,6 +2,7 @@ package Mediabot::RandomQuote::State;
 use strict;
 use warnings;
 use Fcntl qw(:DEFAULT :flock);
+use Errno qw(EINTR);
 use File::Basename qw(dirname);
 use File::Spec;
 use File::Temp qw(tempfile);
@@ -69,17 +70,29 @@ sub _locked {
         return $result;
     }
     mkdir($dir, 0700) or die 'cannot create RandomQuote directory' unless -d $dir;
-    sysopen(my $lock, "$path.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0600)
+    sysopen(my $lock, "$path.lock", O_CREAT | O_RDWR | O_NOFOLLOW | O_NONBLOCK, 0600)
         or die 'cannot open RandomQuote lock';
     die 'RandomQuote lock is not a regular file' unless -f $lock;
     flock($lock, LOCK_EX | LOCK_NB) or die 'RandomQuote state is busy';
-    chmod(0600, "$path.lock") or die 'cannot protect RandomQuote lock';
+    chmod(0600, $lock) or die 'cannot protect RandomQuote lock';
     my $state = {schema => 1, channels => {}};
     if (-e $path) {
-        sysopen(my $fh, $path, O_RDONLY | O_NOFOLLOW) or die 'cannot read RandomQuote state';
+        sysopen(my $fh, $path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK) or die 'cannot read RandomQuote state';
         die 'RandomQuote state is not a regular file' unless -f $fh;
         die 'RandomQuote state too large' if -s $fh > 262144;
-        local $/; my $raw = <$fh>; close $fh;
+        # Bound the read itself, including a file growing after fstat.
+        my $raw = '';
+        while (1) {
+            my $count = sysread($fh, my $chunk, 262145 - length($raw));
+            if (!defined $count) {
+                next if $! == EINTR;
+                die 'cannot read RandomQuote state';
+            }
+            last unless $count;
+            $raw .= $chunk;
+            die 'RandomQuote state too large' if length($raw) > 262144;
+        }
+        close($fh) or die 'cannot close RandomQuote state';
         $state = _validate(JSON::PP->new->utf8->decode($raw));
     }
     my ($result, $dirty) = $cb->($state);
