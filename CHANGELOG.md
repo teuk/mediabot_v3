@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1180 — Keep Hailo typing parameters finite
+
+- Validate typing coefficient and offset before numeric conversion; malformed
+  scalars, references and non-finite values use their independent defaults.
+- Prevent NaN from reaching typing timers and reject numeric-prefix coercion
+  without warnings. Preserve finite settings, rounding and the 0..15s clamp.
+- Extend the existing queue suite; no new project test file.
+
+
 ### MB1179 — Preserve Unicode numbers beside Hailo colour controls
 
 - Restrict IRC decimal colour parameters to ASCII digits in Hailo's

@@ -5,7 +5,8 @@ use warnings;
 use utf8;
 
 use Carp qw(croak);
-use Scalar::Util qw(refaddr);
+use Scalar::Util qw(refaddr looks_like_number);
+use POSIX qw(isfinite);
 use Time::HiRes ();
 
 our $VERSION = '1.0';
@@ -24,14 +25,23 @@ sub _bounded_int {
     return $number;
 }
 
+# Keep invalid configuration out of timer arithmetic without numeric coercion
+# warnings. Each field retains its own default; finite signed values are valid.
+sub _typing_number {
+    my ($value, $default) = @_;
+    return $default unless _plain($value) && looks_like_number($value);
+    my $number = 0 + $value;
+    return isfinite($number) ? $number : $default;
+}
+
 sub new {
     my ($class, %args) = @_;
     return bless {
         max_total       => _bounded_int($args{max_total}, 32, 1, 1024),
         max_per_channel => _bounded_int($args{max_per_channel}, 3, 1, 64),
         ttl_seconds     => _bounded_int($args{ttl_seconds}, 15, 1, 300),
-        typing_coeff    => defined($args{typing_coeff}) ? 0 + $args{typing_coeff} : 1,
-        typing_offset   => defined($args{typing_offset}) ? 0 + $args{typing_offset} : 0,
+        typing_coeff    => _typing_number($args{typing_coeff}, 1),
+        typing_offset   => _typing_number($args{typing_offset}, 0),
         now_cb          => ref($args{now_cb}) eq 'CODE' ? $args{now_cb} : sub { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) },
         queue           => [],
         next_id         => 0,

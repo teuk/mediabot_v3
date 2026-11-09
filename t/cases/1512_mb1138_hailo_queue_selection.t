@@ -73,5 +73,27 @@ sub put {
     is(($q->take_next // {})->{payload},'first','failed candidate remains queued');
     ok(!defined($q->take_next(sub {1})),'empty filtered queue returns undef');
 }
+
+# Typing parameters must not pass NaN or coerced numeric prefixes to timers.
+for my $bad (undef, '', 'oops', '2oops', 'NaN', 'Inf', '-Inf', '1e999', [], {}) {
+    my $q=Mediabot::Hailo::ReplyQueue->new(typing_coeff=>$bad,typing_offset=>$bad);
+    is($q->typing_delay_seconds('x' x 9),3,'invalid typing parameters use independent defaults');
+}
+for my $case (
+    [0,0,0], [0,2.5,3], [0.5,1,3], ['5e-1',-1,1],
+    [-1,0,0], [1,20,15], [1,-20,0], [1e300,1e300,15],
+    ['oops',2,5], [2,'oops',6],
+) {
+    my ($coefficient,$offset,$expected)=@$case;
+    my $q=Mediabot::Hailo::ReplyQueue->new(typing_coeff=>$coefficient,typing_offset=>$offset);
+    is($q->typing_delay_seconds('x' x 9),$expected,
+        'finite typing settings retain rounding, clamping and valid companion values');
+}
+{
+    my $q=Mediabot::Hailo::ReplyQueue->new(typing_coeff=>'NaN',typing_offset=>'Inf');
+    is($q->typing_delay_seconds(''),0,'empty output has no typing delay');
+    is($q->typing_delay_seconds(undef),0,'missing output has no typing delay');
+}
+
 is_deeply(\@warnings, [], 'queue mutation emits no warnings');
 done_testing;
