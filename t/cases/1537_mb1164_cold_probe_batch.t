@@ -61,4 +61,12 @@ for my $jobs (0,3) {
  ok(!eval {run_perl_probes([],jobs=>$jobs);1},'unsupported concurrency rejected');
 }
 is_deeply(run_perl_probes([]),[],'empty batch completes without children');
+# Legacy -we probes must retain global compile/runtime warnings.
+for my $warnings (0,1) {
+ my $probe=run_perl_probes([q{my $value; print $value; print 'done'}],warnings=>$warnings);
+ is($probe->[0]{stdout},'done','warning mode preserves stdout');
+ is($probe->[0]{status},0,'warning mode preserves successful exit');
+ if ($warnings) {like($probe->[0]{stderr},qr/uninitialized/,'-w diagnostics retained')}
+ else {is($probe->[0]{stderr},'','default cold probes do not acquire global warnings')}
+}
 done_testing;

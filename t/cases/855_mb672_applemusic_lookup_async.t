@@ -98,6 +98,8 @@ return sub {
     $assert->is(refaddr(Mediabot::External->can('_handle_applemusic')),
         refaddr(Mediabot::External::AppleMusic->can('_handle_applemusic')),
         'mb886: External facade imports the canonical handler');
+    { # MB1165: independent cold probes, bounded to two interpreters.
+    my (@probe_codes, @probe_orders);
     for my $order (
         [qw(External::AppleMusic)],
         [qw(External::URL External::AppleMusic External)],
@@ -111,14 +113,19 @@ return sub {
         $code .= q{die 'missing pure helper' unless
             Mediabot::External::AppleMusic::_am_duration_from_ms(242867) eq '4m 02s';
             print 'loaded';};
-        my $err = gensym;
-        my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
-        my $stdout = do {local $/; <$out>} // '';
-        my $stderr = do {local $/; <$err>} // '';
-        waitpid($pid, 0);
-        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+        push @probe_codes, $code;
+        push @probe_orders, $order;
+    }
+    require ColdProbeBatch;
+    my $probe_results = ColdProbeBatch::run_perl_probes(\@probe_codes, warnings => 1);
+    for my $index (0 .. $#probe_orders) {
+        my $order = $probe_orders[$index];
+        my ($stdout, $stderr, $status) = @{$probe_results->[$index]}{qw(stdout stderr status)};
+        $assert->ok($status == 0 && $stdout eq 'loaded' && $stderr eq '',
             'mb886: independent import order loads quietly: ' . join('/', @$order));
     }
+    }
+
     my $expected_badge = "\x0300,01[\x0f\x0300,14AppleMusic\x0f\x0300,01]\x0f\x0f ";
 
     $assert->is(

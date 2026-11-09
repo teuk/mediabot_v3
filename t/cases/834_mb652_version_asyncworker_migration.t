@@ -312,6 +312,8 @@ return sub {
     # Exercise the canonical owner as well as the historical Helpers entry
     # points above. A fresh interpreter catches load-order and startup I/O.
     require Mediabot::Version::Remote;
+    { # MB1165: independent cold probes, bounded to two interpreters.
+    my (@probe_codes, @probe_orders);
     for my $order (
         [qw(Version::Remote)],
         [qw(Version::Remote Helpers)],
@@ -353,17 +355,22 @@ return sub {
             }
             print 'loaded';
         };
-        my $err = gensym;
-        my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
-        my $stdout = do { local $/; <$out> } // '';
-        my $stderr = do { local $/; <$err> } // '';
-        waitpid($pid, 0);
-        my $exit = $?;
+        push @probe_codes, $code;
+        push @probe_orders, $order;
+    }
+    require ColdProbeBatch;
+    my $probe_results = ColdProbeBatch::run_perl_probes(\@probe_codes, warnings => 1);
+    for my $index (0 .. $#probe_orders) {
+        my $order = $probe_orders[$index];
+        my ($stdout, $stderr, $status) = @{$probe_results->[$index]}{qw(stdout stderr status)};
+        my $exit = $status;
         (my $diagnostic = $stderr) =~ s/\s+/ /g;
         $assert->ok($exit == 0 && $stdout eq 'loaded' && $stderr eq '',
             'remote version contracts and historical URL list survive load order: ' . join('/', @$order)
                 . ($exit || length($stderr) ? " (exit=$exit; $diagnostic)" : ''));
     }
+    }
+
     {
         no warnings 'redefine';
         require Mediabot::External;

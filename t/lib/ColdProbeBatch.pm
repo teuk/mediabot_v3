@@ -33,7 +33,7 @@ sub run_perl_probes {
                     open STDOUT, '>', "$dir/$index.out" or _exit(254);
                     open STDERR, '>', "$dir/$index.err" or _exit(254);
                     no warnings 'exec';
-                    exec $^X, '-I.', '-It/lib', '-e', $codes->[$index];
+                    exec $^X, '-I.', '-It/lib', ($opts{warnings} ? ('-w') : ()), '-e', $codes->[$index];
                     _exit(254);
                 }
                 $running{$pid} = {index => $index, started => $now->()};

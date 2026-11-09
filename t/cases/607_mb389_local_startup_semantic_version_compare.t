@@ -90,6 +90,8 @@ return sub {
 
     require Mediabot::Version::Format;
 
+    { # MB1165: independent cold probes, bounded to two interpreters.
+    my (@probe_codes, @probe_orders);
     for my $order (
         [qw(Version::Format)],
         [qw(Version::Format Helpers)],
@@ -118,14 +120,19 @@ return sub {
                 Mediabot::Helpers::_compare_mediabot_versions('3.5', '3.6dev-1') < 0;
             print 'loaded';
         };
-        my $err = gensym;
-        my $pid = open3(undef, my $out, $err, $^X, '-I.', '-It/lib', '-we', $code);
-        my $stdout = do { local $/; <$out> } // '';
-        my $stderr = do { local $/; <$err> } // '';
-        waitpid($pid, 0);
-        $assert->ok($? == 0 && $stdout eq 'loaded' && $stderr eq '',
+        push @probe_codes, $code;
+        push @probe_orders, $order;
+    }
+    require ColdProbeBatch;
+    my $probe_results = ColdProbeBatch::run_perl_probes(\@probe_codes, warnings => 1);
+    for my $index (0 .. $#probe_orders) {
+        my $order = $probe_orders[$index];
+        my ($stdout, $stderr, $status) = @{$probe_results->[$index]}{qw(stdout stderr status)};
+        $assert->ok($status == 0 && $stdout eq 'loaded' && $stderr eq '',
             'pure version functions work in load order: ' . join('/', @$order));
     }
+    }
+
     {
         no warnings 'redefine';
         local *Mediabot::Helpers::_usable_local_version = sub { '8.1' };

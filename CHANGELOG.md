@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1165 — Extend bounded cold-probe batching
+
+- Batch twelve additional independent import-order groups across eleven
+  existing tests with at most two fresh Perl interpreters per group.
+- Retain every original probe program, assertion and import permutation;
+  preserve global -w diagnostics for historical -we probes.
+- Extend the existing batch regression with six warning-mode assertions.
+  The full catalogue remains serial; no application behavior is changed.
+
 ### MB1164 — Batch independent cold-import regression probes
 
 - Run the three audited import-order probes two at a time in seven module
