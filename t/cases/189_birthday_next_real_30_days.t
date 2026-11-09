@@ -62,6 +62,7 @@ return sub {
     # MB954: real entry points stay compatible regardless of import order.
     require IPC::Open3;
     require Symbol;
+    my (@probe_codes, @probe_orders);
     for my $order (
         [qw(Users::Birthdays Users::Seen UserCommands)],
         [qw(Users::Seen Users::Birthdays UserCommands)],
@@ -133,12 +134,15 @@ return sub {
             sub gethChannelNicks {{'#test'=>{},'#other'=>{}}}
             sub gethChannelsNicksOnChan {$_[1] eq '#test' ? ('Bob') : ()}
         };
-        my $err=Symbol::gensym();
-        my $pid=IPC::Open3::open3(undef,my $out,$err,$^X,'-I.','-It/lib','-e',$code);
-        my $stdout=do {local $/;<$out>} // '';
-        my $stderr=do {local $/;<$err>} // '';
-        waitpid($pid,0);
-        $assert->ok($?==0 && $stdout eq 'checked' && $stderr eq '',
+        push @probe_codes, $code;
+        push @probe_orders, $order;
+    }
+    require ColdProbeBatch;
+    my $probe_results = ColdProbeBatch::run_perl_probes(\@probe_codes);
+    for my $index (0 .. $#probe_orders) {
+        my $order = $probe_orders[$index];
+        my ($stdout, $stderr, $status) = @{$probe_results->[$index]}{qw(stdout stderr status)};
+        $assert->ok($status==0 && $stdout eq 'checked' && $stderr eq '',
             'mb954: calendar, guards, transports and load order: '.join('/',@$order)
                 .($stderr ne '' ? " ($stderr)" : ''));
     }

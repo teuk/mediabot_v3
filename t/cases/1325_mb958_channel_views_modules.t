@@ -6,6 +6,7 @@ use Symbol ();
 
 return sub {
     my ($assert) = @_;
+    my (@probe_codes, @probe_orders);
     for my $order (
         [qw(Stats::Radar Diagnostics::Commands UserCommands)],
         [qw(Diagnostics::Commands Stats::Radar UserCommands)],
@@ -109,12 +110,15 @@ return sub {
             die 'history empty fallback changed' unless @out==1 && $out[0][2]=~/no data in last 1d/;
             print 'checked';
         };
-        my $err=Symbol::gensym();
-        my $pid=IPC::Open3::open3(undef,my $out,$err,$^X,'-I.','-It/lib','-e',$code);
-        my $stdout=do {local $/;<$out>} // '';
-        my $stderr=do {local $/;<$err>} // '';
-        waitpid($pid,0);
-        $assert->is($?,0,"MB958 load order @$order: $stderr");
+        push @probe_codes, $code;
+        push @probe_orders, $order;
+    }
+    require ColdProbeBatch;
+    my $probe_results = ColdProbeBatch::run_perl_probes(\@probe_codes);
+    for my $index (0 .. $#probe_orders) {
+        my $order = $probe_orders[$index];
+        my ($stdout, $stderr, $status) = @{$probe_results->[$index]}{qw(stdout stderr status)};
+        $assert->is($status,0,"MB958 load order @$order: $stderr");
         $assert->is($stdout,'checked','real views preserve read scope, output routes and late formatter hooks');
     }
 };

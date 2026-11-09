@@ -106,6 +106,7 @@ return sub {
     # the legacy API, access refusal and call-time output/progress hooks.
     require IPC::Open3;
     require Symbol;
+    my (@probe_codes, @probe_orders);
     for my $order (
         [qw(Stats::History Stats::Affinity UserCommands)],
         [qw(Stats::Affinity Stats::History UserCommands)],
@@ -251,12 +252,15 @@ return sub {
             };
         }
         $code .= q{ print 'checked'; };
-        my $err=Symbol::gensym();
-        my $pid=IPC::Open3::open3(undef,my $out,$err,$^X,'-I.','-It/lib','-e',$code);
-        my $stdout=do{local $/;<$out>} // '';
-        my $stderr=do{local $/;<$err>} // '';
-        waitpid($pid,0);
-        $assert->ok($?==0 && $stdout eq 'checked' && $stderr eq '',
+        push @probe_codes, $code;
+        push @probe_orders, $order;
+    }
+    require ColdProbeBatch;
+    my $probe_results = ColdProbeBatch::run_perl_probes(\@probe_codes);
+    for my $index (0 .. $#probe_orders) {
+        my $order = $probe_orders[$index];
+        my ($stdout, $stderr, $status) = @{$probe_results->[$index]}{qw(stdout stderr status)};
+        $assert->ok($status==0 && $stdout eq 'checked' && $stderr eq '',
             'mb956: API, role gates, literal nick, pagination and affinity hooks: '.join('/',@$order)
                 .($stderr ne '' ? " ($stderr)" : ''));
     }

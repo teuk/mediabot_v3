@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1164 — Batch independent cold-import regression probes
+
+- Run the three audited import-order probes two at a time in seven module
+  boundary tests; retain their exact scripts, assertions and fresh interpreters.
+- Keep the full test catalogue serial. Capture each child's stdout/stderr
+  separately, preserve wait statuses and enforce a bounded execution deadline.
+- Cover overlap, the two-process ceiling, cold module state, errors, signals,
+  large output and timeout cleanup in twenty focused harness assertions.
+
 ### MB1163 — Consolidate regression tests and avoid duplicate validation
 
 - Consolidate eleven SafeCalc, UTF-8, Spark and Hailo test files into five,
