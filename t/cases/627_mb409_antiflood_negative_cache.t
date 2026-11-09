@@ -48,6 +48,6 @@ return sub {
     (my $code = $body) =~ s/^\s*#.*$//mg;
     $assert->like($code, qr/\{ ts => \$now, unconfigured => 1 \}/,
         'absence de CHANNEL_FLOOD mémorisée avec TTL');
-    $assert->like($code, qr/return 0 if \$pc->\{unconfigured\};/,
+    $assert->like($code, qr/return \$global_check->\(1\) if \$pc->\{unconfigured\};/,
         'chemin chaud: court-circuit sans SQL');
 };

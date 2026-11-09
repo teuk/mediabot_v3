@@ -1382,7 +1382,10 @@ sub checkAntiFlood {
 
     # IMP7: cross-channel global rate limit per bot-output
     # A bot could send to N channels at full per-channel speed — cap globally.
-    {
+    # Probe without charging: a locally blocked retry is not a new output.
+    # Recheck on admission because callbacks may themselves send messages.
+    my $global_check = sub {
+        my ($commit) = @_;
         my $now_g = time();
         my $g     = $self->{_global_af} //= { hits => [], silenced_until => 0 };
         if ($g->{silenced_until} > $now_g) {
@@ -1395,17 +1398,19 @@ sub checkAntiFlood {
         my $g_max     = _af_conf_int($self, 'OUTPUT_GLOBAL_MAX_MSG', 20, 5, 200);
         my $g_silence = _af_conf_int($self, 'OUTPUT_GLOBAL_SILENCE', 15, 5, 120);
         @{ $g->{hits} } = grep { ($now_g - $_) < $g_window } @{ $g->{hits} };
-        push @{ $g->{hits} }, $now_g;
         # V4: debug log current hit count
         my $hit_count = scalar @{ $g->{hits} };
         $self->{logger}->log(4, "checkAntiFlood() global: $hit_count/$g_max msgs in ${g_window}s window")
             if $hit_count > int($g_max * 0.7);  # only log when >70% of threshold
-        if ($hit_count > $g_max) {
+        if ($hit_count >= $g_max) {
             $g->{silenced_until} = $now_g + $g_silence;
             $self->{logger}->log(2, "checkAntiFlood() global flood — silencing ${g_silence}s");
             return 1;
         }
-    }
+        push @{ $g->{hits} }, $now_g if $commit;
+        return 0;
+    };
+    return 1 if $global_check->(0);
 
     # AF1: in-memory antiflood — zero DB queries per outgoing message.
     # DB params (nbmsg_max, duration, timetowait) are cached for 60s.
@@ -1421,7 +1426,7 @@ sub checkAntiFlood {
         my $channel_obj = $self->{channels}{lc $sChannel};
         unless (defined $channel_obj) {
             $self->{logger}->log(1, "checkAntiFlood() unknown channel: $sChannel");
-            return 0;
+            return $global_check->(1);
         }
         my $id_channel = $channel_obj->get_id;
         my $sth = $self->{dbh}->prepare(
@@ -1448,17 +1453,17 @@ sub checkAntiFlood {
                 # activer l'antiflood en base est pris en compte au prochain
                 # rafraîchissement (<= OUTPUT_PARAMS_CACHE_TTL).
                 $self->{_af_params}{$sChannel} = { ts => $now, unconfigured => 1 };
-                return 0;
+                return $global_check->(1);
             }
         } else {
             $self->{logger}->log(1, "checkAntiFlood() DB error: $DBI::errstr");
-            return 0;
+            return $global_check->(1);
         }
     }
 
     # mb409-B1: canal sans antiflood (cache négatif frais) -> tout passe,
     # sans requête SQL.
-    return 0 if $pc->{unconfigured};
+    return $global_check->(1) if $pc->{unconfigured};
 
     my $nbmsg_max  = $pc->{nbmsg_max}  // 5;
     my $duration   = $pc->{duration}   // 30;
@@ -1532,7 +1537,7 @@ sub checkAntiFlood {
         }
     }
 
-    return 0;
+    return $global_check->(1);
 }
 # Set or display anti-flood parameters for a given channel (Context version)
 sub leet {

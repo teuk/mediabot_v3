@@ -3,6 +3,8 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+{ package MB1170::Log; sub log {1} }
+
 
 sub _slurp_337 {
     open my $fh, '<:raw', $_[0] or die $!;
@@ -51,4 +53,36 @@ return sub {
     )) {
         $assert->like($metrics, qr/\Q$metric\E/, "Metrics.pm declares $metric");
     }
+    {
+        # Compile the real guard in an isolated package with a deterministic
+        # clock and I/O hooks; no copy of the admission algorithm lives here.
+        my $fixture = q{
+            package MB1170::Guard;
+            use strict; use warnings; use subs qw(time);
+            our $now = 1800000000;
+            sub time { $now }
+            sub _af_conf_int { my ($self,$key,$default)=@_; return $key eq 'OUTPUT_GLOBAL_MAX_MSG' ? 5 : $default }
+            sub noticeConsoleChan {1}
+            sub botPrivmsg {1}
+        } . $body;
+        { no warnings 'redefine'; eval $fixture; die $@ if $@; }
+        my $bot={logger=>bless({},'MB1170::Log'),
+            _af_params=>{'#busy'=>{ts=>$MB1170::Guard::now,nbmsg_max=>1,duration=>30,timetowait=>300},
+                          '#quiet'=>{ts=>$MB1170::Guard::now,unconfigured=>1}}};
+        my $check=\&MB1170::Guard::checkAntiFlood;
+        $assert->is($check->($bot,'#busy'),0,'mb1170: first channel admission uses one global slot');
+        $assert->is($check->($bot,'#busy'),1,'mb1170: channel limit still blocks the next attempt');
+        my @blocked=map {$check->($bot,'#busy')} 1..20;
+        $assert->is(join(',',@blocked),join(',',(1)x20),'mb1170: local silence remains enforced on every retry');
+        $assert->is(scalar @{$bot->{_global_af}{hits}},1,'mb1170: rejected retries do not consume global output slots');
+        $assert->is($bot->{_global_af}{silenced_until},0,'mb1170: rejected retries cannot silence other channels');
+        my @allowed=map {$check->($bot,'#quiet')} 1..4;
+        $assert->is(join(',',@allowed),'0,0,0,0','mb1170: another channel retains the remaining global allowance');
+        $assert->is($check->($bot,'#quiet'),1,'mb1170: genuine global exhaustion still blocks admission');
+        $assert->is(scalar @{$bot->{_global_af}{hits}},5,'mb1170: failed global admission does not add a phantom hit');
+        $MB1170::Guard::now += 15;
+        $assert->is($check->($bot,'#quiet'),0,'mb1170: existing global silence expires at its deadline');
+        $assert->is(scalar @{$bot->{_global_af}{hits}},1,'mb1170: expired global hits are reclaimed before new admission');
+    }
+
 };

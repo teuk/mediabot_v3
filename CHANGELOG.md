@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1170 — Charge global AntiFlood only on admission
+
+- Probe the existing global limit without charging before channel policy;
+  commit one global hit only when checkAntiFlood admits the message.
+- Locally blocked attempts and queue retries no longer spend other channels'
+  global allowance. Recheck on commit to account for nested callback sends.
+- Keep existing channel settings, queue behavior and global silence policy;
+  add deterministic cross-channel admission and expiry regression checks.
+
+
 ### MB1169 — Preserve active nick-flood windows during cleanup
 
 - Keep nick command history while its newest hit remains inside the configured
