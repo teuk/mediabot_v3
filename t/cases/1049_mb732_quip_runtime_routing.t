@@ -109,21 +109,20 @@ return sub {
     $hook->($off,MB732Runtime::IRC->new,'#test','Alice','No opt-in.',0);
     $a->ok(!exists $off->{wit_dryrun},'mb732: no flags means no provider runtime creation');
 
-    # Run the actual helper body with deterministic transport/DB boundaries.
-    my $helper_source=do { open my $fh,'<:encoding(UTF-8)','Mediabot/IRC/Sender.pm' or die $!;local $/;<$fh> };
-    my($privmsg)=$helper_source =~ /(sub botPrivmsg \{.*?\n\})/s;
-    die 'Missing transport helper' unless $privmsg;
-    my $helper_ok=eval 'package MB732Transport; use strict; use warnings; use Encode qw(encode);'.$privmsg.' 1;';
-    die $@ unless $helper_ok;
-    local *MB732Transport::_is_irc_channel_target=sub { $_[0] =~ /^#/ };
-    local *MB732Transport::_sanitize_irc_text=sub { $_[0] };
-    local *MB732Transport::getIdChansetList=sub { $_[1] eq 'AntiFlood'?1:undef };
-    local *MB732Transport::getIdChannelSet=sub { 1 };
-    local *MB732Transport::checkAntiFlood=sub { 1 };
-    local *MB732Transport::_defer_flooded_send=sub { $_[0]{queued}++;1 };
+    # Use the real sender module rather than copying one subroutine without
+    # its private dependencies. Only policy and queue boundaries are mocked.
+    require Mediabot::IRC::Sender;
+    require Mediabot::IRC::TextBudget;
+    local *Mediabot::IRC::Sender::_is_irc_channel_target=sub { $_[0] =~ /^#/ };
+    local *Mediabot::IRC::Sender::_sanitize_irc_text=\&Mediabot::IRC::TextBudget::_sanitize_irc_text;
+    local *Mediabot::IRC::Sender::_split_text_for_irc=\&Mediabot::IRC::TextBudget::_split_text_for_irc;
+    local *Mediabot::IRC::Sender::getIdChansetList=sub { $_[1] eq 'AntiFlood'?1:undef };
+    local *Mediabot::IRC::Sender::getIdChannelSet=sub { 1 };
+    local *Mediabot::IRC::Sender::checkAntiFlood=sub { 1 };
+    local *Mediabot::IRC::Sender::_defer_flooded_send=sub { $_[0]{queued}++;1 };
     my $transport_bot={logger=>MB732Runtime::Logger->new,queued=>0};
-    $a->is(MB732Transport::botPrivmsg($transport_bot,'#test','A stale quip.',{no_defer=>1}),0,'mb732: real helper drops a contextual reply under antiflood');
+    $a->is(Mediabot::IRC::Sender::botPrivmsg($transport_bot,'#test','A stale quip.',{no_defer=>1}),0,'mb732: real helper drops a contextual reply under antiflood');
     $a->is($transport_bot->{queued},0,'mb732: dropped conversational reply cannot reappear in the deferred queue');
-    $a->is(MB732Transport::botPrivmsg($transport_bot,'#test','An ordinary message.'),1,'mb732: ordinary callers retain queue acknowledgement');
+    $a->is(Mediabot::IRC::Sender::botPrivmsg($transport_bot,'#test','An ordinary message.'),1,'mb732: ordinary callers retain queue acknowledgement');
     $a->is($transport_bot->{queued},1,'mb732: ordinary output still uses the existing queue');
 };

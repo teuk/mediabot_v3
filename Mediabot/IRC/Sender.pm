@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Encode qw(encode);
 use Time::HiRes ();
+use Scalar::Util qw(refaddr);
 
 # Internal implementation reached by Helpers. Callers use IRC::Output or the
 # legacy Helpers facade; these bodies are not exported. Resolve the existing
@@ -91,6 +92,27 @@ sub _write_irc_chunk {
     return;
 }
 
+sub _flood_filter_source {
+    my ($self, $target, $options) = @_;
+    return '' unless ref($options) eq 'HASH' && defined($options->{flood_source_text})
+        && !ref($options->{flood_source_text});
+    my $source = _sanitize_irc_text($options->{flood_source_text});
+    my $id = getIdChansetList($self, 'NoColors');
+    if (defined($id) && length($id)) {
+        my $enabled = getIdChannelSet($self, $target, $id);
+        $source =~ s/\cC\d{1,2}(?:,\d{1,2})?|[\cC\cB\cI\cU\cR\cO]//g
+            if defined($enabled) && length($enabled);
+    }
+    return lc $source;
+}
+
+sub _has_older_flood_output {
+    my ($self, $target) = @_;
+    my $queues = $self->{_flood_outq} or return 0;
+    my $q = $queues->{$target} or return 0;
+    return @{$q->{items}} && (refaddr($self->{_flood_draining}) // 0) != refaddr($q);
+}
+
 sub botPrivmsg {
     my ($self, $sTo, $sMsg, $send_options) = @_;
 
@@ -133,7 +155,9 @@ sub botPrivmsg {
             if (defined($id_channel_set) && $id_channel_set ne "") {
                 $self->{logger}->log(4, "botPrivmsg() channel $sTo has chanset +AntiFlood");
                 # mb568-B1: differe au lieu de jeter
-                if (checkAntiFlood($self, $sTo)) {
+                my @af_chunks = _split_text_for_irc($sMsg, 400);
+                my $af_cost = @af_chunks || 1;
+                if (_has_older_flood_output($self, $sTo) || checkAntiFlood($self, $sTo, $af_cost)) {
                     # Contextual replies expire with their conversation. Other
                     # callers keep the historical bounded deferred-send queue.
                     return 0 if ref($send_options) eq 'HASH' && $send_options->{no_defer};
@@ -149,8 +173,9 @@ sub botPrivmsg {
             $sMsg = _timed_ping_text($sMsg, $send_options);
 
             my $msg_lc = lc($sMsg);
+            my $source_lc = _flood_filter_source($self, $sTo, $send_options);
             for my $bw (@$words) {
-                if (index($msg_lc, $bw) != -1) {
+                if (index($msg_lc, $bw) != -1 || index($source_lc, $bw) != -1) {
                     # mb387-B1: a rejected payload was never sent, therefore it
                     # must not appear as a normal LIVE line or CHANNEL_LOG event.
                     # Keep the explicit operational diagnostic only.
@@ -220,7 +245,7 @@ sub botPrivmsg {
 }
 
 sub botAction {
-	my ($self,$sTo,$sMsg) = @_;
+	my ($self,$sTo,$sMsg,$send_options) = @_;
 	if (defined($sTo)) {
 		unless (defined($sMsg) && $sMsg ne "") {
 			$self->{logger}->log(0,"botAction() ERROR no message specified to send to target");
@@ -248,9 +273,11 @@ sub botAction {
 					my $id_channel_set = getIdChannelSet($self,$sTo,$id_chanset_list);
 					if (defined($id_channel_set) && ($id_channel_set ne "")) {
 						$self->{logger}->log(4,"botAction() channel $sTo has chanset +AntiFlood");
-						if (checkAntiFlood($self,$sTo)) {
+						my @af_chunks = _split_text_for_irc($sMsg, 391);
+                        my $af_cost = @af_chunks || 1;
+                        if (_has_older_flood_output($self, $sTo) || checkAntiFlood($self,$sTo,$af_cost)) {
 							# mb568-B1: differe au lieu de jeter
-							return _defer_flooded_send($self,'action',$sTo,$sMsg);
+							return _defer_flooded_send($self,'action',$sTo,$sMsg,$send_options);
 						}
 					}
 				}
@@ -259,8 +286,9 @@ sub botAction {
                     my $words = _badwords_for_channel($self, $sTo);
 
 					my $sMsgLc = lc $sMsg;
+                    my $source_lc = _flood_filter_source($self, $sTo, $send_options);
 					for my $bw (@$words) {
-						if (index($sMsgLc, $bw) != -1) {
+						if (index($sMsgLc, $bw) != -1 || index($source_lc, $bw) != -1) {
 							# mb387-B1: rejected ACTIONs are diagnostics, not sent
 							# conversation events. Do not forge LIVE/history entries.
 							noticeConsoleChan($self,"Badword : $bw blocked on channel $sTo ($sMsg)");

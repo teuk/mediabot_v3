@@ -1378,7 +1378,9 @@ sub checkNickFlood {
 }
 
 sub checkAntiFlood {
-	my ($self, $sChannel) = @_;
+	my ($self, $sChannel, $cost) = @_;
+    $cost = 1 unless defined $cost;
+    return 1 unless !ref($cost) && $cost =~ /\A[1-9][0-9]*\z/;
 
     # IMP7: cross-channel global rate limit per bot-output
     # A bot could send to N channels at full per-channel speed — cap globally.
@@ -1402,12 +1404,15 @@ sub checkAntiFlood {
         my $hit_count = scalar @{ $g->{hits} };
         $self->{logger}->log(4, "checkAntiFlood() global: $hit_count/$g_max msgs in ${g_window}s window")
             if $hit_count > int($g_max * 0.7);  # only log when >70% of threshold
-        if ($hit_count >= $g_max) {
+        if ($hit_count + $cost > $g_max) {
+            # A batch that does not fit is queued as individual lines, not a
+            # flood incident that silences unrelated channels.
+            return 1 if $cost > 1;
             $g->{silenced_until} = $now_g + $g_silence;
             $self->{logger}->log(2, "checkAntiFlood() global flood — silencing ${g_silence}s");
             return 1;
         }
-        push @{ $g->{hits} }, $now_g if $commit;
+        push @{ $g->{hits} }, ($now_g) x $cost if $commit;
         return 0;
     };
     return 1 if $global_check->(0);
@@ -1499,7 +1504,8 @@ sub checkAntiFlood {
         $st->{first} = $now;
     }
 
-    $st->{nbmsg}++;
+    return 1 if $cost > 1 && $st->{nbmsg} + $cost > $nbmsg_max;
+    $st->{nbmsg} += $cost;
 
     if ($st->{nbmsg} > $nbmsg_max) {
         unless ($st->{silenced_until}) {

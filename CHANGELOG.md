@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1171 — Account for physical IRC lines in AntiFlood admission
+
+- Charge channel and global budgets for the actual PRIVMSG/ACTION chunk count.
+  Admit a complete response only when both budgets fit; otherwise queue its
+  individual lines without treating an oversized batch as a flood incident.
+- Preserve FIFO across new replies and reblocked lines, retain whole-response
+  badword context, and cap deferred output at thirty physical lines.
+- Keep no_defer admission atomic and write receipts attached to actual writes.
+  Existing parameters, single-line silence policy and drain timers remain.
+
+
 ### MB1170 — Charge global AntiFlood only on admission
 
 - Probe the existing global limit without charging before channel policy;

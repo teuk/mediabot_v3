@@ -15,26 +15,37 @@ sub _defer_flooded_send {
     my ($self, $kind, $to, $msg, $send_options) = @_;
 
     my $q = $self->{_flood_outq}{$to} //= { items => [], armed => 0 };
-    my $item = [ $kind, $msg ];
-    # Keep the receipt stamp, never the command Context or message object.
-    push @$item, { ping_started_at => $send_options->{ping_started_at} }
-        if ref($send_options) eq 'HASH' && defined($send_options->{ping_started_at})
-            && !ref($send_options->{ping_started_at});
-
-    if ((refaddr($self->{_flood_draining}) // 0) == refaddr($q)) {
-        # Only the exact draining queue may reinsert at its head. Another
-        # target or replacement connection keeps its normal FIFO and timer.
-        unshift @{ $q->{items} }, $item;
-        return undef;
+    # Queue physical IRC lines so an oversized response can make progress
+    # even when its total cost exceeds the channel or connection allowance.
+    my @chunks = Mediabot::Helpers::_split_text_for_irc($msg, $kind eq 'action' ? 391 : 400);
+    @chunks = ($msg) unless @chunks;
+    my @items;
+    for my $chunk (@chunks) {
+        my $item = [$kind, $chunk];
+        push @$item, {ping_started_at => $send_options->{ping_started_at}}
+            if ref($send_options) eq 'HASH' && defined($send_options->{ping_started_at})
+                && !ref($send_options->{ping_started_at});
+        # Keep the whole response for badword checks across chunk boundaries.
+        my $source = ref($send_options) eq 'HASH' ? $send_options->{flood_source_text} : undef;
+        $source = $msg if @chunks > 1 && !defined($source);
+        if (defined($source) && !ref($source)) {
+            $item->[2] ||= {};
+            $item->[2]{flood_source_text} = $source;
+        }
+        push @items, $item;
     }
-
-    if (scalar(@{ $q->{items} }) >= 30) {
+    if (@{$q->{items}} + @items > 30) {
         $self->{logger}->log(3,
             "flood queue full on $to — dropping one $kind message");
         return undef;
     }
-
-    push @{ $q->{items} }, $item;
+    if ((refaddr($self->{_flood_draining}) // 0) == refaddr($q)) {
+        # Preserve line order ahead of later replies, including a legacy
+        # unsplit item already queued before this code was loaded.
+        unshift @{$q->{items}}, @items;
+        return undef;
+    }
+    push @{$q->{items}}, @items;
     $self->{logger}->log(4, "botPrivmsg/botAction deferred by AntiFlood on $to ("
         . scalar(@{ $q->{items} }) . " queued)");
     Mediabot::Helpers::_arm_flood_drain($self, $to);
@@ -92,7 +103,7 @@ sub _drain_flood_queue {
         if ($item) {
             my ($kind, $msg, $send_options) = @$item;
             local $self->{_flood_draining} = $q;
-            if ($kind eq 'action') { botAction($self, $to, $msg) }
+            if ($kind eq 'action') { botAction($self, $to, $msg, $send_options) }
             else                   { botPrivmsg($self, $to, $msg, $send_options) }
         }
         1;
