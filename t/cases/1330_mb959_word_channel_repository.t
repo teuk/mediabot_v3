@@ -6,6 +6,7 @@ use File::Temp qw(tempdir);
 use File::Spec;
 use Fcntl qw(:flock);
 use JSON::PP;
+use POSIX qw(mkfifo);
 use Mediabot::Plugin::ChannelRepositoryV3;
 
 my $tmp = tempdir(CLEANUP => 1);
@@ -54,6 +55,38 @@ ok(!eval { $a->commit(expected_revision => 0, changes => {x => 'y'}); 1 }, 'corr
 open $fh, '<:raw', $path or die $!; is(do { local $/; <$fh> }, '{broken', 'corrupt bytes remain available for recovery'); close $fh;
 unlink $path; open $fh, '>:raw', $path or die $!; print {$fh} $bytes; close $fh; chmod 0600, $path;
 is($a->snapshot->{revision}, 2, 'restored complete state reads normally');
+
+# MB1187: a substituted FIFO must fail before waiting for a writer.
+unlink $path or die $!;
+mkfifo($path, 0600) or die $!;
+for my $operation ('snapshot', 'commit') {
+    my $ok = eval {
+        local $SIG{ALRM} = sub { die "fixture_timeout\n" };
+        alarm 2;
+        if ($operation eq 'snapshot') { $a->snapshot }
+        else { $a->commit(expected_revision => 2, changes => {q => 'lost'}) }
+        alarm 0;
+        1;
+    };
+    my $error = $@; alarm 0;
+    ok(!$ok, "$operation refuses a FIFO state file");
+    like($error, qr/\Achannel_storage_permissions\n\z/,
+        "$operation rejects the opened object without waiting for a FIFO writer");
+    ok(-p $path, "$operation preserves the unexpected object for diagnosis");
+}
+unlink $path or die $!;
+open $fh, '>:raw', $path or die $!; print {$fh} $bytes; close $fh or die $!;
+chmod 0600, $path;
+{
+    local $Mediabot::Plugin::ChannelRepositoryV3::MAX_BYTES = length($bytes);
+    is($a->snapshot->{revision}, 2, 'state exactly at the byte limit remains readable');
+}
+{
+    local $Mediabot::Plugin::ChannelRepositoryV3::MAX_BYTES = length($bytes)-1;
+    ok(!eval {$a->snapshot;1}, 'state exceeding the byte limit is refused');
+}
+is_deeply($a->snapshot->{values}, {q=>'ok'}, 'restoring regular state recovers the original scores');
+
 my $old = "$tmp/data/v3-collections"; rename $old, "$old.saved" or die $!; symlink "$old.saved", $old or die $!;
 ok(!eval { $a->snapshot; 1 }, 'symlink ancestor is refused');
 unlink $old; rename "$old.saved", $old or die $!;

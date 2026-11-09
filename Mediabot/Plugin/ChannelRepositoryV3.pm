@@ -74,11 +74,22 @@ sub _read {
     return { plugin => $self->{plugin}, channel => $self->{channel}, revision => 0, values => {} }
         unless defined($path) && (-e $path || -l $path);
     die "channel_storage_symlink\n" if -l $path;
-    sysopen my $fh, $path, O_RDONLY | O_NOFOLLOW or die "channel_storage_read\n";
+    sysopen my $fh, $path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK or die "channel_storage_read\n";
     my @stat = stat($fh);
     die "channel_storage_permissions\n" unless -f $fh && $stat[4] == $< && !($stat[2] & 0077)
         && $stat[7] <= $MAX_BYTES;
-    local $/; my $raw = <$fh>; close $fh;
+    # MB1187: bound bytes read even if the file grows after stat().
+    my $raw = '';
+    while (length($raw) <= $MAX_BYTES) {
+        my $n = sysread($fh, my $chunk, $MAX_BYTES + 1 - length($raw));
+        if (!defined($n)) {
+            next if $!{EINTR};
+            die "channel_storage_read\n";
+        }
+        last unless $n;
+        $raw .= $chunk;
+    }
+    close($fh) or die "channel_storage_read\n";
     die "channel_storage_size\n" unless defined($raw) && length($raw) <= $MAX_BYTES;
     my $doc = eval { JSON::PP->new->utf8->decode($raw) };
     return $self->_validate($doc);

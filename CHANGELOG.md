@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1187 — Bound channel collection reads without FIFO blocking
+
+- Open collection state with O_NONBLOCK before checking the opened object,
+  preventing a substituted FIFO from waiting indefinitely for a writer.
+- Read at most MAX_BYTES + 1 bytes, including files growing after stat, retry
+  interrupted reads and reject read/close failures before decoding state.
+- Extend the existing repository suite with FIFO snapshot/commit rejection,
+  exact byte limits and score recovery. No storage schema changes.
+
+
 ### MB1186 — Reject incomplete dictionary queries
 
 - Check DBI begin, prepare, execute, fetch, finish and rollback outcomes even
