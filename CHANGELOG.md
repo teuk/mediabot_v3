@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1186 — Reject incomplete dictionary queries
+
+- Check DBI begin, prepare, execute, fetch, finish and rollback outcomes even
+  when the connection reports failures without throwing exceptions.
+- Publish no dictionary result after an incomplete read or failed rollback.
+- Roll back only a transaction successfully started by this solve invocation.
+- Extend the existing solver suite with failure injection and DBI true-zero
+  execute compatibility. No schema or dictionary data changes.
+
+
 ### MB1185 — Recognize canonical numeric VDM article URLs
 
 - Extract IDs from official /article/ID URLs, matching the route already

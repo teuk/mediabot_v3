@@ -26,6 +26,7 @@ ok(!eval { $solver->result('AA', [('AA') x 4097]); 1 }, 'oversized worker payloa
     sub execute { my ($s,@bind)=@_; $s->{rows}=[map { [$_,join('',sort split //,$_)] } grep { my $w=$_;grep {$_ eq join('',sort split //,$w)} @bind } @{$s->{db}{words}}];1 }
     sub fetchrow_arrayref { shift @{$_[0]{rows}} }
     sub finish {1}
+    sub err {0}
     package MB959::DB;
     sub begin_work {$_[0]{begun}++;1}
     sub rollback {$_[0]{rolled}++;1}
@@ -78,4 +79,41 @@ for my $round (1..3) {
     $many->close_round($round*100+50) if $round<3;
 }
 is($many->submit(id=>'u.33',nick=>'Extra',word=>'ABCDEFGHIJKL',now=>302)->{error}, 'full', 'match participants remain bounded across rounds');
+
+# MB1186: a failed DB operation must not publish an incomplete dictionary.
+{
+    package MB1186::DB;
+    sub begin_work {
+        my ($s)=@_; $s->{begun}++;
+        die "private SQL diagnostic\n" if $s->{fault} eq 'begin_die';
+        return $s->{fault} eq 'begin_false' ? undef : 1;
+    }
+    sub prepare {
+        my ($s)=@_; $s->{prepared}++;
+        return undef if $s->{fault} eq 'prepare';
+        return bless {db=>$s,rows=>[['TEA','AET']]}, 'MB1186::Statement';
+    }
+    sub rollback {
+        my ($s)=@_; $s->{rolled}++;
+        die "private rollback diagnostic\n" if $s->{fault} eq 'rollback_die';
+        return $s->{fault} eq 'rollback_false' ? undef : 1;
+    }
+    package MB1186::Statement;
+    sub execute {$_[0]{db}{fault} eq 'execute' ? undef : '0E0'}
+    sub fetchrow_arrayref {shift @{$_[0]{rows}}}
+    sub err {$_[0]{db}{fault} eq 'fetch' ? 1 : 0}
+    sub finish {$_[0]{db}{finished}++; $_[0]{db}{fault} eq 'finish' ? undef : 1}
+}
+for my $fault (qw(begin_false begin_die prepare execute fetch finish rollback_false rollback_die)) {
+    my $db=bless {fault=>$fault}, 'MB1186::DB';
+    my $result; my $ok=eval {$result=$solver->solve($db,'TEA');1};
+    ok(!$ok && !defined($result), "$fault does not publish partial or empty success");
+    is($@, "dictionary_query\n", "$fault returns only the bounded public error");
+    is($db->{rolled}//0, $fault =~ /^begin/ ? 0 : 1,
+        "$fault rolls back only a successfully started transaction");
+}
+my $zero_db=bless {fault=>''}, 'MB1186::DB';
+is_deeply($solver->solve($zero_db,'TEA')->{words}, ['TEA'],
+    'DBI true-zero execute return remains successful');
+is($zero_db->{rolled}, 1, 'successful read snapshot is rolled back once');
 done_testing;

@@ -60,6 +60,8 @@ sub execute {
 }
 sub fetchrow_arrayref {shift @{$_[0]{rows}}}
 sub finish {1}
+# MB1186: implement the DBI fetch-error accessor used by the real solver.
+sub err {0}
 1;
 DRIVER
 close $driver;

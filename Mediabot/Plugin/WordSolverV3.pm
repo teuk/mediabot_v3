@@ -48,15 +48,18 @@ sub solve {
     my (@words, $rows);
     $rows = 0;
     my $result;
+    my $started = 0;
     my $ok = eval {
-        $dbh->begin_work;
+        # MB1186: DBI may report errors by return value without RaiseError.
+        $dbh->begin_work or die "dictionary_query\n";
+        $started = 1;
         while (@signatures) {
             my @batch = splice @signatures, 0, 128;
             my $limit = $MAX_WORDS + 1 - $rows;
             my $sql = 'SELECT `word`,`sorted` FROM `DICT` FORCE INDEX (`sorted`) WHERE `sorted` IN ('
                 . join(',', ('?') x @batch) . ") LIMIT $limit";
-            my $sth = $dbh->prepare($sql);
-            $sth->execute(@batch);
+            my $sth = $dbh->prepare($sql) or die "dictionary_query\n";
+            $sth->execute(@batch) or die "dictionary_query\n";
             while (my $row = $sth->fetchrow_arrayref) {
                 die "dictionary_dictionary_limit\n" if ++$rows > $MAX_WORDS;
                 my ($word, $signature) = @$row;
@@ -65,13 +68,14 @@ sub solve {
                     && join('', sort split //, $word) eq $signature;
                 push @words, $word;
             }
-            $sth->finish;
+            die "dictionary_query\n" if $sth->err;
+            $sth->finish or die "dictionary_query\n";
         }
         $result = $class->result($letters, \@words);
         1;
     };
-    my $error = $@;
-    my $rolled_back = eval { $dbh->rollback; 1 };
+    # Never roll back a transaction that this call failed to start.
+    my $rolled_back = $started && eval { $dbh->rollback };
     die "dictionary_query\n" unless $ok && $rolled_back;
     return $result;
 }
