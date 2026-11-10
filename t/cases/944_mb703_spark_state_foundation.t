@@ -132,4 +132,40 @@ return sub {
     my $bad_nick = eval { $state->observe_human(channel => '#test', nick => "Bad\nNick"); 1 };
     $assert->ok(!$bad_nick && $@ =~ /nickname/,
         'mb703-944: unsafe nick input is rejected');
+
+    # MB1199: Unicode decimal digits must never be numerically truncated.
+    for my $digit ("\x{0663}", "\x{ff13}", "\x{0969}", "\x{1d7db}") {
+        my @warnings;
+        local $SIG{__WARN__} = sub { push @warnings, @_ };
+        my $fresh = Mediabot::Spark::State->new(
+            clock => sub { 1000 }, event_duration_seconds => "30$digit");
+        $fresh->begin_event(channel=>'#test', kind=>'portal');
+        $assert->is($fresh->snapshot('#test')->{event_deadline_at}, 1060,
+            'mb1199: malformed constructor duration uses the existing default');
+        my $ok = eval { $fresh->finish_event(channel=>'#test', outcome=>'delivered',
+            cooldown_seconds=>"300$digit"); 1 };
+        $assert->ok(!$ok && $@ =~ /delivered cooldown/,
+            'mb1199: mixed-digit explicit cooldown is rejected');
+        $assert->is($fresh->snapshot('#test')->{event_active}, 1,
+            'mb1199: rejected cooldown preserves the active event');
+        $assert->is($fresh->capture_event_generation('#test'), 1,
+            'mb1199: rejected cooldown preserves event ownership');
+        my $result = $fresh->finish_event(channel=>'#test', outcome=>'delivered', cooldown_seconds=>300);
+        $assert->is($result->{cooldown_seconds}, 300,
+            'mb1199: valid retry can still finish the event');
+        $ok = eval { Mediabot::Spark::State->new(miss_cooldown_seconds=>["60$digit"]); 1 };
+        $assert->ok(!$ok && $@ =~ /miss cooldown/,
+            'mb1199: malformed miss ladder is rejected');
+        $fresh = Mediabot::Spark::State->new(clock=>sub{1000}, event_duration_seconds=>45);
+        $fresh->begin_event(channel=>'#test',kind=>'portal',duration_seconds=>"30$digit");
+        $assert->is($fresh->snapshot('#test')->{event_deadline_at},1045,
+            'mb1199: malformed per-event duration uses the configured fallback');
+        $assert->is(scalar(@warnings),0,'mb1199: invalid digits never reach numeric coercion');
+    }
+    for my $duration (30, 90, '045') {
+        my $fresh=Mediabot::Spark::State->new(clock=>sub{1000});
+        $fresh->begin_event(channel=>'#test',kind=>'portal',duration_seconds=>$duration);
+        $assert->is($fresh->snapshot('#test')->{event_deadline_at},1000+$duration,
+            'mb1199: ASCII duration boundaries and leading zero remain valid');
+    }
 };

@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1199 — Keep Spark timing validation consistent with numeric conversion
+
+- Require ASCII decimal digits for bounded state options, miss cooldown ladders
+  and delivered cooldown overrides. Mixed Unicode digits can no longer pass
+  validation and then be silently truncated by Perl's numeric conversion.
+- Retain existing defaults for malformed bounded options and reject malformed
+  explicit cooldowns before changing event ownership or active state.
+- Extend the existing state suite with four Unicode digit families, valid retry,
+  duration boundaries and leading-zero compatibility. No new test file.
+
+
 ### MB1198 — Validate RandomQuote defaults before acquiring persistent state
 
 - Reject invalid default intervals before configure/claim can create a directory

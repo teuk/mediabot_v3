@@ -40,7 +40,7 @@ sub _plain_scalar {
 
 sub _bounded_int {
     my ($value, $default, $min, $max) = @_;
-    return $default unless _plain_scalar($value) && "$value" =~ /^\d+\z/;
+    return $default unless _plain_scalar($value) && "$value" =~ /\A[0-9]+\z/;
 
     my $n = int($value);
     return $default if $n < $min || $n > $max;
@@ -94,7 +94,7 @@ sub new {
         for my $value (@$miss) {
             croak 'miss cooldown must be between 60 and 86400 seconds'
                 unless _plain_scalar($value)
-                    && "$value" =~ /^\d+\z/
+                    && "$value" =~ /\A[0-9]+\z/
                     && $value >= 60
                     && $value <= 86_400;
             push @clean, int($value);
@@ -439,7 +439,7 @@ sub finish_event {
             unless $outcome eq 'delivered';
         croak 'delivered cooldown must be between 300 and 86400 seconds'
             unless _plain_scalar($args{cooldown_seconds})
-                && "$args{cooldown_seconds}" =~ /^\d+\z/
+                && "$args{cooldown_seconds}" =~ /\A[0-9]+\z/
                 && $args{cooldown_seconds} >= 300
                 && $args{cooldown_seconds} <= 86_400;
         $cooldown_override = int($args{cooldown_seconds});
