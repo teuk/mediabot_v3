@@ -1,5 +1,19 @@
 ## [Unreleased] — 3.8dev
 
+### MB1195 — Dedicated asynchronous TikTok previews
+
+- Route public TikTok links through a dedicated UrlTitle handler: direct videos,
+  photo albums, profiles, live pages, short links and legacy/player variants.
+- Read matching public-page metadata, with oEmbed fallback. Display a compact
+  IRC badge, author, caption and available duration/counters; never substitute
+  the generic Make Your Day landing title for useful content.
+- Bound request size, redirects, workers, launch rate, recipient fanout and
+  caches; recheck channel policy and delivery context before emitting output.
+- Add deterministic parser/transport/routing regressions and a real asynchronous
+  worker round trip. Document supported links and honest unavailable fallbacks.
+- Preserve other provider routes, YouTube previews, radio and database schema.
+
+
 ### MB1194 — Refuse PID acquisition after an unreadable legacy owner
 
 - Retry interrupted PID reads on EINTR. Treat any remaining read/seek failure

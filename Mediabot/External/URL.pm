@@ -67,6 +67,7 @@ use Mediabot::External::XTwitter qw(
 # MB930: dedicated opt-in Reddit previews, independent of generic UrlTitle.
 use Mediabot::External::Reddit ();
 use Mediabot::External::MixCloud ();
+use Mediabot::External::TikTok ();
 
 use URI::Escape qw(uri_escape_utf8 uri_escape);
 use HTML::Entities qw(decode_entities);
@@ -368,7 +369,7 @@ sub _url_display_cache_gate {
 # displayUrlTitle($self, $message, $nick, $channel, $text)
 #
 # Main entry point for URL handling from on_message_PRIVMSG.
-# Handles all URL types: YouTube, Instagram, Spotify, Apple Music, generic.
+# Handles URL providers including TikTok, YouTube and generic page titles.
 # Chanset guards are checked here (not in mediabot.pl).
 # ---------------------------------------------------------------------------
 sub displayUrlTitle {
@@ -421,6 +422,13 @@ sub displayUrlTitle {
             return undef unless Mediabot::External::Reddit::enabled($self, $sChannel);
             eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'reddit' }) if $self->{metrics}; };
             return Mediabot::External::Reddit::handle($self, $message, $sNick, $sChannel, $url);
+        }
+
+        # MB1195: own TikTok links; never leak generic landing-page titles.
+        if (Mediabot::External::TikTok::is_tiktok_url($url)) {
+            return undef unless Mediabot::External::_chanset_ok($self, $sChannel, 'UrlTitle');
+            eval { $self->{metrics}->inc('mediabot_urltitle_requests_total', { type => 'tiktok' }) if $self->{metrics}; };
+            return Mediabot::External::TikTok::handle($self, $message, $sNick, $sChannel, $url);
         }
 
         # ── 1. YouTube ─────────────────────────────────────────────────────────
