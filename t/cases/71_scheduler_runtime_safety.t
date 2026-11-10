@@ -111,4 +111,50 @@ return sub {
     $assert->like($restart,
         qr/return 0 unless \$self->start\(\$name\)/,
         'Scheduler::restart starts task after successful stop');
+    # MB1192: execute registration validation in a private package with inert timers.
+    {
+        package MB1192Scheduler;
+        sub _log { }
+        package MB1192Loop;
+        sub add { $_[0]{added}++ }
+        package MB1192Scalar;
+        use overload '""' => sub { die "unexpected parameter stringification\n" }, fallback => 1;
+    }
+    my $compiled = eval "package MB1192Scheduler; use Scalar::Util qw(weaken refaddr); $add; 1;";
+    die $@ unless $compiled;
+    no warnings qw(redefine once);
+    my $created = 0;
+    local *IO::Async::Timer::Periodic::new = sub { $created++; bless {}, 'MB1192Timer' };
+    for my $field (qw(name interval first_interval)) {
+        my @invalid = $field eq 'name'
+            ? ("task\n", "task\r\n", 'bad name', '', 'a' x 65)
+            : ("12\n", "12\r\n", "2\x{0662}", "\x{0662}", '1.5', '-1', '');
+        push @invalid, [], {}, bless({},'MB1192Scalar');
+        push @invalid, 0 if $field eq 'interval';
+        for my $value (@invalid) {
+            my $loop = bless {}, 'MB1192Loop';
+            my $s = bless {_tasks=>{},loop=>$loop}, 'MB1192Scheduler';
+            my %args = (name=>'valid', interval=>60, cb=>sub {}, $field=>$value);
+            my $before = $created;
+            my @warnings;
+            my $ok;
+            { local $SIG{__WARN__}=sub {push @warnings,@_}; $ok = eval {$s->add(%args);1}; }
+            my $error = $@;
+            $assert->ok(!$ok, "$field: malformed parameter rejected");
+            my $diagnostic = $field eq 'name' ? qr/invalid task name/ : qr/\Q$field\E must be/;
+            $assert->like($error,$diagnostic,"$field: controlled validation error");
+            $assert->is(scalar keys %{$s->{_tasks}},0,"$field: no task registered");
+            $assert->is($created,$before,"$field: no timer constructed");
+            $assert->is(scalar @warnings,0,"$field: no coercion warning");
+        }
+    }
+    for my $first (0, '00', 1, '012') {
+        my $loop = bless {}, 'MB1192Loop';
+        my $s = bless {_tasks=>{},loop=>$loop}, 'MB1192Scheduler';
+        $s->add(name=>'Task_1.test:tick-2',interval=>'060',first_interval=>$first,cb=>sub {});
+        $assert->is($s->{_tasks}{'Task_1.test:tick-2'}{interval},60,'ASCII interval retains numeric normalization');
+        $assert->is($s->{_tasks}{'Task_1.test:tick-2'}{first_interval},0+$first,'zero and leading-zero first intervals remain valid');
+        $assert->is($loop->{added},1,'valid periodic task attaches one timer');
+    }
+
 };

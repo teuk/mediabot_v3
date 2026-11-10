@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1192 — Validate scheduler registration parameters exactly
+
+- Require plain scalar task names and ASCII decimal interval parameters,
+  anchored to the complete input. Reject trailing newlines, Unicode digits
+  and references before registry mutation or timer construction.
+- Preserve valid names, leading-zero numeric normalization, positive intervals
+  and non-negative first intervals including zero.
+- Extend the existing runtime safety test with executable registration checks,
+  controlled diagnostics, warning-free rejection and valid scheduling inputs.
+
+
 ### MB1191 — Resume interrupted read-only state observations
 
 - Retry sysread only on EINTR, retaining bytes already read and the existing

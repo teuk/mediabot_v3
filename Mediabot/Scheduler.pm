@@ -105,7 +105,7 @@ sub add {
 
     if (defined $first) {
         die("Scheduler: first_interval must be a non-negative integer\n")
-            unless $first =~ /^\d+$/;
+            unless !ref($first) && $first =~ /\A[0-9]+\z/;
     }
 
     die("Scheduler: next_run_cb must be a CODE reference\n")
@@ -115,13 +115,14 @@ sub add {
         if defined($first) && defined($next_run_cb);
 
     die("Scheduler: invalid task name\n")
-        unless defined($name) && $name =~ /^[A-Za-z0-9_.:-]{1,64}$/;
+        unless defined($name) && !ref($name) && $name =~ /\A[A-Za-z0-9_.:-]{1,64}\z/;
 
     die("Scheduler: task '$name' already registered\n")
         if exists $self->{_tasks}{$name};
 
     die("Scheduler: interval must be a positive integer\n")
-        unless defined($interval) && $interval =~ /^\d+$/ && $interval > 0;
+        unless defined($interval) && !ref($interval)
+            && $interval =~ /\A[0-9]+\z/ && $interval > 0;
 
     die("Scheduler: cb must be a CODE reference\n")
         unless ref($cb) eq 'CODE';
