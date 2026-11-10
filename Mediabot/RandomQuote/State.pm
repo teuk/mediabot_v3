@@ -114,9 +114,14 @@ sub _locked {
     }
     close $lock; return $result;
 }
+sub _validate_default {
+    my ($default) = @_;
+    die 'invalid RandomQuote default interval' unless _number($default, 604800) && $default >= 900;
+    return;
+}
 sub _status {
     my ($self, $row, $default) = @_;
-    die 'invalid RandomQuote default interval' unless _number($default, 604800) && $default >= 900;
+    _validate_default($default);
     my $interval = $row && $row->{interval} ? $row->{interval} : $default;
     # MB1145: use one clock sample for both the deadline check and subtraction.
     my $now = $row ? $self->{now}->() : undef;
@@ -147,6 +152,8 @@ sub observe {
 }
 sub configure {
     my ($self, $channel, $interval, $default) = @_; my $key = _channel($channel);
+    # Reject bad input before _locked can create a persistent lock or directory.
+    _validate_default($default);
     die 'RandomQuote interval must be 0 or 900..604800 seconds'
         unless _number($interval,604800) && (!$interval || $interval >= 900);
     return $self->_locked(1, sub {
@@ -160,6 +167,7 @@ sub configure {
 }
 sub claim {
     my ($self,$channel,$default)=@_;my $key=_channel($channel);
+    _validate_default($default);
     return $self->_locked(1,sub {
         my ($state)=@_;my $row=$state->{channels}{lc($key)};
         my $status=$self->_status($row,$default);my $now=int($self->{now}->());

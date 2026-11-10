@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1198 — Validate RandomQuote defaults before acquiring persistent state
+
+- Reject invalid default intervals before configure/claim can create a directory
+  or lock file. A rejected first invocation no longer leaves an orphan lock
+  that blocks later valid configuration with a missing-state error.
+- Reuse the existing 900..604800-second validation and preserve valid scheduling,
+  ticket ownership, read-only observations and missing-state protection.
+- Extend the existing state regression suite with rejection/recovery cases and
+  both inclusive interval boundaries; no additional test file or database change.
+
+
 ### MB1197 — Isolate HTTP consumers on every completion path
 
 - Use one guarded delivery helper for worker completion, cache hits, busy

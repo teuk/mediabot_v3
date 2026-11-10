@@ -91,4 +91,36 @@ close $fh;
     is(Mediabot::State::ReadOnly::read_json_snapshot($path)->{state},'fresh',
         'reader recovers after writer releases its lock');
 }
+
+# MB1198: invalid defaults must not create an orphan lock on a fresh instance.
+for my $method (qw(configure claim)) {
+    for my $bad (undef, 0, 899, 604801, '900oops', []) {
+        my $fresh_dir = tempdir(CLEANUP => 1);
+        my $fresh_path = "$fresh_dir/new/state.json";
+        my $clock_reads = 0;
+        my $fresh = Mediabot::RandomQuote::State->new(
+            path => $fresh_path, now => sub { ++$clock_reads; 1000000 });
+        my @args = $method eq 'configure' ? ('#test', 0, $bad) : ('#test', $bad);
+        my ($error, @warnings);
+        {
+            local $SIG{__WARN__} = sub { push @warnings, @_ };
+            eval { $fresh->$method(@args) }; $error = $@;
+        }
+        like($error, qr/invalid RandomQuote default interval/, "$method rejects invalid default");
+        ok(!-e "$fresh_dir/new", "$method rejection creates neither directory nor state/lock");
+        is($clock_reads, 0, "$method rejects before consulting the clock");
+        is_deeply(\@warnings, [], "$method does not coerce invalid defaults");
+        my $recovered = eval { $fresh->configure('#test', 0, 900); 1 };
+        ok($recovered, "$method rejection leaves a later valid configuration usable")
+            or diag($@);
+    }
+}
+for my $default (900, 604800) {
+    my $fresh_dir = tempdir(CLEANUP => 1);
+    my $fresh = Mediabot::RandomQuote::State->new(
+        path => "$fresh_dir/state.json", now => sub { 1000000 });
+    ok(!defined($fresh->claim('#test', $default)), 'valid default first claim still waits');
+    is($fresh->status('#test', $default)->{next_at}, 1000000+$default,
+        'inclusive default boundary keeps its complete interval');
+}
 done_testing;
