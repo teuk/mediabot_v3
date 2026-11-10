@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1194 — Refuse PID acquisition after an unreadable legacy owner
+
+- Retry interrupted PID reads on EINTR. Treat any remaining read/seek failure
+  as an acquisition failure instead of an empty PID file.
+- Preserve the live-owner check, advisory lock ownership, stable symbolic
+  aliases and fork cleanup behavior; never truncate after a failed owner read.
+- Extend the PID ownership suite with isolated EINTR/EIO injection against
+  a live parent PID, checking refusal, diagnostics and unchanged file bytes.
+
+
 ### MB1193 — Validate calendar resolver dates before arming
 
 - Require the complete next-run epoch to contain ASCII decimal digits only.

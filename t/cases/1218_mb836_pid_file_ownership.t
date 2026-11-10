@@ -136,4 +136,36 @@ is(child_result(sub {
     return 2 unless read_file($path) eq "$$\n";
     return $own->release && !-e $path ? 0:3;
 }),0,'a new child-owned object can acquire and release with its own PID');
+
+
+# MB1194: failed PID reads must never masquerade as an empty file.
+my $probe = <<'PROBE';
+use strict; use warnings; use Errno qw(EINTR EIO); use JSON::PP;
+our ($mode,$reads);
+BEGIN { *CORE::GLOBAL::sysread = sub {
+    ++$reads;
+    if ($reads == 1) { $! = $mode eq 'interrupt' ? EINTR : EIO; return undef; }
+    return CORE::sysread($_[0],$_[1],$_[2]);
+}; }
+use Mediabot::ProcessLock;
+($mode,$reads)=($ARGV[1],0);
+my $lock=Mediabot::ProcessLock->new(path=>$ARGV[0]);
+my $ok=$lock->acquire;
+print JSON::PP->new->encode({ok=>$ok?1:0,error=>$lock->error,reads=>$reads});
+$lock->release if $ok;
+PROBE
+require JSON::PP;
+for my $mode (qw(interrupt io)) {
+    my $probe_path="$dir/read-$mode.pid";
+    write_file($probe_path,"$$\n");
+    open my $child,'-|',$^X,'-I.','-e',$probe,$probe_path,$mode or die $!;
+    my $raw=do {local $/;<$child>};close $child;
+    is($?,0,"$mode: PID read probe completes");
+    my $result=JSON::PP->new->decode($raw);
+    ok(!$result->{ok},"$mode: child cannot acquire over a live parent PID");
+    like($result->{error}//'', $mode eq 'interrupt' ? qr/live process/ : qr/cannot read PID/,
+        "$mode: refusal retains a useful diagnostic");
+    is($result->{reads},$mode eq 'interrupt' ? 2:1,"$mode: retry only interrupted reads");
+    is(-f $probe_path?read_file($probe_path):'',"$$\n","$mode: live parent PID remains untouched");
+}
 done_testing;

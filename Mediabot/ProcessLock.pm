@@ -2,6 +2,7 @@ package Mediabot::ProcessLock;
 
 use strict;
 use warnings;
+use Errno qw(EINTR);
 use Fcntl qw(O_RDWR O_CREAT LOCK_EX LOCK_NB SEEK_SET);
 
 sub new {
@@ -24,7 +25,9 @@ sub _read_pid_from_fh {
     return undef unless defined sysseek($fh, 0, SEEK_SET);
 
     my $buffer = '';
-    my $read = sysread($fh, $buffer, 64);
+    my $read;
+    do { $read = sysread($fh, $buffer, 64) }
+        while (!defined($read) && $! == EINTR);
     return undef unless defined $read;
 
     $buffer =~ s/\s+\z//;
@@ -84,7 +87,11 @@ sub acquire {
     # Compatibility with a legacy process that wrote a PID but did not retain
     # an advisory lock.  A live PID must still block the new process.
     my $existing = _read_pid_from_fh($fh);
-    $existing = '' unless defined $existing;
+    unless (defined $existing) {
+        $self->{error} = "cannot read PID file '$path': $!";
+        close $fh;
+        return 0;
+    }
     $existing =~ s/\s+\z//;
     if ($existing =~ /^\d+$/ && $existing != $self->{pid}) {
         my $alive = kill 0, $existing;
