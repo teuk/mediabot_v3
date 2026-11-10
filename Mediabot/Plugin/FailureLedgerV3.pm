@@ -103,6 +103,9 @@ sub _timestamp {
 
 sub _state_key {
     my ($kind, $resource, $channel) = @_;
+    # Match QuarantineV3's RFC1459 identity without changing report spelling.
+    $channel = lc $channel;
+    $channel =~ tr/\x5b\x5d\x5c\x5e/\x7b\x7d\x7c\x7e/;
     return join("\x00", $kind, $resource, $channel);
 }
 

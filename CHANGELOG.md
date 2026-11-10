@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1202 — Share plugin failure streaks across IRC channel aliases
+
+- Key failure-ledger channels with the same RFC1459 casemapping as quarantine.
+  A success under a different spelling now clears the matching failure streak;
+  aliases no longer consume separate resource slots or split diagnostics.
+- Retain the first channel spelling in reports, failure history and totals.
+  Runtime kind, resource and unrelated channel identities remain separate.
+- Extend the existing ledger case with case and IRC punctuation aliases,
+  scoped recovery and resource-count checks. No new test file or schema change.
+
 ### MB1201 — Contain overloaded HTTP callback exceptions
 
 - Avoid boolean and string conversion of exception objects while reporting HTTP

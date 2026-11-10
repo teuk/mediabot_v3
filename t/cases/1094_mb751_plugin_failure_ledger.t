@@ -64,6 +64,42 @@ return sub {
     $assert->is(scalar(keys %{ $ledger->{resources} }), 4,
         'resource cardinality remains within the hard global bound');
 
+    # MB1202: match the channel identity used by the quarantine registry.
+    for my $pair (['#Salon', '#sALON'], ['#[Ops]', '#{ops}'],
+                  ['#A\\B^', '#a|b~']) {
+        my ($first, $alias) = @$pair;
+        my $scoped = Mediabot::Plugin::FailureLedgerV3->new(clock => sub { 200 });
+        for my $channel ($first, $alias) {
+            $scoped->record_failure(kind => 'command', resource => 'roll',
+                channel => $channel, error => 'failure');
+        }
+        my $r = $scoped->report;
+        $assert->is($r->{affected_resources}, 1,
+            'mb1202: IRC aliases share one affected resource');
+        $assert->is($r->{active_streaks}[0]{consecutive_failures}, 2,
+            'mb1202: IRC aliases accumulate one failure streak');
+        $assert->is($r->{recent}[1]{channel}, $first,
+            'mb1202: report preserves the first channel spelling');
+        $scoped->record_failure(kind => 'command', resource => 'roll',
+            channel => '#other', error => 'failure');
+        $scoped->record_failure(kind => 'job', resource => 'roll',
+            channel => $alias, error => 'failure');
+        $scoped->record_failure(kind => 'command', resource => 'other',
+            channel => $alias, error => 'failure');
+        $scoped->record_success(kind => 'command', resource => 'roll', channel => $alias);
+        $r = $scoped->report;
+        $assert->is(scalar @{$r->{active_streaks}}, 3,
+            'mb1202: alias success clears only its channel/resource/kind streak');
+        $assert->is($r->{total_failures}, 5,
+            'mb1202: recovery preserves all historical failures');
+        $assert->is($r->{total_successes}, 1,
+            'mb1202: alias recovery counts once');
+        $assert->is($r->{recent_count}, 5,
+            'mb1202: channel normalization preserves recent history');
+        $assert->is(scalar keys %{$scoped->{resources}}, 4,
+            'mb1202: alias recovery does not allocate another resource slot');
+    }
+
     my $ok = eval {
         $ledger->record_failure(
             kind => 'unknown', resource => 'bad', error => 'bad');
