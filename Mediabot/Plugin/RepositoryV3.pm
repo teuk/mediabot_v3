@@ -56,7 +56,7 @@ sub _document {
         unless ref($raw) eq 'HASH';
     die "RepositoryV3: stored revision is invalid\n"
         unless defined($raw->{revision}) && !ref($raw->{revision})
-            && "$raw->{revision}" =~ /\A(?:0|[1-9][0-9]*)\z/;
+            && "$raw->{revision}" =~ /\A(?:0|[1-9][0-9]{0,14})\z/;
     die "RepositoryV3: stored values are invalid\n"
         unless ref($raw->{values}) eq 'HASH';
     die "RepositoryV3: stored document has too many values\n"
@@ -83,7 +83,7 @@ sub commit {
     die "RepositoryV3: expected_revision is required\n"
         unless defined($args{expected_revision})
             && !ref($args{expected_revision})
-            && "$args{expected_revision}" =~ /\A(?:0|[1-9][0-9]*)\z/;
+            && "$args{expected_revision}" =~ /\A(?:0|[1-9][0-9]{0,14})\z/;
     my $changes = exists($args{changes}) ? $args{changes} : {};
     my $delete = exists($args{delete}) ? $args{delete} : [];
     die "RepositoryV3: changes must be an object\n"
@@ -108,6 +108,8 @@ sub commit {
     die "RepositoryV3: document has too many values\n"
         if keys(%next) > $MAX_VALUES;
 
+    # MB1189: never persist a revision the reader cannot represent exactly.
+    die "RepositoryV3: revision limit reached\n" if $doc->{revision} >= 999999999999999;
     my $next_revision = $doc->{revision} + 1;
     my ($ok, $error) = $self->{writer}->($self->{plugin}, {
         revision => $next_revision,

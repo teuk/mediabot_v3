@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1189 — Bound plugin repository revisions before numeric conversion
+
+- Match the channel collection's fifteen-digit revision contract for stored
+  and expected revisions, rejecting oversized values before numeric coercion.
+- Reject revision exhaustion before invoking the writer, preserving the
+  current document and ordinary stale-revision conflict behavior.
+- Extend the existing CAS suite with malformed large revisions, the last
+  supported increment, stale conflicts and write-free exhaustion.
+
+
 ### MB1188 — Validate collection cleanup locks before deletion
 
 - Apply commit's opened-lock requirements to cleanup: regular file, current
