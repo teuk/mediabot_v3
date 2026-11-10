@@ -209,6 +209,8 @@ sub _youtube_html_fallback {
 
     $title       = Mediabot::External::_decode_html($title);
     $author_name = Mediabot::External::_decode_html($author_name);
+    # MB1190: strip only the exact terminal channel marker, never the title.
+    $author_name =~ s/(?<=\S) - Topic\z//;
 
     $self->{logger}->log(3, "_youtube_html_fallback() oEmbed title='$title' author='$author_name'");
 
@@ -327,9 +329,12 @@ sub displayYoutubeDetails {
 
     $self->{logger}->log(4, "displayYoutubeDetails() sDisplayDuration : $sDisplayDuration");
 
+    # MB1190: detect before case normalization, preserving its existing threshold.
+    my $is_topic_channel = $schannelTitle =~ /\S - Topic\z/;
     # --- Normalisation des majuscules excessives ---
     if (($sTitle        =~ tr/A-Z//) > 20) { $sTitle        = ucfirst(lc($sTitle)); }
     if (($schannelTitle =~ tr/A-Z//) > 20) { $schannelTitle = ucfirst(lc($schannelTitle)); }
+    substr($schannelTitle, -8) = '' if $is_topic_channel;
 
     # --- Formatage IRC coloré ---
     my $sMsgSong = _yt_label();

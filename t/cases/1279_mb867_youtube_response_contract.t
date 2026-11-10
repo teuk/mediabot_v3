@@ -130,4 +130,60 @@ for my $limit (1,3,5) {
     like($r->{bot}{out}[0][1] // '',qr/Local title/,'healthy public title is preserved');
     is($r->{bot}{out}[0][0],'#i/o','public output retains its destination');
 }
+
+# MB1190-BEGIN: preserve the whole preview except the exact author suffix.
+for my $case (
+    ['Artist - Topic', 'Artist'],
+    ['Émilie - Topic', 'Émilie'],
+    ['A - Topic - Topic', 'A - Topic'],
+    ['ABCDEFGHIJKLMNOPQRSTUVWXYZ - Topic', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
+    ['ABCDEFGHIJKLMNOPQRST - Topic', 'ABCDEFGHIJKLMNOPQRST'],
+    ['Topic', 'Topic'], [' - Topic', ' - Topic', '- Topic'],
+    ['Artist - topic', 'Artist - topic'],
+    ['Artist - TOPIC', 'Artist - TOPIC'],
+    ['Artist-Topic', 'Artist-Topic'],
+    ['Artist – Topic', 'Artist – Topic'],
+    ['Artist - Topic Live', 'Artist - Topic Live'],
+    ['Artist - Topic ', 'Artist - Topic ', 'Artist'],
+    ['Studio', 'Studio'], ['', ''],
+) {
+    my ($author, $expected) = @$case;
+    for my $mode ('api', 'oembed') {
+        my $body = sub {
+            my ($name) = @_;
+            return $mode eq 'api'
+                ? ({items=>[{snippet=>{title=>'Song - Topic',channelTitle=>$name},
+                    contentDetails=>{duration=>'PT1M2S'},statistics=>{viewCount=>'1234'}}]})
+                : ({items=>[]}, {title=>'Song - Topic',author_name=>$name});
+        };
+        my $name = $mode eq 'oembed' && @$case > 2 ? $case->[2] : $expected;
+        if ($mode eq 'api' && ($author =~ tr/A-Z//) > 20) { $name = ucfirst(lc($name)); }
+        my $want = '(Caller) ' . Mediabot::External::YouTube::_yt_label()
+            . Mediabot::External::YouTube::_yt_text(' Song - Topic ');
+        if ($mode eq 'api') {
+            $want .= Mediabot::External::YouTube::_yt_sep('- ')
+                . Mediabot::External::YouTube::_yt_meta('1mn 2s ')
+                . Mediabot::External::YouTube::_yt_sep('- ')
+                . Mediabot::External::YouTube::_yt_meta('views 1.2k ');
+        }
+        if ($mode eq 'api' || length $name) {
+            $want .= Mediabot::External::YouTube::_yt_sep('- ')
+                . Mediabot::External::YouTube::_yt_meta("by $name");
+        }
+        my $r = run867('public',3,$body->($author));
+        ok($r->{ok} && $r->{result}, "$mode: preview succeeds for [$author]");
+        is_deeply($r->{bot}{out}, [['#i/o',$want]], "$mode: only the exact author suffix changes for [$author]");
+        like($r->{bot}{out}[0][1], qr/Song - Topic/, "$mode: video title suffix is preserved");
+        is(scalar @{$r->{calls}}, $mode eq 'api' ? 1 : 2, "$mode: request count is unchanged");
+        is_deeply($r->{warnings}, [], "$mode: no warnings");
+        if ($mode eq 'api') {
+            $http->{calls}=[];
+            Mediabot::External::YouTube::displayYoutubeDetails($r->{bot},undef,'Caller','#i/o','https://youtu.be/AbCdEfGh123');
+            is(scalar @{$http->{calls}},0,'API cache replay performs no request');
+            is_deeply($r->{bot}{out}[1],$r->{bot}{out}[0],'API cache preserves the formatted preview');
+        }
+    }
+}
+# MB1190-END
+
 done_testing;

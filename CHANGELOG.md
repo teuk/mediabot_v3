@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1190 — Remove the terminal Topic channel marker from previews
+
+- Strip one exact ` - Topic` suffix from the preview author in the Data API
+  and decoded oEmbed paths, only when a nonblank name precedes it.
+- Keep video titles, search and radio metadata unchanged. Preserve the existing
+  uppercase normalization decision, IRC formatting, requests and cache policy.
+- Extend the existing response contract suite with full preview comparisons,
+  accented names, near matches, uppercase thresholds and cache replay.
+
+
 ### MB1189 — Bound plugin repository revisions before numeric conversion
 
 - Match the channel collection's fifteen-digit revision contract for stored
