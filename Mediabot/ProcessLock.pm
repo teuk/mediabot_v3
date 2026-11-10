@@ -114,11 +114,17 @@ sub acquire {
         return 0;
     };
     my $payload = $self->{pid} . "\n";
-    my $written = syswrite($fh, $payload);
-    unless (defined $written && $written == length($payload)) {
-        $self->{error} = "cannot write PID file '$path': $!";
-        close $fh;
-        return 0;
+    my $offset = 0;
+    while ($offset < length($payload)) {
+        my $written = syswrite($fh, $payload, length($payload)-$offset, $offset);
+        next if !defined($written) && $! == EINTR;
+        unless (defined($written) && $written > 0) {
+            my $reason = defined($written) ? 'write made no progress' : "$!";
+            $self->{error} = "cannot write PID file '$path': $reason";
+            close $fh;
+            return 0;
+        }
+        $offset += $written;
     }
     chmod 0644, $fh;
     unless (_path_matches_handle($path,$fh,$identity)) {

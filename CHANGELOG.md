@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1196 — Complete interrupted and partial PID writes
+
+- Retry EINTR while publishing the owning PID and advance the buffer offset
+  after partial writes, preserving exact PID bytes without duplicate prefixes.
+- Refuse acquisition on real write errors or zero progress; retain ownership
+  only after the entire payload has been written and path identity checked.
+- Extend the existing PID suite with isolated short-write, EINTR, EIO and
+  zero-progress probes. Preserve legacy-owner checks and normal cleanup.
+
+
 ### MB1195 — Dedicated asynchronous TikTok previews
 
 - Route public TikTok links through a dedicated UrlTitle handler: direct videos,

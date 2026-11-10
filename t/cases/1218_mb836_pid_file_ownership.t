@@ -168,4 +168,51 @@ for my $mode (qw(interrupt io)) {
     is($result->{reads},$mode eq 'interrupt' ? 2:1,"$mode: retry only interrupted reads");
     is(-f $probe_path?read_file($probe_path):'',"$$\n","$mode: live parent PID remains untouched");
 }
+
+# MB1196: retry EINTR and finish partial writes without duplicating PID bytes.
+my $write_probe = <<'WRITE_PROBE';
+use strict; use warnings; use Errno qw(EINTR EIO); use JSON::PP;
+use Fcntl qw(LOCK_EX LOCK_NB);
+our ($mode,$writes);
+BEGIN { *CORE::GLOBAL::syswrite = sub {
+    ++$writes;
+    if (($mode eq 'interrupt' && $writes==1) || ($mode eq 'short_interrupt' && $writes==2)) {
+        $!=EINTR; return undef;
+    }
+    if ($mode eq 'io' || ($mode eq 'partial_io' && $writes==2)) { $!=EIO; return undef }
+    if ($mode eq 'zero') { $!=0; return 0 }
+    my $size=$_[2] // length($_[1]);
+    $size=1 if $mode =~ /short|partial/ && $writes==1;
+    return CORE::syswrite($_[0],$_[1],$size,$_[3]//0);
+}; }
+use Mediabot::ProcessLock;
+($mode,$writes)=($ARGV[1],0);
+my $lock=Mediabot::ProcessLock->new(path=>$ARGV[0]);
+my $ok=$lock->acquire;
+open my $r,'<',$ARGV[0] or die $!;
+my $bytes=do {local $/;<$r>}; close $r;
+my $out={ok=>$ok?1:0,error=>$lock->error,writes=>$writes,bytes=>$bytes,expected=>"$$\n",held=>$lock->{fh}?1:0};
+$out->{released}=$lock->release?1:0;
+$out->{exists}=-e $ARGV[0]?1:0;
+print JSON::PP->new->encode($out);
+WRITE_PROBE
+for my $mode (qw(interrupt short short_interrupt io zero partial_io)) {
+    my $probe_path="$dir/write-$mode.pid";
+    open my $child,'-|',$^X,'-I.','-e',$write_probe,$probe_path,$mode or die $!;
+    my $raw=do {local $/;<$child>};close $child;
+    is($?,0,"$mode: PID write probe completes");
+    my $result=JSON::PP->new->decode($raw);
+    my $success=$mode =~ /\A(?:interrupt|short|short_interrupt)\z/ ? 1:0;
+    is($result->{ok},$success,"$mode: correct acquisition result");
+    is($result->{held},$success,"$mode: retain ownership only after a complete write");
+    is($result->{writes},$mode eq 'short_interrupt'?3:$mode =~ /\A(?:io|zero)\z/?1:2,
+        "$mode: bounded progress and retry count");
+    if ($success) {
+        is($result->{bytes},$result->{expected},"$mode: complete PID with no duplicate prefix");
+        ok($result->{released} && !$result->{exists},"$mode: normal owner cleanup");
+    } else {
+        like($result->{error}//'',qr/cannot write PID/,"$mode: write failure remains explicit");
+        ok($result->{exists},"$mode: failed write does not claim or unlink the path");
+    }
+}
 done_testing;
