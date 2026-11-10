@@ -2,7 +2,7 @@ package Mediabot::State::ReadOnly;
 use strict;
 use warnings;
 use Exporter 'import';
-use Errno qw(ENOENT EWOULDBLOCK EAGAIN);
+use Errno qw(ENOENT EWOULDBLOCK EAGAIN EINTR);
 use Fcntl qw(:DEFAULT :flock :mode);
 use File::Spec;
 use JSON::PP;
@@ -58,7 +58,10 @@ sub _read {
     my $raw = '';
     while (1) {
         my $n = sysread($fh, my $chunk, 262145 - length($raw));
-        _fail('unreadable') unless defined $n;
+        if (!defined $n) {
+            next if $! == EINTR; # MB1191: resume interrupted reads without losing bytes.
+            _fail('unreadable');
+        }
         last unless $n;
         $raw .= $chunk;
         _fail('too_large') if length($raw) > 262144;

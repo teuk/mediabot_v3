@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1191 — Resume interrupted read-only state observations
+
+- Retry sysread only on EINTR, retaining bytes already read and the existing
+  size bound. RandomQuote/RSS observations no longer report a valid state as
+  unavailable merely because a signal interrupted the read.
+- Preserve immediate failure on EIO/EAGAIN and nonblocking writer-lock checks.
+- Extend the existing observation suite with isolated error injection before
+  and after a partial read, read counts, unchanged bytes and lock recovery.
+
+
 ### MB1190 — Remove the terminal Topic channel marker from previews
 
 - Strip one exact ` - Topic` suffix from the preview author in the Data API
