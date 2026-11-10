@@ -157,4 +157,28 @@ return sub {
         $assert->is($loop->{added},1,'valid periodic task attaches one timer');
     }
 
+    # MB1193: calendar resolver output has the same exact ASCII contract.
+    my $arm = _extract_sub_scheduler_safety($src, '_arm_calendar');
+    my $owner = _extract_sub_scheduler_safety($src, '_calendar_owner');
+    my $error_text = _extract_sub_scheduler_safety($src, '_exception_text');
+    eval "package MB1193Scheduler; use Scalar::Util qw(weaken refaddr); $arm $owner $error_text; sub _log {} 1;" or die $@;
+    local *IO::Async::Timer::Countdown::new = sub { $created++; die "timer must not be reached\n" };
+    my $future = time() + 3600;
+    for my $next ("$future\n", "$future\r\n", "$future\x{0662}",
+                  "\x{0662}", 'garbage', [], {}, undef, time()-1) {
+        my $task = {mode=>'calendar',started=>1,generation=>1,next_run=>0,
+            timer=>undef,next_run_cb=>sub {$next}};
+        my $scheduler = bless {_tasks=>{calendar=>$task},loop=>bless({},'MB1192Loop')}, 'MB1193Scheduler';
+        my $before = $created;
+        my (@warnings,$result);
+        my $ok;
+        { local $SIG{__WARN__}=sub {push @warnings,@_};
+          $ok=eval {$result=$scheduler->_arm_calendar('calendar');1}; }
+        $assert->ok($ok,'invalid calendar epoch returns without throwing');
+        $assert->is($result,0,'invalid calendar epoch refuses the arm');
+        $assert->is($created,$before,'invalid calendar epoch constructs no timer');
+        $assert->is($task->{next_run},0,'invalid calendar epoch publishes no deadline');
+        $assert->is(scalar @warnings,0,'invalid calendar epoch emits no numeric coercion warnings');
+    }
+
 };

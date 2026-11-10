@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1193 — Validate calendar resolver dates before arming
+
+- Require the complete next-run epoch to contain ASCII decimal digits only.
+  A trailing newline or mixed Unicode digits can no longer reach numeric
+  conversion and timer construction as a misleading future date.
+- Preserve calendar ownership, future-date checks and existing failure cleanup.
+- Extend the runtime-safety test with isolated executable resolver validation,
+  no-timer assertions and warning-free rejection.
+
+
 ### MB1192 — Validate scheduler registration parameters exactly
 
 - Require plain scalar task names and ASCII decimal interval parameters,

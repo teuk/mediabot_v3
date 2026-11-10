@@ -248,7 +248,7 @@ sub _arm_calendar {
     my $current = $self->{_tasks}{$name};
     return 0 unless $current && refaddr($current) == $task_addr
         && $current->{generation} == $generation && $current->{started};
-    if (!$resolved || !defined($next) || ref($next) || "$next" !~ /^\d+$/ || $next <= $now) {
+    if (!$resolved || !defined($next) || ref($next) || "$next" !~ /\A[0-9]+\z/ || $next <= $now) {
         my $err = _exception_text($next_error, 'invalid next epoch');
         $self->_log(1, "Scheduler: cannot arm calendar task '$name': $err");
         return 0;
