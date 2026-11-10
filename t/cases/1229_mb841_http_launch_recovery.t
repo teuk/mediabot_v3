@@ -94,6 +94,54 @@ return sub {
     $a->is(join(',',@out),'replacement','mb841: only replacement generation receives HTTP result');
     $a->is($s->inflight_count('fixture-v3'),0,'mb841: replacement HTTP worker releases capacity');
 
+    # MB1197: callback isolation must also hold for synchronous service paths.
+    for my $mode (qw(cache busy circuit async)) {
+        for my $broken_logger (0,1) {
+            my (@workers,@logs,@delivered);
+            my $svc=Mediabot::Plugin::HTTPServiceV3->new(
+                clock=>sub {1000},
+                worker_factory=>sub {my %args=@_;my $w=MB841::HTTPWorker->new(%args);push @workers,$w;$w},
+                on_log=>sub {push @logs,[@_];die "logger fault\n" if $broken_logger});
+            my $request={url=>'https://example.net/item',cache_ttl_seconds=>$mode eq 'cache'?60:0};
+            if ($mode eq 'cache') {
+                $svc->fetch('callback-v3',$request,sub {});
+                $workers[-1]->finish(mb841_http_success());
+            } elsif ($mode eq 'busy') {
+                $svc->fetch('callback-v3',$request,sub {}) for 1..2;
+            } elsif ($mode eq 'circuit') {
+                for (1..3) {
+                    $svc->fetch('callback-v3',$request,sub {});
+                    $workers[-1]->finish({ok=>1,value=>{ok=>0,status=>503,error=>'http_503'}});
+                }
+            }
+            my ($result,$escaped);
+            my $ok=eval {
+                $result=$svc->fetch('callback-v3',$request,sub {
+                    push @delivered,$_[0];die "consumer failed\n";
+                });
+                $workers[-1]->finish(mb841_http_success()) if $mode eq 'async';
+                1;
+            };
+            $escaped=$@;
+            $a->ok($ok,"mb1197: $mode callback contained (logger=$broken_logger)");
+            $a->is($escaped,'',"mb1197: $mode no callback/logger exception reaches caller");
+            $a->is(scalar @delivered,1,"mb1197: $mode callback delivered exactly once");
+            $a->is(scalar @logs,1,"mb1197: $mode callback failure logged once");
+            $a->is($logs[0] ? $logs[0][1] : '',"consumer failed\n","mb1197: $mode preserves callback diagnostic");
+            $a->is($svc->inflight_count('callback-v3'),$mode eq 'busy'?2:0,
+                "mb1197: $mode preserves outstanding worker slots");
+            if ($mode eq 'cache') {
+                $a->ok($result && $result->{accepted} && $result->{cached},'mb1197: cache hit retains accepted result');
+                $a->ok($delivered[0] && $delivered[0]->from_cache,'mb1197: cached response flag preserved');
+            } elsif ($mode eq 'async') {
+                $a->ok($result && $result->{accepted},'mb1197: asynchronous acceptance unchanged');
+            } else {
+                $a->is($result ? $result->{error} : '',$mode eq 'busy'?'busy':'circuit_open',
+                    "mb1197: $mode refusal result preserved");
+            }
+        }
+    }
+
     # Real fork/pipe/watch_process with an injected offline HTTP response.
     # Network policy and HTTPS verification remain enforced by production code.
     my $loop=IO::Async::Loop->new;my @real;

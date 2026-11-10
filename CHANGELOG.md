@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1197 — Isolate HTTP consumers on every completion path
+
+- Use one guarded delivery helper for worker completion, cache hits, busy
+  refusals and open circuits. Consumer callback exceptions no longer escape
+  merely because a request completes synchronously.
+- Retain callback diagnostics while containing logger failures as well.
+  Preserve admission results, cache flags, circuit policy and worker ownership.
+- Extend the existing HTTP lifecycle suite across all four delivery paths,
+  with both working and failing loggers; retain real worker coverage.
+
+
 ### MB1196 — Complete interrupted and partial PID writes
 
 - Retry EINTR while publishing the owning PID and advance the buffer offset

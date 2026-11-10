@@ -296,6 +296,17 @@ sub _response {
     return Mediabot::Plugin::HTTPResponseV3->new(%$data, %extra);
 }
 
+# Consumer code must not escape the service boundary merely because a cache
+# hit or admission refusal completed inline rather than through a worker.
+sub _deliver {
+    my ($self, $callback, $response) = @_;
+    eval { $callback->($response); 1 } or do {
+        my $error = $@ || 'callback failed';
+        eval { $self->{on_log}->(1, $error) };
+    };
+    return;
+}
+
 sub _metric {
     my ($self, $name, $labels) = @_;
     eval { $self->{on_metric}->($name, $labels) };
@@ -371,7 +382,7 @@ sub fetch {
         $self->_metric('mediabot_plugin_v3_http_request_total', {
             plugin => $plugin, outcome => 'cache',
         });
-        $callback->(_response($cached->{data}, from_cache => 1));
+        $self->_deliver($callback, _response($cached->{data}, from_cache => 1));
         return { accepted => 1, cached => 1 };
     }
     delete $self->{cache}{$cache_key} if $cached;
@@ -381,7 +392,7 @@ sub fetch {
         $self->_metric('mediabot_plugin_v3_http_request_total', {
             plugin => $plugin, outcome => 'circuit_open',
         });
-        $callback->(_response({ ok => 0, error => 'circuit_open', url => $url }));
+        $self->_deliver($callback, _response({ ok => 0, error => 'circuit_open', url => $url }));
         return { accepted => 0, error => 'circuit_open' };
     }
 
@@ -390,7 +401,7 @@ sub fetch {
         $self->_metric('mediabot_plugin_v3_http_request_total', {
             plugin => $plugin, outcome => 'busy',
         });
-        $callback->(_response({ ok => 0, error => 'busy', url => $url }));
+        $self->_deliver($callback, _response({ ok => 0, error => 'busy', url => $url }));
         return { accepted => 0, error => 'busy' };
     }
 
@@ -435,10 +446,7 @@ sub fetch {
         $self->_metric('mediabot_plugin_v3_http_request_total', {
             plugin => $plugin, outcome => $outcome,
         });
-        eval { $callback->(_response($data)); 1 } or do {
-            my $error = $@ || 'callback failed';
-            eval { $self->{on_log}->(1, $error) };
-        };
+        $self->_deliver($callback, _response($data));
     };
 
     my %worker_args = (
