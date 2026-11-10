@@ -12,6 +12,11 @@ use Mediabot::Plugin::HTTPServiceV3;
 sub mb841_http_success {
     return {ok=>1,value=>{ok=>1,status=>200,url=>'https://example.net/item',body=>'local fixture',error=>''}};
 }
+{
+    package MB1201::HostileException;
+    use overload 'bool' => sub { die "exception boolean conversion\n" },
+        '""' => sub { die "exception string conversion\n" }, fallback => 1;
+}
 return sub {
     my ($a)=@_;
     my $req=sub {{url=>'https://example.net/item',cache_ttl_seconds=>0}};
@@ -97,6 +102,7 @@ return sub {
     # MB1197: callback isolation must also hold for synchronous service paths.
     for my $mode (qw(cache busy circuit async)) {
         for my $broken_logger (0,1) {
+          for my $object_error (0,1) {
             my (@workers,@logs,@delivered);
             my $svc=Mediabot::Plugin::HTTPServiceV3->new(
                 clock=>sub {1000},
@@ -117,17 +123,19 @@ return sub {
             my ($result,$escaped);
             my $ok=eval {
                 $result=$svc->fetch('callback-v3',$request,sub {
-                    push @delivered,$_[0];die "consumer failed\n";
+                    push @delivered,$_[0];
+                    die bless({}, "MB1201::HostileException") if $object_error;
+                    die "consumer failed\n";
                 });
                 $workers[-1]->finish(mb841_http_success()) if $mode eq 'async';
                 1;
             };
             $escaped=$@;
-            $a->ok($ok,"mb1197: $mode callback contained (logger=$broken_logger)");
+            $a->ok($ok,"mb1197: $mode callback contained (logger=$broken_logger, object=$object_error)");
             $a->is($escaped,'',"mb1197: $mode no callback/logger exception reaches caller");
             $a->is(scalar @delivered,1,"mb1197: $mode callback delivered exactly once");
             $a->is(scalar @logs,1,"mb1197: $mode callback failure logged once");
-            $a->is($logs[0] ? $logs[0][1] : '',"consumer failed\n","mb1197: $mode preserves callback diagnostic");
+            $a->is($logs[0] ? $logs[0][1] : '',$object_error ? "non-scalar callback exception" : "consumer failed\n","mb1197: $mode preserves callback diagnostic");
             $a->is($svc->inflight_count('callback-v3'),$mode eq 'busy'?2:0,
                 "mb1197: $mode preserves outstanding worker slots");
             if ($mode eq 'cache') {
@@ -139,6 +147,7 @@ return sub {
                 $a->is($result ? $result->{error} : '',$mode eq 'busy'?'busy':'circuit_open',
                     "mb1197: $mode refusal result preserved");
             }
+          } # scalar/object exception
         }
     }
 

@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1201 — Contain overloaded HTTP callback exceptions
+
+- Avoid boolean and string conversion of exception objects while reporting HTTP
+  callback failures. Even hostile overloads cannot escape the delivery guard.
+- Preserve scalar diagnostics and contain logger failures on cache, busy,
+  circuit-open and asynchronous completion paths.
+- Extend the existing lifecycle regression matrix; retain response flags,
+  admission results and worker-slot ownership checks. No additional test file.
+
 ### MB1200 — Make patch delivery reproducible from GitHub
 
 - Document source revision ownership, regression checks and the maintainer's

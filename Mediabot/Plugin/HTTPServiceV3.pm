@@ -301,7 +301,10 @@ sub _response {
 sub _deliver {
     my ($self, $callback, $response) = @_;
     eval { $callback->($response); 1 } or do {
-        my $error = $@ || 'callback failed';
+        my $error = $@;
+        # Exception objects may throw again on boolean or string conversion.
+        $error = 'non-scalar callback exception' if ref($error);
+        $error = 'callback failed' unless defined($error) && length($error);
         eval { $self->{on_log}->(1, $error) };
     };
     return;
