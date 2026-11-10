@@ -63,6 +63,9 @@ test/public-command-dispatch
 
 Keep each branch focused on one bug, feature or documentation topic.
 
+For exact-base patch deliveries, use [the patch workflow](docs/PATCH_WORKFLOW.md).
+Repository automation guidance is in [AGENTS.md](AGENTS.md).
+
 ## Setting up Mediabot
 
 Start with [Clone, understand and contribute](docs/DEVELOPING.md): local Perl

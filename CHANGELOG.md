@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1200 — Make patch delivery reproducible from GitHub
+
+- Document source revision ownership, regression checks and the maintainer's
+  commit.sh/VERSION/push workflow in AGENTS.md and a focused patch guide.
+- Add a check-only-by-default patch helper requiring a full base commit and
+  SHA-256. Reject local work, interrupted Git operations and conflicting patches;
+  explicit application leaves the index untouched for commit.sh.
+- Cover the helper with offline Git integration tests, including preservation
+  of ignored destinations and rejection without partial application.
+
+
 ### MB1199 — Keep Spark timing validation consistent with numeric conversion
 
 - Require ASCII decimal digits for bounded state options, miss cooldown ladders
