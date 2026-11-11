@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1230 — Bind plugin jobs to exact Scheduler registrations
+
+- Capture the Scheduler instance and callback registration ID at mount; start,
+  stop, removal and rollback cannot act on a same-name successor.
+- Retire old callback/output authority when its registration is replaced,
+  including replacement during a handler's channel fan-out.
+- Track partial registrations before rollback and preserve MB1229 incomplete
+  cleanup recovery. Unknown ownership fails closed instead of deleting by name.
+- Extend existing native lifecycle tests and align seven Scheduler doubles with
+  the real registration API. No new repository test file or configuration.
+
 ### MB1229 — Retain plugin jobs after incomplete unload
 
 - Keep unresolved job records after false/throwing Scheduler removals and attempt

@@ -19,8 +19,9 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
-Current continuation point: MB1229 implements incomplete plugin unload recovery
-after MB1228; exact job registration identity and mount rollback remain next. Overall scope: [MB1227 checkpoint](#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
+Current continuation point: MB1230 implements exact plugin-job ownership and
+mount rollback after MB1228/MB1229. Host acceptance is pending; checkpoint the
+remaining phases before choosing another runtime family. Overall scope: [MB1227 checkpoint](#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
 Earlier “Next” paragraphs record decisions at their original increment; they do
 not override this checkpoint.
 
@@ -662,3 +663,37 @@ start/stop/remove and mount rollback. This patch does not claim same-name
 successor protection in PluginManager; MB1228 only protects reentrant removal
 inside Scheduler. Retaining failed records is the prerequisite for safely
 changing that boundary. Generic workers and final-exit policy remain separate.
+
+## MB1230 — exact plugin job ownership
+
+Base `d8a690b9534da14d356bc22b7ffa5cbd6693a692` (MB1229 on GitHub), matched
+against `snap_mediabot_v3_teuk_20261111_184619.zip` for changed inputs.
+
+Native reproduction showed an old plugin stopping/removing a same-name successor,
+activation starting that successor, and a retained old callback still executing.
+The mounted record now contains the scheduler identity and exact callback
+registration ID. All lifecycle operations check that identity; activation checks
+again after start. Missing/superseded registrations are released without mutation,
+while unknown identity or a different scheduler fails closed and retains cleanup
+ownership. Existing API v2 behavior, task names, intervals and policy gates stay.
+
+Mount publishes its owned records incrementally. A throwing add is inspected for
+its exact callback registration, and rollback uses the same ownership-aware
+removal path as unload. MB1229 failure retention/retry remains active. A
+replacement during the handler revokes old output and subsequent-channel dispatch.
+The native Scheduler registration_id/task_info contract is now required for v3
+jobs; seven deterministic test doubles expose that existing native contract.
+Pre-change in-memory records without identity are not guessed from their names;
+use ordinary fresh process/plugin initialization when adopting this code.
+
+Existing case 1072 and MB908 fixture cover lifecycle replacements, retained
+callbacks, add/start replacement, failed mount/start rollback, post-add exceptions,
+incomplete rollback recovery and replacement during output. No new historical
+case file was introduced. Local targeted acceptance: 24 files, 981 assertions
+passed, including Scheduler native cases. Full host suite/commit remains pending.
+
+This completes the bounded plugin-job ownership/recovery implementation selected
+in MB1227, subject to host acceptance. It does not complete all phase D. Next:
+checkpoint remaining generic-worker/final-exit questions and phases B/C data
+access responsibilities before selecting another family. Do not append another
+shutdown migration automatically or introduce a universal resource framework.

@@ -17,8 +17,15 @@ BEGIN {
 
 {
     package T1078::Scheduler;
+    sub task_info { $_[0]{tasks}{$_[1]} }
+    sub registration_id {
+        my ($self, $name, $callback) = @_;
+        my $task = $self->{tasks}{$name} or return;
+        return unless Scalar::Util::refaddr($task->{cb}) == Scalar::Util::refaddr($callback);
+        return $task->{task_id};
+    }
     sub new { bless { tasks => {} }, shift }
-    sub add { my ($s, %a) = @_; $s->{tasks}{$a{name}} = { %a, started => 0 }; $s }
+    sub add { my ($s, %a) = @_; $s->{tasks}{$a{name}} = { %a, started => 0, task_id => ++$s->{serial} }; $s }
     sub start { $_[0]{tasks}{$_[1]}{started} = 1; 1 }
     sub stop { $_[0]{tasks}{$_[1]}{started} = 0; 1 }
     sub remove { delete($_[0]{tasks}{$_[1]}) ? 1 : 0 }

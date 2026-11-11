@@ -37,7 +37,7 @@ integration question for a later migration, not proof that every resource leaks.
 | [Deferred AntiFlood](../Mediabot/IRC/DeferredOutput.pm), `_arm_flood_drain` | `_flood_outq` target queue; owned countdown handle and arm identity; weak expected queue in callback | MB1214 detaches/clears old queues before cancelling notifiers; expiry releases handle before normal drain/retry | Committed as `b321e17`; reconnect retirement does not change final-exit policy. |
 | [AsyncWorker](../Mediabot/AsyncWorker.pm), `cancel`, `_cleanup`, `_complete` | Worker owner PID, task ID, process/stream, timeout/kill/force timers | Cancel initiates TERM/KILL/backstop; cleanup deletes timer/stream/FD slots; finalized gate allows completion once; active_workers excludes finalized entries | Cancellation request is not synchronous child completion. Consumers must retain result/reaping semantics during shutdown. |
 | [Scheduler](../Mediabot/Scheduler.pm), `stop`, `remove`, `registration_id` | Named task plus exact registration ID/generation | Calendar stop removes notifier; ordinary periodic stop stops it; generation changes invalidate old execution; remove has its own semantics | MB1228 rechecks exact task identity after stop/remove callbacks so outer cleanup cannot erase a successor. Stop failure still remains a failure; plugin-side exact ownership is pending. |
-| [Plugin jobs](../Mediabot/PluginManager.pm), `_stop_v3_jobs`, `_remove_v3_jobs` | Plugin entry's `mounted_jobs` stores names/clocks, mediated by Scheduler | Stops/removes by name; MB1229 retains failed removal records on a disabled entry and reports incomplete unload | MB1227 priority: capture exact registration identity, preserve successors and retain incomplete cleanup ownership; include mount rollback. Lifecycle/capability authority stays in PluginManager. |
+| [Plugin jobs](../Mediabot/PluginManager.pm), `_stop_v3_jobs`, `_remove_v3_jobs` | Plugin entry's `mounted_jobs` stores name/clock plus Scheduler identity and registration ID (MB1230) | MB1230 checks exact ownership before start/stop/remove and rollback; MB1229 retains failed removal records on a disabled entry and reports incomplete unload | MB1230 implements exact identity and rollback; host acceptance pending. Unknown ownership is refused, not inferred from a name. Lifecycle/capability authority stays in PluginManager. |
 | [Partyline watch](../Mediabot/Partyline/ShellWatch.pm), `_dispose`, `_remove_owned` | Exact session/stream/state, owner PID and task ID; weak owner references | Marks done, drops renderer, removes only its own scheduler registration; reports incomplete removal | Useful existing model for revoke-first cleanup; preserve session authorization rather than copying it into a generic timer helper. |
 | [Nicklist timers](../Mediabot/Channel/NicklistTimers.pm), Mediabot setup/stop delegates | Public `channel_nicklist_timers` map plus private weak-key callback metadata and setup generation | MB1218 detaches/revokes before independent remove/stop; late setup cannot overwrite successors; failures return 0 and log incomplete cleanup | Committed as `7f1529b3`; no detailed host report supplied. Failed physical cleanup is not retried by repeated retirement; final shutdown remains separate. |
 | [DB timers](../Mediabot/DBCommands.pm), `_stop_all_runtime_db_timers`, `onStartTimers` | `hTimers` map, detached before cleanup | Stops and removes each old timer in separate eval blocks when rebuilding | Keep DB-command scheduling and reconnect publication behavior covered; do not merge with Scheduler solely because both use timers. |
@@ -171,3 +171,13 @@ continues for other jobs. Retry unload completes only the outstanding work,
 including native tasks already removed separately. Persistent unload does not
 write success on failure, and activation/replacement cannot discard this pending
 owner. Exact task registration identity and mount rollback are still pending.
+
+## MB1230 — exact plugin-job registration authority
+
+Mounted jobs now retain scheduler identity and exact callback registration ID.
+Lifecycle operations and mount/start rollback preserve same-name successors;
+old callbacks, later channels and output guards reject superseded registrations.
+Partial add ownership is captured before cleanup. Failed removal still retains
+its disabled owner for retry as in MB1229. Unknown identity fails closed; names
+alone cannot recover pre-change in-memory ownership. This is a bounded plugin
+adapter change using the existing native Scheduler registration API.

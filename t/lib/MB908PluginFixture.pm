@@ -319,4 +319,131 @@ sub run_job_cleanup_contracts {
     return \@rows;
 }
 
+sub run_job_identity_contracts {
+    my @rows;
+    for my $action (qw(disable unload enable retained)) {
+        my ($m,$e,$bot)=_context();my $scheduler=$bot->{scheduler};
+        my $name='plugin.v3.witness.tick';my $old_cb=$scheduler->{_tasks}{$name}{cb};
+        $m->disable('witness') if $action eq 'enable';
+        $scheduler->remove($name);
+        my $new_runs=0;
+        $scheduler->add(name=>$name,interval=>3600,cb=>sub {$new_runs++},
+            autostart=>$action eq 'enable' ? 0:1);
+        my $id=$scheduler->task_info($name)->{task_id};
+        my $before=@{$e->{object}{jobs}};
+        my $ok=eval {
+            $m->disable('witness') if $action eq 'disable';
+            $m->unregister_plugin('witness') if $action eq 'unload';
+            $m->enable('witness') if $action eq 'enable';
+            $old_cb->() if $action eq 'retained';
+            1;
+        };
+        my $info=$scheduler->task_info($name);
+        push @rows,{case=>"$action preserves exact successor",ok=>
+            $info && $info->{task_id}==$id && $info->{started}==($action eq 'enable'?0:1) ? 1:0};
+        push @rows,{case=>"$action preserves lifecycle authority",ok=>
+            ($action eq 'enable' ? !$ok && !$e->{enabled} : $ok)
+            && @{$e->{object}{jobs}}==$before ? 1:0};
+        eval {$m->unregister_plugin('witness')};$scheduler->remove($name);
+    }
+    for my $case (qw(add_replaced rollback_replaced add_throws cleanup_throws)) {
+        my ($m,$e,$bot)=_context();my $scheduler=$bot->{scheduler};
+        my $name='plugin.v3.witness.tick';
+        $m->disable('witness');$scheduler->remove($name);
+        $e->{manifest}{jobs}{ztail}={%{$e->{manifest}{jobs}{tick}}};
+        my $add=Mediabot::Scheduler->can('add');
+        my $remove=Mediabot::Scheduler->can('remove');
+        my $successor;
+        my ($ok,$error);
+        {
+            no warnings 'redefine';
+            local *Mediabot::Scheduler::add=sub {
+                my ($self,%args)=@_;
+                if ($args{name}=~/ztail$/) {
+                    if ($case eq 'rollback_replaced') {
+                        $remove->($self,$name);
+                        $add->($self,name=>$name,interval=>3600,cb=>sub {},autostart=>1);
+                        $successor=$self->task_info($name)->{task_id};
+                    }
+                    die "injected second add failure\n";
+                }
+                my $result=$add->($self,%args);
+                if ($case eq 'add_replaced') {
+                    $remove->($self,$name);
+                    $add->($self,name=>$name,interval=>3600,cb=>sub {},autostart=>1);
+                    $successor=$self->task_info($name)->{task_id};
+                }
+                die "injected post-add failure\n" if $case eq 'add_throws';
+                return $result;
+            };
+            local *Mediabot::Scheduler::remove=sub {
+                return 0 if $case eq 'cleanup_throws';
+                $remove->(@_);
+            };
+            $ok=eval {$m->_mount_v3_jobs('witness',$e);1};$error=$@;
+        }
+        push @rows,{case=>"$case mount fails explicitly",ok=>!$ok && $error=~/mounting API v3 job/ ? 1:0};
+        my $info=$scheduler->task_info($name);
+        push @rows,{case=>"$case rollback respects exact ownership",ok=>
+            defined($successor) ? ($info && $info->{task_id}==$successor && $info->{started} ? 1:0)
+            : $case eq 'cleanup_throws' ? ($info && @{$e->{mounted_jobs}}==1 ? 1:0)
+            : (!$info && !@{$e->{mounted_jobs}} ? 1:0)};
+        $m->unregister_plugin('witness');
+        my $after=$scheduler->task_info($name);
+        push @rows,{case=>"$case unload or retry preserves successor",ok=>
+            defined($successor) ? ($after && $after->{task_id}==$successor ? 1:0) : (!$after ? 1:0)};
+        $scheduler->remove($name) if $after;
+    }
+    for my $case (qw(start_replaced start_rollback)) {
+        my ($m,$e,$bot)=_context();my $scheduler=$bot->{scheduler};
+        my $name='plugin.v3.witness.tick';$m->disable('witness');
+        if ($case eq 'start_rollback') {
+            $scheduler->add(name=>'extra',interval=>3600,cb=>sub {});
+            push @{$e->{mounted_jobs}},{name=>'extra',task=>'extra',
+                clock=>{first=>0},scheduler_id=>refaddr($scheduler),
+                task_id=>$scheduler->task_info('extra')->{task_id}};
+        }
+        my $start=Mediabot::Scheduler->can('start');my $id;
+        my $ok;
+        {
+            no warnings 'redefine';
+            local *Mediabot::Scheduler::start=sub {
+                my ($self,$task)=@_;
+                if (($case eq 'start_replaced' && $task eq $name)
+                    || ($case eq 'start_rollback' && $task eq 'extra')) {
+                    $self->remove($name);
+                    $self->add(name=>$name,interval=>3600,cb=>sub {});
+                    $start->($self,$name);$id=$self->task_info($name)->{task_id};
+                    return $case eq 'start_replaced' ? 1:0;
+                }
+                $start->(@_);
+            };
+            $ok=eval {$m->enable('witness');1};
+        }
+        my $info=$scheduler->task_info($name);
+        push @rows,{case=>"$case activation fails closed",ok=>!$ok && !$e->{enabled}?1:0};
+        push @rows,{case=>"$case rollback keeps successor running",ok=>
+            $info && $info->{task_id}==$id && $info->{started}?1:0};
+        $m->unregister_plugin('witness');$info=$scheduler->task_info($name);
+        push @rows,{case=>"$case later unload preserves successor",ok=>
+            $info && $info->{task_id}==$id && $info->{started}?1:0};
+        $scheduler->remove($name);
+    }
+    {
+        my ($m,$e,$bot)=_context();my $scheduler=$bot->{scheduler};
+        my $name='plugin.v3.witness.tick';my $callback=$scheduler->{_tasks}{$name}{cb};
+        $e->{object}{hook}=sub {
+            $scheduler->remove($name);
+            $scheduler->add(name=>$name,interval=>3600,cb=>sub {},autostart=>1);
+        };
+        $callback->();
+        push @rows,{case=>'replacement during handler revokes subsequent channels',
+            ok=>@{$e->{object}{jobs}}==1?1:0};
+        push @rows,{case=>'replacement during handler revokes old output authority',
+            ok=>!@{$bot->{wire}}?1:0};
+        $m->unregister_plugin('witness');$scheduler->remove($name);
+    }
+    return \@rows;
+}
+
 1;

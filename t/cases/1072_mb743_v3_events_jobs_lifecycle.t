@@ -27,11 +27,18 @@ BEGIN {
 
 {
     package T1072::Scheduler;
+    sub task_info { $_[0]{tasks}{$_[1]} }
+    sub registration_id {
+        my ($self, $name, $callback) = @_;
+        my $task = $self->{tasks}{$name} or return;
+        return unless Scalar::Util::refaddr($task->{cb}) == Scalar::Util::refaddr($callback);
+        return $task->{task_id};
+    }
     sub new { bless { tasks => {} }, shift }
     sub add {
         my ($self, %args) = @_;
         die "duplicate task\n" if $self->{tasks}{ $args{name} };
-        $self->{tasks}{ $args{name} } = { %args, started => 0 };
+        $self->{tasks}{ $args{name} } = { %args, started => 0, task_id => ++$self->{serial} };
         return $self;
     }
     sub start {
@@ -227,7 +234,9 @@ return sub {
         # Another owned task must still be attempted after one removal fails.
         $scheduler->add(name => 'plugin.v3.hello-v3.extra', cb => sub {});
         unshift @{ $e->{mounted_jobs} }, {
-            name => 'extra', task => 'plugin.v3.hello-v3.extra', clock => {}};
+            name => 'extra', task => 'plugin.v3.hello-v3.extra', clock => {},
+            scheduler_id => Scalar::Util::refaddr($scheduler),
+            task_id => $scheduler->task_info('plugin.v3.hello-v3.extra')->{task_id}};
         $scheduler->{remove_fault}{$task} = $fault;
         delete $b->{scheduler} if $fault eq 'unavailable';
         my $writes = 0;
@@ -310,6 +319,18 @@ return sub {
         my $rows = JSON::PP->new->decode($json);
         die 'Invalid cleanup matrix' unless ref($rows) eq 'ARRAY' && @$rows == 8;
         $assert->ok($_->{ok}, 'mb1229: '.$_->{case}) for @$rows;
+    }
+
+    {
+        open my $probe, '-|', $^X, '-I.', '-It/lib', '-MMB908PluginFixture',
+            '-MJSON::PP', '-e',
+            'print JSON::PP->new->encode(MB908PluginFixture::run_job_identity_contracts())'
+            or die "MB1230 job identity fixture: $!";
+        my $json = do { local $/; <$probe> };
+        close $probe or die "MB1230 job identity fixture failed: $?";
+        my $rows = JSON::PP->new->decode($json);
+        die 'Invalid identity matrix' unless ref($rows) eq 'ARRAY' && @$rows == 28;
+        $assert->ok($_->{ok}, 'mb1230: '.$_->{case}) for @$rows;
     }
 
 };

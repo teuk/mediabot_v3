@@ -2838,11 +2838,13 @@ sub _mount_v3_jobs {
         unless $scheduler && eval {
             $scheduler->can('add') && $scheduler->can('start')
                 && $scheduler->can('stop') && $scheduler->can('remove')
+                && $scheduler->can('registration_id') && $scheduler->can('task_info')
         };
 
     require Mediabot::Plugin::JobInvocationV3;
     my $object = $entry->{object};
     my @mounted;
+    $entry->{mounted_jobs} = \@mounted;
 
     for my $job (sort keys %$jobs) {
         my $spec = $jobs->{$job};
@@ -2858,13 +2860,11 @@ sub _mount_v3_jobs {
             sequence      => 0,
         };
 
-        my $ok = eval {
-            $scheduler->add(
-                name           => $task_name,
-                interval       => $interval,
-                first_interval => $first,
-                autostart      => 0,
-                cb             => sub {
+        my $owner = {name=>$job, task=>$task_name, clock=>$clock,
+            scheduler_id=>refaddr($scheduler)};
+        my $callback = sub {
+                    return unless defined($owner->{task_id})
+                        && _owns_v3_job($scheduler, $owner);
                     return unless $self->_v3_entry_is_current($key, $entry);
                     return unless $self->is_enabled($key);
                     return unless $context->has_capability('scheduler.jobs');
@@ -2875,7 +2875,7 @@ sub _mount_v3_jobs {
                     $clock->{next_expected} = $fired_at + $interval;
                     for my $policy ($self->_v3_active_policies($entry)) {
                         last unless $self->_v3_entry_is_current($key, $entry)
-                            && $self->is_enabled($key);
+                            && $self->is_enabled($key) && _owns_v3_job($scheduler, $owner);
                         if ($self->_v3_resource_quarantined($key,
                                 kind => 'job', resource => $job,
                                 channel => $policy->{channel})) {
@@ -2892,6 +2892,7 @@ sub _mount_v3_jobs {
                             config       => $policy->{config},
                             authority    => $context,
                             output_guard => sub {
+                                return 0 unless _owns_v3_job($scheduler, $owner);
                                 return 0 unless $self->_v3_entry_is_current($key, $entry);
                                 return 0 unless $self->is_enabled($key);
                                 my $current = $self->_v3_policy_for_entry(
@@ -2933,24 +2934,42 @@ sub _mount_v3_jobs {
                         }
                     }
                     return;
-                },
-            );
+                };
+        my $ok = eval {
+            $scheduler->add(name=>$task_name, interval=>$interval,
+                first_interval=>$first, autostart=>0, cb=>$callback);
             1;
         };
-        unless ($ok) {
-            my $error = _plugin_error_text($@, 'job registration failed');
-            $scheduler->remove($_->{task}) for reverse @mounted;
+        my $error = $ok ? undef : _plugin_error_text($@, 'job registration failed');
+        # A throwing add may still have registered our exact callback. Capture
+        # only that registration, never whatever now occupies the same name.
+        my $identified = eval {
+            $owner->{task_id} = $scheduler->registration_id($task_name, $callback);
+            1;
+        };
+        push @mounted, $owner if defined $owner->{task_id};
+        unless ($ok && $identified && defined $owner->{task_id}) {
+            $error //= 'job registration ownership lost';
+            my $cleaned = eval {$self->_remove_v3_jobs($entry); 1};
+            $error .= '; job cleanup incomplete, retry unload' unless $cleaned;
             die "PluginManager: mounting API v3 job '$job' for '$key' failed: $error\n";
         }
-        push @mounted, {
-            name  => $job,
-            task  => $task_name,
-            clock => $clock,
-        };
     }
 
     $entry->{mounted_jobs} = \@mounted;
     return 1;
+}
+
+# Job names are reusable; only the scheduler instance and registration ID
+# captured by mount authorize lifecycle changes. Unknown ownership fails closed.
+sub _owns_v3_job {
+    my ($scheduler, $job) = @_;
+    die "PluginManager: unknown API v3 job ownership\n"
+        unless defined($job->{task_id}) && defined($job->{scheduler_id})
+            && refaddr($scheduler) == $job->{scheduler_id};
+    my $info = $scheduler->task_info($job->{task});
+    return $info && defined($info->{task_id})
+        && $info->{task_id} == $job->{task_id} ? 1 : 0;
 }
 
 sub _start_v3_jobs {
@@ -2965,8 +2984,11 @@ sub _start_v3_jobs {
     for my $job (@{ $entry->{mounted_jobs} }) {
         $job->{clock}{next_expected} = time() + $job->{clock}{first}
             if ref($job->{clock}) eq 'HASH';
-        unless ($scheduler->start($job->{task})) {
-            $scheduler->stop($_->{task}) for reverse @started;
+        unless (_owns_v3_job($scheduler, $job)
+            && $scheduler->start($job->{task}) && _owns_v3_job($scheduler, $job)) {
+            for my $started (reverse @started) {
+                $scheduler->stop($started->{task}) if _owns_v3_job($scheduler, $started);
+            }
             $_->{clock}{next_expected} = undef
                 for grep { ref($_->{clock}) eq 'HASH' } @started;
             $job->{clock}{next_expected} = undef
@@ -2987,7 +3009,7 @@ sub _stop_v3_jobs {
 
     my @failed;
     for my $job (reverse @{ $entry->{mounted_jobs} }) {
-        if ($scheduler->stop($job->{task})) {
+        if (!_owns_v3_job($scheduler, $job) || $scheduler->stop($job->{task})) {
             $job->{clock}{next_expected} = undef
                 if ref($job->{clock}) eq 'HASH';
         }
@@ -3014,9 +3036,8 @@ sub _remove_v3_jobs {
     my ($removed, @remaining, @failed) = (0);
     for my $job (reverse @{ $entry->{mounted_jobs} }) {
         my $ok = eval {
-            # An operator may already have removed a previously failed task.
-            # Native Scheduler lookup is authoritative; legacy doubles may omit it.
-            if ($scheduler->can('task_info') && !$scheduler->task_info($job->{task})) {
+            # A missing or superseded registration no longer belongs to us.
+            if (!_owns_v3_job($scheduler, $job)) {
                 1;
             }
             else {
