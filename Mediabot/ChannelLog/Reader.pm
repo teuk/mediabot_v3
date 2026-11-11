@@ -77,6 +77,8 @@ sub channel_log_gather {
         my $ok  = $sth && eval { $sth->execute(@{ $bind || [] }) };
         unless ($ok) {
             my $err = $@ || (eval { $dbh->errstr } // 'unknown');
+            # Capture the execution diagnostic before cleanup can clear it.
+            eval { $sth->finish } if $sth;
             if ($is_live) {
                 # mb578-B1: la commande devra de toute facon refuser le
                 # resultat — arret IMMEDIAT, l'archive (potentiellement

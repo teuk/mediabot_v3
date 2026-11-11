@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1206 — Finish history statements after execution failure
+
+- Finish an already prepared history statement when execute returns failure or
+  raises. Capture the original diagnostic before cleanup can clear it.
+- Preserve live fail-fast and optional archive-failure behavior, including when
+  cleanup itself raises. Extend the existing DBI history regression matrix.
+
 ### MB1205 — Finish history statements when row consumers fail
 
 - Release the active live/archive statement before propagating a row-consumer

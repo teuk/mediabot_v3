@@ -20,6 +20,14 @@ use Mediabot::ChannelLog::Reader ();
         return $sth;
     }
     package MB1039::DBI::st; our @ISA = ('DBI::st');
+    sub execute {
+        my ($sth,@args) = @_;
+        if (defined($sth->{private_source})
+                && ($sth->{Database}{private_execute_fault}//'') eq $sth->{private_source}) {
+            return $sth->set_err(902,'fixture history execute failure');
+        }
+        return $sth->SUPER::execute(@args);
+    }
     sub fetchrow_hashref {
         my ($sth,@args) = @_;
         my $db = $sth->{Database};
@@ -104,6 +112,26 @@ for my $source ('CHANNEL_LOG','archive.CHANNEL_LOG_ARCHIVE') {
                 ['',status_1412($live?0:($after?0:1),2,$live?1:2,$live?0:1,scalar(@expected_rows),!$live && $after?1:0),
                  \@expected_rows,\@attempted,[sort @attempted]],
                 "$source after=$after RaiseError=$raise: fetch failure retains scoped rows, cleanup and live/tainted semantics");
+            $db->disconnect;
+        }
+    }
+}
+# MB1206: failed execution still owns a statement requiring cleanup.
+for my $source ('CHANNEL_LOG','archive.CHANNEL_LOG_ARCHIVE') {
+    for my $raise (0,1) {
+        for my $cleanup_failure (0,1) {
+            my ($bot,$db) = fixture_1412($raise,undef,undef);
+            $db->{private_execute_fault} = $source;
+            $db->{private_cleanup_failure} = $cleanup_failure;
+            my ($g,$rows,$error) = gather_1412($bot,$db);
+            my $live = $source eq 'CHANNEL_LOG';
+            my @attempted = $live ? ('CHANNEL_LOG') : ('CHANNEL_LOG','archive.CHANNEL_LOG_ARCHIVE');
+            is_deeply([$error,$g,$rows,$db->{private_prepared},[sort keys %{$db->{private_finished}}]],
+                ['',status_1412($live?0:1,2,$live?1:2,$live?0:1,$live?0:2,0),
+                 $live?[]:[10,20],\@attempted,[sort @attempted]],
+                "mb1206: $source execute failure cleans up and retains source policy (raise=$raise cleanup=$cleanup_failure)");
+            like(join(' ',map {$_->[1]} @{$bot->{logger}{entries}}),qr/fixture history execute failure/,
+                'mb1206: original execute diagnostic survives cleanup');
             $db->disconnect;
         }
     }
