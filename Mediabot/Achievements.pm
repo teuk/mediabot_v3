@@ -3110,6 +3110,7 @@ sub _spawn_check_worker {
             return if $state->{finalized} || $state->{child_done};
             $state->{timed_out} = 1;
             kill 'TERM', $pid;
+            my $escalation_ok = eval {
             $kill_timer = IO::Async::Timer::Countdown->new(
                 delay => 0.5,
                 on_expire => sub {
@@ -3127,6 +3128,15 @@ sub _spawn_check_worker {
             );
             $loop->add($kill_timer); $kill_timer->start;
             $loop->add($force_timer); $force_timer->start;
+                1;
+            };
+            unless ($escalation_ok) {
+                # The accepted process watcher still owns reaping. A broken
+                # timer installation must not strand a timed-out worker.
+                kill 'KILL', $pid unless $state->{child_done};
+                $state->{force} = 1;
+                $finish->() if $finish;
+            }
         },
     );
     $loop->add($timeout_timer);

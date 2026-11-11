@@ -366,6 +366,27 @@ Next: final-exit physical termination/reaping remains separate from this launch
 repair. Timeout escalation setup and cleanup failures deserve their own contract;
 do not merge watcher-owned completion with synchronous shutdown waits.
 
+## MB1222 — timeout escalation installation boundary
+
+MB1221 is committed as `04e84565`; changed inputs match the supplied 12:21:38
+snapshot. Six native fault injections reproduce exceptions escaping the timeout
+callback when escalation countdown construction, attachment or start fails.
+
+The timeout callback now owns this installation boundary. On failure it sends
+KILL unless child completion has already been observed and invokes the existing
+forced completion path. That path retires partial timers and transport resources,
+delivers one worker_timeout result and revokes subsequent completion. The accepted
+process watcher still owns reaping. No synchronous wait or new cancellation
+service is introduced; normal TERM/KILL delays remain unchanged.
+
+The existing 751 probe covers all six failures, immediate single completion,
+watcher reaping, notifier cleanup and successor preservation after stale callbacks.
+Local eight-case lane: 230 assertions passed (111 in 751). Full host validation
+remains required; no host total is inferred from the snapshot.
+
+Next: audit final-exit physical termination and reaping separately. Best-effort
+notifier removal still cannot guarantee success if the loop refuses cleanup.
+
 ## Rules for subsequent phases
 
 1. Record the base revision and compare supplied source snapshots explicitly.
@@ -394,3 +415,13 @@ do not merge watcher-owned completion with synchronous shutdown waits.
 - The runtime coordinates services; transport and commands do not accumulate
   unrelated business rules.
 - Integration tests cover compatibility facades and native runtime wiring.
+
+### MB1222 R2 host acceptance repair
+
+R1 passed 316 targeted assertions on the host; full validation failed at AI
+assertions 662 and 666. Native diagnostics confirmed two eight-second worker
+timeouts with zero output, not a size-policy failure. The six-child size fixture
+now uses a 30-second request budget (33-second worker budget), a 40-second overall
+wait and raw worker diagnostics. All payloads and assertions remain unchanged.
+Production timeouts and timeout-specific tests are untouched. Full host
+acceptance must be rerun before committing MB1222.

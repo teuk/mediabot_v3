@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1222 — Contain achievement timeout escalation failures
+
+- Catch construction, attachment and start failures of escalation countdowns.
+- Fall back to immediate KILL for an unfinished child and complete the timeout
+  once; the accepted watcher retains reaping ownership and cleanup stays bounded.
+- Retire partial timers through existing completion cleanup; retained callbacks
+  cannot clear successor work. Extend the existing native probe with six faults.
+- No change to normal timeout delays, final shutdown, SQL or services.
+
 ### MB1221 — Clean interrupted achievement worker installation
 
 - Catch stream/countdown construction, partial attachment and start failures after
@@ -10646,3 +10655,7 @@ Recent July release migrations, all idempotent and non-destructive:
 
 Baseline stable release preceding the 3.2dev development line. See the git
 history for the detailed 3.1 series changes.
+
+- R2: give the six-child native AI size fixture a 30-second request budget
+  instead of five (worker budget 33 instead of eight); preserve all size and
+  Unicode assertions and report raw worker failures. Production budgets unchanged.

@@ -95,5 +95,52 @@ for my $stage (qw(stream_new stream_add timer_new timer_add timer_start normal i
         successor=>($stage !~ /^(?:normal|inline)/ && $ok && $a->{_worker_process} && $a->{_worker_process}==$successor)?1:0};
 }
 
-print encode_json({setup=>\@setup,returned=>$returned,count=>scalar(@results),result=>$results[0],
+my @timeout;
+for my $stage (qw(kill_new force_new kill_add force_add kill_start force_start)) {
+    my $l=IO::Async::Loop->really_new;
+    my $a=bless {bot=>{loop=>$l},logger=>bless({},'MB1220::Log'),_worker_timeout=>60},'Mediabot::Achievements';
+    my ($pid,$tick,$calls);$calls=0;my @done;
+    my $watch=$l->can('watch_process');my $add=$l->can('add');
+    my $tn=IO::Async::Timer::Countdown->can('new');
+    my $ts=IO::Async::Timer::Countdown->can('start');
+    my (%kind,@late);my $number=0;my $handled;
+    {
+        no warnings qw(redefine once);
+        local *IO::Async::Loop::watch_process=sub {
+            my ($loop,$p,$cb)=@_;$pid=$p;
+            $watch->($loop,$p,sub {$calls++;$cb->(@_)});
+        };
+        local *IO::Async::Timer::Countdown::new=sub {
+            my ($class,%args)=@_;my $k=(qw(timeout kill force))[$number++];
+            push @late,$args{on_expire};$tick=$args{on_expire} if $k eq 'timeout';
+            die "injected escalation constructor\n" if $stage eq "${k}_new";
+            my $obj=$tn->(@_);$kind{"$obj"}=$k;return $obj;
+        };
+        local *IO::Async::Loop::add=sub {
+            my ($loop,$obj)=@_;my $v=$add->(@_);
+            die "injected escalation add\n" if $stage eq (($kind{"$obj"}//'').'_add');return $v;
+        };
+        local *IO::Async::Timer::Countdown::start=sub {
+            my $v=$ts->(@_);
+            die "injected escalation start\n" if $stage eq (($kind{"$_[0]"}//'').'_start');return $v;
+        };
+        $a->_spawn_check_worker({nick=>'Probe',channel=>'#offline'},sub {push @done,$_[0]});
+        # Fire the actual timeout callback without waiting sixty seconds.
+        $handled=eval {$tick->();1}?1:0;
+    }
+    my $immediate=scalar @done;
+    my $successor={pid=>123};$a->{_worker_process}=$successor;
+    my $until=time+2;
+    while (!$calls && time<$until) {$l->loop_once(0.01)}
+    my $late_ok=eval {$_->() for @late;1}?1:0;
+    my $left=scalar grep {$_->isa('IO::Async::Stream') || $_->isa('IO::Async::Timer::Countdown')} $l->notifiers;
+    my $seen=waitpid($pid,WNOHANG);my $reaped=$seen==-1 && $!{ECHILD}?1:0;
+    if ($seen==0) {kill 'KILL',$pid;while(waitpid($pid,0)==-1 && $!{EINTR}) {}}
+    for my $obj ($l->notifiers) {eval {$obj->stop};eval {$l->remove($obj)}}
+    push @timeout,{stage=>$stage,handled=>$handled,immediate=>$immediate,count=>scalar(@done),
+        result=>$done[0],late_ok=>$late_ok,left=>$left,reaped=>$reaped,calls=>$calls,
+        successor=>($a->{_worker_process} && $a->{_worker_process}==$successor)?1:0};
+}
+
+print encode_json({timeout=>\@timeout,setup=>\@setup,returned=>$returned,count=>scalar(@results),result=>$results[0],
     reaped=>$no_child,elapsed=>$elapsed,registered=>exists($a->{_worker_process})?1:0});

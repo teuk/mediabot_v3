@@ -190,6 +190,17 @@ return sub {
             && $r->{result}{stage} eq 'watch_process',
             'watch rejection preserves structured setup failure');
         $assert->ok(!$r->{registered},'failed worker is not published as active');
+        for my $p (@{$r->{timeout}}) {
+            my $stage=$p->{stage};
+            $assert->ok($p->{handled} && $p->{immediate}==1 && $p->{count}==1,
+                "$stage: escalation failure completes once without escaping the callback");
+            $assert->ok($p->{result}{error} eq 'worker_timeout' && $p->{result}{stage} eq 'timeout',
+                "$stage: escalation failure preserves timeout classification");
+            $assert->ok($p->{reaped} && $p->{calls}==1 && !$p->{left},
+                "$stage: accepted watcher reaps and worker notifiers are removed");
+            $assert->ok($p->{late_ok} && $p->{successor},
+                "$stage: stale callbacks preserve successor ownership");
+        }
         for my $p (@{$r->{setup}}) {
             my $stage=$p->{stage};
             $assert->ok($p->{handled} && $p->{count}==1 && $p->{late_count}==1,

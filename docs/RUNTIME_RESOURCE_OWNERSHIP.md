@@ -104,3 +104,13 @@ provider-specific requests, and every individual plugin's resources are outside
 this bounded audit. Audit their owner and lifecycle before any later universal
 shutdown proposal. Phase E file persistence and portfolio diagnostics pilots
 are delivered; lifecycle/security authority remains in PluginManager.
+
+### MB1222: timeout escalation setup
+
+The achievement timeout callback catches failures installing its KILL and forced
+completion countdowns. It immediately signals an unfinished child with KILL and
+uses the existing forced timeout completion to retire partial notifiers. The
+accepted process watcher retains reaping ownership; late callbacks cannot deliver
+again or clear successor work. Normal timeout delays and final shutdown remain
+unchanged. This is asynchronous cleanup, not a guarantee that the child has exited
+at the instant the completion callback runs.

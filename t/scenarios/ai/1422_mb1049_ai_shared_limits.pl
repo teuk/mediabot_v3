@@ -126,16 +126,35 @@ for my $case (['openai',400],['gemini',503]) {
         [[qw(anthropic openai)],1,'openai','recovered',1],'auto alone may recover on the next permitted provider');
 }
 {
+    # This is a size/serialization contract, not a worker timeout test. Six
+    # native children perform substantial Unicode JSON work concurrently.
+    my $native_timeout = 30;
+    require Mediabot::AsyncWorker;
     my $loop=IO::Async::Loop->new;my @results;
     for my $provider (qw(openai anthropic gemini)) {
         for my $large (0,1) {
             my $text=$large?'漢'x100_000:$normal;
             my $client=Mediabot::AI::Client->new(conf=>conf_1422(),loop_owner=>{loop=>$loop},
+                worker_start=>sub {
+                    my %args=@_;my $done=$args{on_done};
+                    $args{on_done}=sub {
+                        my ($result)=@_;
+                        if (ref($result) eq 'HASH' && !$result->{ok}) {
+                            my %diagnostic=map {$_=>$result->{$_}}
+                                qw(error stage detail signal bytes elapsed_s timed_out);
+                            diag("$provider large=$large native worker: ".encode_json(\%diagnostic));
+                        }
+                        $done->(@_);
+                    };
+                    return Mediabot::AsyncWorker->start(%args);
+                },
                 http_factory=>sub {bless {reply=>sub {response_1422($provider,$text)}},'MB1049::HTTP'});
-            $client->submit(request_1422($provider),on_done=>sub {push @results,[$provider,$large,$_[0]]});
+            my $request=request_1422($provider);
+            $request->{timeout_seconds}=$native_timeout;
+            $client->submit($request,on_done=>sub {push @results,[$provider,$large,$_[0]]});
         }
     }
-    my $deadline=time()+12;$loop->loop_once(0.05) while @results<6 && time()<$deadline;
+    my $deadline=time()+$native_timeout+10;$loop->loop_once(0.05) while @results<6 && time()<$deadline;
     is(scalar(@results),6,'six real worker children complete through the actual JSON pipe');
     for my $provider (qw(openai anthropic gemini)) {
         my ($small)=map {$_->[2]} grep {$_->[0] eq $provider && !$_->[1]} @results;
