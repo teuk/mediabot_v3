@@ -340,6 +340,32 @@ Next: review successful watcher installation followed by stream/timer setup
 failure, then the final-exit TERM/reap contract. Preserve result revocation from
 MB1219 and distinguish logical completion from confirmed child exit.
 
+## MB1221 — partial worker installation cleanup
+
+MB1220 is committed as `f98fcf24` and matches the 12:05:51 supplied snapshot;
+no detailed host test total is inferred. Native fault injection reproduced leaks
+when stream/countdown construction, partial loop add or timer start throws after
+watch_process succeeds. The outer launcher caught the exception but did not own
+notifier cleanup; the registered child watcher alone was insufficient.
+
+The installation boundary now catches those failures, finalizes state and revokes
+the finish callback before KILL (unless child completion was already observed),
+stops/removes its timers, closes/removes its stream and closes its pipe. Cleanup
+attempts are best effort; exceptions in one do not suppress the other attempts.
+No synchronous wait is added: the accepted watcher still owns reaping. Exactly
+one worker_setup/notifier_setup result is delivered unless inline completion has
+already delivered the result. Retained read/expiry callbacks are inert, and late
+child completion cannot erase newer work. A completed process is not republished.
+
+Existing 751 and its fresh-interpreter probe now cover five native setup faults,
+normal completion and completion during add with/without a subsequent exception.
+The worker case has 87 assertions; the final eight-case local lane passed 206
+assertions. Full host integration remains mandatory before commit. No new case.
+
+Next: final-exit physical termination/reaping remains separate from this launch
+repair. Timeout escalation setup and cleanup failures deserve their own contract;
+do not merge watcher-owned completion with synchronous shutdown waits.
+
 ## Rules for subsequent phases
 
 1. Record the base revision and compare supplied source snapshots explicitly.

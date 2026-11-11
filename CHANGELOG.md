@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1221 — Clean interrupted achievement worker installation
+
+- Catch stream/countdown construction, partial attachment and start failures after
+  watcher registration; revoke callbacks, terminate the child and detach notifiers.
+- Keep child reaping with its accepted watcher and report one structured setup
+  failure. Late callbacks cannot clear successor ownership or deliver twice.
+- Preserve normal/inline completion and avoid republishing a completed process.
+- Extend the existing real-child probe; no final-shutdown, SQL or service change.
+
+
 ### MB1220 — Reap achievement children after watcher setup failure
 
 - Revoke failed setup callbacks before killing the achievement child; perform a

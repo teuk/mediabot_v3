@@ -190,6 +190,23 @@ return sub {
             && $r->{result}{stage} eq 'watch_process',
             'watch rejection preserves structured setup failure');
         $assert->ok(!$r->{registered},'failed worker is not published as active');
+        for my $p (@{$r->{setup}}) {
+            my $stage=$p->{stage};
+            $assert->ok($p->{handled} && $p->{count}==1 && $p->{late_count}==1,
+                "$stage: native launch completes exactly once, including retained callbacks");
+            $assert->ok($p->{reaped} && $p->{watch_calls}==1,
+                "$stage: accepted watcher alone collects the child");
+            $assert->ok($p->{after}==0,"$stage: no worker stream or countdown remains");
+            if ($stage !~ /^(?:normal|inline)/) {
+                $assert->ok($p->{before}==0 && !$p->{registered},
+                    "$stage: setup failure immediately detaches notifiers and publishes no process");
+                $assert->ok($p->{result}{error} eq 'worker_setup'
+                    && $p->{result}{stage} eq 'notifier_setup',
+                    "$stage: setup failure retains structured failure semantics");
+                $assert->ok($p->{successor},"$stage: late child completion preserves successor ownership");
+            }
+        }
+
     }
 
     my $src=slurp751('Mediabot/Achievements.pm');

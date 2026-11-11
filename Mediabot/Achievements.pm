@@ -3084,10 +3084,12 @@ sub _spawn_check_worker {
         return 1;
     }
 
+    my $setup_ok = eval {
     $stream = IO::Async::Stream->new(
         read_handle => $pipe,
         on_read => sub {
             my ($io, $buffref, $eof) = @_;
+            if ($state->{finalized}) { $$buffref = ''; return 0; }
             if (length $$buffref) {
                 $state->{bytes} += length($$buffref);
                 $state->{buffer} .= $$buffref if $state->{bytes} <= 64 * 1024;
@@ -3129,6 +3131,33 @@ sub _spawn_check_worker {
     );
     $loop->add($timeout_timer);
     $timeout_timer->start;
+
+        1;
+    };
+    unless ($setup_ok) {
+        # watch_process already owns reaping. Revoke delivery before teardown;
+        # its eventual callback must not touch a successor worker or deliver twice.
+        my $already_finished = $state->{finalized};
+        $state->{finalized} = 1;
+        $finish = undef;
+        kill 'KILL', $pid unless $state->{child_done};
+        $remove->($timeout_timer);
+        $remove->($kill_timer);
+        $remove->($force_timer);
+        eval { $stream->close_now } if $stream;
+        eval { $loop->remove($stream) } if $stream;
+        eval { close $pipe if defined fileno($pipe) };
+        $done->({ ok => 0, error => 'worker_setup', stage => 'notifier_setup',
+            detail => 'could not install worker stream or timeout' }) unless $already_finished;
+        return 1;
+    }
+    # Inline completion must not republish the old process over newer work.
+    if ($state->{finalized}) {
+        $remove->($timeout_timer);
+        eval { $stream->close_now } if $stream;
+        eval { $loop->remove($stream) } if $stream;
+        return 1;
+    }
 
     $self->{_worker_process} = { pid => $pid };
     return 1;
