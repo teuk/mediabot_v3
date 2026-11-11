@@ -123,12 +123,21 @@ for my $empty (0,1) {
         'existing content archive policy still excludes an ineligible archive');
     $db->disconnect;
 }
-{
-    my ($bot,$db) = fixture_1412(1,undef,undef);
-    my ($g,$rows,$error) = gather_1412($bot,$db,sub {die "consumer callback failed\n"});
-    is_deeply([$g,$rows,$error,$db->{private_prepared}], [undef,[10],"consumer callback failed\n",['CHANNEL_LOG']],
-        'consumer callback exceptions remain exceptions and are never downgraded to optional SQL failures');
-    $db->disconnect;
+for my $source ('CHANNEL_LOG','archive.CHANNEL_LOG_ARCHIVE') {
+    for my $cleanup_failure (0,1) {
+        my ($bot,$db) = fixture_1412(1,undef,undef);
+        $db->{private_cleanup_failure} = $cleanup_failure;
+        my ($g,$rows,$error) = gather_1412($bot,$db,sub {
+            die "consumer callback failed\n" if $_[1] eq $source;
+        });
+        my @attempted = $source eq 'CHANNEL_LOG' ? ('CHANNEL_LOG')
+            : ('CHANNEL_LOG','archive.CHANNEL_LOG_ARCHIVE');
+        is_deeply([$g,$rows,$error,$db->{private_prepared},[sort keys %{$db->{private_finished}}]],
+            [undef,$source eq 'CHANNEL_LOG' ? [10] : [10,20,30],"consumer callback failed\n",
+             \@attempted,[sort @attempted]],
+            "mb1205: $source consumer failure closes its statement and preserves the original exception (cleanup=$cleanup_failure)");
+        $db->disconnect;
+    }
 }
 for my $source ('CHANNEL_LOG','archive.CHANNEL_LOG_ARCHIVE') {
     my ($bot,$db) = fixture_1412(1,$source,1);

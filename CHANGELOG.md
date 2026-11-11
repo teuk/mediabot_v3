@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1205 — Finish history statements when row consumers fail
+
+- Release the active live/archive statement before propagating a row-consumer
+  exception. Cleanup failure cannot replace the original consumer exception.
+- Retain fail-fast behavior: consumer errors remain exceptions, never optional
+  archive failures or successful partial results.
+- Extend the existing native DBI history regression across both sources and
+  successful/failing cleanup. No schema or service changes.
+
 ### MB1204 — Reject malformed activity periods before gathering history
 
 - Reject reference-valued comparison periods instead of silently treating them

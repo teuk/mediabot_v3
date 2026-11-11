@@ -102,7 +102,14 @@ sub channel_log_gather {
             last unless $r;
             $source_rows++;
             $st{rows}++;
-            $row_cb->($r, $src);
+            my $consumed = eval { $row_cb->($r, $src); 1 };
+            unless ($consumed) {
+                # Preserve consumer errors, including exception objects, while
+                # releasing the active statement even if cleanup also throws.
+                my $consumer_error = $@;
+                eval { $sth->finish };
+                die $consumer_error;
+            }
         }
         # mb578-B1: une fin de lecture peut etre une ERREUR de fetch et non
         # une fin normale — DBI l'expose via $sth->err apres la boucle.
