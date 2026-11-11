@@ -36,6 +36,8 @@ use Scalar::Util qw(refaddr);
     }
     sub fetchrow_hashref {
         my $db=$_[0]{db}; push @{$db->{events}}, ['fetch'];
+        die $db->{exception} if $db->{mode} eq 'fetch_throw';
+        return $db->{row} if exists $db->{row};
         return if $db->{mode} eq 'missing';
         return {nbmsg_max=>5,duration=>30,timetowait=>1};
     }
@@ -127,4 +129,67 @@ return sub {
             $assert->($equal->($notice,['notice','Operator',$mode eq 'display' ? 'antifloodset for #MIXED: 5 lines burst, full refill over 30 seconds, wait 1 second if breached' : 'No antiflood settings found for #MIXED']),"$mode: unchanged display reply");
         }
     }
+    # MB1233: characterize the actual display branch before extracting its JOIN.
+    for my $mode (qw(display missing nulls plural zero_rows prepare_false execute_false prepare_throw execute_throw fetch_throw finish_throw finish_false notice_throw denied unregistered)) {
+        my @events; my $exception=bless {},'MB1232Exception';
+        my $db=bless {events=>\@events,mode=>$mode,exception=>$exception},'MB1232DB';
+        $db->{row}={nbmsg_max=>undef,duration=>undef,timetowait=>undef} if $mode eq 'nulls';
+        $db->{row}={nbmsg_max=>2,duration=>15,timetowait=>2} if $mode eq 'plural';
+        my $bot={dbh=>$db,events=>\@events,logger=>bless({events=>\@events},'MB1232Logger'),
+            channels=>{'#mixed_%'=>bless({},'MB1232Channel')},
+            _af_params=>{'#Mixed'=>{ts=>10}},_chan_flood_conf=>{'#Mixed'=>{x=>1}}};
+        my $before=$json->encode([$bot->{_af_params},$bot->{_chan_flood_conf}]);
+        my $ctx=bless {bot=>$bot,channel=>undef,args=>['#MiXeD_%'],allowed=>($mode ne 'denied')},'MB1232Context';
+        $bot->{channels}={} if $mode eq 'unregistered';
+        my ($ret,$error);
+        {
+            no warnings 'redefine';
+            my $diagnostic='display DB failure'; local *DBI::errstr=\$diagnostic;
+            local *Mediabot::ChannelCommands::botNotice=sub {
+                my ($b,$nick,$text)=@_; push @events,['notice',$nick,$text];
+                die $exception if $mode eq 'notice_throw';
+            };
+            local *Mediabot::ChannelCommands::getIdChansetList=sub {die 'display unexpectedly checks chanset'};
+            eval { $ret=Mediabot::ChannelCommands::setChannelAntiFloodParams_ctx($ctx); 1 } or $error=$@;
+        }
+        my $throws=$mode =~ /_throw$/;
+        $assert->($throws ? ref($error) && refaddr($error)==refaddr($exception) : !$error,"display $mode: exact exception identity");
+        $assert->($before eq $json->encode([$bot->{_af_params},$bot->{_chan_flood_conf}]),"display $mode: no cache mutation");
+        my @ops=map {$_->[0]} @events;
+        my @expected=('level');
+        if ($mode eq 'unregistered') {push @expected,'notice'}
+        elsif ($mode ne 'denied') {
+            push @expected, 'log','prepare';
+            if ($mode eq 'prepare_false') {push @expected,'log'}
+            elsif ($mode ne 'prepare_throw') {
+                push @expected,'execute';
+                if ($mode eq 'execute_false') {push @expected,'log','finish'}
+                elsif ($mode ne 'execute_throw') {
+                    push @expected,'fetch';
+                    if ($mode ne 'fetch_throw') {push @expected,'notice';push @expected,'finish' if $mode ne 'notice_throw'}
+                }
+            }
+        }
+        $assert->($equal->(\@ops,\@expected),"display $mode: complete diagnostics/delivery/finish ordering");
+        if (my ($prepare)=grep {$_->[0] eq 'prepare'} @events) {
+            $assert->($equal->($prepare,['prepare','SELECT CHANNEL_FLOOD.nbmsg_max, CHANNEL_FLOOD.duration, CHANNEL_FLOOD.timetowait FROM CHANNEL JOIN CHANNEL_FLOOD ON CHANNEL.id_channel = CHANNEL_FLOOD.id_channel WHERE CHANNEL.name = ?']),"display $mode: exact JOIN and equality query");
+        }
+        if (my ($exec)=grep {$_->[0] eq 'execute'} @events) {
+            $assert->($equal->($exec,['execute','#MiXeD_%']),"display $mode: binds original channel name, not ID or SQL pattern");
+        }
+        if ($mode eq 'prepare_false' || $mode eq 'execute_false') {
+            my @errors=grep {$_->[0] eq 'log' && $_->[1]==1} @events;
+            $assert->($equal->(\@errors,[['log',1,'SQL Error: display DB failure']]),"display $mode: historical diagnostic");
+        }
+        if ($mode =~ /^(display|missing|nulls|plural|zero_rows|finish_false)$/) {
+            my ($notice)=grep {$_->[0] eq 'notice'} @events;
+            my $body=$mode eq 'missing' ? 'No antiflood settings found for #MiXeD_%'
+                : $mode eq 'nulls' ? 'antifloodset for #MiXeD_%: 0 lines burst, full refill over 0 seconds, wait 0 seconds if breached'
+                : $mode eq 'plural' ? 'antifloodset for #MiXeD_%: 2 lines burst, full refill over 15 seconds, wait 2 seconds if breached'
+                : 'antifloodset for #MiXeD_%: 5 lines burst, full refill over 30 seconds, wait 1 second if breached';
+            $assert->($equal->($notice,['notice','Operator',$body]),"display $mode: exact wire text");
+            $assert->(defined($ret) && $ret==0,"display $mode: historical return");
+        }
+    }
+
 };

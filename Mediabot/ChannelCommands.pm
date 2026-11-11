@@ -3897,23 +3897,17 @@ sub setChannelAntiFloodParams_ctx {
     if (@args == 0) {
         $self->{logger}->log(4, "Fetching antiflood settings for $target_channel");
 
-        my $sql = q{
-            SELECT CHANNEL_FLOOD.nbmsg_max,
-                   CHANNEL_FLOOD.duration,
-                   CHANNEL_FLOOD.timetowait
-            FROM CHANNEL
-            JOIN CHANNEL_FLOOD ON CHANNEL.id_channel = CHANNEL_FLOOD.id_channel
-            WHERE CHANNEL.name = ?
-        };
-
-        my $sth = $self->{dbh}->prepare($sql);
-        unless ($sth && $sth->execute($target_channel)) {
+        my $result = Mediabot::Channel::FloodRules::read_for_display(
+            $self->{dbh}, $target_channel
+        );
+        my $sth = $result->{statement};
+        if ($result->{status} eq 'error') {
             $self->{logger}->log(1, "SQL Error: $DBI::errstr");
             $sth->finish if $sth;
             return;
         }
 
-        if (my $row = $sth->fetchrow_hashref()) {
+        if (my $row = $result->{row}) {
             my $max    = $row->{nbmsg_max}  // 0;
             my $period = $row->{duration}   // 0;
             my $wait   = $row->{timetowait} // 0;

@@ -14,15 +14,16 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
-| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
+| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read implemented, host acceptance pending. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; see the MB1231 checkpoint below. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
-Current continuation point: MB1232 implements the channel flood-rule UPDATE
-boundary selected in MB1231. Host acceptance remains pending. After acceptance,
-review the command's no-argument display read separately before another extraction;
-do not combine its JOIN/name lookup with admission's ID-based read contract.
+Current continuation point: MB1233 implements the operator flood-rule display
+read after MB1232 (`cdbdbee6`, committed). Host acceptance of MB1233 remains
+pending. The selected antifloodset read/write boundary is implemented; review
+remaining channel data-access callers before widening the pilot. Preserve their
+individual query, error and cleanup contracts rather than merging by table name.
 Earlier “Next” paragraphs are historical decisions, not current instructions.
 
 ## Phase A / MB1208
@@ -777,3 +778,35 @@ Next: assess the display query as a separate contract, retaining lookup by name,
 missing-row response and diagnostic/finish ordering. Do not replace it with the
 admission reader just because both query CHANNEL_FLOOD. Remaining phase D review
 questions stay in the MB1231 checkpoint; no automatic shutdown migration.
+
+## MB1233 — operator flood-rule display read
+
+Base `cdbdbee69a0bbf666f304e9e91c4f4fab8525419`, matched against supplied
+`snap_mediabot_v3_teuk_20261111_192531.zip` for changed inputs. MB1232 is
+committed on origin/master; no host assertion totals are inferred from that fact.
+
+`Channel::FloodRules::read_for_display` owns the existing SELECT/JOIN, exact
+channel-name binding and fetch. It returns found/missing/error plus its statement.
+The command retains Master authorization, channel resolution, diagnostic and
+notice rendering, then finish. In particular, notices precede finish, while
+false execute is diagnosed before finish. Thrown prepare/execute/fetch or notice
+does not gain an implicit cleanup call. DBI 0E0 remains truthy; null values still
+render as zero. No new cache, transaction, retry or normalization is introduced.
+
+This separate method is deliberate: admission's read uses channel ID, owns its
+finish timing and has a different failure policy. Do not substitute one for the
+other. The UPDATE extraction and existing cache invalidation remain unchanged.
+
+Case 398's expanded native command checks passed against the unmodified command
+before extraction (191 assertions), including literal percent/underscore in the
+name, missing/null rows, singular/plural output, false results, exception identity,
+notice failure and complete operation ordering. Case 44 now checks the SQL's
+actual owner. No additional historical test file was introduced.
+
+Local targeted lane: six files, 599 assertions passed. Full target-host
+acceptance and commit remain pending; native integration case 1306 still needs
+the full bot dependencies absent from this local environment.
+After acceptance, checkpoint the bounded channel data-access pilot: antifloodset
+read/write now have an explicit owner, but other channel info/chanset queries and
+broader Helpers boundaries remain. Select further work from inspected call sites;
+do not claim all phase C complete or automatically move every SQL statement.

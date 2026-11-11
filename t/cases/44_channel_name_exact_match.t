@@ -29,8 +29,10 @@ return sub {
 
     my $src = _slurp_channel_name_exact_match(File::Spec->catfile('.', 'Mediabot', 'ChannelCommands.pm'));
 
+    my $rules = _slurp_channel_name_exact_match(File::Spec->catfile('.', 'Mediabot', 'Channel', 'FloodRules.pm'));
+
     $assert->ok(
-        $src =~ /WHERE CHANNEL\.name = \?/,
+        $rules =~ /WHERE CHANNEL\.name = \?/,
         'antifloodset channel lookup uses exact channel match'
     );
 

@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 # CHANNEL_FLOOD boundary. Receives only a DBI-compatible handle and
-# channel ID; owns no bot, cache, clock, logger or transport.
+# channel identity/values; owns no bot, cache, clock, logger or transport.
 # Distinguish an absent row from a false prepare/execute result. DBI exceptions
 # propagate unchanged. Preserve the existing statement call order and failure
 # semantics; the admission policy owns defaults, caching and fail-open choices.
@@ -19,6 +19,27 @@ sub read {
     }
     no warnings 'once';
     return { status => 'error', error => $DBI::errstr };
+}
+
+# Operator display uses the historical name-based JOIN, not admission's ID read.
+# Hand the statement back even after false execute: the command logs before
+# finish on error, and sends its notice before finish on success. Fetch and DBI
+# exceptions retain their original identity; no finish is added on thrown work.
+sub read_for_display {
+    my ($dbh, $channel_name) = @_;
+    my $sth = $dbh->prepare(q{
+            SELECT CHANNEL_FLOOD.nbmsg_max,
+                   CHANNEL_FLOOD.duration,
+                   CHANNEL_FLOOD.timetowait
+            FROM CHANNEL
+            JOIN CHANNEL_FLOOD ON CHANNEL.id_channel = CHANNEL_FLOOD.id_channel
+            WHERE CHANNEL.name = ?
+        });
+    unless ($sth && $sth->execute($channel_name)) {
+        return { status => 'error', statement => $sth };
+    }
+    my $row = $sth->fetchrow_hashref();
+    return { status => $row ? 'found' : 'missing', row => $row, statement => $sth };
 }
 
 # Execute an UPDATE without owning command diagnostics or statement retirement.

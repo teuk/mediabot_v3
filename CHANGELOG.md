@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1233 — Isolate the operator flood-rule display read
+
+- Move antifloodset's name-based JOIN into Channel::FloodRules::read_for_display,
+  separate from admission's ID-based reader and its cache/failure policy.
+- Preserve raw channel-name binding, absent/null values, notices, DBI exceptions
+  and diagnostic/notice-before-finish ordering through explicit statement handoff.
+- Extend existing native command coverage; no new case file, schema or config.
+
 ### MB1232 — Isolate channel flood-rule updates
 
 - Move antifloodset's bound UPDATE into Channel::FloodRules; keep permissions,
