@@ -14,15 +14,15 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
-| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). The antifloodset pilot is implemented; broader phase C remains open. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; see the MB1231 checkpoint below. |
+| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are implemented and committed; broader phase C remains open. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; see the MB1237 checkpoint below. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1236 implements badword command data access after
-MB1235 (`043310dd`, committed). Host acceptance remains pending. Read and write SQL
-now have a channel-domain owner; cache, permissions and presentation remain with
-their existing callers. Checkpoint this pilot before selecting another family.
+Current continuation point: MB1237 closes the bounded badword data-access pilot
+and selects a focused review of DB timer reload publication/reentrancy. Reproduce
+any ownership failure before changing runtime behavior. See
+[MB1237 checkpoint](#mb1237--badword-pilot-and-db-timer-review).
 Earlier “Next” paragraphs are historical decisions, not current instructions.
 
 ## Phase A / MB1208
@@ -931,3 +931,65 @@ Next: checkpoint the channel badword pilot after acceptance. The read/write SQL
 boundary is implemented; do not merge command ownership or cache policies simply
 because they share the table. Reassess the remaining B/C and D priorities before
 starting another family. Full host acceptance and commit remain pending here.
+
+## MB1237 — badword pilot and DB timer review
+
+Reviewed `8907a26c0dadee96622a23c24c678236e5763070` (MB1236 on
+origin/master) against `snap_mediabot_v3_teuk_20261111_201401.zip`.
+MB1235/MB1236 are committed; missing host assertion totals are not inferred.
+This checkpoint changes documentation only, not timer or database behavior.
+
+### Delivered boundaries and remaining scope
+
+| Area | Bounded work delivered | Remaining decision |
+| --- | --- | --- |
+| A | Partyline plugin administration extracted. | Further parsing/rendering separation only with a concrete need. |
+| B | Helpers output admission delegated. | Wider dependency reduction remains open; avoid cosmetic file splitting. |
+| C | Flood-rule admission reader and antifloodset read/write; badword outgoing reader and command SQL. | Pilots complete as implementations. Chanset bootstrap and chaninfo retain separate contracts; no automatic bulk extraction. |
+| D | Output/nicklist retirement, achievement/archive ownership and plugin-job recovery/identity. | Next: DB timer reload publication under reentrant callbacks. Generic-worker final-exit coordination remains separate. |
+| E | Plugin persistence and diagnostics separated. | Keep lifecycle/capability authority in PluginManager. |
+
+The badword domain owns SQL, not command authorization or cache authority.
+Sender still owns confirmed-rule fallback; commands still own no-op responses,
+mutation invalidation and their different finish order. Do not merge these
+policies or add a generic repository abstraction to declare all phase C finished.
+
+### Next review: DB timer reload publication
+
+Source: [DBCommands](../Mediabot/DBCommands.pm), `onStartTimers` and
+`_stop_all_runtime_db_timers`. Existing [case 403](../t/cases/403_mb164_onstarttimers_stage_fresh_before_publish.t)
+already exercises native Periodic timers, SQLite, setup rollback and public wiring.
+Reuse it rather than creating another historical case file.
+
+Observed protections: a complete DB snapshot precedes staging; add/start failure
+rolls back fresh attempts and keeps the old set; tick callbacks compare exact
+published timer identity. Retirement detaches hTimers before stop/remove.
+These protections must remain. The final publication currently copies the staged
+set into hTimers after calling retirement; no reload-generation check is visible
+at that publication site. This is a review hypothesis, not a reproduced defect.
+
+The next increment should first inject a nested reload or replacement through
+logging, timer add/start and old stop/remove seams, and retain callbacks. Determine
+whether an older attempt can retire or overwrite a later published set. Include
+nested failure as well as success; record which invocation retains authority.
+If a failure is reproduced, make the smallest ownership fix with these criteria:
+
+- A superseded attempt cannot publish over or stop a later authorized timer set.
+- Losing attempts clean only their own staged notifiers, including partial setup;
+  cleanup callbacks cannot revive obsolete publication authority.
+- Failed DB reads/setup retain the working set and current return/diagnostic
+  contracts unless an explicitly documented correction is necessary.
+- Queued obsolete ticks stay inert; normal startup, empty snapshots and sequential
+  reconnect still publish once and execute each scheduled command once.
+- Keep SQL/schema, command dispatch, responder retirement, final-exit policy and
+  unrelated Scheduler jobs outside this change. Do not add a universal stop-all.
+
+Characterize behavior before choosing registry identity versus a generation
+mechanism; neither is mandated by this checkpoint. If the suspected sequence is
+already safe, record that evidence and choose another concrete remaining gap
+instead of manufacturing a runtime fix. Target native case 403 and adjacent
+DB-timer safety/IRC-write cases, then the full suite once for a runtime change.
+
+MB1237 checks documentation links and reviewed source symbols plus guarded patch
+application/commit flow. No bot suite is required for this documentation-only
+checkpoint. The next timer investigation and any fix are not implemented here.

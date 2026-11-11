@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1237 — Checkpoint badword boundaries and DB timer ownership
+
+- Record the committed badword read/write pilot and remaining architecture scope.
+- Select native DB timer publication/reentrancy investigation, requiring a
+  reproduction before any runtime fix and preserving existing staging/rollback.
+- Documentation only; no runtime, schema, configuration or service change.
+
 ### MB1236 — Isolate badword command database operations
 
 - Move add/remove lookups, INSERT and DELETE into Channel::Badwords with exact
