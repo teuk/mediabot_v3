@@ -22,6 +22,96 @@ sub _channel_key {
     return $key;
 }
 
+# Read-only portfolio assembly. The manager retains discovery and diagnostic
+# authority; callbacks preserve lazy resolution and existing observation order.
+sub portfolio {
+    my ($class, %args) = @_;
+
+    my @discovered = $args{discover}->();
+    my %installed = map { $_->{name} => $_ } @discovered;
+    my %names = map { $_->{name} => 1 } @discovered;
+
+    for my $entry ($args{list}->()) {
+        next unless ref($entry) eq 'HASH'
+            && ref($entry->{metadata}) eq 'HASH'
+            && ($entry->{metadata}{api} // 0) == 3;
+        $names{$entry->{name}} = 1;
+    }
+
+    my @packages;
+    my %summary = (
+        discovered      => scalar(@discovered),
+        loaded          => 0,
+        enabled         => 0,
+        active          => 0,
+        ready           => 0,
+        limited         => 0,
+        active_channels => 0,
+    );
+
+    for my $name (sort keys %names) {
+        my $entry = $args{entry}->($name);
+        my $is_v3 = $entry && ref($entry->{metadata}) eq 'HASH'
+            && ($entry->{metadata}{api} // 0) == 3;
+        my $package = $installed{$name};
+
+        unless ($is_v3) {
+            my $collision = $entry ? 1 : 0;
+            push @packages, {
+                name      => "$name",
+                version   => defined($package->{version})
+                    ? "$package->{version}" : '',
+                installed => $package ? 1 : 0,
+                lifecycle => $collision ? 'collision' : 'unloaded',
+                status    => $collision ? 'limited' : 'inactive',
+                reason    => $collision ? 'name_collision' : 'not_loaded',
+                policies  => {
+                    total => 0, active => 0, off => 0, observe => 0, on => 0,
+                },
+            };
+            $summary{limited}++ if $collision;
+            next;
+        }
+
+        my $report = $args{report}->($name);
+        my $policies = $report->{policies};
+        $summary{loaded}++;
+        $summary{enabled}++ if $entry->{enabled};
+        $summary{active}++ if ($policies->{active} // 0) > 0;
+        $summary{active_channels} += int($policies->{active} // 0);
+        $summary{ready}++ if $report->{status} eq 'ready';
+        $summary{limited}++ if $report->{status} eq 'limited';
+        push @packages, {
+            name      => "$name",
+            version   => "$report->{version}",
+            installed => $package ? 1 : 0,
+            lifecycle => "$report->{lifecycle}",
+            status    => "$report->{status}",
+            reason    => "$report->{reason}",
+            policies  => {
+                total   => int($policies->{total} // 0),
+                active  => int($policies->{active} // 0),
+                off     => int($policies->{off} // 0),
+                observe => int($policies->{observe} // 0),
+                on      => int($policies->{on} // 0),
+            },
+        };
+    }
+
+    my $maximum_entries = 64;
+    my $total_entries = scalar @packages;
+    splice @packages, $maximum_entries if @packages > $maximum_entries;
+    return {
+        summary => {
+            %summary,
+            entries         => $total_entries,
+            maximum_entries => $maximum_entries,
+            truncated       => $total_entries - scalar(@packages),
+        },
+        packages => \@packages,
+    };
+}
+
 sub permissions {
     my ($class, %args) = @_;
     my $entry = $args{entry};

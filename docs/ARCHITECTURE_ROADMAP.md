@@ -16,7 +16,7 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1214 AntiFlood retirement committed/pushed as `b321e17`; three-family output pilot delivered. Detailed MB1214 host test report not supplied. |
-| E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 file-persistence boundary implemented; host acceptance pending. |
+| E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 file persistence committed/pushed as `8467555`; MB1216 portfolio diagnostics implemented, host acceptance pending. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
 ## Phase A / MB1208
@@ -169,9 +169,29 @@ does not claim to add fsync durability or change file-system race policies.
 
 Existing 1135 exercises the real component and existing manager round trips;
 1136 retains restore/failure isolation; 1137 follows the new file owner for its
-publication contract. No new repository case. MB1215 host acceptance pending.
-Next: inspect the diagnostics boundary independently; do not combine diagnostics
-with capability authority or persistent-mutation rollback.
+publication contract. MB1215 is present on GitHub as `8467555` and matches the
+supplied snapshot. Its detailed host test report was not supplied; no assertion
+total is inferred.
+
+### MB1216 — portfolio diagnostics assembly
+
+Individual diagnostics already belong to `Plugin::DiagnosticsV3`. The portfolio
+aggregation now joins them there: sorted installed/live union, collision and
+unloaded rows, detached policy counts, full summary and 64-row output cap.
+The component receives four read callbacks (discover, list, entry, report),
+preserving observation order and exception propagation. It loads no manager,
+bot, filesystem discovery or lifecycle machinery itself.
+
+PluginManager retains discovery and live-entry/report access; its public
+`v3_portfolio_report` remains the adapter. No quarantine, permission enforcement,
+plugin mutation or rollback responsibility moves. Existing 1129 tests exercise
+both actual manager wiring and standalone assembly; no new repository case.
+MB1216 local targeted lane: 246 assertions pass. Full host acceptance pending.
+
+Next checkpoint after acceptance: review phase A–E integration and remaining
+explicitly deferred boundaries before selecting another runtime extraction.
+The bounded pilots do not imply universal shutdown coverage or a completed
+rewrite of Helpers/PluginManager.
 
 ## Rules for subsequent phases
 

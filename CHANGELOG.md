@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1216 — Move portfolio assembly into plugin diagnostics
+
+- Assemble the read-only API v3 portfolio in the existing DiagnosticsV3 owner,
+  with explicit discovery, list, entry and report callbacks.
+- Retain PluginManager's public adapter and lifecycle/security authority; preserve
+  sorted rows, detached policy counts, full summary and the 64-row output cap.
+- Extend existing portfolio tests for collisions, removed packages, redaction,
+  truncation and callback failures; record roadmap progress.
+
 ### MB1215 — Separate API v3 runtime-state file persistence
 
 - Move bounded JSON file read/write and private rename publication into
