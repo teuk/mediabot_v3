@@ -47,7 +47,7 @@ sub solve {
     my @signatures = @{ $class->signatures($letters) };
     my (@words, $rows);
     $rows = 0;
-    my $result;
+    my ($result, $sth);
     my $started = 0;
     my $ok = eval {
         # MB1186: DBI may report errors by return value without RaiseError.
@@ -58,7 +58,7 @@ sub solve {
             my $limit = $MAX_WORDS + 1 - $rows;
             my $sql = 'SELECT `word`,`sorted` FROM `DICT` FORCE INDEX (`sorted`) WHERE `sorted` IN ('
                 . join(',', ('?') x @batch) . ") LIMIT $limit";
-            my $sth = $dbh->prepare($sql) or die "dictionary_query\n";
+            $sth = $dbh->prepare($sql) or die "dictionary_query\n";
             $sth->execute(@batch) or die "dictionary_query\n";
             while (my $row = $sth->fetchrow_arrayref) {
                 die "dictionary_dictionary_limit\n" if ++$rows > $MAX_WORDS;
@@ -69,11 +69,17 @@ sub solve {
                 push @words, $word;
             }
             die "dictionary_query\n" if $sth->err;
-            $sth->finish or die "dictionary_query\n";
+            # Clear ownership before finish, which may itself raise.
+            my $completed_sth = $sth;
+            undef $sth;
+            $completed_sth->finish or die "dictionary_query\n";
         }
         $result = $class->result($letters, \@words);
         1;
     };
+    # On early failure, release the active result before rollback. Cleanup must
+    # not prevent rollback or expose driver diagnostics to callers.
+    eval { $sth->finish } if $sth;
     # Never roll back a transaction that this call failed to start.
     my $rolled_back = $started && eval { $dbh->rollback };
     die "dictionary_query\n" unless $ok && $rolled_back;

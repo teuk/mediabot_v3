@@ -116,4 +116,48 @@ my $zero_db=bless {fault=>''}, 'MB1186::DB';
 is_deeply($solver->solve($zero_db,'TEA')->{words}, ['TEA'],
     'DBI true-zero execute return remains successful');
 is($zero_db->{rolled}, 1, 'successful read snapshot is rolled back once');
+# MB1207: release a prepared statement before closing its read transaction.
+{
+    package MB1207::DB;
+    sub begin_work { push @{$_[0]{events}}, 'begin'; 1 }
+    sub prepare {
+        my ($s)=@_; push @{$s->{events}}, 'prepare';
+        die "private prepare failure\n" if $s->{fault} eq 'prepare';
+        return bless {db=>$s,rows=>[['TEA','AET']]}, 'MB1207::Statement';
+    }
+    sub rollback { push @{$_[0]{events}}, 'rollback'; 1 }
+    package MB1207::Statement;
+    sub execute {
+        my ($s)=@_; push @{$s->{db}{events}}, 'execute';
+        die "private execute failure\n" if $s->{db}{fault} eq 'execute_die';
+        return $s->{db}{fault} eq 'execute_false' ? undef : '0E0';
+    }
+    sub fetchrow_arrayref {
+        my ($s)=@_;
+        die "private fetch failure\n" if $s->{db}{fault} eq 'fetch_die';
+        my $row=shift @{$s->{rows}};
+        $row->[1]='BAD' if $row && $s->{db}{fault} eq 'corrupt';
+        return $row;
+    }
+    sub err { $_[0]{db}{fault} eq 'fetch_error' ? 1 : 0 }
+    sub finish {
+        my ($s)=@_; push @{$s->{db}{events}}, 'finish';
+        die "private finish failure\n" if $s->{db}{cleanup} eq 'die';
+        return $s->{db}{cleanup} eq 'false' ? undef : 1;
+    }
+}
+for my $fault (qw(prepare execute_false execute_die fetch_die fetch_error corrupt success)) {
+    for my $cleanup (qw(ok false die)) {
+        my $db=bless {fault=>$fault,cleanup=>$cleanup,events=>[]}, 'MB1207::DB';
+        my $result; my $ok=eval {$result=$solver->solve($db,'TEA');1};
+        my $error=$@;
+        my $success=$fault eq 'success' && $cleanup eq 'ok';
+        is_deeply([$ok ? 1 : 0,$error,$result],
+            $success ? [1,'',$solver->result('TEA',['TEA'])] : [0,"dictionary_query\n",undef],
+            "mb1207: $fault / $cleanup retains result and public error policy");
+        is_deeply($db->{events},$fault eq 'prepare' ? [qw(begin prepare rollback)]
+            : [qw(begin prepare execute finish rollback)],
+            "mb1207: $fault / $cleanup finishes once before rollback");
+    }
+}
 done_testing;

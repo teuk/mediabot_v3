@@ -1,5 +1,12 @@
 ## [Unreleased] — 3.8dev
 
+### MB1207 — Close dictionary statements before rollback
+
+- Finish prepared dictionary statements on execute/fetch failures and invalid
+  rows before rolling back the read snapshot. Attempt cleanup only once, even
+  when finish fails or throws; retain bounded public errors and normal results.
+- Extend the existing solver regression with failure-order and cleanup checks.
+
 ### MB1206 — Finish history statements after execution failure
 
 - Finish an already prepared history statement when execute returns failure or
