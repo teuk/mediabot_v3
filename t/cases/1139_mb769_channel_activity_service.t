@@ -82,6 +82,30 @@ return sub {
         $assert->ok(!$ok && $@, 'invalid activity input fails closed');
     }
 
+    # MB1204: malformed API periods must never widen a query to all history.
+    my $scalar_period = '4w';
+    for my $period ([], {}, \$scalar_period, sub { '4w' }) {
+        my $before = scalar @calls;
+        my $ok = eval {
+            $service->compare(channel => '#x', left => 'a', right => 'b', period => $period);
+            1;
+        };
+        $assert->ok(!$ok, 'mb1204: reference period is rejected');
+        $assert->like($@ // '', qr/invalid period/, 'mb1204: period diagnostic is explicit');
+        $assert->is(scalar @calls, $before, 'mb1204: invalid period never invokes the gatherer');
+    }
+    for my $period (undef, '', 'all', 'ALL') {
+        my $result = $service->compare(channel => '#x', left => 'a', right => 'b', period => $period);
+        $assert->is($result->{comparison}->period, 'all', 'mb1204: existing all-time defaults retained');
+        $assert->unlike($calls[-1]{sql}, qr/INTERVAL/, 'mb1204: valid all-time request has no interval');
+    }
+    for my $pair (['365D', '365 DAY'], ['52W', '52 WEEK'],
+                  ['24M', '24 MONTH'], ['10Y', '10 YEAR']) {
+        my $result = $service->compare(channel => '#x', left => 'a', right => 'b', period => $pair->[0]);
+        $assert->is($result->{comparison}->period, lc($pair->[0]), 'mb1204: period boundary remains accepted');
+        $assert->like($calls[-1]{sql}, qr/INTERVAL \Q$pair->[1]\E/, 'mb1204: bounded interval remains exact');
+    }
+
     my $unavailable = Mediabot::Plugin::ChannelActivityServiceV3->new(
         gatherer => sub { return { live_ok => 0 } },
     );

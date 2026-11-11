@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1204 — Reject malformed activity periods before gathering history
+
+- Reject reference-valued comparison periods instead of silently treating them
+  as an all-time query. Validation occurs before the activity gatherer runs.
+- Retain missing/empty/all defaults, case-insensitive units and period limits.
+- Extend the existing activity service case with rejected reference inputs,
+  no-query checks and valid boundary/default compatibility checks.
+
 ### MB1203 — Preserve exact quote and factoid record integers
 
 - Reject all zero spellings for positive record IDs, including leading zeros.

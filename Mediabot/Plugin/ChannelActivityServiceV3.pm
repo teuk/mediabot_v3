@@ -53,7 +53,8 @@ sub _nick {
 
 sub _period {
     my ($value) = @_;
-    $value = 'all' unless defined $value && !ref($value) && length($value);
+    die "ChannelActivityServiceV3: invalid period\n" if ref($value);
+    $value = 'all' unless defined $value && length($value);
     $value = lc "$value";
     return ('all', '', 'all time') if $value eq 'all';
     my ($count, $unit) = $value =~ /\A([1-9][0-9]*)([dwmy])\z/
