@@ -445,3 +445,33 @@ host acceptance is still required; no host test total is inferred from a commit.
 
 Next: determine the final-exit policy for children still alive when the loop is
 stopped. This increment does not make TERM a confirmed termination or add waits.
+
+## MB1224 — bounded physical shutdown of the active achievement child
+
+MB1223 is committed as `3e45ff6f`; changed inputs match the supplied 13:35:31
+snapshot. Native tests reproduced an unreaped child and attached worker notifiers
+after shutdown without event-loop iterations, including a child ignoring TERM.
+
+shutdown_worker now revokes the active process callbacks and detaches its timers,
+stream and pipe before attempting termination. WNOHANG verifies child ownership
+before either TERM or KILL. Each signal phase allows twenty five-millisecond
+polls; there is no blocking waitpid or loop iteration. ECHILD counts as already
+collected, EINTR uses the same bounded polling budget, and other errors stop the
+attempt. The watcher is unregistered after confirmed collection. Otherwise a
+bounded diagnostic records unconfirmed collection and the method returns false.
+Actual scheduling can extend elapsed wall time beyond the nominal polling budget.
+
+Normal worker execution retains watcher-owned asynchronous reaping. Final shutdown
+of the currently registered process is the explicit ownership transfer to the
+synchronous exit path. Logical revocation and final-save ordering are unchanged.
+Repeated shutdown is inert; stale read, watcher and timer callbacks cannot deliver.
+Existing case 751 includes native responsive/resistant children with a readiness
+handshake and no loop iterations. Local eight-case lane: 246 assertions passed,
+including 127 in 751. Full host acceptance remains required before commit.
+
+Scope limit: this covers the active process record, not a universal worker drain.
+A process whose forced completion already removed that record still belongs to
+its watcher; a process-wide shutdown registry remains a separate design question.
+Next: review that detached-but-not-yet-reaped case and archive worker shutdown,
+then checkpoint phase D against the remaining roadmap rather than declaring
+all runtime resources drained.

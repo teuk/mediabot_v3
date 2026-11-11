@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1224 — Collect the active achievement child at final shutdown
+
+- Revoke native callbacks and detach transport/timers before signalling the child.
+- Check waitpid ownership before TERM/KILL and use bounded WNOHANG polling without
+  driving the event loop; unregister the watcher after confirmed collection.
+- Diagnose unconfirmed collection and return false rather than claiming success.
+- Preserve logical retirement, final-save ordering and normal asynchronous work;
+  extend native coverage for TERM-responsive and TERM-resistant children.
+
 ### MB1223 — Retire achievement process ownership at reap
 
 - Remove the exact worker process record as soon as its watcher observes exit,

@@ -189,5 +189,52 @@ for my $inline (0,1) {
     for my $obj ($l->notifiers) {eval {$obj->stop};eval {$l->remove($obj)}}
 }
 
-print encode_json({retired=>\@retired,timeout=>\@timeout,setup=>\@setup,returned=>$returned,count=>scalar(@results),result=>$results[0],
+{
+    package MB1224::SlowDB;
+    sub connect_isolated_handle {
+        my ($self)=@_;
+        $SIG{TERM}=$self->{ignore}?'IGNORE':'DEFAULT';
+        syswrite($self->{ready},'R');
+        while (1) {Time::HiRes::sleep(1)}
+    }
+}
+my @shutdown;
+require IO::Select;
+for my $ignore (0,1) {
+    pipe(my $ready,my $notify) or die "ready pipe: $!";
+    my $l=IO::Async::Loop->really_new;
+    my $log=bless {},'MB1220::Log';
+    my $a=bless {bot=>{loop=>$l,db=>bless({ready=>$notify,ignore=>$ignore},'MB1224::SlowDB')},
+        logger=>$log,_worker_timeout=>60},'Mediabot::Achievements';
+    my ($pid,$watch_cb,$read);my @ticks;my @done;
+    my $watch=$l->can('watch_process');my $sn=IO::Async::Stream->can('new');
+    my $tn=IO::Async::Timer::Countdown->can('new');
+    {
+        no warnings qw(redefine once);
+        local *IO::Async::Loop::watch_process=sub {
+            my ($loop,$p,$cb)=@_;$pid=$p;$watch_cb=$cb;$watch->(@_);
+        };
+        local *IO::Async::Stream::new=sub {my ($class,%a)=@_;$read=$a{on_read};$sn->(@_)};
+        local *IO::Async::Timer::Countdown::new=sub {my ($class,%a)=@_;push @ticks,$a{on_expire};$tn->(@_)};
+        $a->_spawn_check_worker({nick=>'Probe',channel=>'#offline'},sub {push @done,$_[0]});
+    }
+    close $notify;
+    die 'child did not become ready' unless IO::Select->new($ready)->can_read(3);
+    sysread($ready,my $byte,1)==1 or die 'missing readiness';close $ready;
+    # No loop iterations: this models clean_and_exit's stopped event loop.
+    my $started=time;my $ret=$a->shutdown_worker;my $elapsed=time-$started;
+    my $seen=waitpid($pid,WNOHANG);my $reaped=$seen==-1 && $!{ECHILD}?1:0;
+    my $left=scalar grep {$_->isa('IO::Async::Stream') || $_->isa('IO::Async::Timer::Countdown')} $l->notifiers;
+    my $slot=exists($a->{_worker_process})?1:0;
+    $a->shutdown_worker;
+    # Baseline cleanup before deliberately replaying retained callbacks.
+    if ($seen==0) {kill 'KILL',$pid;while(waitpid($pid,0)==-1 && $!{EINTR}) {}}
+    my $late_ok=eval {my $buf='{}';$read->(undef,\$buf,1);$watch_cb->($pid,0);$_->() for @ticks;1}?1:0;
+    push @shutdown,{ignore=>$ignore,returned=>$ret,reaped=>$reaped,left=>$left,slot=>$slot,
+        elapsed=>$elapsed,late_ok=>$late_ok,count=>scalar(@done)};
+    eval {$l->unwatch_process($pid)};
+    for my $obj ($l->notifiers) {eval {$obj->stop};eval {$l->remove($obj)}}
+}
+
+print encode_json({shutdown=>\@shutdown,retired=>\@retired,timeout=>\@timeout,setup=>\@setup,returned=>$returned,count=>scalar(@results),result=>$results[0],
     reaped=>$no_child,elapsed=>$elapsed,registered=>exists($a->{_worker_process})?1:0});

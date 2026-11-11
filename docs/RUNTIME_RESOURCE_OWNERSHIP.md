@@ -17,7 +17,7 @@ not a claim that every plugin, HTTP request or timer has been audited.
 | --- | --- | --- |
 | IRC reconnect | [mediabot.pl](../mediabot.pl), `reconnect`; [Mediabot.pm](../Mediabot/Mediabot.pm), `restart_irc` and `setIrc` | Reuses the loop so Partyline survives; removes the old IRC object, rebuilds nicklist/main timers and replaces the IRC object. `setIrc` invalidates output registries only when transport identity changes. |
 | Rehash | [Mediabot.pm](../Mediabot/Mediabot.pm), `rehash_runtime_state` | Reads config, reloads logging and rebuilds channels/nicklist timers. This is not shutdown or a blanket cancellation of workers/output. |
-| Final process exit | [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | Revokes Wit authorization, attempts QUIT, stops the archive worker, signals the achievement worker, saves achievements/Hailo, disconnects DB, releases PID ownership and closes/flushes logging before exit. |
+| Final process exit | [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | Revokes Wit authorization, attempts QUIT, stops the archive worker, stops/collects the active achievement worker, saves achievements/Hailo, disconnects DB, releases PID ownership and closes/flushes logging before exit. |
 
 Do not replace these with one generic stop-all operation. Reconnect must retain
 Partyline and process ownership; rehash must not silently discard unrelated work.
@@ -40,7 +40,7 @@ integration question for a later migration, not proof that every resource leaks.
 | [Partyline watch](../Mediabot/Partyline/ShellWatch.pm), `_dispose`, `_remove_owned` | Exact session/stream/state, owner PID and task ID; weak owner references | Marks done, drops renderer, removes only its own scheduler registration; reports incomplete removal | Useful existing model for revoke-first cleanup; preserve session authorization rather than copying it into a generic timer helper. |
 | [Nicklist timers](../Mediabot/Channel/NicklistTimers.pm), Mediabot setup/stop delegates | Public `channel_nicklist_timers` map plus private weak-key callback metadata and setup generation | MB1218 detaches/revokes before independent remove/stop; late setup cannot overwrite successors; failures return 0 and log incomplete cleanup | Committed as `7f1529b3`; no detailed host report supplied. Failed physical cleanup is not retried by repeated retirement; final shutdown remains separate. |
 | [DB timers](../Mediabot/DBCommands.pm), `_stop_all_runtime_db_timers`, `onStartTimers` | `hTimers` map, detached before cleanup | Stops and removes each old timer in separate eval blocks when rebuilding | Keep DB-command scheduling and reconnect publication behavior covered; do not merge with Scheduler solely because both use timers. |
-| [Achievement worker](../Mediabot/Achievements.pm), `shutdown_worker` | `_worker_process` PID and `_shutting_down` flag | MB1219 revokes logical parent delivery and resets its gauge, then existing TERM/child cleanup policy applies; final save follows in clean_and_exit | Late success/failure cannot mutate parent state. MB1220 bounds reaping after rejected watcher installation; MB1221 cleans notifier setup failures while the accepted watcher retains reaping. Final-exit TERM is still not confirmed exit. |
+| [Achievement worker](../Mediabot/Achievements.pm), `shutdown_worker` | `_worker_process` PID and `_shutting_down` flag | MB1219 revokes logical delivery; MB1224 detaches the active worker resources and attempts bounded TERM/KILL collection without running the loop; final save follows in clean_and_exit | Late success/failure cannot mutate parent state. MB1220 bounds reaping after rejected watcher installation; MB1221 cleans notifier setup failures while the accepted watcher retains reaping. MB1224 reports unconfirmed collection rather than assuming TERM implies exit. Detached processes no longer in the active record remain outside this bounded shutdown scope. |
 | Archive worker in [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | `_channel_log_archive_pid` | TERM, bounded WNOHANG polling, then KILL/waitpid before DB teardown | Preserve this ordering; do not generalize its blocking final-exit behavior to ordinary reconnect. |
 
 The inspected reconnect resets `_af`, `_af_params`, `_chan_flood`, `_nick_flood`,
@@ -121,4 +121,15 @@ The process watcher retires only its own process record immediately upon observe
 child exit. Pipe EOF may still be pending; result delivery and logical in-flight
 ownership remain separate. Shutdown no longer sees that reaped PID as a signal
 target, inline exit is not republished, and old EOF cleanup cannot erase a newer
-process record. Final shutdown of a still-live child remains TERM-only.
+process record. MB1224 below supersedes the former TERM-only final shutdown.
+
+### MB1224: active achievement child at final exit
+
+The active process record supplies a one-shot callback that revokes native result
+and timer callbacks and detaches resources. Final shutdown then checks child
+ownership with WNOHANG before TERM and KILL, with at most twenty 5ms polls per
+phase plus a final nonblocking observation. No event-loop callbacks are driven.
+Confirmed collection allows unwatch_process; unconfirmed collection is logged
+and returns false, retaining the watcher if the loop ever resumes. Logical
+revocation and final save remain unchanged. This does not drain detached children
+whose earlier forced completion already removed their active process record.

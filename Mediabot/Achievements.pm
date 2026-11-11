@@ -2998,6 +2998,7 @@ sub _spawn_check_worker {
     # Physical process ownership ends at reap, independently of pipe EOF.
     my $process = { pid => $pid };
     my $retire_process = sub {
+        delete $process->{shutdown_cleanup};
         delete $self->{_worker_process}
             if $self->{_worker_process} && $self->{_worker_process} == $process;
     };
@@ -3176,22 +3177,71 @@ sub _spawn_check_worker {
         return 1;
     }
 
-    $self->{_worker_process} = $process unless $state->{child_done};
+    unless ($state->{child_done}) {
+        $process->{loop} = $loop;
+        $process->{shutdown_cleanup} = sub {
+            # Final exit may never run the loop again. Revoke delivery before
+            # detaching resources; a retained watcher/expiry is then inert.
+            $state->{finalized} = 1;
+            $finish = undef;
+            $remove->($timeout_timer);
+            $remove->($kill_timer);
+            $remove->($force_timer);
+            eval { $stream->close_now } if $stream;
+            eval { $loop->remove($stream) } if $stream;
+            eval { close $pipe if defined fileno($pipe) };
+        };
+        $self->{_worker_process} = $process;
+    }
     return 1;
 }
 
 sub shutdown_worker {
     my ($self) = @_;
     $self->{_shutting_down} = 1;
-    # Revoke parent delivery before signalling or publishing metrics. Child
-    # watchers still own physical cleanup/reaping; this is not a join operation.
+    # This is final shutdown, not ordinary asynchronous cancellation. Do not
+    # drive the loop: unrelated IRC/DB callbacks must not run during teardown.
     my $active = delete $self->{_worker_inflight};
     my $proc = delete $self->{_worker_process};
+    my $collected = 1;
     if (ref($proc) eq 'HASH' && $proc->{pid}) {
-        kill 'TERM', $proc->{pid};
+        my $cleanup = delete $proc->{shutdown_cleanup};
+        eval { $cleanup->() } if ref($cleanup) eq 'CODE';
+        require POSIX;
+        my $pid = $proc->{pid};
+        $collected = 0;
+        my $wait_error = 0;
+        SIGNAL: for my $signal ('TERM', 'KILL') {
+            my $sent = 0;
+            for (1 .. 20) {
+                my $seen = waitpid($pid, POSIX::WNOHANG());
+                if ($seen == $pid || ($seen == -1 && $!{ECHILD})) {
+                    $collected = 1;
+                    last SIGNAL;
+                }
+                if ($seen == -1 && !$!{EINTR}) {
+                    $wait_error = 1;
+                    last SIGNAL;
+                }
+                # Verify child ownership before either signal, including when
+                # the watcher reaped it but its callback has not run yet.
+                if ($seen == 0 && !$sent) { kill $signal, $pid; $sent = 1; }
+                Time::HiRes::sleep(0.005);
+            }
+        }
+        unless ($collected || $wait_error) {
+            my $seen = waitpid($pid, POSIX::WNOHANG());
+            $collected = 1 if $seen == $pid || ($seen == -1 && $!{ECHILD});
+        }
+        if ($collected) {
+            eval { $proc->{loop}->unwatch_process($pid) } if $proc->{loop};
+        }
+        else {
+            eval { $self->_log(1, 'Achievements: shutdown child reap unconfirmed') };
+        }
     }
     $self->_metric('set', 'mediabot_achievement_worker_inflight', 0) if $active;
-    return 1;
+    return $collected;
 }
 
 # mb558-B1: per-query stopwatch. Every aggregation names itself when slow

@@ -190,6 +190,13 @@ return sub {
             && $r->{result}{stage} eq 'watch_process',
             'watch rejection preserves structured setup failure');
         $assert->ok(!$r->{registered},'failed worker is not published as active');
+        for my $p (@{$r->{shutdown}}) {
+            my $label=$p->{ignore}?'TERM-resistant child':'TERM-responsive child';
+            $assert->ok($p->{returned} && $p->{reaped},"$label: shutdown collects the real child without driving the loop");
+            $assert->ok(!$p->{left} && !$p->{slot},"$label: shutdown removes worker transport, timers and process ownership");
+            $assert->ok($p->{late_ok} && !$p->{count},"$label: retained callbacks cannot deliver after physical shutdown");
+            $assert->ok($p->{elapsed}<2,"$label: native shutdown remains bounded");
+        }
         for my $p (@{$r->{retired}}) {
             my $label=$p->{inline}?'inline child exit':'child exit before EOF';
             $assert->ok($p->{reaped} && $p->{watched}==1 && !$p->{pending},
