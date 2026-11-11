@@ -190,6 +190,14 @@ return sub {
             && $r->{result}{stage} eq 'watch_process',
             'watch rejection preserves structured setup failure');
         $assert->ok(!$r->{registered},'failed worker is not published as active');
+        for my $p (@{$r->{retired}}) {
+            my $label=$p->{inline}?'inline child exit':'child exit before EOF';
+            $assert->ok($p->{reaped} && $p->{watched}==1 && !$p->{pending},
+                "$label: native child is reaped while result delivery still waits for EOF");
+            $assert->ok(!$p->{published},"$label: reaped PID is no longer a shutdown signal target");
+            $assert->ok($p->{count}==1 && !$p->{left},"$label: eventual EOF completes once and retires timers");
+            $assert->ok($p->{successor},"$label: old EOF cannot clear successor process ownership");
+        }
         for my $p (@{$r->{timeout}}) {
             my $stage=$p->{stage};
             $assert->ok($p->{handled} && $p->{immediate}==1 && $p->{count}==1,

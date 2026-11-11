@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1223 — Retire achievement process ownership at reap
+
+- Remove the exact worker process record as soon as its watcher observes exit,
+  even while result delivery still waits for pipe EOF; shutdown cannot reuse it.
+- Avoid publishing a PID already reaped during inline setup. Scope final cleanup
+  to its own process record so a late EOF cannot erase successor ownership.
+- Extend the existing native process probe with deferred EOF and inline exit.
+
 ### MB1222 — Contain achievement timeout escalation failures
 
 - Catch construction, attachment and start failures of escalation countdowns.

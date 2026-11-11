@@ -114,3 +114,11 @@ accepted process watcher retains reaping ownership; late callbacks cannot delive
 again or clear successor work. Normal timeout delays and final shutdown remain
 unchanged. This is asynchronous cleanup, not a guarantee that the child has exited
 at the instant the completion callback runs.
+
+### MB1223: reaped achievement processes
+
+The process watcher retires only its own process record immediately upon observed
+child exit. Pipe EOF may still be pending; result delivery and logical in-flight
+ownership remain separate. Shutdown no longer sees that reaped PID as a signal
+target, inline exit is not republished, and old EOF cleanup cannot erase a newer
+process record. Final shutdown of a still-live child remains TERM-only.

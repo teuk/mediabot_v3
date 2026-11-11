@@ -425,3 +425,23 @@ now uses a 30-second request budget (33-second worker budget), a 40-second overa
 wait and raw worker diagnostics. All payloads and assertions remain unchanged.
 Production timeouts and timeout-specific tests are untouched. Full host
 acceptance must be rerun before committing MB1222.
+
+## MB1223 — separate process ownership from result delivery
+
+MB1222 R2 is committed as `0d8d00d9`; changed inputs match the supplied 13:21:30
+snapshot. The final-exit audit reproduced a stale PID ownership interval: the
+native watcher had reaped the child, but the pipe had not delivered EOF. The old
+process record remained available to shutdown_worker, which could signal a PID
+no longer owned by the bot. This is a reproduced state defect, not evidence that
+an unrelated process has actually been signalled in production.
+
+The accepted watcher now retires the exact process record on observed exit.
+Result delivery still waits for EOF as before. Final cleanup only removes its
+own record, and inline child exit cannot be followed by republishing a dead PID.
+The existing probe covers both ordinary and inline child exit before EOF, native
+reaping, single eventual completion, timer cleanup and successor preservation.
+Local eight-case lane: 238 assertions passed, including 119 in case 751. Full
+host acceptance is still required; no host test total is inferred from a commit.
+
+Next: determine the final-exit policy for children still alive when the loop is
+stopped. This increment does not make TERM a confirmed termination or add waits.

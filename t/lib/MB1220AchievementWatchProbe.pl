@@ -142,5 +142,52 @@ for my $stage (qw(kill_new force_new kill_add force_add kill_start force_start))
         successor=>($a->{_worker_process} && $a->{_worker_process}==$successor)?1:0};
 }
 
-print encode_json({timeout=>\@timeout,setup=>\@setup,returned=>$returned,count=>scalar(@results),result=>$results[0],
+# Keep pipe EOF pending after the native process watcher has reaped the child.
+my @retired;
+for my $inline (0,1) {
+    my $l=IO::Async::Loop->really_new;
+    my $a=bless {bot=>{loop=>$l},logger=>bless({},'MB1220::Log'),_worker_timeout=>60},'Mediabot::Achievements';
+    my ($pid,$read,$stream,$watched);$watched=0;my @done;
+    my $watch=$l->can('watch_process');my $add=$l->can('add');
+    my $sn=IO::Async::Stream->can('new');
+    {
+        no warnings qw(redefine once);
+        local *IO::Async::Loop::watch_process=sub {
+            my ($loop,$p,$cb)=@_;$pid=$p;
+            $watch->($loop,$p,sub {$watched++;$cb->(@_)});
+        };
+        local *IO::Async::Stream::new=sub {
+            my ($class,%args)=@_;$read=$args{on_read};$stream=$sn->(@_);return $stream;
+        };
+        local *IO::Async::Loop::add=sub {
+            my ($loop,$obj)=@_;
+            if ($obj->isa('IO::Async::Stream')) {
+                if ($inline) {
+                    my $until=time+2;
+                    $l->loop_once(0.01) while !$watched && time<$until;
+                }
+                return $obj; # retain its pipe, but defer reading/EOF
+            }
+            return $add->(@_);
+        };
+        $a->_spawn_check_worker({nick=>'Probe',channel=>'#offline'},sub {push @done,$_[0]});
+    }
+    my $until=time+2;
+    $l->loop_once(0.01) while !$watched && time<$until;
+    my $seen=waitpid($pid,WNOHANG);my $reaped=$seen==-1 && $!{ECHILD}?1:0;
+    my $published=exists($a->{_worker_process})?1:0;
+    my $pending=scalar @done;
+    $a->shutdown_worker if $reaped; # Never signal an unverified fixture PID.
+    my $successor={pid=>123};$a->{_worker_process}=$successor;
+    my $buf='{}';$read->($stream,\$buf,1);$read->($stream,\$buf,1);
+    my $left=scalar grep {$_->isa('IO::Async::Timer::Countdown')} $l->notifiers;
+    push @retired,{inline=>$inline,reaped=>$reaped,watched=>$watched,published=>$published,
+        pending=>$pending,count=>scalar(@done),left=>$left,
+        successor=>($a->{_worker_process} && $a->{_worker_process}==$successor)?1:0};
+    if ($seen==0) {kill 'KILL',$pid;while(waitpid($pid,0)==-1 && $!{EINTR}) {}}
+    eval {$stream->close_now};
+    for my $obj ($l->notifiers) {eval {$obj->stop};eval {$l->remove($obj)}}
+}
+
+print encode_json({retired=>\@retired,timeout=>\@timeout,setup=>\@setup,returned=>$returned,count=>scalar(@results),result=>$results[0],
     reaped=>$no_child,elapsed=>$elapsed,registered=>exists($a->{_worker_process})?1:0});

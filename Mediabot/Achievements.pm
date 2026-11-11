@@ -2995,6 +2995,12 @@ sub _spawn_check_worker {
         finalized  => 0,
         force      => 0,
     };
+    # Physical process ownership ends at reap, independently of pipe EOF.
+    my $process = { pid => $pid };
+    my $retire_process = sub {
+        delete $self->{_worker_process}
+            if $self->{_worker_process} && $self->{_worker_process} == $process;
+    };
     my ($stream, $timeout_timer, $kill_timer, $force_timer);
     my $finish;
 
@@ -3015,7 +3021,7 @@ sub _spawn_check_worker {
         $remove->($force_timer);
         eval { $loop->remove($stream) } if $stream;
         eval { close $pipe };
-        delete $self->{_worker_process};
+        $retire_process->();
 
         my $status = $state->{wait_status} // 0;
         my $signal = $status & 127;
@@ -3055,6 +3061,7 @@ sub _spawn_check_worker {
             return unless defined($seen_pid) && $seen_pid == $pid;
             $state->{wait_status} = $status;
             $state->{child_done} = 1;
+            $retire_process->();
             $finish->() if $finish;
         });
         1;
@@ -3169,7 +3176,7 @@ sub _spawn_check_worker {
         return 1;
     }
 
-    $self->{_worker_process} = { pid => $pid };
+    $self->{_worker_process} = $process unless $state->{child_done};
     return 1;
 }
 
