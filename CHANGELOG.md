@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1232 — Isolate channel flood-rule updates
+
+- Move antifloodset's bound UPDATE into Channel::FloodRules; keep permissions,
+  validation, diagnostics, statement finish and cache invalidation in the command.
+- Preserve DBI truth, exceptions and diagnostic/finish order, including zero-row
+  success. Leave the display JOIN and admission reader unchanged.
+- Replace the copied cache simulation in existing case 398 with native command
+  coverage; no new historical test file, schema or configuration change.
+
 ### MB1231 — Checkpoint the architecture roadmap after plugin ownership
 
 - Record the committed plugin-job boundary and distinguish remaining phase D

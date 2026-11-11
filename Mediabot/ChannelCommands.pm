@@ -23,6 +23,7 @@ use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
 use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
+use Mediabot::Channel::FloodRules ();
 use Mediabot::DynamicTemplate qw(normalize_name);
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
@@ -3957,19 +3958,16 @@ sub setChannelAntiFloodParams_ctx {
     # ---------------------------------------------------------
     # Update CHANNEL_FLOOD values for this channel
     # ---------------------------------------------------------
-    my $sql_update = q{
-        UPDATE CHANNEL_FLOOD
-        SET nbmsg_max = ?, duration = ?, timetowait = ?
-        WHERE id_channel = ?
-    };
-
-    my $sth = $self->{dbh}->prepare($sql_update);
-    unless ($sth) {
+    my $result = Mediabot::Channel::FloodRules::write(
+        $self->{dbh}, $id_channel, $max_msg, $period_sec, $wait_sec
+    );
+    if ($result->{status} eq 'prepare_error') {
         $self->{logger}->log(1, "SQL Error (prepare): $DBI::errstr");
         return;
     }
 
-    if ($sth->execute($max_msg, $period_sec, $wait_sec, $id_channel)) {
+    my $sth = $result->{statement};
+    if ($result->{status} eq 'updated') {
         $sth->finish;
 
         # mb162-B2: invalider le cache runtime de checkAntiFlood. Sans ca,

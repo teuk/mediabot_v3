@@ -19,10 +19,10 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
-Current continuation point: MB1231 reviews the remaining boundaries after
-MB1230, committed/pushed as `9508ecbf`. The next implementation is the bounded
-channel flood-rule write boundary, with command authorization and cache
-invalidation retained at the command layer. See [MB1231 checkpoint](#mb1231--checkpoint-and-channel-rule-write-boundary).
+Current continuation point: MB1232 implements the channel flood-rule UPDATE
+boundary selected in MB1231. Host acceptance remains pending. After acceptance,
+review the command's no-argument display read separately before another extraction;
+do not combine its JOIN/name lookup with admission's ID-based read contract.
 Earlier “Next” paragraphs are historical decisions, not current instructions.
 
 ## Phase A / MB1208
@@ -747,3 +747,33 @@ case file merely for this extraction.
 MB1231 itself changes documentation only. Validate relative links, reviewed
 symbols and the guarded patch/commit workflow; no runtime suite is needed for
 this checkpoint. The write extraction is planned, not implemented by MB1231.
+
+## MB1232 — channel flood-rule UPDATE boundary
+
+Base `2325530f6eaddf8c75d6b89330aacc0bf20c6d3f` (MB1231), matched against
+`snap_mediabot_v3_teuk_20261111_190746.zip` for changed inputs.
+
+`Channel::FloodRules::write` receives the DB handle, channel ID and validated raw
+values; owns SQL and binding; returns prepare_error, execute_error or updated.
+It deliberately hands the statement back to the command after execute. The
+command retains diagnostics and finish: execute failure historically logs before
+finish, success finishes before invalidating both cache spellings and replying.
+This keeps the domain module free of logger/transport callbacks without moving
+observable cleanup order. Exceptions propagate unchanged and 0E0 stays successful.
+The historical no-argument JOIN, input validation and authorization are unchanged.
+This bounded extraction does not complete all phase C or create a generic DB API.
+
+Existing case 398 now invokes the real command with DB/IRC dependencies replaced
+at their boundaries, instead of simulating cache refresh and manually deleting
+keys. Ninety behavioral assertions passed against the unchanged command first;
+the same checks cover the extracted implementation. Additional component checks
+verify SQL/binds and explicit statement handoff. No new case file is introduced.
+Local six-file lane: 516 assertions passed. Native case 1306 also passed its
+first 131 assertions but could not complete: Config::Simple is absent locally
+when loading the full bot. This is not a passing integration case. The package
+includes it in host targeted acceptance; full acceptance/commit remain pending.
+
+Next: assess the display query as a separate contract, retaining lookup by name,
+missing-row response and diagnostic/finish ordering. Do not replace it with the
+admission reader just because both query CHANNEL_FLOOD. Remaining phase D review
+questions stay in the MB1231 checkpoint; no automatic shutdown migration.
