@@ -22,9 +22,10 @@ use Mediabot::Radio::Public ();
 use Mediabot::XAuth ();
 use Mediabot::Fullop ();
 
-for my $module (qw(Target Text CaseMapping Presentation PacedOutput OutputPolicy)) {
+for my $module (qw(IRC::Target IRC::Text IRC::CaseMapping IRC::Presentation
+    IRC::PacedOutput IRC::OutputPolicy Channel::FloodRules)) {
     my $err = gensym;
-    my $code = "require Mediabot::IRC::$module;" . q{
+    my $code = "require Mediabot::$module;" . q{
         die 'runtime dependency' if $INC{'Mediabot/Helpers.pm'} || $INC{'Mediabot/External/Claude.pm'}
             || $INC{'Mediabot/AI/Client.pm'} || $INC{'Mediabot/AI/IRCOutput.pm'};
         print 'loaded';};

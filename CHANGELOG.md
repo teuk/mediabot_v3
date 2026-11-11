@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1210 — Separate channel flood rule reads from admission
+
+- Introduce a read-only CHANNEL_FLOOD boundary with explicit database handle
+  and channel ID, distinguishing configured, missing and failed reads.
+- Keep cache freshness, invalidation, defaults and global/channel admission
+  decisions in their existing owners; preserve SQL call order and exceptions.
+- Extend the existing cache case with real reader and failed-refresh contracts;
+  record MB1209 host acceptance and the phase C pilot in the roadmap.
+
 ### MB1209 — Isolate output admission policy
 
 - Give IRC output admission a dedicated owner with explicit clock, configuration

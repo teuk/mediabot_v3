@@ -9,8 +9,8 @@ use Scalar::Util ();
 # the same objects. This module never loads Helpers or the IRC transport.
 # The compatibility facade supplies clock, config_int, reply and console hooks;
 # callbacks retain their historical arguments, exception policy and call order.
-# OutputBudget separately owns monotonic credit accrual. SQL extraction is a
-# later roadmap increment; its domain-specific failure behavior stays unchanged.
+# OutputBudget owns monotonic credit accrual. Channel::FloodRules owns the
+# read-only SQL boundary; cache freshness and failure decisions stay here.
 
 sub checkAntiFlood {
 	my ($self, $sChannel, $cost, $hooks) = @_;
@@ -78,12 +78,10 @@ sub checkAntiFlood {
             return $global_check->(1);
         }
         my $id_channel = $channel_obj->get_id;
-        my $sth = $self->{dbh}->prepare(
-            "SELECT nbmsg_max, duration, timetowait FROM CHANNEL_FLOOD WHERE id_channel = ?"
-        );
-        if ($sth && $sth->execute($id_channel)) {
-            my $ref = $sth->fetchrow_hashref;
-            $sth->finish;
+        require Mediabot::Channel::FloodRules;
+        my $result = Mediabot::Channel::FloodRules::read($self->{dbh}, $id_channel);
+        if ($result->{status} ne 'error') {
+            my $ref = $result->{row};
             if ($ref) {
                 $self->{_af_params}{$sChannel} = {
                     ts          => $now,
@@ -105,8 +103,7 @@ sub checkAntiFlood {
                 return $global_check->(1);
             }
         } else {
-            no warnings 'once';
-            $self->{logger}->log(1, "checkAntiFlood() DB error: $DBI::errstr");
+            $self->{logger}->log(1, "checkAntiFlood() DB error: $result->{error}");
             return $global_check->(1);
         }
     }

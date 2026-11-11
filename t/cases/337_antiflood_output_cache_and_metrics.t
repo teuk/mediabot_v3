@@ -55,8 +55,8 @@ return sub {
         'checkAntiFlood caches CHANNEL_FLOOD params in _af_params');
     $assert->like($body // '', qr/_af\b/,
         'checkAntiFlood stores output flood state in _af');
-    $assert->like($body // '', qr/SELECT\s+nbmsg_max,\s*duration,\s*timetowait\s+FROM\s+CHANNEL_FLOOD/s,
-        'checkAntiFlood still reads existing CHANNEL_FLOOD schema');
+    $assert->unlike($body // '', qr/SELECT\s+nbmsg_max/,
+        'output admission delegates SQL to the channel rules reader');
     $assert->like($body // '', qr/mediabot_antiflood_blocks_total/,
         'checkAntiFlood increments output antiflood metric');
 

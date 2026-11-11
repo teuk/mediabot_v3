@@ -13,8 +13,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | Phase | Objective and bounded first increment | Status |
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
-| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 output-admission owner implemented; target-host acceptance pending. |
-| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | Planned. |
+| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
+| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 read-only CHANNEL_FLOOD pilot implemented; target-host acceptance pending. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Planned. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | Planned. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
@@ -60,8 +60,33 @@ algorithm. Native wiring remains in the host integration lane. The SQL cache
 and its failure policy deliberately remain together until phase C; this bounded
 increment does not complete all of phase B. No speedup is claimed.
 
-Host acceptance of MB1209 is pending. Next: review remaining Helpers boundaries
-before the channel output-rule data-access pilot. Preserve lazy runtime wiring.
+Host acceptance of MB1209: 918 targeted and 39,347 full-suite assertions passed;
+committed and pushed as `492a23b`. Boundary review: Helpers already delegates
+command throttling, output transport and admission; cache invalidation still
+shares `_af_params` with ChannelCommands. Keep that shared state intact while
+piloting the adjacent read-only data-access boundary before broader extraction.
+
+## Phase C / MB1210 — channel flood rules reader
+
+`Channel::FloodRules::read` receives only a DBI-compatible handle and channel ID.
+It owns the parameter SELECT and returns distinct found/missing/error results;
+DBI exceptions propagate unchanged. It has no bot, transport, clock or cache.
+`IRC::OutputPolicy` retains defaults, positive/negative cache freshness, channel
+lookup, diagnostics and admission fallback. ChannelCommands keeps writes and
+existing cache invalidation. No second cache is introduced.
+
+This pilot preserves the existing anti-flood failure policy: false prepare or
+execute logs and falls back to global admission without refreshing the cache.
+Previously confirmed entries and their age remain stored, but stale entries are
+not enforced on that failed read. Missing rows create the existing negative
+cache. This differs from the badword filter's last-known-good enforcement;
+those policies must not be merged. Statement cleanup and thrown errors are
+unchanged, including no explicit finish on false execute. Further cleanup work
+must be a separately tested behavior change.
+
+MB1210 host acceptance is pending. Next: inventory timer/worker ownership for
+phase D before choosing one lifecycle family; remaining phase B/C work stays
+bounded and preserves native wiring.
 
 ## Rules for subsequent phases
 
