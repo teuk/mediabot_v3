@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1217 — Architecture checkpoint and nicklist lifecycle priority
+
+- Review phase A–E ownership and test boundaries; record MB1216 on GitHub and
+  update the resource inventory without inferring missing host test totals.
+- Select periodic nicklist retirement as the next bounded runtime task: separate
+  cleanup failures, preserve reentrant successors and replace simulated coverage.
+- Document acceptance criteria and deferred scope. Documentation only; no runtime,
+  schema, configuration or service changes.
+
 ### MB1216 — Move portfolio assembly into plugin diagnostics
 
 - Assemble the read-only API v3 portfolio in the existing DiagnosticsV3 owner,

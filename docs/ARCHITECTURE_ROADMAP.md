@@ -16,7 +16,7 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1214 AntiFlood retirement committed/pushed as `b321e17`; three-family output pilot delivered. Detailed MB1214 host test report not supplied. |
-| E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 file persistence committed/pushed as `8467555`; MB1216 portfolio diagnostics implemented, host acceptance pending. |
+| E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
 ## Phase A / MB1208
@@ -186,12 +186,70 @@ PluginManager retains discovery and live-entry/report access; its public
 `v3_portfolio_report` remains the adapter. No quarantine, permission enforcement,
 plugin mutation or rollback responsibility moves. Existing 1129 tests exercise
 both actual manager wiring and standalone assembly; no new repository case.
-MB1216 local targeted lane: 246 assertions pass. Full host acceptance pending.
+MB1216 local targeted lane: 246 assertions passed. Commit `a9d10caa` is now on
+GitHub and matches the snapshot. Detailed host test results were not supplied;
+no full-suite assertion count is inferred.
 
-Next checkpoint after acceptance: review phase A–E integration and remaining
-explicitly deferred boundaries before selecting another runtime extraction.
-The bounded pilots do not imply universal shutdown coverage or a completed
-rewrite of Helpers/PluginManager.
+## MB1217 — integration checkpoint and next bounded priority
+
+Reviewed at `a9d10caaccaaceaa4a4ab788fa524c303707bae3` against the supplied
+2026-11-11 snapshot. This is a documentation-only checkpoint, not a new runtime
+migration or a claim that every completion criterion is satisfied.
+
+| Boundary | Current ownership and integration evidence | Remaining scope |
+| --- | --- | --- |
+| A: operator administration | [Commands](../Mediabot/Partyline/Commands.pm) `_cmd_plugins` delegates to [PluginAdmin](../Mediabot/Partyline/PluginAdmin.pm); existing [412](../t/cases/412_mb173_partyline_plugins_status.t) exercises the component. | Other Partyline command families remain separate candidates; retain session/level authority. |
+| B/C: output admission and storage | [OutputPolicy](../Mediabot/IRC/OutputPolicy.pm) owns cache/budget decisions; [FloodRules](../Mediabot/Channel/FloodRules.pm) owns the SELECT. [627](../t/cases/627_mb409_antiflood_negative_cache.t) covers failure/cache boundaries. | ChannelCommands still writes rules and invalidates shared cache. Do not merge domain-specific fallback policies. |
+| D: connection output | [setIrc](../Mediabot/Mediabot.pm) detaches registries and publishes the transport before [paced](../Mediabot/IRC/PacedOutput.pm) and [deferred](../Mediabot/IRC/DeferredOutput.pm) retirement. [1311](../t/cases/1311_mb882_irc_native_timer_lifecycle.t) retains native coverage. | Periodic nicklist timers and worker/final-exit coordination are not covered by countdown retirement. |
+| E: state file | [RuntimeStateFile](../Mediabot/Plugin/RuntimeStateFile.pm) owns file IO; [PluginManager](../Mediabot/PluginManager.pm) retains validation, path policy and rollback. [1135](../t/cases/1135_mb766_v3_boot_state.t) exercises real manager restoration and standalone IO. | No fsync durability or new filesystem race policy was introduced. |
+| E: diagnostics | [DiagnosticsV3](../Mediabot/Plugin/DiagnosticsV3.pm) owns detached reports/portfolio assembly; [1129](../t/cases/1129_mb764_v3_portfolio_report.t) covers actual manager wiring and bounded standalone assembly. | Discovery, quarantine and capability/lifecycle decisions remain with the manager. |
+
+### Next runtime increment: nicklist timer retirement
+
+Inspection of `stop_all_channel_nicklist_timers` and
+`stop_channel_nicklist_timer` in Mediabot.pm shows two concrete failure paths:
+
+- Loop removal and timer stop share an eval. If removal throws, stop is skipped.
+  The all-channel path nevertheless clears the registry and logs success.
+- Registry deletion happens after external cleanup. A replacement registered by
+  reentrant cleanup can therefore be erased, either for one channel or globally.
+
+`setup_channel_nicklist_timers` also installs periodic callbacks without an
+explicit registration identity gate. Treat callback revocation as a distinct
+requirement from physical stop/remove. These are source-level findings; this
+checkpoint does not claim a production incident or a passing fault reproduction.
+
+The nicklist portion of [388](../t/cases/388_mb129_nicklist_timer_and_metrics_utf8.t)
+currently models setup/stop with local closures rather than invoking these
+methods. Preserve its unrelated UTF-8 metrics assertions, but replace the
+lifecycle simulation with real-owner tests in the runtime increment.
+
+Acceptance requirements for that increment:
+
+1. Detach only the old owned registration before cleanup; reentrant successor
+   timers for the same or another channel survive.
+2. Attempt stop and removal independently; report incomplete cleanup honestly.
+3. Retained callbacks from retired registrations cannot refresh the nicklist.
+4. Preserve the configured interval, default 300 seconds, target spelling and
+   add/part/join/purge/reconnect/rehash behavior. Audit the calls in
+   [ChannelCommands](../Mediabot/ChannelCommands.pm) before changing the boundary.
+5. Cover normal completion, stop/remove faults, repeated cleanup, reentrant
+   replacement and setup failure against real owner methods; retain a native
+   periodic-timer integration check and run the full suite once before commit.
+
+Do not route periodic timers through the countdown-only cancellation API.
+[DBCommands](../Mediabot/DBCommands.pm) `_stop_all_runtime_db_timers` already
+separates its cleanup attempts, and [ShellWatch](../Mediabot/Partyline/ShellWatch.pm)
+`_dispose` demonstrates identity-aware retirement; neither is a drop-in nicklist
+implementation. Choose the smallest owner boundary that the new tests justify.
+
+Worker shutdown, Scheduler policy, database writes, radio and YouTube remain
+outside this next increment. A universal resource container or stop-all service
+is not a prerequisite. No startup/runtime performance gain is claimed.
+
+Checkpoint validation: verify documentation paths/source symbols, exact base,
+patch/reverse and guarded commit flow. No runtime code changes, so the full
+runtime suite is not rerun for MB1217 alone.
 
 ## Rules for subsequent phases
 
