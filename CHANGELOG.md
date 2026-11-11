@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1238 — Preserve newer DB timer publications
+
+- Prevent an older onStartTimers attempt from retiring or overwriting a timer
+  set published by a nested successful reload, including an empty snapshot.
+- Track successful publication identity only: nested DB/setup failures still
+  allow the outer attempt to finish. Superseded setup cleans its own notifiers.
+- Extend native case 403 with real Periodic/SQLite reentrancy probes through
+  logging, add/start, old retirement and rollback; retained losing ticks stay inert.
+- Keep SQL, responder retirement, wire validation and ordinary failure policy.
+
 ### MB1237 — Checkpoint badword boundaries and DB timer ownership
 
 - Record the committed badword read/write pilot and remaining architecture scope.

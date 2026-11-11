@@ -1,12 +1,10 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1237, reviewed at MB1236 commit
-`8907a26c0dadee96622a23c24c678236e5763070` against the supplied 20:14 snapshot.
-The badword data-access pilot is committed. Next is a focused investigation of
-DB timer reload publication under reentrant callbacks; see
-[the current roadmap](ARCHITECTURE_ROADMAP.md#mb1237--badword-pilot-and-db-timer-review).
-Existing native staging/rollback protections remain authoritative. A suspected
-publication race must be reproduced before a runtime fix is selected.
+Current continuation checkpoint: MB1238, prepared against MB1237 commit
+`10a311c924985506792a5e5d95bcfe499c77b7d0`.
+Nested DB timer publication was reproduced and guarded; see
+[the current roadmap](ARCHITECTURE_ROADMAP.md#mb1238--reentrant-db-timer-publication).
+Native reentrancy checks pass locally; full target-host acceptance is pending.
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all
@@ -40,7 +38,7 @@ integration question for a later migration, not proof that every resource leaks.
 | [Plugin jobs](../Mediabot/PluginManager.pm), `_stop_v3_jobs`, `_remove_v3_jobs` | Plugin entry's `mounted_jobs` stores name/clock plus Scheduler identity and registration ID (MB1230) | MB1230 checks exact ownership before start/stop/remove and rollback; MB1229 retains failed removal records on a disabled entry and reports incomplete unload | MB1230 implements exact identity and rollback; committed as `9508ecbf`, without a host test total recorded here. Unknown ownership is refused, not inferred from a name. Lifecycle/capability authority stays in PluginManager. |
 | [Partyline watch](../Mediabot/Partyline/ShellWatch.pm), `_dispose`, `_remove_owned` | Exact session/stream/state, owner PID and task ID; weak owner references | Marks done, drops renderer, removes only its own scheduler registration; reports incomplete removal | Useful existing model for revoke-first cleanup; preserve session authorization rather than copying it into a generic timer helper. |
 | [Nicklist timers](../Mediabot/Channel/NicklistTimers.pm), Mediabot setup/stop delegates | Public `channel_nicklist_timers` map plus private weak-key callback metadata and setup generation | MB1218 detaches/revokes before independent remove/stop; late setup cannot overwrite successors; failures return 0 and log incomplete cleanup | Committed as `7f1529b3`; no detailed host report supplied. Failed physical cleanup is not retried by repeated retirement; final shutdown remains separate. |
-| [DB timers](../Mediabot/DBCommands.pm), `_stop_all_runtime_db_timers`, `onStartTimers` | `hTimers` map, detached before cleanup | Stops and removes each old timer in separate eval blocks when rebuilding | MB1237 selects publication/reentrancy review with native case 403. Preserve staging/rollback and exact tick identity; no new defect is claimed before reproduction. |
+| [DB timers](../Mediabot/DBCommands.pm), `_stop_all_runtime_db_timers`, `onStartTimers` | `hTimers` map, detached before cleanup | Stops and removes each old timer in separate eval blocks when rebuilding | MB1238 guards successful publication identity against nested reloads and cleans losing attempts only. Native case 403 extended; host acceptance pending. Tick-time reentrancy is the next bounded review. |
 | [Achievement worker](../Mediabot/Achievements.pm), `shutdown_worker` | Active `_worker_process` plus physical `_worker_children` registry and `_shutting_down` gate | MB1219–1225 revoke logical delivery, retain accepted detached children, clean notifier setup failures and attempt bounded shared-budget TERM/KILL collection without running the loop | Unconfirmed records remain owned and diagnosed; watcher completion retires exact records. This is family-specific, not generic AsyncWorker shutdown. |
 | Archive worker in [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | `_channel_log_archive_pid` | MB1226: checked TERM/KILL with bounded WNOHANG polling before DB teardown; watcher refusal uses the same routine with immediate KILL | Retain unconfirmed PID ownership and diagnose uncertainty. No blocking waitpid or loop iteration; ordinary reconnect is unchanged. |
 

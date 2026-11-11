@@ -203,6 +203,8 @@ sub run {
     return $out;
 }
 my %out;
+require MB1238TimerReload;
+MB1238TimerReload::check(sub { push @{$out{reload}}, [$_[0] ? 1 : 0, $_[1]] });
 for my $entry (qw(module facade)) {
     for my $stage (qw(add-before add-after start-before start-after)) {
         for my $at (1..3) {
@@ -297,6 +299,7 @@ MB925_NATIVE
     $assert->($rc==0 && ref($data) eq 'HASH',
         'MB925 native timer probe completes and returns JSON');
     return unless $rc==0 && ref($data) eq 'HASH';
+    $assert->(@$_) for @{$data->{reload}};
     my $same=sub {JSON::PP->new->canonical->encode($_[0]) eq JSON::PP->new->canonical->encode($_[1])};
     my @commands=map {"PRIVMSG #test :\x{e9}t\x{e9} $_\r\n"} qw(alpha bravo charlie);
     my @rows=map {[$_+1,(qw(alpha bravo charlie))[$_],sprintf('%d',$_+11),substr($commands[$_],0,-2)]} 0..2;

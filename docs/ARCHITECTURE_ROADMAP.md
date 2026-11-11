@@ -15,7 +15,7 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are implemented and committed; broader phase C remains open. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; see the MB1237 checkpoint below. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; see MB1238 below for the DB timer publication fix (host acceptance pending). |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
@@ -993,3 +993,33 @@ DB-timer safety/IRC-write cases, then the full suite once for a runtime change.
 MB1237 checks documentation links and reviewed source symbols plus guarded patch
 application/commit flow. No bot suite is required for this documentation-only
 checkpoint. The next timer investigation and any fix are not implemented here.
+
+
+## MB1238 — Reentrant DB timer publication
+
+Prepared against MB1237 commit `10a311c924985506792a5e5d95bcfe499c77b7d0`.
+The MB1237 hypothesis is reproduced with the real DBCommands module, native
+IO::Async Periodic timers and a private SQLite database: an older invocation
+can retire/overwrite a nested successful publication. Retirement-time nesting
+can also leave the overwritten timers attached but unregistered.
+
+The fix records successful publication identity. Each attempt checks that
+identity before setup, after add/start and after retirement. A superseded
+attempt returns zero and cleans only its own attempted timers. An empty nested
+publication also wins. Nested DB/setup failures do not change publication
+identity, so a still-authorized outer attempt can complete. Cleanup reentrancy
+cannot restore an obsolete attempt's authority. This covers nested reloads;
+it does not redefine arbitrary direct hTimers writes or operator mutations.
+
+Existing [case 403](../t/cases/403_mb164_onstarttimers_stage_fresh_before_publish.t)
+uses [the native fixture](../t/lib/MB1238TimerReload.pm): 288 assertions, with
+58 failures against the unchanged base and all passing with the fix. Four
+adjacent cases pass 58 assertions locally. Full case 403 and XAUTH case 1223
+need missing full-bot dependencies locally; their host acceptance and the full
+suite are pending. The delivery requires both before commit/push. No new
+historical case file, schema change or service action is introduced.
+
+Next review: timer tick callbacks check ownership before logging, then write.
+Investigate replacement during that log callback using retained native ticks;
+do not assume a defect or expand final-exit handling without reproduction.
+Broader phases B/C/D and generic-worker exit coordination remain open.

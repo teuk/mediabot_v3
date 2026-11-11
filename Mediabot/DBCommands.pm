@@ -140,6 +140,13 @@ sub _timer_irc_write {
 sub onStartTimers {
     my $self = shift;
 
+    # A nested successful reload supersedes this attempt, including an empty
+    # snapshot. Failed nested reads/setup do not revoke a usable outer attempt.
+    my $publication = $self->{_db_timer_publication} ||= {};
+    my $still_current = sub {
+        refaddr($self->{_db_timer_publication}) == refaddr($publication);
+    };
+
     # A login/reconnect never inherits an automatic reply from the old session,
     # even when reloading the independent DB timer set subsequently fails.
     _release_pending_responder($self);
@@ -233,6 +240,14 @@ sub onStartTimers {
     # before stopping the old runtime set. If this pre-commit step fails,
     # cleanup the fresh staged timers and keep the old timers alive.
     my @started_fresh;
+    my $rollback = sub {
+        for my $started (@started_fresh) {
+            eval { $started->stop if $started->can('stop') };
+            eval { $self->{loop}->remove($started) if $self->{loop} };
+        }
+        return 0;
+    };
+    return 0 unless $still_current->();
     for my $timer_name (sort keys %hTimers) {
         my $timer = $hTimers{$timer_name} or next;
 
@@ -241,7 +256,7 @@ sub onStartTimers {
         push @started_fresh, $timer;
         my $ok = eval {
             $self->{loop}->add($timer) if $self->{loop};
-            $timer->start;
+            $timer->start if $still_current->();
             1;
         };
 
@@ -251,18 +266,16 @@ sub onStartTimers {
             $self->{logger}->log(1, "onStartTimers() failed to start fresh timer $timer_name: $err")
                 if $self->{logger};
 
-            for my $started (@started_fresh) {
-                eval { $started->stop if $started->can('stop') };
-                eval { $self->{loop}->remove($started) if $self->{loop} };
-            }
-
-            return 0;
+            return $rollback->();
         }
+        return $rollback->() unless $still_current->();
     }
 
     # All fresh timers are alive. Now stop/remove the old registered timers and
     # publish the fresh set.
     $self->_stop_all_runtime_db_timers();
+    return $rollback->() unless $still_current->();
+    $self->{_db_timer_publication} = {};
     %{$self->{hTimers}} = %hTimers;
     return $i;
 }
