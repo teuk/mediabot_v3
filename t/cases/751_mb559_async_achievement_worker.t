@@ -127,6 +127,53 @@ return sub {
     $assert->ok($ach->pending_check_count == 0,
         'third failure drops the entry after bounded retries');
 
+    # MB1219: final shutdown revokes parent result delivery, not child reaping.
+    for my $outcome (qw(success failure)) {
+        my $late;
+        my $b=B751->new;
+        my $a=Mediabot::Achievements->new(
+            path=>"$tmp/shutdown-$outcome.json",logger=>L751->new,bot=>$b,
+            worker_launcher=>sub {$late=$_[1];1},
+        );
+        $a->queue_check('Late','#room');
+        $a->start_next_check_async;
+        $assert->ok($a->worker_inflight,'shutdown fixture has real pending parent work');
+        $a->shutdown_worker;
+        $assert->ok(!$a->worker_inflight,'shutdown retires logical in-flight ownership immediately');
+        my $sets=@{$b->{metrics}{sets}};
+        my $incs=@{$b->{metrics}{incs}};
+        my $obs=@{$b->{metrics}{obs}};
+        my $pending=$a->pending_check_count;
+        my $key="late\x00#room";
+        my $before=JSON::PP->new->canonical->encode($a->{_pending_checks});
+        my $result=$outcome eq 'success' ? {
+            ok=>1,checks=>['msg_count'],timings=>{msg_count=>0.2},
+            unlocks=>[{nick=>'Late',channel=>'#room',id=>'first_msg'}],
+            progress=>{msg_count=>4321},
+        } : {ok=>0,error=>'worker_timeout',detail=>'late timeout'};
+        $late->($result);$late->($result);
+        $assert->ok(!exists($a->get_for_nick('Late','#room')->{first_msg})
+            && $a->progress('msg_count','Late','#room')==0,
+            "$outcome after shutdown cannot unlock or import progress");
+        $assert->ok(!$a->{_msg_check_ts}{$key} && $a->pending_check_count==$pending
+            && JSON::PP->new->canonical->encode($a->{_pending_checks}) eq $before,
+            "$outcome after shutdown cannot acknowledge, retry or throttle queued work");
+        $assert->ok(@{$b->{metrics}{sets}}==$sets && @{$b->{metrics}{incs}}==$incs
+            && @{$b->{metrics}{obs}}==$obs,
+            "$outcome after shutdown produces no completion metrics");
+        $assert->ok($a->start_next_check_async==0 && $a->queue_check('Other','#room')==0,
+            'shutdown continues to refuse new work');
+        $a->shutdown_worker;
+        $assert->ok(@{$b->{metrics}{sets}}==$sets,'repeated shutdown does not repeat logical retirement');
+        my @gauges=grep {$_->[0] eq 'mediabot_achievement_worker_inflight'} @{$b->{metrics}{sets}};
+        $assert->ok($gauges[-1][1]==0,'shutdown publishes logical in-flight gauge zero');
+    }
+
+    $ach->shutdown_worker;
+    $assert->ok(exists $ach->get_for_nick('Alice','#one')->{first_msg},
+        'shutdown preserves previously committed achievements for the final save');
+    $assert->ok($ach->save(1),'forced final save remains available after worker shutdown');
+
     my $src=slurp751('Mediabot/Achievements.pm');
     $assert->like($src, qr/pipe\(\$pipe, \$child_write\).*?my \$pid = fork\(\)/s,
         'worker uses an ordinary pipe and fork');

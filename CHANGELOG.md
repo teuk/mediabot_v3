@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1219 — Revoke achievement result delivery at shutdown
+
+- Retire logical in-flight ownership before signalling the achievement child and
+  reject completion callbacks received after shutdown begins.
+- Late results cannot unlock achievements, import progress, alter retry/throttle
+  state or publish completion metrics; repeated shutdown stays inert.
+- Preserve previously accepted achievements, forced final save, TERM signalling
+  and existing child cleanup/reaping. This is not synchronous process termination.
+- Extend the existing async-worker case and record the bounded phase D increment.
+
+
 ### MB1218 — Retire channel nicklist timers safely
 
 - Give periodic nicklist setup/retirement a dedicated owner; keep Mediabot methods,

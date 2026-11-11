@@ -276,12 +276,41 @@ add/part/join/purge/reconnect/rehash call sites are unchanged. Periodic timers d
 not use the countdown cancellation API. Existing case 388 now tests the actual
 component with an injected factory; UTF-8 assertions remain. Case 1311 adds actual
 Mediabot facade/native periodic integration; 1304 checks independent loading.
-Local component lane: 49 assertions passed. Target-host targeted/native and full
-suite acceptance is required before commit; no host result is inferred here.
+MB1218 is committed on GitHub as `7f1529b3` and matches the supplied snapshot.
+Detailed host test results were not supplied; no full-suite count is inferred.
 
 Next: review worker/final-exit ownership and select one bounded consumer before
 changing shutdown behavior. Async cancellation, child reaping and synchronous
 final exit must remain distinct; no universal stop-all coordinator is assumed.
+
+## MB1219 — achievement worker result retirement
+
+Base: `7f1529b34ec271852c6de4bd87206e517fa082ea`, matched to the supplied
+2026-11-11 11:17:32 snapshot. Review of `clean_and_exit`, archive termination,
+`Achievements::shutdown_worker`, its process watcher and parent completion path
+selects one bounded ownership defect before broader process migration.
+
+Shutdown already refused new checks and sent TERM, but left the parent's active
+token valid. Actual-component tests reproduced late success unlocking achievements
+and importing progress; late failure changed retry state and outcome metrics.
+`shutdown_worker` now revokes logical ownership before signalling and publishes
+an idle gauge once. `_finish_async_check` refuses results after shutdown begins.
+Queued checks remain unacknowledged and existing achievements/final save survive.
+No cancelled completion is counted as a success, timeout or failure.
+
+This gate concerns callbacks arriving after shutdown; it does not interrupt a
+completion already executing. Child TERM, stream/timer cleanup, watch_process and
+reaping stay unchanged. The gauge means logical parent work, not OS child count.
+No waits, blocking join, AsyncWorker conversion or reconnect policy are added.
+Existing case 751 covers late success/failure, duplicate delivery, repeated/idle
+shutdown, refusal of new work and final save. Eight local cases / 162 assertions
+passed. Wider integration needs host dependencies; targeted and full host suite
+remain mandatory before commit. No new repository test file.
+
+Next bounded review: achievement child physical termination and reaping at final
+exit, including watcher/setup failures and the difference between TERM request
+and confirmed exit. Preserve archive termination ordering and avoid copying its
+blocking wait into ordinary async cancellation or reconnect.
 
 ## Rules for subsequent phases
 

@@ -2742,6 +2742,7 @@ sub drain_one_check {
 
 sub _finish_async_check {
     my ($self, $token, $result) = @_;
+    return 0 if $self->{_shutting_down};
     my $active = $self->{_worker_inflight};
     return 0 unless ref($active) eq 'HASH' && ($active->{token} // -1) == $token;
 
@@ -3119,10 +3120,14 @@ sub _spawn_check_worker {
 sub shutdown_worker {
     my ($self) = @_;
     $self->{_shutting_down} = 1;
+    # Revoke parent delivery before signalling or publishing metrics. Child
+    # watchers still own physical cleanup/reaping; this is not a join operation.
+    my $active = delete $self->{_worker_inflight};
     my $proc = delete $self->{_worker_process};
     if (ref($proc) eq 'HASH' && $proc->{pid}) {
         kill 'TERM', $proc->{pid};
     }
+    $self->_metric('set', 'mediabot_achievement_worker_inflight', 0) if $active;
     return 1;
 }
 
