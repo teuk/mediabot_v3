@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1211 — Map runtime resource ownership
+
+- Document the core timer/worker owners and distinguish IRC reconnect, rehash
+  and final process exit. Record observed cleanup boundaries and audit limits.
+- Select paced NOTICE retirement as the first lifecycle migration, with explicit
+  callback revocation, reentrancy and cleanup-failure acceptance criteria.
+- Record MB1210 R2 host acceptance. Documentation only; runtime is unchanged.
+
 ### MB1210 — Separate channel flood rule reads from admission
 
 - Introduce a read-only CHANNEL_FLOOD boundary with explicit database handle

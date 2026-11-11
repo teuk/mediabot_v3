@@ -14,8 +14,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
-| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 read-only CHANNEL_FLOOD pilot implemented; target-host acceptance pending. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Planned. |
+| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1211 inventory and NOTICE retirement acceptance plan documented; runtime migration pending. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | Planned. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
@@ -84,9 +84,23 @@ those policies must not be merged. Statement cleanup and thrown errors are
 unchanged, including no explicit finish on false execute. Further cleanup work
 must be a separately tested behavior change.
 
-MB1210 host acceptance is pending. Next: inventory timer/worker ownership for
-phase D before choosing one lifecycle family; remaining phase B/C work stays
-bounded and preserves native wiring.
+MB1210 R2 host acceptance: 956 targeted and 39,386 full-suite assertions passed;
+committed/pushed as `97ced23`. The DBI fault fixture now isolates its scalar slot
+without writing to DBI's special variable; native diagnostic restoration passed.
+
+## Phase D / MB1211 — inventory before migration
+
+See [Runtime resource ownership](RUNTIME_RESOURCE_OWNERSHIP.md) for the bounded
+source inventory, reconnect/rehash/final-exit distinctions and observed gaps.
+The first runtime migration selected is explicit retirement of paced NOTICE
+callbacks and notifiers on transport replacement. Existing registry identity
+already prevents stale sends; physical removal and payload revocation need an
+explicit contract, including inline expiry, reentrancy and cleanup failures.
+
+MB1211 changes documentation only. Inventory is complete for its stated scope;
+no runtime cancellation API or global shutdown coordinator is implemented.
+Next delivery implements the NOTICE pilot against the documented acceptance
+matrix. Other phase B/C work and phase E remain incremental.
 
 ## Rules for subsequent phases
 
