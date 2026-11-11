@@ -229,4 +229,101 @@ for my $fault ('', 'stop', 'remove', 'both') {
     }
 }
 
+
+# MB1214: real deferred owner and countdown, with deterministic loop failures.
+{
+    require Mediabot::IRC::DeferredOutput;
+    require MB882TimerFixture;
+    no warnings qw(redefine once);
+    local *IO::Async::Timer::Countdown::new = sub {shift; MB882::Timer->new(@_)};
+    local *Mediabot::Helpers::_arm_flood_drain = sub {goto &Mediabot::IRC::DeferredOutput::_arm_flood_drain};
+    local *Mediabot::Helpers::_drain_flood_queue = sub {goto &Mediabot::IRC::DeferredOutput::_drain_flood_queue};
+    my @wire;
+    local *Mediabot::IRC::DeferredOutput::botPrivmsg = sub {push @wire, $_[2]};
+    my $enqueue = sub {
+        my ($bot, $target, @messages) = @_;
+        my $q = $bot->{_flood_outq}{$target} ||= {items=>[], armed=>0};
+        push @{$q->{items}}, map {['privmsg', $_, undef, {expires_at=>1e20}]} @messages;
+        Mediabot::IRC::DeferredOutput::_arm_flood_drain($bot, $target);
+        return $q;
+    };
+    my $retire = sub {
+        my ($bot) = @_;
+        Mediabot::IRC::DeferredOutput::retire_flood_queues($bot, delete $bot->{_flood_outq});
+    };
+    for my $mode (qw(normal stop remove)) {
+        @wire=();my $bot=bless {loop=>MB882::Loop->new,logger=>bless({rows=>[]},'MB882::Logger')},'MB882::Bot';
+        my $q=$enqueue->($bot,'#test','old','tail');
+        $enqueue->($bot,'#other','other');
+        my $old=$bot->{_flood_outq};my @callbacks=@{$bot->{loop}{callbacks}};
+        my $payload=bless {},'MB1214Payload';my $weak=$payload;weaken($weak);
+        $q->{items}[0][3]{probe}=$payload;undef $payload;
+        my $stop=MB882::Timer->can('stop');my $remove=MB882::Loop->can('remove');
+        {
+            local *MB882::Timer::stop=sub {die "stop failed\n" if $mode eq 'stop';$stop->(@_)};
+            local *MB882::Loop::remove=sub {die "remove failed\n" if $mode eq 'remove';$remove->(@_)};
+            is($retire->($bot),$mode eq 'normal'?1:0,'flood retirement reports cleanup outcome');
+        }
+        ok(!defined $weak,'retained queue and callbacks release response payload immediately');
+        is_deeply([$old,$q->{items},$q->{armed},$q->{timer},$q->{arm}],[{},[],0,undef,undef],'all old queue ownership revoked');
+        $_->() for @callbacks;
+        is_deeply(\@wire,[],'old callbacks cannot send');
+        is(scalar keys %{$bot->{loop}{attached}},$mode eq 'remove'?2:0,'independent removal attempted for every old target');
+        is(scalar @{$bot->{logger}{rows}},$mode eq 'normal'?0:1,'cleanup failure reported once');
+        is(Mediabot::IRC::DeferredOutput::retire_flood_queues($bot,$old),1,'repeat retirement is inert');
+    }
+    {
+        @wire=();my $bot=bless {loop=>MB882::Loop->new},'MB882::Bot';
+        $enqueue->($bot,'#test','old');my $stop=MB882::Timer->can('stop');my $once=0;
+        {local *MB882::Timer::stop=sub {unless($once++){$enqueue->($bot,'#test','new','tail')}$stop->(@_)};
+         $retire->($bot);}
+        is(scalar keys %{$bot->{loop}{attached}},1,'new drain survives reentrant cleanup');
+        $bot->{loop}->drain;
+        is_deeply(\@wire,[qw(new tail)],'successor keeps FIFO delivery');
+    }
+    {
+        @wire=();my $bot=bless {loop=>MB882::Loop->new},'MB882::Bot';my $add=MB882::Loop->can('add');
+        {local *MB882::Loop::add=sub {$add->(@_);$retire->($bot)};
+         $enqueue->($bot,'#test','old');}
+        is(scalar keys %{$bot->{loop}{attached}},0,'late setup result cancelled');
+        $_->() for @{$bot->{loop}{callbacks}};
+        is_deeply(\@wire,[],'late timer stays inert');
+    }
+    for my $fail (0,1) {
+        @wire=();my $bot=bless {loop=>MB882::Loop->new},'MB882::Bot';my $add=MB882::Loop->can('add');my $once=0;
+        {local *MB882::Loop::add=sub {$add->(@_);unless($once++){$_[1]{on_expire}->();die "late add error\n" if $fail}};
+         my $ok=eval {$enqueue->($bot,'#test','inline','pending');1};
+         is($ok?1:0,$fail?0:1,'inline setup retains original exception policy');}
+        ok($bot->{_flood_outq}{'#test'}{timer},'inline expiry preserves successor handle');
+        $retire->($bot);
+        is(scalar keys %{$bot->{loop}{attached}},0,'successor can be cancelled after inline setup');
+        $_->() for @{$bot->{loop}{callbacks}};
+        is_deeply(\@wire,['inline'],'inline tail revoked without replay');
+    }
+    {
+        my $bot=bless {loop=>MB882::Loop->new},'MB882::Bot';
+        {local *MB882::Timer::start=sub {die "arm failed\n"};
+         eval {$enqueue->($bot,'#test','pending')};like($@,qr/arm failed/,'setup failure propagates');}
+        my $q=$bot->{_flood_outq}{'#test'};
+        is_deeply([$q->{armed},scalar @{$q->{items}}],[0,1],'ordinary failure retains rearmable payload');
+        $retire->($bot);is_deeply($q->{items},[],'retirement clears dormant failed-arm queue');
+    }
+    {
+        @wire=();my $bot=bless {loop=>MB882::Loop->new},'MB882::Bot';
+        $enqueue->($bot,'#test','first','second');
+        my $old_callback=$bot->{loop}{callbacks}[0];
+        Mediabot::IRC::DeferredOutput::_drain_flood_queue($bot,'#test');
+        is(scalar keys %{$bot->{loop}{attached}},1,'explicit drain replaces the pending arm without duplication');
+        $old_callback->();
+        is_deeply(\@wire,['first'],'cancelled pending arm cannot advance explicit drain');
+        $bot->{loop}->drain;
+        is_deeply(\@wire,[qw(first second)],'explicit drain preserves FIFO and single delivery');
+        my $dormant={items=>[['action','unscheduled']],armed=>0};
+        $bot->{_flood_outq}{'#idle'}=$dormant;
+        $retire->($bot);
+        is_deeply($dormant->{items},[],'unscheduled queue also releases payload');
+    }
+
+}
+
 done_testing;

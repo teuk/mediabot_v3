@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1214 — Retire AntiFlood drains on transport replacement
+
+- Give each deferred target queue explicit countdown/arm ownership; preserve
+  successor arms across inline expiry, late setup returns and setup exceptions.
+- Revoke old queued responses before independent timer cleanup on replacement;
+  retain new work created by reentrant cleanup and report physical failures.
+- Preserve admission, FIFO, expiry and ordinary recovery behavior; extend existing
+  lifecycle tests and record MB1213 host acceptance in the architecture roadmap.
+
 ### MB1213 — Retire paced PRIVMSG resources on transport replacement
 
 - Revoke old target batches, guards and pump ownership before cancelling owned

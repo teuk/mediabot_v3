@@ -9,6 +9,7 @@ use Mediabot::IRC::PacedOutput qw(queue_notices queue_privmsg_chunks);
 use Mediabot::IRC::Output qw(privmsg action);
 use MB881OutputFixture;
 use Mediabot::UserCommands ();
+use Mediabot::Mediabot ();
 
 sub timer_count {scalar grep {$_->isa('IO::Async::Timer::Countdown')} $_[0]->notifiers}
 no warnings qw(redefine once);
@@ -318,4 +319,23 @@ sub quotegame_fixture {
     $callback->();is($calls,0,'retained native callback stays inert');
     is(cancel_countdown($timer),1,'native cancellation is idempotent');
 }
+
+MB881OutputFixture::with_policy(sub {
+    my $bot = MB881OutputFixture::new_bot(); $bot->{loop} = IO::Async::Loop->really_new;
+    $bot->{policy}{AntiFlood} = 1; $bot->{blocked} = 1;
+    privmsg($bot, '#test', 'retired'); action($bot, '#test', 'old action');
+    my $q = $bot->{_flood_outq}{'#test'};
+    is(timer_count($bot->{loop}), 1, 'native flood queue owns one countdown');
+    Mediabot::setIrc($bot, $bot->{irc});
+    is(timer_count($bot->{loop}), 1, 'same transport retains native flood countdown');
+    my $fresh = bless {wire=>[]}, 'MB881::IRC';
+    Mediabot::setIrc($bot, $fresh);
+    is(timer_count($bot->{loop}), 0, 'replacement immediately removes native flood notifier');
+    is_deeply([$q->{items},$q->{armed},$q->{timer}], [[],0,undef], 'native retirement releases pending messages and handle');
+    privmsg($bot, '#test', 'fresh'); $bot->{blocked} = 0;
+    $bot->{loop}->loop_once(0.01);
+    is_deeply([map {$_->{text}} @{$fresh->{wire}}], ['fresh'], 'only successor flood output reaches new transport');
+    is(timer_count($bot->{loop}), 0, 'successor completes without leaking a notifier');
+});
+
 done_testing;

@@ -117,6 +117,35 @@ sub _flood_retry_delay {
     return $delay > 10 ? 10 : $delay;
 }
 
+# Called with the detached old registry, after the new IRC transport is visible.
+# Revoke every queue before stop/remove can re-enter and create successor work.
+sub retire_flood_queues {
+    my ($self, $queues) = @_;
+    return 1 unless $queues;
+    my @old = values %$queues;
+    %$queues = ();
+    my @timers;
+    for my $q (@old) {
+        delete $q->{arm};
+        push @timers, delete $q->{timer};
+        @{$q->{items}} = ();
+        $q->{armed} = 0;
+    }
+    my $ok = 1;
+    for my $timer (@timers) {
+        $ok = 0 unless Mediabot::IRC::Timer::cancel_countdown($timer);
+    }
+    _report_retirement_failure($self) unless $ok;
+    return $ok;
+}
+
+sub _report_retirement_failure {
+    my ($self) = @_;
+    eval { $self->{logger}->log(1,
+        'AntiFlood output revoked; timer cleanup incomplete') if $self->{logger}; };
+    return;
+}
+
 sub _arm_flood_drain {
     my ($self, $to) = @_;
     my $q = $self->{_flood_outq}{$to} or return;
@@ -129,22 +158,39 @@ sub _arm_flood_drain {
         return;
     }
     $q->{armed} = 1;
+    my $arm = $q->{arm} = {};
     my $expected = $q;
     weaken($expected);
     my $started = eval {
-        Mediabot::IRC::Timer::countdown(
+        my $timer = Mediabot::IRC::Timer::countdown(
             loop => $loop,
             delay => _flood_retry_delay($self, $to),
             on_expire => sub {
                 return unless _flood_queue_current($self, $to, $expected);
+                return unless (refaddr($expected->{arm}) // 0) == refaddr($arm);
+                delete $expected->{arm};
+                delete $expected->{timer};
                 Mediabot::Helpers::_drain_flood_queue($self, $to);
             },
         );
+        if (_flood_queue_current($self, $to, $q)
+                && (refaddr($q->{arm}) // 0) == refaddr($arm)) {
+            $q->{timer} = $timer;
+        } elsif ($timer) {
+            # Inline expiry may already own a successor; connection replacement
+            # may have retired this arm before its handle was returned.
+            _report_retirement_failure($self)
+                unless Mediabot::IRC::Timer::cancel_countdown($timer);
+        }
         1;
     };
     unless ($started) {
         my $error = $@;
-        $q->{armed} = 0;
+        if ((refaddr($q->{arm}) // 0) == refaddr($arm)) {
+            delete $q->{arm};
+            delete $q->{timer};
+            $q->{armed} = 0;
+        }
         die $error;
     }
     return 1;
@@ -153,6 +199,13 @@ sub _arm_flood_drain {
 sub _drain_flood_queue {
     my ($self, $to) = @_;
     my $q = $self->{_flood_outq}{$to} or return;
+    delete $q->{arm};
+    my $timer = delete $q->{timer};
+    if ($timer) {
+        _report_retirement_failure($self)
+            unless Mediabot::IRC::Timer::cancel_countdown($timer);
+        return unless _flood_queue_current($self, $to, $q);
+    }
     $q->{armed} = 0;
 
     _expire_flood_output($self, $to, $q, _flood_queue_now());

@@ -15,7 +15,7 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1212 NOTICE retirement accepted: 39,423 assertions, pushed as `62f83c0`; MB1213 PRIVMSG retirement implemented, host acceptance pending. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1213 PRIVMSG retirement accepted: 39,462 assertions, pushed as `52e250e`; MB1214 AntiFlood retirement implemented, host acceptance pending. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | Planned. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
@@ -130,10 +130,27 @@ Each arm has an identity token so an inline expiry cannot overwrite a successor
 notifier with its late return value. Late timers from a retired connection are
 cancelled. Stop/remove faults retain callback revocation and emit a diagnostic;
 cleanup reentry cannot retire new work. Existing isolated and native paced tests
-cover these contracts. Native/full host acceptance remains pending.
+cover these contracts. MB1213 host acceptance: 837 targeted and 39,462 full-suite
+assertions passed; committed/pushed as `52e250e`.
 
-Next: inspect DeferredOutput's drain ownership (currently no stored countdown
-handle) before considering its migration. Phase E remains a separate step.
+### MB1214 — explicit AntiFlood drain ownership and retirement
+
+`DeferredOutput` now owns a countdown handle and an arm identity per target queue.
+Expiry releases these slots before the legacy drain hook. Inline expiry and late
+setup failure cannot overwrite or clear a successor arm. An explicit drain also
+retires any still-pending arm before processing its item.
+
+`retire_flood_queues` clears every detached queue's payload and arm slots before
+cancelling countdowns. `setIrc` publishes the replacement transport first;
+cleanup reentry preserves new queues. Dormant failed-arm/no-loop queues are
+cleared too. Cleanup failure is reported without restoring permission to send.
+Existing line costs, FIFO/retry order, response expiry, queue cap, target spelling
+and dynamic Helpers hooks remain unchanged. No global shutdown migration.
+
+MB1214 native/full host acceptance remains pending. This completes the planned
+three-family output pilot once accepted. Next: phase E, inspect PluginManager's
+runtime-state persistence boundary before extracting a bounded component;
+remaining worker/final-shutdown questions in phase D stay explicitly deferred.
 
 ## Rules for subsequent phases
 
