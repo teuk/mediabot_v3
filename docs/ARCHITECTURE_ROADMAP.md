@@ -19,7 +19,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
-Current continuation point: [MB1227 checkpoint](#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
+Current continuation point: MB1228 implements the Scheduler removal prerequisite
+below; plugin-job ownership remains next. Overall scope: [MB1227 checkpoint](#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
 Earlier “Next” paragraphs record decisions at their original increment; they do
 not override this checkpoint.
 
@@ -602,3 +603,32 @@ Validation for MB1227: documentation links and source symbols, snapshot/base
 comparison, patch/reverse guards and the real commit script against a temporary
 local remote. No runtime changes: do not rerun the full runtime suite solely for
 this checkpoint. Host application/commit of MB1227 remains pending delivery.
+
+## MB1228 — preserve Scheduler successors during cleanup
+
+Base: `f92fb0903bf694030e243aaff161eb3e8c5e1793` (MB1227 on GitHub).
+No newer snapshot was supplied; runtime source comes from that exact commit.
+The existing host commit script remains separately hash-guarded.
+
+The MB1227 audit's reentrancy prerequisite is now reproduced: both periodic and
+calendar removal can lose a replacement registered by stop logging or loop
+removal. The native Scheduler was invoked with deterministic loop/logger hooks;
+the old implementation failed 20 assertions across the four scenarios, leaving
+the replacement timer attached without its task record.
+
+`Scheduler::remove` now rechecks the captured task reference after stop and after
+loop removal. If nested cleanup already retired it, the outer call completes
+without deleting the successor. Existing false returns for absent tasks and
+stop/remove failures remain unchanged. The public signature is unchanged.
+
+Existing case 575 now has 62 assertions, including retained callback inertness,
+successor delivery and subsequent explicit cleanup. The local scheduler lane
+passed 516 assertions across eight cases, including native IO::Async cases;
+case 749 could not load JSON::MaybeXS locally. Plugin lifecycle/diagnostics
+cases 1072 and 1091 passed 78 assertions. Full host acceptance remains pending.
+
+This small prerequisite does not complete plugin-job ownership: the manager
+still stores task names, clears failed removal records and rolls back by name.
+Next apply the MB1227 acceptance contract there, including failed removal
+recovery and exact registration capture. Do not mark those findings fixed by
+this Scheduler change. No service, configuration, database or provider changes.

@@ -346,6 +346,11 @@ sub remove {
     # still-owned timer can survive without a task record.
     return 0 if $task->{started} && !$self->stop($name);
 
+    # MB1228: stop/log callbacks may have removed this registration and
+    # installed another under the same name. This call owns only the old task.
+    my $current = $self->{_tasks}{$name};
+    return 1 unless $current && refaddr($current) == refaddr($task);
+
     my $timer = $task->{timer};
     my $ok = eval {
         $self->{loop}->remove($timer) if $timer;
@@ -357,6 +362,10 @@ sub remove {
         $self->_log(1, "Scheduler: failed to remove '$name': $err");
         return 0;
     }
+
+    # Loop removal may reenter too; never delete its same-name successor.
+    $current = $self->{_tasks}{$name};
+    return 1 unless $current && refaddr($current) == refaddr($task);
 
     $task->{generation}++;
     delete $self->{_tasks}{$name};

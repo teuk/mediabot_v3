@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1228 — Preserve Scheduler successors during reentrant removal
+
+- Recheck exact task identity after stop and loop removal before deleting the
+  named registration. Cleanup of an old task cannot erase its replacement.
+- Extend the existing lifecycle case for periodic/calendar replacement through
+  stop logging and loop removal, stale callbacks and later successor cleanup.
+- Keep stop/remove failure behavior and public API unchanged. This is the
+  Scheduler prerequisite for the pending plugin-job ownership increment.
+
 ### MB1227 — Checkpoint resource ownership and select plugin job retirement
 
 - Refresh phase D status through MB1226; distinguish implemented family-specific

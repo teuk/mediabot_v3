@@ -46,6 +46,8 @@ BEGIN {
         my ($self, $timer) = @_;
         die "forced remove failure\n" if $self->{fail_remove};
         delete $self->{active}{refaddr($timer)} if $timer;
+        my $hook = delete $self->{on_remove};
+        $hook->() if $hook;
         return $timer;
     }
     sub active_count { scalar keys %{ $_[0]{active} } }
@@ -54,7 +56,15 @@ BEGIN {
 {
     package MB356::Logger;
     sub new { bless { lines => [] }, shift }
-    sub log { push @{ $_[0]{lines} }, [ $_[1], $_[2] ]; return 1 }
+    sub log {
+        my ($self, $level, $message) = @_;
+        push @{ $self->{lines} }, [$level, $message];
+        if ($self->{on_stop} && $message =~ /Scheduler: stopped /) {
+            my $hook = delete $self->{on_stop};
+            $hook->();
+        }
+        return 1;
+    }
 }
 
 require Mediabot::Scheduler;
@@ -142,6 +152,49 @@ ok(defined $sched3->task_info('remove_failure'),
     'failed remove keeps the task registry entry');
 ok($sched3->task_info('remove_failure')->{started},
     'failed stop leaves the task marked running');
+
+# MB1228: cleanup may reenter through the loop or logger. Use the real
+# scheduler's public remove/add operations to replace the same name.
+for my $mode (qw(periodic calendar)) {
+    for my $boundary (qw(stop_log loop_remove)) {
+        my $lp = MB356::Loop->new;
+        my $lg = MB356::Logger->new;
+        my $sc = Mediabot::Scheduler->new(loop => $lp, logger => $lg);
+        my ($old_runs, $new_runs) = (0, 0);
+        my %timing = $mode eq 'calendar'
+            ? (next_run_cb => sub { time() + 60 }) : ();
+        $sc->add(name => 'owned', interval => 60, %timing,
+            cb => sub { $old_runs++ }, autostart => 1);
+        my $old = $sc->{_tasks}{owned};
+        my $old_timer = $old->{timer};
+        my $successor_id;
+        my $replace = sub {
+            ok($sc->remove('owned'), "$mode/$boundary: nested removal succeeds");
+            $sc->add(name => 'owned', interval => 60, %timing,
+                cb => sub { $new_runs++ }, autostart => 1);
+            $successor_id = $sc->task_info('owned')->{task_id};
+        };
+        if ($boundary eq 'stop_log') { $lg->{on_stop} = $replace }
+        else { $lp->{on_remove} = $replace }
+        ok($sc->remove('owned'), "$mode/$boundary: original removal completes");
+        my $info = $sc->task_info('owned');
+        is($info ? $info->{task_id} : undef, $successor_id,
+            "$mode/$boundary: outer cleanup preserves the successor registration");
+        ok($info && $info->{started}, "$mode/$boundary: successor remains started");
+        is($lp->active_count, 1, "$mode/$boundary: exactly one live timer remains");
+        my $old_cb = $old_timer->{$mode eq 'calendar' ? 'on_expire' : 'on_tick'};
+        $old_cb->();
+        is($old_runs, 0, "$mode/$boundary: retained old callback stays inert");
+        my $current = $sc->{_tasks}{owned};
+        if ($current) {
+            $current->{timer}->{$mode eq 'calendar' ? 'on_expire' : 'on_tick'}->();
+        }
+        is($new_runs, 1, "$mode/$boundary: successor still executes once");
+        ok($sc->remove('owned'), "$mode/$boundary: later explicit removal owns successor");
+        is($lp->active_count, 0, "$mode/$boundary: later removal releases successor timer");
+        ok(!$sc->remove('owned'), "$mode/$boundary: absent task keeps false return");
+    }
+}
 
 sub slurp {
     my ($path) = @_;

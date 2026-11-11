@@ -36,7 +36,7 @@ integration question for a later migration, not proof that every resource leaks.
 | [Paced PRIVMSG](../Mediabot/IRC/PacedOutput.pm), `_queue_irc_chunks` | `_external_ai_output_queues` target state; `timer`, `current`, `batches`; guarded pump | MB1213 detaches all old targets, clears batches/guards/pump ownership and cancels their countdowns; arm identity preserves inline successors | MB1213 accepted; final-exit coordination remains separate. |
 | [Deferred AntiFlood](../Mediabot/IRC/DeferredOutput.pm), `_arm_flood_drain` | `_flood_outq` target queue; owned countdown handle and arm identity; weak expected queue in callback | MB1214 detaches/clears old queues before cancelling notifiers; expiry releases handle before normal drain/retry | Committed as `b321e17`; reconnect retirement does not change final-exit policy. |
 | [AsyncWorker](../Mediabot/AsyncWorker.pm), `cancel`, `_cleanup`, `_complete` | Worker owner PID, task ID, process/stream, timeout/kill/force timers | Cancel initiates TERM/KILL/backstop; cleanup deletes timer/stream/FD slots; finalized gate allows completion once; active_workers excludes finalized entries | Cancellation request is not synchronous child completion. Consumers must retain result/reaping semantics during shutdown. |
-| [Scheduler](../Mediabot/Scheduler.pm), `stop`, `remove`, `registration_id` | Named task plus exact registration ID/generation | Calendar stop removes notifier; ordinary periodic stop stops it; generation changes invalidate old execution; remove has its own semantics | Stop and remove are not interchangeable. Stop failure must not be reported as successful retirement. |
+| [Scheduler](../Mediabot/Scheduler.pm), `stop`, `remove`, `registration_id` | Named task plus exact registration ID/generation | Calendar stop removes notifier; ordinary periodic stop stops it; generation changes invalidate old execution; remove has its own semantics | MB1228 rechecks exact task identity after stop/remove callbacks so outer cleanup cannot erase a successor. Stop failure still remains a failure; plugin-side exact ownership is pending. |
 | [Plugin jobs](../Mediabot/PluginManager.pm), `_stop_v3_jobs`, `_remove_v3_jobs` | Plugin entry's `mounted_jobs` stores names/clocks, mediated by Scheduler | Stops/removes by name; stop reports failures, but removal clears the mounted list even on false returns | MB1227 priority: capture exact registration identity, preserve successors and retain incomplete cleanup ownership; include mount rollback. Lifecycle/capability authority stays in PluginManager. |
 | [Partyline watch](../Mediabot/Partyline/ShellWatch.pm), `_dispose`, `_remove_owned` | Exact session/stream/state, owner PID and task ID; weak owner references | Marks done, drops renderer, removes only its own scheduler registration; reports incomplete removal | Useful existing model for revoke-first cleanup; preserve session authorization rather than copying it into a generic timer helper. |
 | [Nicklist timers](../Mediabot/Channel/NicklistTimers.pm), Mediabot setup/stop delegates | Public `channel_nicklist_timers` map plus private weak-key callback metadata and setup generation | MB1218 detaches/revokes before independent remove/stop; late setup cannot overwrite successors; failures return 0 and log incomplete cleanup | Committed as `7f1529b3`; no detailed host report supplied. Failed physical cleanup is not retried by repeated retirement; final shutdown remains separate. |
@@ -153,3 +153,12 @@ claim success; EINTR remains within the polling budget. Before either signal a
 nonblocking wait verifies child ownership. Final shutdown allows ten 50ms polls
 per TERM/KILL phase; setup failure has only the KILL phase. Unconfirmed children
 remain tracked. Late watcher callbacks for a different/cleared PID are inert.
+
+## MB1228 — Scheduler removal prerequisite
+
+At base `f92fb0903bf694030e243aaff161eb3e8c5e1793`, reentrant stop logging and
+loop removal could replace a task before the outer removal deleted its name.
+Exact-reference checks now preserve that successor. Four periodic/calendar
+scenarios reproduce the defect and cover stale callbacks and later cleanup.
+This is not a plugin-job migration or generic worker shutdown change; current
+manager-side ownership and incomplete-removal findings remain open.
