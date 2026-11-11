@@ -1339,20 +1339,7 @@ sub clean_and_exit {
 
     # --- mb571-B1: stop/reap the isolated CHANNEL_LOG archive worker ---
     eval {
-        if (my $pid = delete $self->{_channel_log_archive_pid}) {
-            kill 'TERM', $pid;
-            my $reaped = 0;
-            for (1 .. 10) {
-                my $seen = waitpid($pid, WNOHANG);
-                if ($seen == $pid || $seen == -1) { $reaped = 1; last; }
-                usleep(50_000);
-            }
-            unless ($reaped) {
-                kill 'KILL', $pid;
-                waitpid($pid, 0);
-            }
-            delete $self->{_channel_log_archive_started};
-        }
+        _stop_channel_log_archive_worker($self);
         1;
     };
 
@@ -3976,6 +3963,47 @@ sub getQuit {
 # event loop. A configured 2,000,000-row catch-up must never freeze IRC while
 # SQL batches are copied and verified. The child owns a fresh bounded DB handle;
 # inherited DBI handles are marked InactiveDestroy and never used.
+# Final exit or rejected watcher setup: never drive unrelated loop callbacks,
+# and never wait indefinitely for a child stuck in uninterruptible work.
+sub _stop_channel_log_archive_worker {
+    my ($self, $immediate_kill) = @_;
+    my $pid = $self->{_channel_log_archive_pid};
+    return 1 unless $pid;
+    my ($collected, $wait_error) = (0, 0);
+    SIGNAL: for my $signal ($immediate_kill ? ('KILL') : ('TERM', 'KILL')) {
+        my $sent = 0;
+        for (1 .. 10) {
+            my $seen = waitpid($pid, WNOHANG);
+            if ($seen == $pid || ($seen == -1 && $!{ECHILD})) {
+                $collected = 1;
+                last SIGNAL;
+            }
+            if ($seen == -1 && !$!{EINTR}) {
+                $wait_error = 1;
+                last SIGNAL;
+            }
+            if ($seen == 0 && !$sent) { kill $signal, $pid; $sent = 1; }
+            usleep(50_000);
+        }
+    }
+    unless ($collected || $wait_error) {
+        my $seen = waitpid($pid, WNOHANG);
+        $collected = 1 if $seen == $pid || ($seen == -1 && $!{ECHILD});
+    }
+    if ($collected) {
+        eval { $self->{loop}->unwatch_process($pid) } if $self->{loop};
+        if (($self->{_channel_log_archive_pid} // 0) == $pid) {
+            delete $self->{_channel_log_archive_pid};
+            delete $self->{_channel_log_archive_started};
+        }
+        return 1;
+    }
+    eval { $self->{logger}->log(1,
+        'channel_log_archive: child reap unconfirmed; retaining process ownership')
+        if $self->{logger}; };
+    return 0;
+}
+
 sub start_channel_log_archive_async {
     my ($self) = @_;
 
@@ -4046,6 +4074,7 @@ sub start_channel_log_archive_async {
         $loop->watch_process($pid, sub {
             my ($seen_pid, $status) = @_;
             return unless defined($seen_pid) && $seen_pid == $pid;
+            return unless ($self->{_channel_log_archive_pid} // 0) == $pid;
             delete $self->{_channel_log_archive_pid};
             my $started = delete($self->{_channel_log_archive_started}) // Time::HiRes::time();
             my $elapsed = Time::HiRes::time() - $started;
@@ -4064,12 +4093,9 @@ sub start_channel_log_archive_async {
         1;
     };
     unless ($watch_ok) {
-        kill 'KILL', $pid;
-        waitpid($pid, 0);
-        delete $self->{_channel_log_archive_pid};
-        delete $self->{_channel_log_archive_started};
+        _stop_channel_log_archive_worker($self, 1);
         $self->{logger}->log(1,
-            'channel_log_archive: could not register child watcher; worker killed')
+            'channel_log_archive: could not register child watcher')
             if $self->{logger};
         return 0;
     }

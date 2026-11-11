@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1226 — Bound archive child collection during shutdown and setup failure
+
+- Replace both blocking waitpid paths with one archive-specific bounded routine.
+- Check child ownership before TERM/KILL, handle ECHILD and EINTR explicitly,
+  retain unconfirmed ownership and diagnose it rather than reporting success.
+- Detach confirmed watchers and ignore late callbacks for obsolete process slots.
+- Extend existing archive tests with injected wait errors and real TERM-responsive
+  and TERM-resistant children; SQL/archive transaction semantics are unchanged.
+
 ### MB1225 — Retain achievement children until physical collection
 
 - Track accepted worker children independently of the active result slot; forced

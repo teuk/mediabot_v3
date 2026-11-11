@@ -41,7 +41,7 @@ integration question for a later migration, not proof that every resource leaks.
 | [Nicklist timers](../Mediabot/Channel/NicklistTimers.pm), Mediabot setup/stop delegates | Public `channel_nicklist_timers` map plus private weak-key callback metadata and setup generation | MB1218 detaches/revokes before independent remove/stop; late setup cannot overwrite successors; failures return 0 and log incomplete cleanup | Committed as `7f1529b3`; no detailed host report supplied. Failed physical cleanup is not retried by repeated retirement; final shutdown remains separate. |
 | [DB timers](../Mediabot/DBCommands.pm), `_stop_all_runtime_db_timers`, `onStartTimers` | `hTimers` map, detached before cleanup | Stops and removes each old timer in separate eval blocks when rebuilding | Keep DB-command scheduling and reconnect publication behavior covered; do not merge with Scheduler solely because both use timers. |
 | [Achievement worker](../Mediabot/Achievements.pm), `shutdown_worker` | `_worker_process` PID and `_shutting_down` flag | MB1219 revokes logical delivery; MB1224 detaches the active worker resources and attempts bounded TERM/KILL collection without running the loop; final save follows in clean_and_exit | Late success/failure cannot mutate parent state. MB1220 bounds reaping after rejected watcher installation; MB1221 cleans notifier setup failures while the accepted watcher retains reaping. MB1224 reports unconfirmed collection rather than assuming TERM implies exit. MB1225 retains detached accepted children separately until physical collection. |
-| Archive worker in [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | `_channel_log_archive_pid` | TERM, bounded WNOHANG polling, then KILL/waitpid before DB teardown | Preserve this ordering; do not generalize its blocking final-exit behavior to ordinary reconnect. |
+| Archive worker in [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | `_channel_log_archive_pid` | MB1226: checked TERM/KILL with bounded WNOHANG polling before DB teardown; watcher refusal uses the same routine with immediate KILL | Retain unconfirmed PID ownership and diagnose uncertainty. No blocking waitpid or loop iteration; ordinary reconnect is unchanged. |
 
 The inspected reconnect resets `_af`, `_af_params`, `_chan_flood`, `_nick_flood`,
 `_nick_mute`, `_cmd_cooldown` and the netsplit counter. This is separate from the
@@ -143,3 +143,12 @@ shared TERM/KILL sleep budgets, unregisters confirmed children and retains
 unconfirmed records for watcher completion or retry. Empty registries disappear.
 This supersedes MB1224's active-only scope limitation; rejected watcher setup
 still uses its existing bounded immediate collection path. No loop is driven.
+
+### MB1226: archive collection boundary
+
+_stop_channel_log_archive_worker owns final-exit and rejected-watcher collection.
+Only confirmed waitpid/ECHILD clears matching process state. Wait errors do not
+claim success; EINTR remains within the polling budget. Before either signal a
+nonblocking wait verifies child ownership. Final shutdown allows ten 50ms polls
+per TERM/KILL phase; setup failure has only the KILL phase. Unconfirmed children
+remain tracked. Late watcher callbacks for a different/cleared PID are inert.

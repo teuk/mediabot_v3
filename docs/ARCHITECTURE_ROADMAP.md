@@ -507,3 +507,32 @@ local collection path and diagnostic if collection is not confirmed.
 
 Next: audit archive-worker final shutdown, which still contains a blocking wait,
 and checkpoint phase D against the other resource owners before broader changes.
+
+## MB1226 — bounded archive worker collection
+
+MB1225 is committed as `b657c1e4`; changed inputs match the supplied 14:09:05
+snapshot. A deterministic baseline probe reaches blocking waitpid after TERM/KILL.
+Both final exit and rejected watcher registration previously used an unbounded
+wait; final exit also treated every waitpid error as successful collection.
+
+One archive-specific routine now owns both paths. Final exit uses TERM then KILL;
+watcher registration failure keeps immediate KILL. Each phase permits ten 50ms
+polls, followed by a nonblocking final check. ECHILD means already collected;
+EINTR consumes the same budget, and other wait errors stop without signalling.
+Only a WNOHANG result of zero authorizes a signal. Confirmed collection clears the
+matching PID/start timestamp and attempts watcher removal. Unconfirmed ownership
+is retained with a diagnostic and false return. Old watcher callbacks cannot
+clear a different PID or fabricate a fresh completion status.
+
+Existing case 761 now executes the extracted production routines with injected
+process operations and real children, covering responsive/ignored TERM, error
+classification, finite polling, watcher refusal and stale callbacks. Its 57
+assertions pass locally. The metrics/archive-source cases also pass (145 combined
+assertions across those three cases). Wider cases 762/763 require unavailable
+local dependencies, including URI::Escape; they and the full suite must run on
+the host. No full-suite success is claimed. No SQL, transaction, schema or service
+change. Scheduling and syscall overhead may exceed nominal sleep budgets.
+
+Next: checkpoint phase D across all documented owners. Achievement and archive
+shutdown are now bounded at the reviewed paths, but this does not establish a
+universal shutdown protocol for AsyncWorker consumers, scheduler and plugins.
