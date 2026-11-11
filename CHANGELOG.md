@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1215 — Separate API v3 runtime-state file persistence
+
+- Move bounded JSON file read/write and private rename publication into
+  Plugin::RuntimeStateFile, supplied with path and validation callbacks.
+- Keep snapshot, directory policy, validation, restore and rollback authority in
+  PluginManager; preserve existing entry points, bounds and error tuples.
+- Extend the existing state tests and update the publication contract/roadmap;
+  no schema, lifecycle, configuration or service changes.
+
 ### MB1214 — Retire AntiFlood drains on transport replacement
 
 - Give each deferred target queue explicit countdown/arm ownership; preserve

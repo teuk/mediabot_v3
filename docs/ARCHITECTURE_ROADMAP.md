@@ -15,8 +15,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1213 PRIVMSG retirement accepted: 39,462 assertions, pushed as `52e250e`; MB1214 AntiFlood retirement implemented, host acceptance pending. |
-| E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | Planned. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1214 AntiFlood retirement committed/pushed as `b321e17`; three-family output pilot delivered. Detailed MB1214 host test report not supplied. |
+| E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 file-persistence boundary implemented; host acceptance pending. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
 ## Phase A / MB1208
@@ -147,10 +147,31 @@ cleared too. Cleanup failure is reported without restoring permission to send.
 Existing line costs, FIFO/retry order, response expiry, queue cap, target spelling
 and dynamic Helpers hooks remain unchanged. No global shutdown migration.
 
-MB1214 native/full host acceptance remains pending. This completes the planned
-three-family output pilot once accepted. Next: phase E, inspect PluginManager's
-runtime-state persistence boundary before extracting a bounded component;
-remaining worker/final-shutdown questions in phase D stay explicitly deferred.
+MB1214 is present on GitHub as `b321e17` and matches the supplied snapshot.
+Its detailed host test report was not supplied; no assertion total is inferred.
+The three-family output pilot is delivered. Remaining worker/final-shutdown
+questions in phase D stay explicitly deferred.
+
+## Phase E / MB1215 — runtime-state file persistence
+
+`Plugin::RuntimeStateFile` owns JSON encoding/decoding, bounded file reads,
+private exclusive temporary-file creation, cleanup and rename publication.
+It loads core dependencies only and receives the size bound, a lazy path resolver
+and a read validator. It does not receive a bot or manager and has no lifecycle,
+capability, scheduler or plugin-loading authority.
+
+PluginManager retains snapshot construction, schema/grant/policy validation,
+trusted directory selection, restore order and rollback after persistence errors.
+Its existing methods/globals remain compatible adapters. Encoding and size
+checks still precede directory creation; return tuples, messages, file mode,
+symlink handling and historical JSON decoding are preserved. This extraction
+does not claim to add fsync durability or change file-system race policies.
+
+Existing 1135 exercises the real component and existing manager round trips;
+1136 retains restore/failure isolation; 1137 follows the new file owner for its
+publication contract. No new repository case. MB1215 host acceptance pending.
+Next: inspect the diagnostics boundary independently; do not combine diagnostics
+with capability authority or persistent-mutation rollback.
 
 ## Rules for subsequent phases
 

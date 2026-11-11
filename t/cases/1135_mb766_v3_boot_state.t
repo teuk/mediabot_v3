@@ -200,4 +200,52 @@ return sub {
         $writer->unregister_plugin('short-content-v3');
         $reader->unregister_plugin('short-content-v3');
     }
+    # MB1215: actual file component, without a manager, bot or plugin runtime.
+    {
+        require Mediabot::Plugin::RuntimeStateFile;
+        my $dir = tempdir(CLEANUP => 1);
+        my $path = "$dir/state.json";
+        my $document = {schema=>1, packages=>{}, label=>"café 漢"};
+        my @calls;
+        my $resolver = sub {push @calls, {@_}; return ($path, undef)};
+        my %args = (max_bytes=>4096, path=>$resolver,
+            validate=>sub {return (1, undef)});
+        my ($ok,$error) = Mediabot::Plugin::RuntimeStateFile::store($document,%args);
+        $assert->ok($ok && !defined $error,'mb1215: standalone component stores Unicode state');
+        $assert->is((stat($path))[2] & 0777,0600,'mb1215: state file remains private');
+        open my $fh,'<:raw',$path or die $!;my $raw=do {local $/;<$fh>};close $fh;
+        $assert->is($raw,JSON::PP->new->canonical->ascii->encode($document),'mb1215: canonical ASCII JSON bytes unchanged');
+        my ($read,$why,$missing)=Mediabot::Plugin::RuntimeStateFile::read(%args);
+        $assert->ok($read && $read->{label} eq $document->{label} && !defined($why) && !$missing,'mb1215: standalone roundtrip retains Unicode');
+        $assert->ok(@calls==2 && $calls[0]{create}==1 && !keys(%{$calls[1]}),'mb1215: path resolution retains write/read intent');
+        @calls=();
+        ($ok,$error)=Mediabot::Plugin::RuntimeStateFile::store({bad=>sub {}},%args);
+        $assert->ok(!$ok && $error eq 'API v3 state is not JSON-serializable' && !@calls,'mb1215: encoding failure precedes path creation');
+        ($ok,$error)=Mediabot::Plugin::RuntimeStateFile::store($document,%args,max_bytes=>length($raw)-1);
+        $assert->ok(!$ok && $error eq 'API v3 state exceeds the byte limit' && !@calls,'mb1215: size refusal precedes path creation');
+        ($ok,$error)=Mediabot::Plugin::RuntimeStateFile::store($document,%args,max_bytes=>length($raw));
+        $assert->ok($ok,'mb1215: exact byte limit accepted');
+        ($read,$why,$missing)=Mediabot::Plugin::RuntimeStateFile::read(%args,validate=>sub {(0,'fixture rejected')});
+        $assert->ok(!defined($read) && $why eq 'invalid API v3 state: fixture rejected' && !$missing,'mb1215: manager validation remains authoritative');
+        ($read,$why,$missing)=Mediabot::Plugin::RuntimeStateFile::read(%args,path=>sub {(undef,'path denied')});
+        $assert->ok(!defined($read) && $why eq 'path denied' && !$missing,'mb1215: path error is not absence');
+        ($read,$why,$missing)=Mediabot::Plugin::RuntimeStateFile::read(%args,path=>sub {(undef,undef)});
+        $assert->ok(!defined($read) && !defined($why) && $missing,'mb1215: absent path retains missing result');
+        my $temporary="$path.tmp.$$";
+        open $fh,'>',$temporary or die $!;print {$fh} 'reserved';close $fh;
+        ($ok,$error)=Mediabot::Plugin::RuntimeStateFile::store($document,%args);
+        $assert->ok(!$ok && $error =~ /^cannot write API v3 state:/ && -f $temporary,'mb1215: exclusive temporary-file collision is preserved');
+        unlink $temporary;
+        my $link="$dir/link";symlink $path,$link or die $!;
+        ($ok,$error)=Mediabot::Plugin::RuntimeStateFile::store($document,%args,path=>sub {($link,undef)});
+        $assert->ok(!$ok && $error eq 'API v3 state path is a symlink','mb1215: writer refuses symlink');
+        ($read,$why,$missing)=Mediabot::Plugin::RuntimeStateFile::read(%args,path=>sub {($link,undef)});
+        $assert->ok(!defined($read) && $why eq 'API v3 state path is not a regular file' && !$missing,'mb1215: reader refuses symlink');
+        mkdir "$dir/destination" or die $!;
+        ($ok,$error)=Mediabot::Plugin::RuntimeStateFile::store($document,%args,path=>sub {("$dir/destination",undef)});
+        $assert->ok(!$ok && $error =~ /^cannot publish API v3 state:/ && !-e "$dir/destination.tmp.$$",'mb1215: publication failure removes only owned temporary file');
+        open $fh,'<:raw',$path or die $!;my $after=do {local $/;<$fh>};close $fh;
+        $assert->is($after,$raw,'mb1215: refused writes preserve the existing document');
+    }
+
 };

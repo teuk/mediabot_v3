@@ -21,6 +21,7 @@ sub slurp_1137 {
 return sub {
     my ($assert) = @_;
     my $manager = slurp_1137('Mediabot/PluginManager.pm');
+    my $state_file = slurp_1137('Mediabot/Plugin/RuntimeStateFile.pm');
     my $partyline = slurp_1137('Mediabot/Partyline/PluginAdmin.pm');
     my $main = slurp_1137('mediabot.pl');
     my $sample = slurp_1137('mediabot.sample.conf');
@@ -44,7 +45,7 @@ return sub {
     $assert->like($manager,
         qr/sub restore_v3_runtime_state \{/,
         'PluginManager owns validated boot restore');
-    $assert->like($manager,
+    $assert->like($state_file,
         qr/chmod 0600, \$temporary.*?rename \$temporary, \$path/s,
         'operator ledger uses private atomic publication');
     $assert->like($partyline,
