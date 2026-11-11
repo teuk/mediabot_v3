@@ -12,12 +12,12 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 
 | Phase | Objective and bounded first increment | Status |
 | --- | --- | --- |
-| A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 implemented; target-host integration/full suite acceptance pending. |
-| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | Next after A acceptance. |
+| A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
+| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 output-admission owner implemented; target-host acceptance pending. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | Planned. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Planned. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | Planned. |
-| Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | Started in MB1208 (412, 1110). |
+| Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
 ## Phase A / MB1208
 
@@ -43,6 +43,25 @@ compatibility aliases and command routing preserved; no additional repository
 test file; full suite once before commit. Do not mark host acceptance complete
 merely because the patch has been prepared or uploaded. Record the successful
 host result/commit in the next delivery.
+
+## Phase B / MB1209 — output admission
+
+Before: Helpers owned the admission algorithm, SQL parameter cache, global
+window and channel state; Sender and DeferredOutput reached it through the
+historical helper. After: `IRC::OutputPolicy` owns that policy, with explicit
+wall-clock, config and notification callbacks. Helpers remains the adapter;
+Sender and DeferredOutput retain their established entry points and overrides.
+The policy does not load Helpers or any transport. `IRC::OutputBudget` retains
+monotonic refill ownership. Shared bot state and invalidation keys are unchanged.
+
+Existing cases 337 and 1538 now call the real component rather than recompiling
+its source; 627 tests its actual negative-cache behavior rather than a copied
+algorithm. Native wiring remains in the host integration lane. The SQL cache
+and its failure policy deliberately remain together until phase C; this bounded
+increment does not complete all of phase B. No speedup is claimed.
+
+Host acceptance of MB1209 is pending. Next: review remaining Helpers boundaries
+before the channel output-rule data-access pilot. Preserve lazy runtime wiring.
 
 ## Rules for subsequent phases
 

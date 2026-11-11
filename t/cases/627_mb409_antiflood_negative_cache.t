@@ -13,41 +13,37 @@
 use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
-use File::Spec;
-
-sub _slurp_627 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; local $/; <$fh> }
-
+use Mediabot::IRC::OutputPolicy ();
+{ package MB1209::Log; sub log {1}
+  package MB1209::Channel; sub get_id {42}
+  package MB1209::DB;
+  sub prepare { my ($s,$sql)=@_; $s->{selects}++; $s->{sql}=$sql; return $s }
+  sub execute { $_[0]{bound}=$_[1]; 1 }
+  sub fetchrow_hashref { undef }
+  sub finish { $_[0]{finished}++; 1 }
+}
 return sub {
     my ($assert) = @_;
-
-    # --- 1. Sémantique du cache négatif (reproduction) ---------------------
-    my %af_params; my $selects = 0;
+    my $db = bless {selects=>0,finished=>0}, 'MB1209::DB';
+    my $bot = {dbh=>$db,logger=>bless({},'MB1209::Log'),
+               channels=>{'#teuk'=>bless({},'MB1209::Channel')}};
+    my $now;
+    my $hooks = {clock=>sub {$now},config_int=>sub {$_[2]},
+                 reply=>sub {die 'unexpected reply'},console=>sub {die 'unexpected console'}};
     my $check = sub {
-        my ($chan, $now) = @_;
-        my $ttl = 60;
-        my $pc  = $af_params{$chan} // {};
-        if (!$pc->{ts} || ($now - $pc->{ts}) >= $ttl) {
-            $selects++;                              # <- le SELECT
-            my $ref = undef;                         # pas de ligne CHANNEL_FLOOD
-            if ($ref) { }
-            else { $af_params{$chan} = { ts => $now, unconfigured => 1 }; return 0; }
-        }
-        return 0 if $pc->{unconfigured};
-        return 0;
+        ($now)=@_;
+        return Mediabot::IRC::OutputPolicy::checkAntiFlood($bot,'#teuk',undef,$hooks);
     };
-    $check->('#teuk', 1000 + $_) for (1 .. 10);
-    $assert->is($selects, 1, '10 messages, 1 seul SELECT (avant: 10)');
-    $check->('#teuk', 1100);   # TTL expiré
-    $assert->is($selects, 2, 'après TTL: une seule re-vérification');
-    $check->('#teuk', 1101);
-    $assert->is($selects, 2, 'le cache négatif repart pour un TTL');
-
-    # --- 2. Scan source ------------------------------------------------------
-    my $src = _slurp_627(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
-    my ($body) = $src =~ /(sub checkAntiFlood \{.*?\n\}\n)/s; $body //= '';
-    (my $code = $body) =~ s/^\s*#.*$//mg;
-    $assert->like($code, qr/\{ ts => \$now, unconfigured => 1 \}/,
-        'absence de CHANNEL_FLOOD mémorisée avec TTL');
-    $assert->like($code, qr/return \$global_check->\(1\) if \$pc->\{unconfigured\};/,
-        'chemin chaud: court-circuit sans SQL');
+    my @result = map {$check->(1000+$_)} 1..10;
+    $assert->is(join(',',@result),join(',',(0)x10),'unconfigured channel admits every message');
+    $assert->is($db->{selects},1,'10 messages use one SELECT');
+    $check->(1060);
+    $assert->is($db->{selects},1,'negative cache remains fresh before exact TTL');
+    $check->(1061);
+    $assert->is($db->{selects},2,'negative cache refreshes at exact TTL');
+    $check->(1062);
+    $assert->is($db->{selects},2,'negative cache starts a new lifetime');
+    $assert->is($db->{finished},2,'both real policy reads finish their statements');
+    $assert->is($db->{bound},42,'real policy binds the channel ID');
+    $assert->is($bot->{_af_params}{'#teuk'}{unconfigured},1,'absence is cached in shared bot state');
 };

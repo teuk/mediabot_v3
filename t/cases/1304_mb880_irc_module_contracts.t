@@ -22,7 +22,7 @@ use Mediabot::Radio::Public ();
 use Mediabot::XAuth ();
 use Mediabot::Fullop ();
 
-for my $module (qw(Target Text CaseMapping Presentation PacedOutput)) {
+for my $module (qw(Target Text CaseMapping Presentation PacedOutput OutputPolicy)) {
     my $err = gensym;
     my $code = "require Mediabot::IRC::$module;" . q{
         die 'runtime dependency' if $INC{'Mediabot/Helpers.pm'} || $INC{'Mediabot/External/Claude.pm'}
@@ -127,5 +127,33 @@ for my $answer ('**Bold** and *italic*.', '# Heading' . "\n- item", 'Été 🙂 
         cmp_ok(scalar @$lines, '<=', 2, 'compact renderer keeps its two-line maximum');
         ok(!grep({length(encode('UTF-8', $_)) > $limit} @$lines), 'style and suffix bytes remain within the limit');
     }
+}
+# MB1209: native facade keeps optional cost and callback arguments intact.
+{
+    require Mediabot::IRC::OutputPolicy;
+    no warnings 'redefine';
+    my @calls;
+    local *Mediabot::Helpers::_af_conf_int = sub {push @calls, ['config', @_]; 17};
+    local *Mediabot::Helpers::botPrivmsg = sub {push @calls, ['reply', @_]; 'sent'};
+    local *Mediabot::Helpers::noticeConsoleChan = sub {push @calls, ['console', @_]; 'logged'};
+    local *Mediabot::IRC::OutputPolicy::checkAntiFlood = sub {
+        my ($bot,$channel,$cost,$hooks) = @_;
+        is($channel,'#policy','native facade forwards channel');
+        is($cost,$bot->{cost},'native facade forwards optional line cost');
+        cmp_ok(abs($hooks->{clock}->()-time()),'<=',1,'native facade supplies wall clock');
+        is($hooks->{config_int}->($bot,'key',60,5,100),17,'configuration result is preserved');
+        is($hooks->{reply}->($bot,$channel,'text'),'sent','reply result is preserved');
+        is($hooks->{console}->($bot,'notice'),'logged','console result is preserved');
+        return 1;
+    };
+    for my $args ([],[3]) {
+        my $bot={cost=>$args->[0]}; @calls=();
+        is(Mediabot::Helpers::checkAntiFlood($bot,'#policy',@$args),1,'admission result is preserved');
+        is_deeply(\@calls,[['config',$bot,'key',60,5,100],['reply',$bot,'#policy','text'],
+                           ['console',$bot,'notice']], 'native callbacks preserve arguments and order');
+    }
+    local *Mediabot::IRC::OutputPolicy::checkAntiFlood = sub {die "policy exception\n"};
+    eval {Mediabot::Helpers::checkAntiFlood({},'#policy')};
+    is($@,"policy exception\n",'facade does not swallow policy exceptions');
 }
 done_testing;

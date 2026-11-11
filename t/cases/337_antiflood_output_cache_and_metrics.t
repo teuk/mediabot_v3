@@ -3,6 +3,20 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use Mediabot::IRC::OutputPolicy ();
+{
+ package MB1170::Guard;
+ our $now = 1800000000;
+ sub checkAntiFlood {
+  my ($bot, $channel, $cost) = @_;
+  return Mediabot::IRC::OutputPolicy::checkAntiFlood($bot, $channel, $cost, {
+   clock => sub { $now },
+   config_int => sub { my ($s,$k,$d)=@_; return $k eq 'OUTPUT_GLOBAL_MAX_MSG' ? 5 : $d },
+   reply => sub {1}, console => sub {1},
+  });
+ }
+}
+
 { package MB1170::Log; sub log {1} }
 
 
@@ -30,7 +44,7 @@ sub _sub_337 {
 return sub {
     my ($assert) = @_;
 
-    my $helpers = _slurp_337(File::Spec->catfile('.', 'Mediabot', 'Helpers.pm'));
+    my $helpers = _slurp_337(File::Spec->catfile('.', 'Mediabot', 'IRC', 'OutputPolicy.pm'));
     my $metrics = _slurp_337(File::Spec->catfile('.', 'Mediabot', 'Metrics.pm'));
     my $body = _sub_337($helpers, 'checkAntiFlood');
 
@@ -54,18 +68,7 @@ return sub {
         $assert->like($metrics, qr/\Q$metric\E/, "Metrics.pm declares $metric");
     }
     {
-        # Compile the real guard in an isolated package with a deterministic
-        # clock and I/O hooks; no copy of the admission algorithm lives here.
-        my $fixture = q{
-            package MB1170::Guard;
-            use strict; use warnings; use subs qw(time);
-            our $now = 1800000000;
-            sub time { $now }
-            sub _af_conf_int { my ($self,$key,$default)=@_; return $key eq 'OUTPUT_GLOBAL_MAX_MSG' ? 5 : $default }
-            sub noticeConsoleChan {1}
-            sub botPrivmsg {1}
-        } . $body;
-        { no warnings 'redefine'; eval $fixture; die $@ if $@; }
+        $MB1170::Guard::now = 1800000000;
         my $bot={logger=>bless({},'MB1170::Log'),
             _af_params=>{'#busy'=>{ts=>$MB1170::Guard::now,nbmsg_max=>1,duration=>30,timetowait=>300},
                           '#quiet'=>{ts=>$MB1170::Guard::now,unconfigured=>1}}};

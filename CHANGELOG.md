@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1209 — Isolate output admission policy
+
+- Give IRC output admission a dedicated owner with explicit clock, configuration
+  and notification dependencies. Preserve Helpers::checkAntiFlood, global and
+  channel budgets, cache keys, SQL failure behavior and notification ordering.
+- Exercise the actual policy in existing admission, queue and negative-cache
+  tests; remove source-body recompilation and the copied cache algorithm.
+- Record MB1208 host acceptance and the bounded phase B architecture increment.
+
 ### MB1208 — Isolate Partyline plugin administration
 
 - Move `.plugins` interpretation, permission gates and presentation into a

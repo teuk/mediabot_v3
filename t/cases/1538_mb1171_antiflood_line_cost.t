@@ -10,13 +10,22 @@ use FindBin qw($Bin);
 use Mediabot::IRC::OutputBudget ();
 no warnings qw(redefine once);
 local *Mediabot::IRC::OutputBudget::now = sub {$MB1171::Guard::now};
-open my $fh,'<:encoding(UTF-8)',"$Bin/../../Mediabot/Helpers.pm" or die $!;
-my $src=do {local $/;<$fh>};
-my ($guard)=$src =~ /(sub checkAntiFlood \{.*?\n\}\n)/s;die 'guard missing' unless $guard;
-eval q{package MB1171::Guard;use strict;use warnings;use subs qw(time);our $now=1800000000;
-sub time {$now} sub _af_conf_int {my($s,$k,$d)=@_;return $k eq 'OUTPUT_GLOBAL_MAX_MSG'?5:$d}
-sub noticeConsoleChan {1} sub botPrivmsg {1}
-}.$guard;die $@ if $@;
+use Mediabot::IRC::OutputPolicy ();
+{
+ package MB1171::Guard;
+ our $now = 1800000000;
+ sub _af_conf_int {my($s,$k,$d)=@_;return $k eq 'OUTPUT_GLOBAL_MAX_MSG'?5:$d}
+ sub botPrivmsg {1}
+ sub noticeConsoleChan {1}
+ sub checkAntiFlood {
+  my ($bot, $channel, $cost) = @_;
+  return Mediabot::IRC::OutputPolicy::checkAntiFlood($bot, $channel, $cost, {
+   clock => sub { $now },
+   config_int => sub { _af_conf_int(@_) },
+   reply => sub {botPrivmsg(@_)}, console => sub {noticeConsoleChan(@_)},
+  });
+ }
+}
 {
  package MB1171::Log;sub log {1}
  package MB1171::IRC;sub nick_folded {'bot'} sub do_PRIVMSG {my($s,%a)=@_;push @{$s->{wire}},$a{text};return 'written'}
