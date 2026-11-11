@@ -1835,12 +1835,13 @@ sub setIrc {
     if ((refaddr($self->{irc}) // 0) != (refaddr($irc) // 0)) {
         my $notices = delete $self->{_notice_queue_timers};
         delete $self->{_flood_outq};
-        delete $self->{_external_ai_output_queues};
+        my $privmsg = delete $self->{_external_ai_output_queues};
         # Publish before cleanup: reentrant sends belong to the new transport,
         # and a nested setIrc must not be overwritten after cleanup returns.
         $self->{irc} = $irc;
-        if ($notices) {
+        if ($notices || $privmsg) {
             require Mediabot::IRC::PacedOutput;
+            Mediabot::IRC::PacedOutput::retire_privmsg_queues($self, $privmsg);
             Mediabot::IRC::PacedOutput::retire_notice_timers($self, $notices);
         }
     } else {

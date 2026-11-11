@@ -114,4 +114,119 @@ for my $fault ('', 'stop', 'remove', 'both') {
     is(scalar keys %{$loop->{attached}},0,'inline cancellation removes timer without starting it');
     $loop->{callbacks}[0]->();
 }
+
+# MB1213: exercise the actual paced owner without loading Helpers/IRC runtime.
+{
+    require Mediabot::IRC::PacedOutput;
+    require MB882TimerFixture;
+    no warnings qw(redefine once);
+    local *IO::Async::Timer::Countdown::new = sub {shift; MB882::Timer->new(@_)};
+    my @wire;
+    local *Mediabot::IRC::Output::privmsg = sub {push @wire, $_[2]};
+    my $queue = sub {Mediabot::IRC::PacedOutput::_queue_irc_chunks(@_)};
+    my $retire = sub {
+        my ($bot) = @_;
+        my $old = delete $bot->{_external_ai_output_queues};
+        Mediabot::IRC::PacedOutput::retire_privmsg_queues($bot, $old);
+    };
+    for my $mode ('normal', 'stop', 'remove') {
+        @wire = ();
+        my $bot = bless {loop=>MB882::Loop->new, logger=>bless({rows=>[]}, 'MB882::Logger')}, 'MB882::Bot';
+        my $payload = bless {}, 'MB1213Payload';
+        my $weak = $payload; Scalar::Util::weaken($weak);
+        {
+            my $held = $payload;
+            $queue->($bot, '#test', [qw(first old)], 10000, 'fixture', {can_send=>sub {defined $held}});
+        }
+        undef $payload;
+        $queue->($bot, '#test', ['tail'], 0);
+        $queue->($bot, '#other', [qw(other1 other2)], 10000);
+        my $old = $bot->{_external_ai_output_queues};
+        my @states = values %$old;
+        my @callbacks = @{$bot->{loop}{callbacks}};
+        my $stop = MB882::Timer->can('stop'); my $remove = MB882::Loop->can('remove');
+        {
+            local *MB882::Timer::stop = sub {die "stop failure\n" if $mode eq 'stop'; $stop->(@_)};
+            local *MB882::Loop::remove = sub {die "remove failure\n" if $mode eq 'remove'; $remove->(@_)};
+            is($retire->($bot), $mode eq 'normal' ? 1 : 0, 'paced retirement reports cleanup result');
+        }
+        ok(!defined $weak, 'retirement releases guarded payload immediately despite retained callbacks/state');
+        is_deeply($old, {}, 'all old targets detached');
+        ok(!grep({$_->{current} || @{$_->{batches}} || $_->{retire} || $_->{timer}} @states), 'old state no longer owns batches, pump or notifier');
+        $_->() for @callbacks;
+        is_deeply(\@wire, [qw(first other1)], 'retained callbacks cannot send retired chunks');
+        is(scalar keys %{$bot->{loop}{attached}}, $mode eq 'remove' ? 2 : 0, 'every removal attempted despite stop failure');
+        is(scalar @{$bot->{logger}{rows}}, $mode eq 'normal' ? 0 : 1, 'incomplete cleanup diagnosed once');
+        is(Mediabot::IRC::PacedOutput::retire_privmsg_queues($bot, $old), 1, 'repeat retirement is inert');
+    }
+    {
+        @wire = (); my $bot = bless {loop=>MB882::Loop->new}, 'MB882::Bot';
+        $queue->($bot, '#test', [qw(first old)], 10000);
+        my $stop = MB882::Timer->can('stop'); my $once = 0;
+        {
+            local *MB882::Timer::stop = sub {
+                unless ($once++) {$queue->($bot, '#test', [qw(new1 new2)], 10000)}
+                $stop->(@_);
+            };
+            $retire->($bot);
+        }
+        is(scalar keys %{$bot->{loop}{attached}}, 1, 'cleanup reentry retains successor notifier');
+        $bot->{loop}->drain;
+        is_deeply(\@wire, [qw(first new1 new2)], 'successor queue survives old retirement');
+    }
+    {
+        @wire = (); my $bot = bless {loop=>MB882::Loop->new}, 'MB882::Bot';
+        my $add = MB882::Loop->can('add');
+        {
+            local *MB882::Loop::add = sub {$add->(@_); $retire->($bot)};
+            $queue->($bot, '#test', [qw(first old)], 10000);
+        }
+        is(scalar keys %{$bot->{loop}{attached}}, 0, 'late setup result is retired');
+        $_->() for @{$bot->{loop}{callbacks}};
+        is_deeply(\@wire, ['first'], 'late setup cannot replay old output');
+    }
+    {
+        @wire = (); my $bot = bless {loop=>MB882::Loop->new}, 'MB882::Bot';
+        my $add = MB882::Loop->can('add'); my $once = 0;
+        {
+            local *MB882::Loop::add = sub {$add->(@_); $_[1]{on_expire}->() unless $once++};
+            $queue->($bot, '#test', [qw(first inline pending)], 10000);
+        }
+        my $state = $bot->{_external_ai_output_queues}{'#test'};
+        ok($state->{timer}, 'inline expiry retains successor timer handle');
+        $retire->($bot);
+        is(scalar keys %{$bot->{loop}{attached}}, 0, 'successor after inline expiry remains cancellable');
+        $_->() for @{$bot->{loop}{callbacks}};
+        is_deeply(\@wire, [qw(first inline)], 'inline successor stays silent after retirement');
+    }
+
+    {
+        @wire = (); my $bot = bless {loop=>MB882::Loop->new}, 'MB882::Bot';
+        my $add = MB882::Loop->can('add'); my $once = 0;
+        {
+            local *MB882::Loop::add = sub {
+                $add->(@_);
+                unless ($once++) {$_[1]{on_expire}->(); die "late add failure\n"}
+            };
+            eval {$queue->($bot, '#test', [qw(first inline successor)], 10000)};
+            like($@, qr/late add failure/, 'post-inline setup exception remains visible');
+        }
+        ok($bot->{_external_ai_output_queues}{'#test'}{timer}, 'old setup failure cannot clear successor handle');
+        $bot->{loop}->drain;
+        is_deeply(\@wire, [qw(first inline successor)], 'new arm remains active after old setup exception');
+    }
+    {
+        @wire = (); my $bot = bless {loop=>MB882::Loop->new}, 'MB882::Bot';
+        {
+            local *MB882::Timer::start = sub {die "failed arm\n"};
+            eval {$queue->($bot, '#test', [qw(first pending)], 10000)};
+            like($@, qr/failed arm/, 'failed arm still propagates');
+        }
+        my $state = $bot->{_external_ai_output_queues}{'#test'};
+        is_deeply($state->{current}{chunks}, ['pending'], 'ordinary failure keeps recovery payload');
+        $retire->($bot);
+        ok(!$state->{current} && !@{$state->{batches}}, 'connection retirement also clears dormant recovery payload');
+    }
+}
+
 done_testing;

@@ -96,7 +96,10 @@ MB881OutputFixture::with_policy(sub {
 
     my $retired = $callbacks[0];
     my $fresh = bless {wire => []}, 'MB881::IRC';
+    my $old_state = $bot->{_external_ai_output_queues}{'#test'};
     Mediabot::setIrc($bot, $fresh);
+    is(timer_count($bot->{loop}), 0, 'replacement immediately removes native old PRIVMSG notifier');
+    ok(!$old_state->{current} && !@{$old_state->{batches}} && !$old_state->{retire}, 'native replacement immediately releases old pump and payload');
     queue_privmsg_chunks($bot, '#test', [qw(fresh1 fresh2)], 10_000);
     $retired->();
     is_deeply([[map {$_->{text}} @{$fresh->{wire}}], $guard_calls, timer_count($bot->{loop})],

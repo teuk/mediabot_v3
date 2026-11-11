@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1213 — Retire paced PRIVMSG resources on transport replacement
+
+- Revoke old target batches, guards and pump ownership before cancelling owned
+  countdowns; include dormant queues preserved after scheduling failure.
+- Preserve successor timers across inline expiry and reentrant cleanup; retire
+  timers returned late after transport replacement and report cleanup faults.
+- Extend existing isolated/native cases and record MB1212 host acceptance in
+  the architecture roadmap. Same-transport pacing and recovery remain unchanged.
+
 ### MB1212 — Retire NOTICE callbacks and timers on transport replacement
 
 - Add explicit countdown cancellation that revokes captured output before

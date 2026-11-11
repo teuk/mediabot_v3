@@ -15,7 +15,7 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1211 inventory accepted/pushed as `a29a67f`; MB1212 NOTICE retirement implemented, host acceptance pending. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1212 NOTICE retirement accepted: 39,423 assertions, pushed as `62f83c0`; MB1213 PRIVMSG retirement implemented, host acceptance pending. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | Planned. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
@@ -115,8 +115,25 @@ Same-transport assignments and rehash retain their behavior. PRIVMSG and flood
 queues keep existing identity invalidation; no global shutdown coordinator or
 child-process migration is introduced. Existing tests cover cancellation faults,
 retained callbacks, native notifier removal, inline expiry and reentrant wiring.
-MB1212 host acceptance is pending. Next: assess the paced PRIVMSG pump's coupled
-state/timer ownership before extending explicit retirement to that family.
+MB1212 host acceptance: 798 targeted and 39,423 full-suite assertions passed;
+committed/pushed as `62f83c0`.
+
+### MB1213 — explicit paced PRIVMSG retirement
+
+`PacedOutput::retire_privmsg_queues` revokes all detached target states before
+notifier cleanup: current and waiting batches, send guards, pump/schedule closures
+and notifier slots. `setIrc` publishes the new transport before calling it.
+Dormant queues retained after a failed arm are also released on replacement.
+Same-transport assignments and ordinary setup-failure recovery remain intact.
+
+Each arm has an identity token so an inline expiry cannot overwrite a successor
+notifier with its late return value. Late timers from a retired connection are
+cancelled. Stop/remove faults retain callback revocation and emit a diagnostic;
+cleanup reentry cannot retire new work. Existing isolated and native paced tests
+cover these contracts. Native/full host acceptance remains pending.
+
+Next: inspect DeferredOutput's drain ownership (currently no stored countdown
+handle) before considering its migration. Phase E remains a separate step.
 
 ## Rules for subsequent phases
 

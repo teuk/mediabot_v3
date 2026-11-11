@@ -114,6 +114,8 @@ sub _queue_irc_chunks {
         # registered another queue for the same target.
         delete $queues->{$key}
             if (refaddr($queues->{$key}) // 0) == refaddr($state);
+        delete $state->{retire};
+        delete $state->{arm};
         $state->{current} = undef;
         $state->{batches} = [];
         $state->{active} = 0;
@@ -122,28 +124,44 @@ sub _queue_irc_chunks {
         return;
     };
 
+    $state->{retire} = $finish;
+
     $schedule = sub {
         my ($delay) = @_;
 
+        my $arm = $state->{arm} = {};
         my $started = eval {
-            $state->{timer} = Mediabot::IRC::Timer::countdown(
+            my $timer = Mediabot::IRC::Timer::countdown(
                 loop => $loop,
                 delay => $delay,
                 on_expire => sub {
+                    return unless (refaddr($state->{arm}) // 0) == refaddr($arm);
+                    delete $state->{arm};
                     $state->{timer} = undef;
-                    $pump->();
+                    $pump->() if $pump;
                 },
             );
+            if ($is_current->() && (refaddr($state->{arm}) // 0) == refaddr($arm)) {
+                $state->{timer} = $timer;
+            } elsif ($timer) {
+                # Setup may replace the connection or expire inline. Never
+                # publish this late notifier over a successor arm.
+                retire_notice_timers($self, [$timer], 'PRIVMSG');
+            }
             1;
         };
         unless ($started) {
             my $error = $@;
             # Preserve unsent chunks for the next batch, without leaving an
             # active queue that can never be pumped. Never burst a failed arm.
-            $state->{timer} = undef;
-            $state->{active} = 0;
-            $pump = undef;
-            $schedule = undef;
+            if ((refaddr($state->{arm}) // 0) == refaddr($arm)) {
+                delete $state->{retire};
+                delete $state->{arm};
+                $state->{timer} = undef;
+                $state->{active} = 0;
+                $pump = undef;
+                $schedule = undef;
+            }
             die $error;
         }
     };
@@ -212,10 +230,35 @@ sub _queue_irc_chunks {
     return $queued_count;
 }
 
+# Detach and revoke every old target before notifier cleanup can re-enter.
+sub retire_privmsg_queues {
+    my ($self, $queues) = @_;
+    return 1 unless $queues;
+    my @states = values %$queues;
+    %$queues = ();
+    my @timers;
+    for my $state (@states) {
+        push @timers, delete $state->{timer};
+        my $retire = delete $state->{retire};
+        if ($retire) {
+            $retire->();
+        } else {
+            # Failed arms retain their unsent batches for ordinary recovery.
+            # A connection replacement revokes those dormant batches as well.
+            delete $state->{arm};
+            $state->{current} = undef;
+            $state->{batches} = [];
+            $state->{active} = 0;
+        }
+    }
+    return retire_notice_timers($self, \@timers, 'PRIVMSG');
+}
+
 # The caller has already detached this exact registry and published the new
 # transport. Never inspect or clear a successor registry during cleanup.
 sub retire_notice_timers {
-    my ($self, $timers) = @_;
+    my ($self, $timers, $kind) = @_;
+    $kind //= 'NOTICE';
     return 1 unless $timers;
     my @retired = @$timers;
     @$timers = ();
@@ -226,7 +269,7 @@ sub retire_notice_timers {
     }
     unless ($ok) {
         eval { $self->{logger}->log(1,
-            'NOTICE output revoked; timer cleanup incomplete') if $self->{logger}; };
+            "$kind output revoked; timer cleanup incomplete") if $self->{logger}; };
     }
     return $ok;
 }
