@@ -2996,9 +2996,14 @@ sub _spawn_check_worker {
         force      => 0,
     };
     # Physical process ownership ends at reap, independently of pipe EOF.
-    my $process = { pid => $pid };
+    my $process = { pid => $pid, loop => $loop };
     my $retire_process = sub {
         delete $process->{shutdown_cleanup};
+        if ($state->{child_done} && $self->{_worker_children}
+            && $self->{_worker_children}{$pid} && $self->{_worker_children}{$pid} == $process) {
+            delete $self->{_worker_children}{$pid};
+            delete $self->{_worker_children} unless keys %{$self->{_worker_children}};
+        }
         delete $self->{_worker_process}
             if $self->{_worker_process} && $self->{_worker_process} == $process;
     };
@@ -3091,6 +3096,9 @@ sub _spawn_check_worker {
             detail => 'could not register child process watcher' });
         return 1;
     }
+
+    # Accepted watchers own physical children even after forced result delivery.
+    $self->{_worker_children}{$pid} = $process unless $state->{child_done};
 
     my $setup_ok = eval {
     $stream = IO::Async::Stream->new(
@@ -3202,43 +3210,55 @@ sub shutdown_worker {
     # This is final shutdown, not ordinary asynchronous cancellation. Do not
     # drive the loop: unrelated IRC/DB callbacks must not run during teardown.
     my $active = delete $self->{_worker_inflight};
-    my $proc = delete $self->{_worker_process};
-    my $collected = 1;
-    if (ref($proc) eq 'HASH' && $proc->{pid}) {
+    my $active_process = delete $self->{_worker_process};
+    my $children = $self->{_worker_children} ||= {};
+    # Compatibility for a worker created before this registry existed.
+    if (ref($active_process) eq 'HASH' && $active_process->{pid}) {
+        $children->{$active_process->{pid}} ||= $active_process;
+    }
+    for my $proc (values %$children) {
         my $cleanup = delete $proc->{shutdown_cleanup};
         eval { $cleanup->() } if ref($cleanup) eq 'CODE';
+    }
+    if (keys %$children) {
         require POSIX;
-        my $pid = $proc->{pid};
-        $collected = 0;
-        my $wait_error = 0;
+        my %wait_error;
+        my $observe = sub {
+            my ($pid) = @_;
+            my $seen = waitpid($pid, POSIX::WNOHANG());
+            if ($seen == $pid || ($seen == -1 && $!{ECHILD})) {
+                my $proc = delete $children->{$pid};
+                eval { $proc->{loop}->unwatch_process($pid) } if $proc->{loop};
+                return 1;
+            }
+            $wait_error{$pid} = 1 if $seen == -1 && !$!{EINTR};
+            return $seen == 0 ? 0 : -1;
+        };
+        # One polling budget for the entire batch, not one sleep budget per PID.
         SIGNAL: for my $signal ('TERM', 'KILL') {
-            my $sent = 0;
+            my %sent;
             for (1 .. 20) {
-                my $seen = waitpid($pid, POSIX::WNOHANG());
-                if ($seen == $pid || ($seen == -1 && $!{ECHILD})) {
-                    $collected = 1;
-                    last SIGNAL;
+                for my $pid (keys %$children) {
+                    next if $wait_error{$pid};
+                    my $seen = $observe->($pid);
+                    if ($seen == 0 && !$sent{$pid}) {
+                        kill $signal, $pid;
+                        $sent{$pid} = 1;
+                    }
                 }
-                if ($seen == -1 && !$!{EINTR}) {
-                    $wait_error = 1;
-                    last SIGNAL;
-                }
-                # Verify child ownership before either signal, including when
-                # the watcher reaped it but its callback has not run yet.
-                if ($seen == 0 && !$sent) { kill $signal, $pid; $sent = 1; }
+                last SIGNAL unless grep {!$wait_error{$_}} keys %$children;
                 Time::HiRes::sleep(0.005);
             }
         }
-        unless ($collected || $wait_error) {
-            my $seen = waitpid($pid, POSIX::WNOHANG());
-            $collected = 1 if $seen == $pid || ($seen == -1 && $!{ECHILD});
-        }
-        if ($collected) {
-            eval { $proc->{loop}->unwatch_process($pid) } if $proc->{loop};
-        }
-        else {
-            eval { $self->_log(1, 'Achievements: shutdown child reap unconfirmed') };
-        }
+        $observe->($_) for grep {!$wait_error{$_}} keys %$children;
+    }
+    my $collected = !keys %$children;
+    if ($collected) {
+        delete $self->{_worker_children};
+    }
+    else {
+        # Retain unconfirmed ownership for a later watcher callback or retry.
+        eval { $self->_log(1, 'Achievements: shutdown child reap unconfirmed') };
     }
     $self->_metric('set', 'mediabot_achievement_worker_inflight', 0) if $active;
     return $collected;

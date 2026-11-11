@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1225 — Retain achievement children until physical collection
+
+- Track accepted worker children independently of the active result slot; forced
+  completion and notifier setup failure no longer hide them from final shutdown.
+- Remove exact child records on watcher completion or confirmed shutdown reap.
+- Drain all owned children using shared TERM/KILL polling budgets; retain and
+  diagnose unconfirmed records for a later watcher callback or shutdown retry.
+- Extend native tests for detached children alone and with an active successor.
+
 ### MB1224 — Collect the active achievement child at final shutdown
 
 - Revoke native callbacks and detach transport/timers before signalling the child.

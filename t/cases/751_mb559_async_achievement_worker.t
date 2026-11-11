@@ -190,6 +190,16 @@ return sub {
             && $r->{result}{stage} eq 'watch_process',
             'watch rejection preserves structured setup failure');
         $assert->ok(!$r->{registered},'failed worker is not published as active');
+        for my $p (@{$r->{detached}}) {
+            my $label=$p->{replacement}?'detached plus active':'detached alone';
+            $assert->ok($p->{before}==1 && $p->{owned}==1+$p->{replacement},
+                "$label: forced result retires delivery but retains physical ownership");
+            $assert->ok($p->{returned} && !grep(!$_,@{$p->{reaped}}),
+                "$label: shutdown collects all owned native children without loop iterations");
+            $assert->ok($p->{count}==1 && !$p->{left} && !$p->{remaining} && $p->{repeat},
+                "$label: retained callbacks and repeated shutdown leave no duplicate result or registry entry");
+            $assert->ok($p->{elapsed}<2,"$label: batch shutdown remains bounded");
+        }
         for my $p (@{$r->{shutdown}}) {
             my $label=$p->{ignore}?'TERM-resistant child':'TERM-responsive child';
             $assert->ok($p->{returned} && $p->{reaped},"$label: shutdown collects the real child without driving the loop");
@@ -222,7 +232,7 @@ return sub {
                 "$stage: native launch completes exactly once, including retained callbacks");
             $assert->ok($p->{reaped} && $p->{watch_calls}==1,
                 "$stage: accepted watcher alone collects the child");
-            $assert->ok($p->{after}==0,"$stage: no worker stream or countdown remains");
+            $assert->ok($p->{after}==0 && !$p->{remaining},"$stage: no worker stream, countdown or child ownership remains");
             if ($stage !~ /^(?:normal|inline)/) {
                 $assert->ok($p->{before}==0 && !$p->{registered},
                     "$stage: setup failure immediately detaches notifiers and publishes no process");

@@ -475,3 +475,35 @@ its watcher; a process-wide shutdown registry remains a separate design question
 Next: review that detached-but-not-yet-reaped case and archive worker shutdown,
 then checkpoint phase D against the remaining roadmap rather than declaring
 all runtime resources drained.
+
+## MB1225 — physical child ownership outlives forced result completion
+
+MB1224 is committed as `edf78e08`; changed inputs match the supplied 13:55:05
+snapshot. Native readiness-controlled tests reproduce an ignored-TERM child
+surviving final shutdown after forced result completion, both alone and alongside
+an active successor. The old active-only shutdown collects only the successor.
+
+Accepted watchers now register child records separately from _worker_process.
+The active result slot retains its existing behavior; physical records survive
+forced delivery or notifier setup failure until the watcher confirms exit.
+Watcher removal is scoped to the exact record and removes the empty registry.
+Final shutdown includes all retained children plus an older active-only record
+for compatibility. It cleans active callbacks, checks ownership before signalling,
+and polls the entire batch with one shared twenty-by-5ms budget per TERM/KILL
+phase. There is no event-loop iteration or blocking waitpid. Polling work scales
+with child count; scheduling can extend wall time beyond the nominal sleep budget.
+
+Confirmed records are removed and unwatched. Unconfirmed records remain available
+for watcher completion or a subsequent shutdown attempt; false return and the
+existing diagnostic remain explicit. Registry entries do not claim children have
+exited merely because their results completed. Native stale callbacks cannot
+repeat delivery. Setup/normal completion coverage also checks registry removal.
+
+Local eight-case lane passed 254 assertions; final worker-case verification passed
+135 assertions. Full host validation remains mandatory; no host total is inferred
+from the supplied commit. This is achievement-scoped ownership, not a universal
+process supervisor. Rejected watcher registration retains its existing bounded
+local collection path and diagnostic if collection is not confirmed.
+
+Next: audit archive-worker final shutdown, which still contains a blocking wait,
+and checkpoint phase D against the other resource owners before broader changes.

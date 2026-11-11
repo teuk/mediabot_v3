@@ -91,7 +91,7 @@ for my $stage (qw(stream_new stream_add timer_new timer_add timer_start normal i
     for my $obj ($l->notifiers) {eval {$obj->stop};eval {$l->remove($obj)}}
     push @setup,{stage=>$stage,handled=>$ok&&$ret?1:0,before=>$before,after=>$after,
         count=>$count,late_count=>scalar(@done),watch_calls=>$watch_calls,reaped=>$collected,
-        result=>$done[0],registered=>$registered,
+        result=>$done[0],registered=>$registered,remaining=>scalar(keys %{$a->{_worker_children}||{}}),
         successor=>($stage !~ /^(?:normal|inline)/ && $ok && $a->{_worker_process} && $a->{_worker_process}==$successor)?1:0};
 }
 
@@ -236,5 +236,50 @@ for my $ignore (0,1) {
     for my $obj ($l->notifiers) {eval {$obj->stop};eval {$l->remove($obj)}}
 }
 
-print encode_json({shutdown=>\@shutdown,retired=>\@retired,timeout=>\@timeout,setup=>\@setup,returned=>$returned,count=>scalar(@results),result=>$results[0],
+my @detached;
+for my $replacement (0,1) {
+    my $l=IO::Async::Loop->really_new;
+    my $a=bless {bot=>{loop=>$l},logger=>bless({},'MB1220::Log'),_worker_timeout=>60},'Mediabot::Achievements';
+    my (@pids,@watchers,@ticks,@done);
+    my $watch=$l->can('watch_process');my $tn=IO::Async::Timer::Countdown->can('new');
+    {
+        no warnings qw(redefine once);
+        local *IO::Async::Loop::watch_process=sub {
+            my ($loop,$p,$cb)=@_;push @pids,$p;push @watchers,$cb;$watch->(@_);
+        };
+        local *IO::Async::Timer::Countdown::new=sub {
+            my ($class,%args)=@_;push @ticks,$args{on_expire};$tn->(@_);
+        };
+        for my $index (0 .. $replacement) {
+            pipe(my $ready,my $notify) or die "ready pipe: $!";
+            $a->{bot}{db}=bless {ready=>$notify,ignore=>1},'MB1224::SlowDB';
+            $a->_spawn_check_worker({nick=>'Probe',channel=>'#offline'},sub {push @done,$_[0]});
+            close $notify;
+            die 'detached child not ready' unless IO::Select->new($ready)->can_read(3);
+            sysread($ready,my $byte,1)==1 or die 'missing readiness';close $ready;
+            if (!$index) {
+                $ticks[0]->(); # timeout: TERM ignored, kill/force countdowns armed
+                $ticks[2]->(); # force result before the KILL countdown or watcher runs
+            }
+        }
+    }
+    my $before=scalar @done;
+    my $owned=scalar keys %{$a->{_worker_children}||{}};
+    my $started=time;my $ret=$a->shutdown_worker;my $elapsed=time-$started;
+    my @reaped;
+    for my $pid (@pids) {
+        my $seen=waitpid($pid,WNOHANG);push @reaped,($seen==-1 && $!{ECHILD})?1:0;
+        if ($seen==0) {kill 'KILL',$pid;while(waitpid($pid,0)==-1 && $!{EINTR}) {}}
+    }
+    for my $i (0..$#pids) {$watchers[$i]->($pids[$i],0)}
+    $_->() for @ticks;
+    my $left=scalar grep {$_->isa('IO::Async::Stream') || $_->isa('IO::Async::Timer::Countdown')} $l->notifiers;
+    push @detached,{replacement=>$replacement,before=>$before,owned=>$owned,returned=>$ret,
+        reaped=>\@reaped,count=>scalar(@done),left=>$left,elapsed=>$elapsed,
+        remaining=>scalar(keys %{$a->{_worker_children}||{}}),repeat=>$a->shutdown_worker};
+    for my $pid (@pids) {eval {$l->unwatch_process($pid)}}
+    for my $obj ($l->notifiers) {eval {$obj->stop};eval {$l->remove($obj)}}
+}
+
+print encode_json({detached=>\@detached,shutdown=>\@shutdown,retired=>\@retired,timeout=>\@timeout,setup=>\@setup,returned=>$returned,count=>scalar(@results),result=>$results[0],
     reaped=>$no_child,elapsed=>$elapsed,registered=>exists($a->{_worker_process})?1:0});
