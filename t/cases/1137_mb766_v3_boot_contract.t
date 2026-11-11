@@ -21,7 +21,7 @@ sub slurp_1137 {
 return sub {
     my ($assert) = @_;
     my $manager = slurp_1137('Mediabot/PluginManager.pm');
-    my $partyline = slurp_1137('Mediabot/Partyline/Commands.pm');
+    my $partyline = slurp_1137('Mediabot/Partyline/PluginAdmin.pm');
     my $main = slurp_1137('mediabot.pl');
     my $sample = slurp_1137('mediabot.sample.conf');
     my $operations = slurp_1137('docs/PLUGIN_OPERATIONS_V3.md');

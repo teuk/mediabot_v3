@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1208 — Isolate Partyline plugin administration
+
+- Move `.plugins` interpretation, permission gates and presentation into a
+  component with explicit manager/writer/state dependencies. Preserve the
+  historical Partyline entry points and rendering helper aliases.
+- Exercise the real component in existing tests instead of inspecting its
+  source body. Keep native integration coverage and record the incremental
+  architecture roadmap for subsequent deliveries.
+
 ### MB1207 — Close dictionary statements before rollback
 
 - Finish prepared dictionary statements on execute/fetch failures and invalid

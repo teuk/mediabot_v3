@@ -25,11 +25,9 @@ close $dfh;
 $src = $commands_src . "\n" . $src . "\n" . $dispatcher_src;
 
 my ($dispatch) = $src =~ /(# ---- Authenticated : dispatch commands.*?Unknown command\. Type \.help)/s;
-my ($plugins)  = $src =~ /(sub _cmd_plugins \{.*?)(?=^sub _cmd_help)/ms;
 my ($help)     = $src =~ /(sub _cmd_help \{.*?^\})/ms;
 
 ok(defined($dispatch) && length($dispatch), 'authenticated partyline dispatch block extracted');
-ok(defined($plugins) && length($plugins), '_cmd_plugins block extracted');
 ok(defined($help) && length($help), '_cmd_help block extracted');
 
 like($dispatch, qr/^    elsif \(\$line =~ \/\^\\\.plugins/ms,
@@ -48,67 +46,81 @@ like($help, qr/\.plugins \[quarantine\|unquarantine\] - Owner-only API v3 resour
 like($help, qr/\.plugins \[doctor\|failures\|quarantines\|permissions\|why\] - API v3 read-only diagnostics/,
     '.help documents v3 operator diagnostics separately');
 
-like($plugins, qr/Read-only Partyline visibility for the active PluginManager state/,
-    '_cmd_plugins documents active read-only visibility');
-like($plugins, qr/PluginManager: not initialized/,
-    '_cmd_plugins handles missing PluginManager');
-like($plugins, qr/plugin_autoload_enabled/,
-    '_cmd_plugins reports autoload gate status');
-like($plugins, qr/\$pm->list/,
-    '_cmd_plugins reads PluginManager list');
-like($plugins, qr/Usage: \.plugins \[loaded\|config/,
-    '_cmd_plugins has usage branch');
-like($plugins, qr/\|load <Module> \[name\]\|loadscript <path> \[name\]\|unload <name>\|reload <name>/,
-    '_cmd_plugins usage covers the lifecycle verbs (incl. loadscript mb590)');
-like($plugins, qr/Plugin config:/,
-    '_cmd_plugins has config view');
-like($plugins, qr/plugins\.ENABLED_AUTOLOAD, PLUGIN_AUTOLOAD, PLUGINS_AUTOLOAD/,
-    '_cmd_plugins lists all autoload compatibility keys');
-like($plugins, qr/PLUGINS_ENABLED, PLUGIN_ENABLED, PLUGINS/,
-    '_cmd_plugins lists all plugin-list compatibility keys');
-like($plugins, qr/Loaded plugins:/,
-    '_cmd_plugins has loaded plugin listing');
-# mb588: le contrat evolue — les mutations existent mais UNIQUEMENT dans le
-# bloc de cycle de vie gate par niveau ; la section de lecture (summary/
-# loaded/config), qui suit le marqueur historique read-only, reste pure.
-my ($lifecycle_412, $readonly_412) = $plugins =~
-    /(mb588-B1.*?)(# Read-only Partyline visibility.*)/s;
-ok(defined $readonly_412, '_cmd_plugins keeps a distinct read-only section');
-unlike($readonly_412 // '', qr/load_configured_plugins|load_perl_module|register_plugin|unregister_plugin|->enable\(|->disable\(/,
-    '_cmd_plugins read-only section does not mutate PluginManager');
-like($lifecycle_412 // '', qr/requires Owner level/,
-    '_cmd_plugins destructive verbs are Owner-gated');
-like($lifecycle_412 // '', qr/requires Master or Owner level/,
-    '_cmd_plugins enable\/disable are Master-gated');
-like($lifecycle_412 // '', qr/load_package_v3/,
-    '_cmd_plugins provides explicit Owner-gated v3 loading');
-like($lifecycle_412 // '', qr/set_v3_channel_policy/,
-    '_cmd_plugins provides explicit Owner-gated channel policy');
-like($lifecycle_412 // '', qr/set_v3_quarantine/,
-    '_cmd_plugins provides explicit Owner-gated resource quarantine');
-like($lifecycle_412 // '', qr/reset_v3_quarantine/,
-    '_cmd_plugins provides exact Owner-gated quarantine release');
-like($readonly_412 // '', qr/v3_diagnostic_report/,
-    '_cmd_plugins exposes read-only API v3 doctor state');
-like($readonly_412 // '', qr/v3_failure_report/,
-    '_cmd_plugins exposes bounded API v3 failure history');
-like($readonly_412 // '', qr/v3_quarantine_report/,
-    '_cmd_plugins exposes bounded API v3 quarantine state');
-like($readonly_412 // '', qr/v3_permissions_report/,
-    '_cmd_plugins exposes the effective capability intersection');
-like($readonly_412 // '', qr/v3_channel_explanation/,
-    '_cmd_plugins explains per-channel execution decisions');
-
-SKIP: {
-    my $loaded = eval {
-        local @INC = ($root, @INC);
-        require 'Mediabot/Partyline.pm';
-        1;
-    };
-    if (!$loaded && $@ =~ /Can't locate (?:IO\/Async|Net\/Async|Future)\b/) {
-        skip 'optional async runtime dependency missing', 1;
+# MB1208: load the actual isolated owner, not extracted Perl source.
+use Mediabot::Partyline::PluginAdmin qw(_plugin_info_text _plugin_config_display_value);
+{
+    package Stream412;
+    sub write { $_[0]{out} .= $_[1]; 1 }
+    package Manager412;
+    sub list { () }
+    sub discover_v3_packages { () }
+    sub is_registered { 1 }
+    sub plugin { {metadata=>{api=>2}} }
+    sub enable { push @{$_[0]{calls}}, ['enable',$_[1]]; 1 }
+    sub disable { push @{$_[0]{calls}}, ['disable',$_[1]]; 1 }
+    sub clear_v3_plugin_data { push @{$_[0]{calls}}, ['clearv3',$_[1]]; (1,1,undef) }
+    sub clear_plugin_data { push @{$_[0]{calls}}, ['clear',$_[1]]; (1,1,undef) }
+    sub v3_permissions_report {
+        push @{$_[0]{calls}}, ['permissions',$_[1]];
+        return {plugin=>$_[1],status=>'ready',requested=>['irc.reply'],
+                granted=>['irc.reply'],effective=>['irc.reply'],missing=>[]};
     }
-    ok($loaded, 'Partyline module loads with .plugins command') or diag($@);
 }
+sub invoke_412 {
+    my ($arg,$level,%extra)=@_;
+    my $pm=bless {calls=>[]},'Manager412';
+    my $stream=bless {out=>''},'Stream412';
+    Mediabot::Partyline::PluginAdmin::run($stream,$arg,
+        manager=>$pm,level=>sub {$level},autoload=>sub {0},metrics=>sub {undef},%extra);
+    return ($stream->{out},$pm->{calls});
+}
+my ($out,$calls)=invoke_412('',undef);
+is($out,"PluginManager:\r\n  autoload: disabled\r\n  registered: 0\r\n  enabled: 0\r\n  disabled: 0\r\n  plugins: none loaded\r\n",
+    'summary preserves exact wire output without the bot runtime');
+is_deeply($calls,[],'summary performs no mutations');
+($out)=invoke_412('loaded',undef,manager=>undef);
+is($out,"PluginManager: not initialized\r\n",'missing manager remains explicit');
+($out)=invoke_412('discoverv3',undef);
+is($out,"API v3 packages:\r\n  (none)\r\n",'empty discovery remains read-only');
+($out)=invoke_412('config',undef);
+like($out,qr/boot loading: skipped unless plugins.AUTOLOAD=1/,'disabled autoload is explained');
+like($out,qr/plugins.ENABLED_AUTOLOAD, PLUGIN_AUTOLOAD, PLUGINS_AUTOLOAD/,'autoload aliases remain visible');
+like($out,qr/PLUGINS_ENABLED, PLUGIN_ENABLED, PLUGINS/,'plugin-list aliases remain visible');
+($out)=invoke_412('config',undef,autoload=>undef);
+like($out,qr/boot loading: enabled by configuration gate/,'absent optional autoload method keeps historical display');
+($out)=invoke_412('bogus',undef);
+like($out,qr/^Usage: \.plugins \[loaded\|config/,'unknown input returns usage');
+for my $verb (qw(load loadscript unload reload cleardata loadv3 policy resetpolicy quarantine unquarantine clearv3data)) {
+    for my $level (undef,1,2) {
+        ($out,$calls)=invoke_412("$verb example",$level);
+        is($out,"Access denied: .plugins $verb requires Owner level.\r\n","$verb denies non-Owner");
+        is_deeply($calls,[],"$verb denial cannot mutate manager");
+    }
+}
+for my $verb (qw(enable disable)) {
+    for my $level (undef,2) {
+        ($out,$calls)=invoke_412("$verb example",$level);
+        like($out,qr/requires Master or Owner level/,"$verb denies insufficient level");
+        is_deeply($calls,[],"$verb denial cannot mutate manager");
+    }
+    for my $level (0,1) {
+        ($out,$calls)=invoke_412("$verb example",$level);
+        is_deeply($calls,[[$verb,'example']],"$verb permits Owner and Master once");
+    }
+}
+for my $pair (['clearv3data','clearv3'],['cleardata','clear']) {
+    ($out,$calls)=invoke_412("$pair->[0] example",0);
+    is_deeply($calls,[[$pair->[1],'example']],'v2/v3 cleanup namespaces stay separate');
+}
+($out,$calls)=invoke_412('permissions example',undef);
+is_deeply($calls,[['permissions','example']],'permissions view only requests the manager report');
+like($out,qr/effective: irc.reply/,'effective permissions remain visible');
+is(_plugin_config_display_value('API_KEY','secret'),'[redacted]','config secrets remain redacted');
+is(_plugin_info_text("hello\r\nworld",200),'hello world','rendering stays on one line');
+is(_plugin_info_text('abcdefgh',6),'abc...','rendering remains bounded');
+# This case itself must stay independent of the integration dependency tree.
+ok(!exists $INC{'Mediabot/Helpers.pm'} && !exists $INC{'Mediabot/Mediabot.pm'}
+    && !exists $INC{'DBI.pm'} && !exists $INC{'IO/Async/Loop.pm'},
+    'administration component loads without bot, DBI or async runtime');
 
 done_testing();

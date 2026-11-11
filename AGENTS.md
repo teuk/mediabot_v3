@@ -2,6 +2,10 @@
 
 ## Source and scope
 
+- For structural work, read `docs/ARCHITECTURE_ROADMAP.md` first, follow its
+  incremental sequence and update progress with the delivered change. Distinguish
+  local implementation from successful target-host acceptance.
+
 - Start from the current GitHub development branch and record its full commit SHA.
   Use an explicitly supplied newer snapshot for local changes absent from GitHub;
   never silently combine different source revisions.
