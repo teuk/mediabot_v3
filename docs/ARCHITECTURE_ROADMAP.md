@@ -13,16 +13,15 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | Phase | Objective and bounded first increment | Status |
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
-| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
+| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1240 selects local VERSION identity as the next bounded Helpers boundary; extraction not yet implemented. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are implemented and committed; broader phase C remains open. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation prepared below (host acceptance pending). |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1237 closes the bounded badword data-access pilot
-and selects a focused review of DB timer reload publication/reentrancy. Reproduce
-any ownership failure before changing runtime behavior. See
-[MB1237 checkpoint](#mb1237--badword-pilot-and-db-timer-review).
+Current continuation point: MB1240 selects the local VERSION identity boundary
+inside Helpers, after committed DB-timer fixes. See
+[MB1240 checkpoint](#mb1240--helpers-local-version-boundary).
 Earlier “Next” paragraphs are historical decisions, not current instructions.
 
 ## Phase A / MB1208
@@ -1054,3 +1053,86 @@ lifecycle audit. Next checkpoint: review remaining phase B Helpers dependencies
 and select one bounded boundary with existing behavioral tests. Keep arbitrary
 operator mutation during setup and generic-worker final-exit coordination as
 separate open questions; do not broaden this tick fix into a timer framework.
+
+
+## MB1240 — Helpers local version boundary
+
+Reviewed at MB1239 commit `8437a8901e42da62238c55cd68718e0b1f43507a`,
+matching tracked files in the supplied 2026-11-11 21:50:52 snapshot.
+MB1238 R2 (`35bdd3b4`) and MB1239 (`8437a890`) are committed on GitHub.
+Their full host acceptance transcripts were not supplied; do not invent totals.
+This checkpoint implements no runtime extraction or new timer behavior.
+
+### Boundary review
+
+| Candidate | Observed coupling | Decision |
+| --- | --- | --- |
+| Local version identity in [Helpers](../Mediabot/Helpers.pm), `_cached_local_version`, `_read_local_version`, `getLocalVersion` | [Remote](../Mediabot/Version/Remote.pm) explicitly requires Helpers when local hooks are absent, although local identity needs only file access, normalization, logging and existing bot cache. | Selected. Small domain adjacent to existing Format and Remote modules; preserve the facade. |
+| Authentication/user lookup in Helpers, `get_user_from_message`, `get_user_from_whois` | Shared user caches, hostmask resolution, authentication and DB policy. | Defer; not a mechanical utility extraction. It needs a separate security and invalidation contract. |
+| Resolver/whereis in Helpers, `resolve_ctx`, `whereis_async` | Operator responses, asynchronous workers and transport failure behavior. | Defer; larger lifecycle/command boundary than local identity. |
+| Existing output/archive delegates | Helpers already forwards to owning modules. | Retain compatibility; moving forwarding wrappers alone would not reduce ownership ambiguity. |
+
+### Selected implementation scope
+
+Introduce a small local-version component (proposed `Mediabot::Version::Local`)
+that owns local reading/cache fallback, leaving public Helpers entry points and
+imports compatible. The success criterion is that the component can serve local
+identity without loading Helpers, HTTP, DBI or AsyncWorker. Remote's local fallback
+should use it when no legacy override is installed, instead of requiring Helpers.
+Existing overrides remain optional call-time hooks; do not turn them into mandatory
+reverse imports or recursion between two forwarding wrappers.
+
+[Format](../Mediabot/Version/Format.pm) already owns normalization and comparison.
+Keep that ownership. `versionCheck` remains command routing/presentation; remote
+URLs, worker budgets and error categories stay in Remote. No version grammar,
+network retry policy, VERSION contents or release process change belongs here.
+
+### Contracts to characterize before moving code
+
+- **Path lifetime:** Helpers currently resolves its absolute source path at module
+  load and derives VERSION from that tree. Preserve foreign-cwd behavior and the
+  moment the path becomes fixed, including Helpers-first versus Local-first load
+  order. Do not accidentally derive the root one directory too shallow after
+  moving into Version/. Explicitly test symlink/source-tree resolution before
+  choosing how the facade anchors the path; do not silently change it.
+- **File semantics:** read the first line with the current I/O layer and normalize
+  through the existing hook. Characterize absent/empty files, whitespace, the
+  Undefined sentinel and malformed values; do not mix encoding/BOM fixes into
+  this structural change. Reading at startup stays local-only.
+- **Cache semantics:** usable disk identity refreshes main_prog_version. An
+  unusable read falls back to the last usable cached value; the sentinel must
+  not poison that value. The cache accessor does not perform disk/network I/O.
+- **Hooks and diagnostics:** preserve Helpers normalizer/read/local/cache hook
+  overrides where they are used, arguments, return values and logger order.
+  Characterize logger exceptions and existing undef/non-object call behavior;
+  do not introduce unrelated validation changes or silently suppress failures.
+- **Update identity remains distinct:** [Update::_read_local_version](../Mediabot/Update.pm)
+  resolves the selected update project directory, opens with UTF-8, and returns
+  undef rather than the same sentinel policy. Do not merge it just because it
+  has a similar function name. Update completion/deployment ownership is separate.
+
+### Validation and delivery gates
+
+Extend existing [case 606](../t/cases/606_mb388_release_version_identity.t) and
+[case 607](../t/cases/607_mb389_local_startup_semantic_version_compare.t).
+Case 606 currently asserts lexical declarations in Helpers: replace those
+location checks with actual source-root/cwd behavior while retaining its existing
+async fallback checks. Case 607 already tests foreign cwd, no HTTP startup,
+Format/Helpers load orders and call-time parser overrides. Extend its existing
+bounded cold probes rather than adding a historical case per module.
+
+Use temporary source trees/files and actual components; never rewrite the live
+repository VERSION to simulate failure. Compare behavior before/after the move.
+Include [539](../t/cases/539_mb317_version_check_async_nonblocking.t),
+[818](../t/cases/818_mb638_remote_version_diagnosis.t),
+[821](../t/cases/821_mb641_version_worker_terminal_truth.t) and
+[834](../t/cases/834_mb652_version_asyncworker_migration.t) in targeted acceptance:
+834 explicitly overrides the Helpers cache accessor. Test all relevant load
+orders so passing without Helpers does not break historical integration with it.
+Run the full suite once on the host before committing the eventual runtime patch.
+
+MB1240 itself changes documentation only. Check links/source symbols and guarded
+patch/commit workflow; do not spend another full bot suite on this checkpoint.
+Phase B remains open until the extraction is implemented and accepted. Phases C/D
+still include broader domain boundaries and generic-worker final-exit questions;
+this selection does not declare the architecture roadmap complete.

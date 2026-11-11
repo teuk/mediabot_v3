@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1240 — Map the next Helpers dependency boundary
+
+- Record committed DB-timer publication and tick-ownership increments, without
+  reconstructing unseen host test results from Git history.
+- Select local VERSION identity as the next bounded phase B extraction; document
+  source-path lifetime, fallback/cache, compatibility hooks and cold-load gates.
+- Keep update-tree identity, operator presentation, remote transport and broader
+  authentication/resolver migrations separate. Documentation only.
+
 ### MB1239 — Recheck timer ownership after tick logging
 
 - Revalidate exact published timer identity after the logger returns in both
