@@ -1404,6 +1404,10 @@ sub register_plugin {
     my $name = _name($args{name});
     die "PluginManager: missing plugin name\n" unless defined $name;
 
+    die "PluginManager: plugin '$name' has pending job removal; retry unload first\n"
+        if $self->{plugins}{$name}
+            && $self->{plugins}{$name}{metadata}{job_cleanup_pending};
+
     if (exists $self->{plugins}{$name} && !$args{replace}) {
         die "PluginManager: plugin '$name' already registered\n";
     }
@@ -1497,6 +1501,8 @@ sub unregister_plugin {
     my $api = ref($entry->{metadata}) eq 'HASH'
         ? ($entry->{metadata}{api} // 1) : 1;
     if ($api == 3) {
+        # A partial unload must remain disabled and owned until removal succeeds.
+        $entry->{metadata}{job_cleanup_pending} = 1;
         my $was_enabled = $entry->{enabled} ? 1 : 0;
         $entry->{enabled} = 0;
         $self->_cancel_v3_http($key);
@@ -1570,6 +1576,8 @@ sub enable {
     my ($self, $name) = @_;
 
     my $entry = $self->plugin($name) or return 0;
+    die "PluginManager: plugin '$entry->{name}' has pending job removal; retry unload first\n"
+        if $entry->{metadata}{job_cleanup_pending};
     return 1 if $entry->{enabled};
 
     my $api = ref($entry->{metadata}) eq 'HASH'
@@ -2995,14 +3003,43 @@ sub _stop_v3_jobs {
 sub _remove_v3_jobs {
     my ($self, $entry) = @_;
     return 0 unless $entry && ref($entry->{mounted_jobs}) eq 'ARRAY';
+    return 0 unless @{ $entry->{mounted_jobs} };
     my $scheduler = eval { $self->{bot}{scheduler} };
-    return 0 unless $scheduler;
-
-    my $removed = 0;
-    for my $job (reverse @{ $entry->{mounted_jobs} }) {
-        $removed++ if $scheduler->remove($job->{task});
+    unless ($scheduler) {
+        $entry->{metadata}{job_cleanup_pending} = 1;
+        $entry->{metadata}{job_remove_error} = 'scheduler unavailable';
+        die "PluginManager: scheduler unavailable while removing API v3 jobs\n";
     }
-    $entry->{mounted_jobs} = [];
+
+    my ($removed, @remaining, @failed) = (0);
+    for my $job (reverse @{ $entry->{mounted_jobs} }) {
+        my $ok = eval {
+            # An operator may already have removed a previously failed task.
+            # Native Scheduler lookup is authoritative; legacy doubles may omit it.
+            if ($scheduler->can('task_info') && !$scheduler->task_info($job->{task})) {
+                1;
+            }
+            else {
+                $scheduler->remove($job->{task});
+            }
+        };
+        if ($ok) {
+            $removed++;
+        }
+        else {
+            # Continue cleaning other jobs, but never discard unresolved ownership.
+            unshift @remaining, $job;
+            push @failed, $job->{name};
+        }
+    }
+    $entry->{mounted_jobs} = \@remaining;
+    if (@failed) {
+        $entry->{metadata}{job_cleanup_pending} = 1;
+        my $error = 'failed to remove API v3 jobs: ' . join(', ', @failed);
+        $entry->{metadata}{job_remove_error} = $error;
+        die "PluginManager: $error; retry unload\n";
+    }
+    delete $entry->{metadata}{job_remove_error};
     return $removed;
 }
 

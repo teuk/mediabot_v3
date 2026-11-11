@@ -19,8 +19,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
-Current continuation point: MB1228 implements the Scheduler removal prerequisite
-below; plugin-job ownership remains next. Overall scope: [MB1227 checkpoint](#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
+Current continuation point: MB1229 implements incomplete plugin unload recovery
+after MB1228; exact job registration identity and mount rollback remain next. Overall scope: [MB1227 checkpoint](#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
 Earlier “Next” paragraphs record decisions at their original increment; they do
 not override this checkpoint.
 
@@ -632,3 +632,33 @@ still stores task names, clears failed removal records and rolls back by name.
 Next apply the MB1227 acceptance contract there, including failed removal
 recovery and exact registration capture. Do not mark those findings fixed by
 this Scheduler change. No service, configuration, database or provider changes.
+
+## MB1229 — incomplete plugin unload recovery
+
+Base `d65f85b5c305276d8d1a9363563ad5f5b5a1bc96` (MB1228 on GitHub), matched
+against `snap_mediabot_v3_teuk_20261111_182923.zip` for changed inputs.
+
+The next bounded part of MB1227's acceptance contract is failure recovery.
+Previously a false removal cleared mounted_jobs and unregister deleted the
+plugin; an exception could abandon cleanup of later jobs. The persistent unload
+could therefore record success while a task remained registered.
+
+Now unresolved records stay on the disabled entry, other jobs are attempted,
+and incomplete removal throws before persistent-state writing. Re-enabling or
+replacing the partially unloaded entry is refused until unload is retried.
+Native task_info confirmation of an absent task allows recovery after separate
+operator cleanup. Command/event surfaces and late job callbacks remain retired.
+No new retry timer, configuration, schema or API v2 lifecycle is introduced.
+
+Existing case 1072 covers false/throwing/unavailable cleanup, partial progress,
+retry, persistent-write suppression and activation/replacement refusal. Its
+existing MB908 native fixture now injects IO::Async removal failure and verifies
+actual notifier ownership, callback inertness and retry (including a task already
+removed by the operator). Local targeted lane: 11 files, 404 assertions passed.
+Full host acceptance remains pending; do not infer a host result from local tests.
+
+Remaining: mounted task names still need exact registration identity at mount,
+start/stop/remove and mount rollback. This patch does not claim same-name
+successor protection in PluginManager; MB1228 only protects reentrant removal
+inside Scheduler. Retaining failed records is the prerequisite for safely
+changing that boundary. Generic workers and final-exit policy remain separate.

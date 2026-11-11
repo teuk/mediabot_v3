@@ -49,6 +49,10 @@ BEGIN {
     }
     sub remove {
         my ($self, $name) = @_;
+        push @{ $self->{remove_calls} }, $name;
+        my $fault = $self->{remove_fault}{$name} // '';
+        return 0 if $fault eq 'false';
+        die "injected removal exception\n" if $fault eq 'throw';
         return delete($self->{tasks}{$name}) ? 1 : 0;
     }
     sub fire {
@@ -210,6 +214,62 @@ return sub {
         'failed resource transaction rolls back mounted commands');
     $assert->is($atomic_bot->{event_bus}->listener_count('plugin_cron_observed'), 0,
         'failed resource transaction rolls back event listeners');
+    # MB1229: incomplete unload retains a disabled owner and can be retried.
+    for my $fault (qw(false throw unavailable)) {
+        my $b = T1072::Bot->new;
+        my $m = Mediabot::PluginManager->new(bot => $b, plugin_dir => 'plugins');
+        my $e = $m->load_package_v3('hello-v3',
+            grants => ['events.subscribe', 'irc.reply', 'scheduler.jobs'],
+            channel_policies => {'#i/o' => {mode => 'on', config => {}}});
+        $m->enable('hello-v3');
+        my $scheduler = $b->{scheduler};
+        my $stale = $scheduler->{tasks}{$task}{cb};
+        # Another owned task must still be attempted after one removal fails.
+        $scheduler->add(name => 'plugin.v3.hello-v3.extra', cb => sub {});
+        unshift @{ $e->{mounted_jobs} }, {
+            name => 'extra', task => 'plugin.v3.hello-v3.extra', clock => {}};
+        $scheduler->{remove_fault}{$task} = $fault;
+        delete $b->{scheduler} if $fault eq 'unavailable';
+        my $writes = 0;
+        my $unloaded;
+        {
+            no warnings 'redefine';
+            local *Mediabot::PluginManager::store_v3_runtime_state = sub { $writes++; return (1, undef) };
+            $unloaded = eval { $m->unregister_plugin_persistent('hello-v3'); 1 };
+        }
+        my $unload_error = $@;
+        $assert->ok(!$unloaded, "$fault: incomplete unload reports failure");
+        $assert->like($unload_error // '', qr/(remov|scheduler unavailable)/i,
+            "$fault: operator receives a cleanup diagnosis");
+        $assert->is($writes, 0, "$fault: incomplete unload is not persisted as success");
+        $assert->ok($m->plugin('hello-v3') == $e,
+            "$fault: exact plugin entry retained for retry");
+        $assert->is($e->{enabled}, 0, "$fault: retained plugin stays disabled");
+        $assert->is(scalar @{ $e->{mounted_jobs} }, $fault eq 'unavailable' ? 2 : 1,
+            "$fault: only unresolved task ownership is retained");
+        $assert->ok(exists $scheduler->{tasks}{$task}, "$fault: failed task is still registered");
+        $assert->ok($fault eq 'unavailable' || !exists $scheduler->{tasks}{'plugin.v3.hello-v3.extra'},
+            "$fault: failure does not prevent other task cleanup");
+        $assert->is($b->{registry}->has_command('v3hello', 'public'), 0,
+            "$fault: command surface is retired");
+        $assert->is($b->{event_bus}->listener_count('plugin_cron_observed'), 0,
+            "$fault: event surface is retired");
+        my $before_heartbeats = $e->{object}{heartbeats};
+        $stale->();
+        $assert->is($e->{object}{heartbeats}, $before_heartbeats,
+            "$fault: retained callback cannot execute the disabled plugin");
+        my $activated = eval { $m->enable('hello-v3'); 1 };
+        $assert->ok(!$activated, "$fault: partially unloaded plugin cannot be re-enabled");
+        my $replaced = eval { $m->register_plugin(name => 'hello-v3', replace => 1); 1 };
+        $assert->ok(!$replaced, "$fault: replacement cannot discard pending ownership");
+        $b->{scheduler} = $scheduler;
+        delete $scheduler->{remove_fault}{$task};
+        $assert->ok($m->unregister_plugin('hello-v3'), "$fault: retry completes cleanup");
+        $assert->ok(!$m->plugin('hello-v3'), "$fault: successful retry releases the plugin");
+        $assert->is(scalar(keys %{ $scheduler->{tasks} }), 0,
+            "$fault: successful retry releases every task");
+        $assert->ok(!$m->unregister_plugin('hello-v3'), "$fault: repeated unload stays harmless");
+    }
     # MB908: exact instance ownership through real registry/loop/scheduler paths.
     require JSON::PP;
     open my $probe, '-|', $^X, '-I.', '-It/lib', '-MMB908PluginFixture',
@@ -240,4 +300,16 @@ return sub {
             $assert->ok($contract->{ok}, "mb911: $contract->{case}");
         }
     }
+    {
+        open my $probe, '-|', $^X, '-I.', '-It/lib', '-MMB908PluginFixture',
+            '-MJSON::PP', '-e',
+            'print JSON::PP->new->encode(MB908PluginFixture::run_job_cleanup_contracts())'
+            or die "MB1229 job cleanup fixture: $!";
+        my $json = do { local $/; <$probe> };
+        close $probe or die "MB1229 job cleanup fixture failed: $?";
+        my $rows = JSON::PP->new->decode($json);
+        die 'Invalid cleanup matrix' unless ref($rows) eq 'ARRAY' && @$rows == 8;
+        $assert->ok($_->{ok}, 'mb1229: '.$_->{case}) for @$rows;
+    }
+
 };

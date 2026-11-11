@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1229 — Retain plugin jobs after incomplete unload
+
+- Keep unresolved job records after false/throwing Scheduler removals and attempt
+  cleanup of the other jobs. An unavailable Scheduler remains an explicit error.
+- Retain the disabled plugin until cleanup succeeds; reject activation or
+  replacement of a partially unloaded entry and propagate failure before the
+  persistent unload writes success. A later unload retries outstanding work.
+- Accept native Scheduler confirmation that a previously failed task is already
+  absent. Extend existing lifecycle/native fixtures without another test file.
+
 ### MB1228 — Preserve Scheduler successors during reentrant removal
 
 - Recheck exact task identity after stop and loop removal before deleting the

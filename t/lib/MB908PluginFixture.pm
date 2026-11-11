@@ -284,4 +284,39 @@ sub run_command_ownership_contracts {
         unload_same_owner_replacement unload_alias_successor unload_vacant_builtin
         command_rollback_replacement resource_rollback_replacement command_rollback_nominal resource_rollback_nominal)];
 }
+# MB1229: real Scheduler and IO::Async notifier cleanup, with one injected
+# loop-removal exception. No running event loop is needed for retirement.
+sub run_job_cleanup_contracts {
+    my @rows;
+    for my $recovery (qw(retry external_remove)) {
+    my ($m,$e,$bot,$ctx)=_context();
+    my $scheduler=$bot->{scheduler};
+    my $name='plugin.v3.witness.tick';
+    my $timer=$scheduler->{_tasks}{$name}{timer};
+    my $callback=$scheduler->{_tasks}{$name}{cb};
+    my $remove=IO::Async::Loop->can('remove');
+    my ($ok,$error);
+    {
+        no warnings 'redefine';
+        local *IO::Async::Loop::remove=sub {
+            die "injected native removal failure\n" if refaddr($_[1])==refaddr($timer);
+            $remove->(@_);
+        };
+        $ok=eval {$m->unregister_plugin('witness');1};$error=$@;
+    }
+    push @rows,{case=>'native failure is explicit',ok=>!$ok && $error=~/failed to remove/ ? 1:0};
+    push @rows,{case=>'native task and disabled plugin retain ownership',ok=>
+        $m->plugin('witness') && refaddr($m->plugin('witness'))==refaddr($e)
+        && !$e->{enabled} && @{$e->{mounted_jobs}}==1
+        && $scheduler->task_info($name) && $timer->loop ? 1:0};
+    my $before=@{$e->{object}{jobs}};$callback->();
+    push @rows,{case=>'native retained callback is inert',ok=>@{$e->{object}{jobs}}==$before ? 1:0};
+    $scheduler->remove($name) if $recovery eq 'external_remove';
+    my $retry=$m->unregister_plugin('witness');
+    push @rows,{case=>'native retry releases task notifier and plugin',ok=>
+        $retry && !$m->plugin('witness') && !$scheduler->task_info($name) && !$timer->loop ? 1:0};
+    }
+    return \@rows;
+}
+
 1;
