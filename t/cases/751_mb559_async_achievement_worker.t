@@ -174,6 +174,24 @@ return sub {
         'shutdown preserves previously committed achievements for the final save');
     $assert->ok($ach->save(1),'forced final save remains available after worker shutdown');
 
+    # Run actual fork/kill/waitpid in a fresh interpreter, isolated from the
+    # shared runner's SIGCHLD handlers and any IO::Async test doubles.
+    {
+        open my $probe, '-|', $^X, '-I.', 't/lib/MB1220AchievementWatchProbe.pl'
+            or die "launch worker probe: $!";
+        my $json=do {local $/;<$probe>};
+        my $closed=close $probe;
+        $assert->ok($closed,'native watcher-rejection probe exits successfully');
+        my $r=JSON::PP::decode_json($json);
+        $assert->ok($r->{reaped},'rejected watcher leaves no unreaped child');
+        $assert->ok($r->{returned}==1 && $r->{count}==1,
+            'watch rejection preserves handled-launch return and one completion');
+        $assert->ok(!$r->{result}{ok} && $r->{result}{error} eq 'worker_setup'
+            && $r->{result}{stage} eq 'watch_process',
+            'watch rejection preserves structured setup failure');
+        $assert->ok(!$r->{registered},'failed worker is not published as active');
+    }
+
     my $src=slurp751('Mediabot/Achievements.pm');
     $assert->like($src, qr/pipe\(\$pipe, \$child_write\).*?my \$pid = fork\(\)/s,
         'worker uses an ordinary pipe and fork');

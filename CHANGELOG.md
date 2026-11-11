@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1220 — Reap achievement children after watcher setup failure
+
+- Revoke failed setup callbacks before killing the achievement child; perform a
+  bounded waitpid collection when watch_process registration throws.
+- Treat ECHILD as already collected, retry EINTR within the same bounded budget,
+  and diagnose unconfirmed cleanup without changing the setup-error result.
+- Extend the existing worker case with an isolated real fork/kill/reap probe.
+  Normal worker completion, timeout and final-shutdown policies are unchanged.
+
+
 ### MB1219 — Revoke achievement result delivery at shutdown
 
 - Retire logical in-flight ownership before signalling the achievement child and

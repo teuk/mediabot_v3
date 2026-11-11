@@ -312,6 +312,34 @@ exit, including watcher/setup failures and the difference between TERM request
 and confirmed exit. Preserve archive termination ordering and avoid copying its
 blocking wait into ordinary async cancellation or reconnect.
 
+## MB1220 — watcher rejection owns its child cleanup
+
+MB1219 is committed as `c787a6b0` and matches the supplied 11:39:03 snapshot;
+its detailed target-host test report was not supplied. Physical-lifecycle review
+identified a smaller prerequisite than final-exit migration: when achievement
+watch_process registration throws, the parent killed its child but never waited
+for it. An isolated real fork probe reproduced an uncollected child on the base.
+
+That exceptional setup path now marks callback state finalized, breaks its finish
+closure, sends the existing KILL, closes its pipe and polls only that PID with
+WNOHANG (20 attempts, 5 ms between attempts). A matching PID or ECHILD confirms
+collection; EINTR consumes the same bounded budget. Other failures or exhaustion
+log an unconfirmed reap. No unbounded wait or successful-cleanup guarantee is
+introduced; a pathological uncollectable child remains an explicit limitation.
+The original worker_setup/watch_process result and one completion are retained.
+Normal watcher-owned completion, timeout escalation and TERM-only final shutdown
+are unchanged. AsyncWorker already uses a similar bounded setup-failure reap;
+this increment does not create a universal process cancellation service.
+
+Existing case 751 invokes a fresh-interpreter real-child probe so SIGCHLD and
+IO::Async doubles cannot contaminate the shared harness. The fixture cleans its
+child even against the failing baseline. Local eight-case lane: 167 assertions
+passed, including 48 in 751. Full host acceptance remains required before commit.
+
+Next: review successful watcher installation followed by stream/timer setup
+failure, then the final-exit TERM/reap contract. Preserve result revocation from
+MB1219 and distinguish logical completion from confirmed child exit.
+
 ## Rules for subsequent phases
 
 1. Record the base revision and compare supplied source snapshots explicitly.

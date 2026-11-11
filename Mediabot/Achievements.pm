@@ -3060,8 +3060,25 @@ sub _spawn_check_worker {
         1;
     };
     unless ($watch_ok) {
+        # No watcher accepted ownership: retire callbacks and collect our child
+        # here, rather than leaving an unowned zombie after the setup failure.
+        $state->{finalized} = 1;
+        $finish = undef;
         kill 'KILL', $pid;
         eval { close $pipe };
+        my $reaped = 0;
+        for (1 .. 20) {
+            my $seen = waitpid($pid, POSIX::WNOHANG());
+            if ($seen == $pid || ($seen == -1 && $!{ECHILD})) {
+                $reaped = 1;
+                last;
+            }
+            last if $seen == -1 && !$!{EINTR};
+            Time::HiRes::sleep(0.005);
+        }
+        eval { $self->_log(1,
+            'Achievements: worker watcher setup failed; child reap unconfirmed') }
+            unless $reaped;
         $done->({ ok => 0, error => 'worker_setup', stage => 'watch_process',
             detail => 'could not register child process watcher' });
         return 1;
