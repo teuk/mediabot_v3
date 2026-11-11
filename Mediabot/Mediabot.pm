@@ -8,6 +8,7 @@ use warnings;
 use Mediabot::Auth;
 use Mediabot::User;
 use Mediabot::Channel;
+use Mediabot::Channel::NicklistTimers ();
 use Mediabot::Conf;
 use Mediabot::NetworkStats qw(parse_numeric);
 use Mediabot::XAuth;
@@ -982,95 +983,15 @@ sub refresh_channel_nicklist {
 }
 
 sub stop_all_channel_nicklist_timers {
-    my ($self) = @_;
-
-    my $timers = $self->{channel_nicklist_timers} || {};
-    foreach my $channel_name (keys %$timers) {
-        my $timer = $timers->{$channel_name};
-        next unless $timer;
-
-        eval {
-            if ($self->{loop}) {
-                $self->{loop}->remove($timer);
-            }
-            $timer->stop if $timer->can('stop');
-            1;
-        };
-    }
-
-    $self->{channel_nicklist_timers} = {};
-    $self->{logger}->log(1, "Stopped all channel nicklist timers");
-
-    return 1;
+    return Mediabot::Channel::NicklistTimers::stop_all(@_);
 }
 
 sub stop_channel_nicklist_timer {
-    my ($self, $channel_name) = @_;
-
-    return unless defined $channel_name && $channel_name ne '';
-
-    my $timer = $self->{channel_nicklist_timers}{$channel_name};
-    return unless $timer;
-
-    eval {
-        if ($self->{loop}) {
-            $self->{loop}->remove($timer);
-        }
-        $timer->stop if $timer->can('stop');
-        1;
-    } or do {
-        my $err = $@ || 'unknown error';
-        $self->{logger}->log(1, "Failed to stop nicklist timer for $channel_name: $err");
-    };
-
-    delete $self->{channel_nicklist_timers}{$channel_name};
-    $self->{logger}->log(1, "Stopped nicklist timer for $channel_name");
-
-    return 1;
+    return Mediabot::Channel::NicklistTimers::stop_one(@_);
 }
 
 sub setup_channel_nicklist_timers {
-    my ($self) = @_;
-
-    my $conf = $self->{conf};
-    unless ($conf) {
-        $self->{logger}->log(1, "setup_channel_nicklist_timers() called without config");
-        return;
-    }
-
-    unless ($self->{loop}) {
-        $self->{logger}->log(1, "setup_channel_nicklist_timers() called without IO::Async loop");
-        return;
-    }
-
-    $self->stop_all_channel_nicklist_timers();
-
-    my $interval = $conf->get('main.MAIN_CHANNEL_NICKLIST_REFRESH_INTERVAL');
-    $interval = 300 unless defined $interval && $interval =~ /^\d+$/ && $interval > 0;
-
-    foreach my $channel_name (sort keys %{ $self->{channels} || {} }) {
-        my $channel_obj = $self->{channels}{lc $channel_name};
-        next unless $channel_obj;
-
-        my $timer = IO::Async::Timer::Periodic->new(
-            interval => $interval,
-            first_interval => $interval,
-            on_tick => sub {
-                $self->refresh_channel_nicklist($channel_name);
-            },
-        );
-
-        $self->{loop}->add($timer);
-        $timer->start;
-        $self->{channel_nicklist_timers}{$channel_name} = $timer;
-
-        $self->{logger}->log(1, "Started nicklist refresh timer for $channel_name (interval=${interval}s)");
-    }
-
-    my $count = scalar keys %{ $self->{channel_nicklist_timers} || {} };
-    $self->{logger}->log(1, "Nicklist timer setup complete ($count timers)");
-
-    return 1;
+    return Mediabot::Channel::NicklistTimers::setup(@_);
 }
 
 sub rehash_runtime_state {

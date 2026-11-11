@@ -1,5 +1,17 @@
 ## [Unreleased] — 3.8dev
 
+### MB1218 — Retire channel nicklist timers safely
+
+- Give periodic nicklist setup/retirement a dedicated owner; keep Mediabot methods,
+  registry values, configured/default intervals and channel-command call sites.
+- Detach registrations and revoke callbacks before independent remove/stop attempts;
+  report incomplete cleanup and preserve reentrant successor timers.
+- Clean failed/late setup without replacing newer registrations; preserve original
+  setup exceptions and avoid retaining the bot/loop through stale callbacks.
+- Replace the simulated nicklist case with real component tests and extend native
+  periodic/facade coverage. No schema, configuration or service changes.
+
+
 ### MB1217 — Architecture checkpoint and nicklist lifecycle priority
 
 - Review phase A–E ownership and test boundaries; record MB1216 on GitHub and

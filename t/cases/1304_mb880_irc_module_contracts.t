@@ -23,7 +23,7 @@ use Mediabot::XAuth ();
 use Mediabot::Fullop ();
 
 for my $module (qw(IRC::Target IRC::Text IRC::CaseMapping IRC::Presentation
-    IRC::PacedOutput IRC::OutputPolicy Channel::FloodRules)) {
+    IRC::PacedOutput IRC::OutputPolicy Channel::FloodRules Channel::NicklistTimers)) {
     my $err = gensym;
     my $code = "require Mediabot::$module;" . q{
         die 'runtime dependency' if $INC{'Mediabot/Helpers.pm'} || $INC{'Mediabot/External/Claude.pm'}

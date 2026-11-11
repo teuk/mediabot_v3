@@ -200,7 +200,7 @@ migration or a claim that every completion criterion is satisfied.
 | --- | --- | --- |
 | A: operator administration | [Commands](../Mediabot/Partyline/Commands.pm) `_cmd_plugins` delegates to [PluginAdmin](../Mediabot/Partyline/PluginAdmin.pm); existing [412](../t/cases/412_mb173_partyline_plugins_status.t) exercises the component. | Other Partyline command families remain separate candidates; retain session/level authority. |
 | B/C: output admission and storage | [OutputPolicy](../Mediabot/IRC/OutputPolicy.pm) owns cache/budget decisions; [FloodRules](../Mediabot/Channel/FloodRules.pm) owns the SELECT. [627](../t/cases/627_mb409_antiflood_negative_cache.t) covers failure/cache boundaries. | ChannelCommands still writes rules and invalidates shared cache. Do not merge domain-specific fallback policies. |
-| D: connection output | [setIrc](../Mediabot/Mediabot.pm) detaches registries and publishes the transport before [paced](../Mediabot/IRC/PacedOutput.pm) and [deferred](../Mediabot/IRC/DeferredOutput.pm) retirement. [1311](../t/cases/1311_mb882_irc_native_timer_lifecycle.t) retains native coverage. | Periodic nicklist timers and worker/final-exit coordination are not covered by countdown retirement. |
+| D: connection output | [setIrc](../Mediabot/Mediabot.pm) detaches registries and publishes the transport before [paced](../Mediabot/IRC/PacedOutput.pm) and [deferred](../Mediabot/IRC/DeferredOutput.pm) retirement. [1311](../t/cases/1311_mb882_irc_native_timer_lifecycle.t) retains native coverage. | MB1218 adds separate periodic nicklist retirement; worker/final-exit coordination remains open. |
 | E: state file | [RuntimeStateFile](../Mediabot/Plugin/RuntimeStateFile.pm) owns file IO; [PluginManager](../Mediabot/PluginManager.pm) retains validation, path policy and rollback. [1135](../t/cases/1135_mb766_v3_boot_state.t) exercises real manager restoration and standalone IO. | No fsync durability or new filesystem race policy was introduced. |
 | E: diagnostics | [DiagnosticsV3](../Mediabot/Plugin/DiagnosticsV3.pm) owns detached reports/portfolio assembly; [1129](../t/cases/1129_mb764_v3_portfolio_report.t) covers actual manager wiring and bounded standalone assembly. | Discovery, quarantine and capability/lifecycle decisions remain with the manager. |
 
@@ -250,6 +250,38 @@ is not a prerequisite. No startup/runtime performance gain is claimed.
 Checkpoint validation: verify documentation paths/source symbols, exact base,
 patch/reverse and guarded commit flow. No runtime code changes, so the full
 runtime suite is not rerun for MB1217 alone.
+
+## MB1218 — periodic nicklist retirement
+
+Base: `a0fcaf84ca506e14344b464b363a4587a0e3f91c` (MB1217 committed).
+[Channel::NicklistTimers](../Mediabot/Channel/NicklistTimers.pm) now owns periodic
+setup, registration identity and retirement. Mediabot keeps the three historical
+methods as delegates and still owns NAMES delivery, configuration, channels and
+loop. Public registry values remain timers; private weak-key metadata stores
+revocable callback state and the original loop. Loading the owner needs only
+core Perl; the default periodic factory loads IO::Async lazily.
+
+Both old failure modes were reproduced locally from the base stop methods:
+remove exceptions skipped stop, and single/all cleanup erased reentrant
+successors. Retirement now detaches old registrations and revokes every old
+callback before cleanup. Remove and stop are attempted independently; incomplete
+cleanup returns 0 and is logged instead of claiming success. Existing callers
+ignore that result. Repeated retirement does not retry failed physical cleanup.
+A setup generation and per-timer identity protect nested setup and late add/start
+returns. Setup failures clean only the old registration and rethrow the original
+exception. Retained callbacks hold weak bot/loop references and become inert.
+
+Configured/default intervals (300 seconds), channel spelling and the existing
+add/part/join/purge/reconnect/rehash call sites are unchanged. Periodic timers do
+not use the countdown cancellation API. Existing case 388 now tests the actual
+component with an injected factory; UTF-8 assertions remain. Case 1311 adds actual
+Mediabot facade/native periodic integration; 1304 checks independent loading.
+Local component lane: 49 assertions passed. Target-host targeted/native and full
+suite acceptance is required before commit; no host result is inferred here.
+
+Next: review worker/final-exit ownership and select one bounded consumer before
+changing shutdown behavior. Async cancellation, child reaping and synchronous
+final exit must remain distinct; no universal stop-all coordinator is assumed.
 
 ## Rules for subsequent phases
 

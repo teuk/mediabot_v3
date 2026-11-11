@@ -22,126 +22,129 @@ use Encode qw(encode_utf8);
 my $case = sub {
     my ($assert) = @_;
 
-    # -------------------------------------------------------------------------
-    # B1 + B2 : simulation du lifecycle des timers nicklist
-    # -------------------------------------------------------------------------
-    # On modelise un mini-bot avec :
-    #   - {channels} : hash des canaux connus
-    #   - {channel_nicklist_timers} : hash des timers actifs
-    #   - setup_all : (re)cree un timer pour chaque canal
-    #   - stop_one  : arrete un timer specifique
-    my $make_bot = sub {
-        my $bot = {
-            channels => {},
-            channel_nicklist_timers => {},
+    require Mediabot::Channel::NicklistTimers;
+    {
+        package MB1218::Conf;
+        sub get { $_[0]{interval} }
+        package MB1218::Logger;
+        sub log { push @{$_[0]{messages}}, $_[2] }
+        package MB1218::Loop;
+        sub add {
+            my ($s,$t)=@_; $s->{timers}{$t}= $t;
+            my $hook=delete $s->{on_add}; $hook->($t) if $hook;
+            die $s->{add_error} if $s->{add_error};
+        }
+        sub remove {
+            my ($s,$t)=@_; $s->{removes}++;
+            my $hook=delete $s->{on_remove}; $hook->($t) if $hook;
+            die "remove failure\n" if $s->{fail_remove};
+            delete $s->{timers}{$t};
+        }
+        package MB1218::Timer;
+        sub start {
+            my ($s)=@_; $s->{starts}++;
+            my $hook=delete $s->{on_start}; $hook->($s) if $hook;
+            die $s->{start_error} if $s->{start_error};
+        }
+        sub stop { $_[0]{stops}++; die "stop failure\n" if $_[0]{fail_stop} }
+        package MB1218::Bot;
+        sub refresh_channel_nicklist { push @{$_[0]{wire}}, $_[1] }
+    }
+    my $new_bot=sub {
+        bless { conf=>bless({},'MB1218::Conf'), logger=>bless({},'MB1218::Logger'),
+            loop=>bless({},'MB1218::Loop'), channels=>{'#a'=>{}}, wire=>[] }, 'MB1218::Bot';
+    };
+    my $factory=sub { bless {@_}, 'MB1218::Timer' };
+    my $setup=sub { Mediabot::Channel::NicklistTimers::setup($_[0], $factory) };
+    my $one=\&Mediabot::Channel::NicklistTimers::stop_one;
+    my $all=\&Mediabot::Channel::NicklistTimers::stop_all;
+    {
+        my $b=$new_bot->(); $setup->($b);
+        my $t=$b->{channel_nicklist_timers}{'#a'}; my $tick=$t->{on_tick};
+        $assert->($t->{interval}==300 && $t->{first_interval}==300,'default interval and first interval preserved');
+        $tick->(); $assert->("@{$b->{wire}}" eq '#a','real owner tick refreshes its target');
+        $one->($b,'#a'); $tick->();
+        $assert->(@{$b->{wire}}==1 && $t->{stops}==1 && !keys %{$b->{loop}{timers}},'part retires callback and notifier');
+        $assert->(exists $b->{channels}{'#a'},'part retains configured channel');
+        $one->($b,'#a'); $assert->($t->{stops}==1,'repeated single retirement is inert');
+        $b->{channels}{'#b'}={}; $b->{conf}{interval}=17; $setup->($b);
+        $assert->(keys(%{$b->{channel_nicklist_timers}})==2 && $b->{channel_nicklist_timers}{'#b'}{interval}==17,'join/add rebuild both timers with configured interval');
+        delete $b->{channels}{'#a'}; $one->($b,'#a');
+        $assert->(exists $b->{channel_nicklist_timers}{'#b'} && !exists $b->{channel_nicklist_timers}{'#a'},'purge preserves other channel timer');
+        $all->($b); $all->($b);
+        $assert->(!keys(%{$b->{loop}{timers}}),'all retirement leaves no notifier');
+    }
+    for my $fault (qw(remove stop both)) {
+        my $b=$new_bot->(); $setup->($b);my $t=$b->{channel_nicklist_timers}{'#a'};
+        $b->{loop}{fail_remove}=($fault ne 'stop'); $t->{fail_stop}=($fault ne 'remove');
+        my $ok=$all->($b);$t->{on_tick}->();
+        $assert->(!$ok && $t->{stops}==1 && $b->{loop}{removes}==1,"$fault: both cleanup operations attempted and failure returned");
+        $assert->(!@{$b->{wire}} && !keys %{$b->{channel_nicklist_timers}},"$fault: callback revoked despite physical failure");
+        $assert->($b->{logger}{messages}[-1]=~/incomplete/,"$fault: no false success diagnostic");
+    }
+    for my $scope (qw(one all setup)) {
+        my $b=$new_bot->();$setup->($b);my $old=$b->{channel_nicklist_timers}{'#a'};
+        my $successor;
+        $b->{loop}{on_remove}=sub {
+            $b->{channels}{'#b'}={};$setup->($b);
+            $successor=$b->{channel_nicklist_timers}{'#a'};
+            $old->{on_tick}->();
         };
-        return $bot;
-    };
-
-    my $setup_all = sub {
-        my ($bot) = @_;
-        # Stop tous puis recreer
-        for my $k (keys %{ $bot->{channel_nicklist_timers} }) {
-            $bot->{channel_nicklist_timers}{$k} = undef;
-            delete $bot->{channel_nicklist_timers}{$k};
-        }
-        for my $name (keys %{ $bot->{channels} }) {
-            $bot->{channel_nicklist_timers}{$name} = { active => 1, channel => $name };
-        }
-    };
-
-    my $stop_one = sub {
-        my ($bot, $name) = @_;
-        delete $bot->{channel_nicklist_timers}{$name};
-        delete $bot->{channel_nicklist_timers}{lc($name)};
-    };
-
-    # === B1: addchan declenche setup ===
-    {
-        my $bot = $make_bot->();
-        $bot->{channels}{'#chanA'} = { id => 1 };
-        $setup_all->($bot);   # demarrage initial
-        $assert->(exists $bot->{channel_nicklist_timers}{'#chanA'},
-            "B1 setup initial : timer #chanA cree");
-
-        # Simulation: addchan #chanB → setup_all redeclenche
-        $bot->{channels}{'#chanB'} = { id => 2 };
-        $setup_all->($bot);
-        $assert->(exists $bot->{channel_nicklist_timers}{'#chanB'},
-            "B1 addchan #chanB → setup → timer cree");
-        $assert->(exists $bot->{channel_nicklist_timers}{'#chanA'},
-            "B1 #chanA toujours present apres setup");
-
-        # Verifier ce qu'il se serait passe SANS le fix
-        my $bot_no_fix = $make_bot->();
-        $bot_no_fix->{channels}{'#chanA'} = { id => 1 };
-        $setup_all->($bot_no_fix);
-        # addchan SANS appel setup_all
-        $bot_no_fix->{channels}{'#chanB'} = { id => 2 };
-        $assert->(!exists $bot_no_fix->{channel_nicklist_timers}{'#chanB'},
-            "B1 REGRESSION-POC: sans fix, #chanB n'a pas de timer");
+        $scope eq 'one' ? $one->($b,'#a') : $scope eq 'all' ? $all->($b) : $setup->($b);
+        $assert->($b->{channel_nicklist_timers}{'#a'}==$successor && exists $b->{channel_nicklist_timers}{'#b'},"$scope: reentrant successor registrations survive");
+        $assert->(!@{$b->{wire}},"$scope: old callback is inert during cleanup");
+        $successor->{on_tick}->();$assert->(@{$b->{wire}}==1,"$scope: successor remains usable");$all->($b);
     }
-
-    # === B2: purge arrete le timer ===
-    {
-        my $bot = $make_bot->();
-        $bot->{channels}{'#chanA'} = { id => 1 };
-        $bot->{channels}{'#chanB'} = { id => 2 };
-        $setup_all->($bot);
-
-        # Simulation purge #chanA
-        delete $bot->{channels}{'#chanA'};
-        $stop_one->($bot, '#chanA');
-
-        $assert->(!exists $bot->{channel_nicklist_timers}{'#chanA'},
-            "B2 purge #chanA → timer arrete");
-        $assert->( exists $bot->{channel_nicklist_timers}{'#chanB'},
-            "B2 timer #chanB preserve");
+    for my $stage (qw(add start)) {
+        my $b=$new_bot->();my ($old,$fresh);
+        my $hook=sub { $old=shift; $setup->($b); $fresh=$b->{channel_nicklist_timers}{'#a'} };
+        $b->{loop}{on_add}=$hook if $stage eq 'add';
+        my $f=sub { my $t=$factory->(@_); $t->{on_start}=$hook if $stage eq 'start'; $hook=undef if $stage eq 'start';return $t };
+        Mediabot::Channel::NicklistTimers::setup($b,$f);
+        $old->{on_tick}->();
+        $assert->($b->{channel_nicklist_timers}{'#a'}==$fresh && !@{$b->{wire}},"$stage: late setup cannot overwrite successor or send");
+        $assert->(!exists $b->{loop}{timers}{$old},"$stage: late old notifier removed");$all->($b);
     }
-
-    # === B2: part arrete le timer (canal reste configure) ===
-    {
-        my $bot = $make_bot->();
-        $bot->{channels}{'#chanA'} = { id => 1 };
-        $setup_all->($bot);
-        $assert->(exists $bot->{channel_nicklist_timers}{'#chanA'},
-            "B2 setup initial OK");
-
-        # part #chanA : canal reste configure mais timer stoppe
-        $stop_one->($bot, '#chanA');
-        $assert->(!exists $bot->{channel_nicklist_timers}{'#chanA'},
-            "B2 part #chanA → timer arrete (canal toujours dans channels)");
-        $assert->(exists $bot->{channels}{'#chanA'},
-            "B2 part ne supprime PAS le canal du registry");
-
-        # join #chanA : setup_all recree le timer
-        $setup_all->($bot);
-        $assert->(exists $bot->{channel_nicklist_timers}{'#chanA'},
-            "B2 join → setup → timer recree");
+    for my $stage (qw(add start)) {
+        my $b=$new_bot->();my $error=bless {},'MB1218::Error';my $t;
+        $b->{loop}{add_error}=$error if $stage eq 'add';
+        my $f=sub { $t=$factory->(@_);$t->{start_error}=$error if $stage eq 'start';return $t };
+        my $ok=eval { Mediabot::Channel::NicklistTimers::setup($b,$f);1 };my $got=$@;
+        $t->{on_tick}->();
+        $assert->(!$ok && ref($got) && $got==$error,"$stage failure: original exception identity retained");
+        $assert->(!keys(%{$b->{channel_nicklist_timers}}) && !keys(%{$b->{loop}{timers}}) && !@{$b->{wire}},"$stage failure: registry, notifier and callback retired");
     }
-
-    # === B2 lifecycle complet : addchan → part → join → purge ===
     {
-        my $bot = $make_bot->();
-        # addchan #X
-        $bot->{channels}{'#X'} = { id => 1 };
-        $setup_all->($bot);
-        $assert->(exists $bot->{channel_nicklist_timers}{'#X'}, "lifecycle: after addchan, timer exists");
-
-        # part #X
-        $stop_one->($bot, '#X');
-        $assert->(!exists $bot->{channel_nicklist_timers}{'#X'}, "lifecycle: after part, timer gone");
-        $assert->(exists $bot->{channels}{'#X'}, "lifecycle: after part, channel still registered");
-
-        # join #X
-        $setup_all->($bot);
-        $assert->(exists $bot->{channel_nicklist_timers}{'#X'}, "lifecycle: after join, timer back");
-
-        # purge #X
-        delete $bot->{channels}{'#X'};
-        $stop_one->($bot, '#X');
-        $assert->(!exists $bot->{channel_nicklist_timers}{'#X'}, "lifecycle: after purge, timer gone");
-        $assert->(!exists $bot->{channels}{'#X'}, "lifecycle: after purge, channel gone");
+        my $b=$new_bot->();my $error=bless {},'MB1218::Error';my $callback;
+        my $ok=eval { Mediabot::Channel::NicklistTimers::setup($b,sub {
+            my %args=@_;$callback=$args{on_tick};die $error;
+        });1 };my $got=$@;
+        $callback->();
+        $assert->(!$ok && ref($got) && $got==$error && !@{$b->{wire}},
+            'constructor failure preserves exception and revokes retained callback');
+    }
+    {
+        my $b=$new_bot->();my $old;my $fresh;my $error=bless {},'MB1218::Error';
+        $b->{loop}{on_add}=sub {
+            $old=shift;$setup->($b);$fresh=$b->{channel_nicklist_timers}{'#a'};die $error;
+        };
+        my $ok=eval {$setup->($b);1};my $got=$@;$old->{on_tick}->();
+        $assert->(!$ok && ref($got) && $got==$error && $b->{channel_nicklist_timers}{'#a'}==$fresh,
+            'late failed setup preserves successor and original exception');
+        $assert->(!@{$b->{wire}} && !exists $b->{loop}{timers}{$old},'late failed setup retires only the old notifier');
+        $all->($b);
+    }
+    {
+        require Scalar::Util;
+        my $b=$new_bot->();$setup->($b);my $tick=$b->{channel_nicklist_timers}{'#a'}{on_tick};
+        my $weak_bot=$b;Scalar::Util::weaken($weak_bot);
+        my $weak_loop=$b->{loop};Scalar::Util::weaken($weak_loop);
+        $all->($b);undef $b;$tick->();
+        $assert->(!defined($weak_bot) && !defined($weak_loop),'retained retired callback retains neither bot nor loop');
+    }
+    for my $interval (0,-1,'bad','',undef) {
+        my $b=$new_bot->();$b->{conf}{interval}=$interval;$setup->($b);
+        $assert->($b->{channel_nicklist_timers}{'#a'}{interval}==300,'invalid interval retains historical default');$all->($b);
     }
 
     # -------------------------------------------------------------------------

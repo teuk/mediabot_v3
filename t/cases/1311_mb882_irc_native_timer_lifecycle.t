@@ -338,4 +338,40 @@ MB881OutputFixture::with_policy(sub {
     is(timer_count($bot->{loop}), 0, 'successor completes without leaking a notifier');
 });
 
+# MB1218: actual Mediabot facades with a native periodic notifier.
+{
+    package MB1218::NativeConf;
+    sub get { 300 }
+    package MB1218::NativeLog;
+    sub log { 1 }
+}
+{
+    my $loop = IO::Async::Loop->really_new;
+    my $bot = bless {loop=>$loop, conf=>bless({},'MB1218::NativeConf'),
+        logger=>bless({},'MB1218::NativeLog'), channels=>{'#test'=>{}}}, 'Mediabot';
+    my @names;
+    local *Mediabot::refresh_channel_nicklist = sub {push @names,$_[1]};
+    $bot->setup_channel_nicklist_timers;
+    my $timer = $bot->{channel_nicklist_timers}{'#test'};
+    ok($timer->isa('IO::Async::Timer::Periodic') && $timer->is_running,
+        'nicklist facade arms a real periodic timer');
+    my $callback = $timer->{on_tick};
+    $timer->stop;
+    $timer->configure(first_interval=>0);
+    $timer->start;
+    $loop->loop_once(0.01);
+    is_deeply(\@names,['#test'],'native periodic expiry invokes actual owner callback');
+    is($bot->stop_channel_nicklist_timer('#test'),1,'single facade retires native timer');
+    ok(!$timer->is_running && !grep({$_ == $timer} $loop->notifiers),
+        'native periodic timer is stopped and detached');
+    $callback->();
+    is_deeply(\@names,['#test'],'retained native tick cannot refresh retired channel');
+    $bot->setup_channel_nicklist_timers;
+    is($bot->stop_all_channel_nicklist_timers,1,'all facade retires native successor');
+    is(scalar(grep {$_->isa('IO::Async::Timer::Periodic')} $loop->notifiers),0,
+        'native loop has no remaining nicklist notifier');
+    my $weak_bot=$bot;weaken($weak_bot);undef $bot;
+    ok(!defined $weak_bot,'retained old callback does not retain bot');
+}
+
 done_testing;
