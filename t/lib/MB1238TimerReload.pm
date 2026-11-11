@@ -9,6 +9,10 @@ use Mediabot::DBCommands;
 {
     package MB1238TimerReload::Bot;
     our @ISA = ('Mediabot::DBCommands');
+    sub botNotice { 1 }
+    package MB1238TimerReload::Owner;
+    sub has_level { 1 }
+    sub is_authenticated { 1 }
     package MB1238TimerReload::IRC;
     sub is_connected { 1 }
     sub write { push @{$_[0]{wire}}, $_[1]; 1 }
@@ -119,6 +123,80 @@ sub check {
             $bot->_stop_all_runtime_db_timers;
             # Also clean leaked baseline notifiers so the reproduction is isolated.
             for my $t ($old, @created) { $stop->($t); $remove->($loop,$t) if $t->loop }
+            $dbh->disconnect;
+        }
+    }
+}
+# Run in case 403's native child, alongside the reload ownership scenarios.
+sub check_tick {
+    my ($assert) = @_;
+    require Mediabot::Context;
+    for my $entry (qw(reload add)) {
+        for my $event (qw(normal replace same empty stop failed throw)) {
+            my $label = "MB1239 $entry/$event";
+            my $dbh = DBI->connect('dbi:SQLite:dbname=:memory:', '', '',
+                {RaiseError=>1, PrintError=>0});
+            $dbh->do('CREATE TABLE TIMERS (id_timers INTEGER PRIMARY KEY, name TEXT, duration INTEGER, command TEXT)');
+            my $loop = IO::Async::Loop->really_new;
+            my $bot = bless {dbh=>$dbh, loop=>$loop, hTimers=>{},
+                irc=>bless({wire=>[]}, 'MB1238TimerReload::IRC')}, 'MB1238TimerReload::Bot';
+            my $command = 'PRIVMSG #offline :original';
+            my $loaded;
+            if ($entry eq 'reload') {
+                $dbh->do('INSERT INTO TIMERS VALUES (1, ?, 3600, ?)', undef, 'alpha', $command);
+                $loaded = $bot->onStartTimers;
+            }
+            else {
+                my $ctx = Mediabot::Context->new(bot=>$bot, nick=>'Owner',
+                    command=>'addtimer', args=>['alpha',3600,split / /,$command]);
+                $ctx->{user}=bless {}, 'MB1238TimerReload::Owner';
+                $ctx->{_user_fetched}=1;
+                no warnings 'redefine';
+                local *Mediabot::DBCommands::logBot = sub {1};
+                $loaded = Mediabot::DBCommands::mbAddTimer_ctx($ctx);
+            }
+            $assert->($loaded==1, "$label native timer published");
+            my $old = $bot->{hTimers}{alpha};
+            my ($logged,$reload_result) = (0);
+            my $exception = bless {}, 'MB1238TimerReload::Exception';
+            $bot->{logger} = bless {hook=>sub {
+                return unless $_[1]==4;
+                return if $logged++;
+                if ($event eq 'throw') { die $exception }
+                if ($event eq 'stop') { $bot->_stop_all_runtime_db_timers; return }
+                return if $event eq 'normal';
+                $dbh->do('UPDATE TIMERS SET command=?',undef,'PRIVMSG #offline :replacement') if $event eq 'replace';
+                $dbh->do('DELETE FROM TIMERS') if $event eq 'empty';
+                $dbh->do('ALTER TABLE TIMERS RENAME TO unavailable') if $event eq 'failed';
+                $reload_result=$bot->onStartTimers;
+                $dbh->do('ALTER TABLE unavailable RENAME TO TIMERS') if $event eq 'failed';
+            }}, 'MB1238TimerReload::Log';
+            my $ok = eval { $old->invoke_event('on_tick'); 1 };
+            my $err=$@;
+            $assert->($event eq 'throw' ? ref($err) && refaddr($err)==refaddr($exception) : $ok,
+                "$label logging exception contract preserved");
+            my $kept = $event eq 'normal' || $event eq 'failed';
+            $assert->(join('',@{$bot->{irc}{wire}}) eq ($kept ? "$command\r\n" : ''),
+                "$label no revoked command crosses the logging boundary");
+            my $current = $bot->{hTimers}{alpha};
+            my $replaced = $event eq 'replace' || $event eq 'same';
+            $assert->($replaced ? $current && refaddr($current)!=refaddr($old)
+                : ($event eq 'empty' || $event eq 'stop') ? !$current
+                : $current && refaddr($current)==refaddr($old), "$label exact publication identity");
+            $assert->($event eq 'normal' || $event eq 'stop' || $event eq 'throw'
+                || (defined($reload_result) && $reload_result==($replaced?1:0)), "$label nested reload outcome");
+            delete $bot->{logger};
+            @{$bot->{irc}{wire}}=();
+            $old->invoke_event('on_tick');
+            $assert->(join('',@{$bot->{irc}{wire}}) eq (($kept || $event eq 'throw') ? "$command\r\n" : ''),
+                "$label retained callback follows current ownership");
+            if ($replaced) {
+                $current->invoke_event('on_tick');
+                my $expected = $event eq 'replace' ? 'PRIVMSG #offline :replacement' : $command;
+                $assert->(join('',@{$bot->{irc}{wire}}) eq "$expected\r\n", "$label replacement sends once");
+            }
+            $bot->_stop_all_runtime_db_timers;
+            $assert->(!scalar($loop->notifiers), "$label timers fully detached");
             $dbh->disconnect;
         }
     }

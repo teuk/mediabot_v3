@@ -205,6 +205,7 @@ sub run {
 my %out;
 require MB1238TimerReload;
 MB1238TimerReload::check(sub { push @{$out{reload}}, [$_[0] ? 1 : 0, $_[1]] });
+MB1238TimerReload::check_tick(sub { push @{$out{reload}}, [$_[0] ? 1 : 0, $_[1]] });
 for my $entry (qw(module facade)) {
     for my $stage (qw(add-before add-after start-before start-after)) {
         for my $at (1..3) {

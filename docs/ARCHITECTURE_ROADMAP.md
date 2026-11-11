@@ -15,7 +15,7 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are implemented and committed; broader phase C remains open. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; see MB1238 below for the DB timer publication fix (host acceptance pending). |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation prepared below (host acceptance pending). |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
@@ -1023,3 +1023,34 @@ Next review: timer tick callbacks check ownership before logging, then write.
 Investigate replacement during that log callback using retained native ticks;
 do not assume a defect or expand final-exit handling without reproduction.
 Broader phases B/C/D and generic-worker exit coordination remain open.
+
+
+## MB1239 — Timer authority after logging
+
+Base: MB1238 R2 commit `35bdd3b4579b42ac3654525998a21ad29f66f3d8`, verified on
+GitHub and matching tracked files in the supplied 21:23:32 snapshot. R2 confines
+native timer scenarios to case 403's existing child and preserves unrelated
+loop handles. This confirms the committed revision, not an unseen full-suite
+acceptance transcript.
+
+The selected tick-time hypothesis is reproduced in both onStartTimers and
+mbAddTimer_ctx callbacks: logging can synchronously replace or retire a timer,
+yet its already-running callback still sends the old command. Eight of 102 new
+native assertions fail on the base. The fix rechecks exact hTimers identity
+after logging, before entering the existing guarded IRC writer. It does not
+retry a command or execute the replacement timer early. A failed reload leaves
+the same timer authorized; logger exceptions retain their original identity.
+
+The existing native fixture now covers both entry points, normal delivery,
+replacement (including identical name and command), empty reload, explicit
+retirement, failed DB read, throwing logger and retained stale ticks. All 390
+reload/tick assertions pass locally, as do 65 assertions in five adjacent cases.
+Case 403 remains in its native child; no extra process, sleep or historical
+case file. Full case 403/XAUTH integration requires the host's full-bot
+dependencies and the complete host suite remains mandatory before commit.
+
+This closes the two selected DB-timer reentrancy gaps, not a universal resource
+lifecycle audit. Next checkpoint: review remaining phase B Helpers dependencies
+and select one bounded boundary with existing behavioral tests. Keep arbitrary
+operator mutation during setup and generic-worker final-exit coordination as
+separate open questions; do not broaden this tick fix into a timer framework.

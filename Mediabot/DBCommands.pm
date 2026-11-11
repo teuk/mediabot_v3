@@ -198,6 +198,10 @@ sub onStartTimers {
                     $bot->{logger}->log(4, "Timer every $duration seconds : $command")
                         if $bot->{logger};
 
+                    # Logging can synchronously reload or retire this timer.
+                    $current = $bot->{hTimers}{$name} or return;
+                    return unless refaddr($current) == refaddr($owned);
+
                     # mb369-B1: écriture via le helper qui refuse CR/LF/NUL.
                     $bot->_timer_irc_write($command, $name);
                 },
@@ -459,6 +463,9 @@ sub mbAddTimer_ctx {
                 return unless refaddr($current) == refaddr($owned);
                 $bot->{logger}->log(4, "Timer [$name] tick: $cmd")
                     if $bot->{logger};
+                # Logging can synchronously reload or retire this timer.
+                $current = $bot->{hTimers}{$name} or return;
+                return unless refaddr($current) == refaddr($owned);
                 # mb369-B1: refuse CR/LF/NUL at the actual IRC boundary.
                 $bot->_timer_irc_write($cmd, $name);
             },

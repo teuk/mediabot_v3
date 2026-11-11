@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1239 — Recheck timer ownership after tick logging
+
+- Revalidate exact published timer identity after the logger returns in both
+  startup/reload and addtimer callbacks. A synchronous replacement, empty reload
+  or retirement can no longer leak the old command through that callback.
+- Preserve current-timer delivery after failed reloads and preserve logger
+  exception identity. Wire validation and command authorization are unchanged.
+- Extend case 403's existing native child and fixture; no extra test process,
+  test case file or sleep. Include equal-name/equal-command replacements.
+
 ### MB1238 — Preserve newer DB timer publications
 
 - Prevent an older onStartTimers attempt from retiring or overwriting a timer
