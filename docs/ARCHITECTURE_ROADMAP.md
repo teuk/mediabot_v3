@@ -14,16 +14,15 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
-| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read implemented, host acceptance pending. |
+| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). The antifloodset pilot is implemented; broader phase C remains open. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; see the MB1231 checkpoint below. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
-| Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
+| Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1233 implements the operator flood-rule display
-read after MB1232 (`cdbdbee6`, committed). Host acceptance of MB1233 remains
-pending. The selected antifloodset read/write boundary is implemented; review
-remaining channel data-access callers before widening the pilot. Preserve their
-individual query, error and cleanup contracts rather than merging by table name.
+Current continuation point: MB1234 checkpoints the completed antifloodset
+read/write pilot and selects the outgoing badword reader as the next bounded
+phase C increment. See [MB1234 checkpoint](#mb1234--channel-data-access-checkpoint).
+Keep its last-confirmed-rules policy separate from AntiFlood admission fallback.
 Earlier “Next” paragraphs are historical decisions, not current instructions.
 
 ## Phase A / MB1208
@@ -810,3 +809,66 @@ After acceptance, checkpoint the bounded channel data-access pilot: antifloodset
 read/write now have an explicit owner, but other channel info/chanset queries and
 broader Helpers boundaries remain. Select further work from inspected call sites;
 do not claim all phase C complete or automatically move every SQL statement.
+
+## MB1234 — channel data-access checkpoint
+
+Reviewed base `7b4785676667d3111fdca084b2a8137531f69eb8` (MB1233 on
+origin/master), matched against `snap_mediabot_v3_teuk_20261111_194142.zip`.
+MB1232 and MB1233 are committed; missing detailed host test reports are not
+reconstructed from those commits. This delivery changes documentation only.
+
+### Boundaries now present and still open
+
+| Caller / source | Current boundary | Decision |
+| --- | --- | --- |
+| [OutputPolicy](../Mediabot/IRC/OutputPolicy.pm), `checkAntiFlood` | FloodRules ID reader; policy owns defaults/cache/admission fallback. | Retain existing MB1210 contract. |
+| [ChannelCommands](../Mediabot/ChannelCommands.pm), `setChannelAntiFloodParams_ctx` | FloodRules UPDATE and display JOIN; command owns permissions, diagnostics, replies and statement finish. | Bounded pilot implemented in MB1232–1233. |
+| ChannelCommands, `userChannelInfo_ctx` | Separate ID query including notification and LIMIT 1. | Defer; neither admission nor display reader is an interchangeable replacement. |
+| [Helpers](../Mediabot/Helpers.pm), `setChannelAntiFlood` | Chanset bootstrap SELECT/INSERT/re-read plus notices and insert ID. | Defer as a separate mutation contract; do not turn the UPDATE into an upsert. |
+| [Sender](../Mediabot/IRC/Sender.pm), `_badwords_for_channel` | SQL/fetch/validation mixed with cache, diagnostics and fallback in IRC transport. | Selected next: extract only its complete database read. |
+
+The next boundary is selected for its transport/data-access separation and
+existing native fault coverage, not because this review establishes a new bug.
+Do not chase every CHANNEL_FLOOD statement merely to make the table appear in
+one file. Phases B/C remain incremental; phase D's generic worker final-exit and
+DB timer questions remain open review candidates, not confirmed resource leaks.
+The bounded A/E pilots and plugin-job ownership work remain delivered.
+
+### Next implementation: outgoing badword read
+
+Introduce a small channel-domain reader receiving a DBI-compatible handle and
+the original target name. Move the existing SELECT/JOIN, fetch loop, row/value
+validation and statement cleanup there. Return a complete list or explicit
+failure; never expose a partial list as successful data. It must not depend on
+Helpers, the bot, IRC transport, logger, metrics, clock or a new cache.
+
+Retain `_badwords_for_channel` as the policy owner: lower-case cache identity,
+original SQL bind/wire target, current 300-second freshness boundary, and shared
+PRIVMSG/ACTION behavior. On failure keep the old list AND its original age,
+retry on the next expired lookup, and keep initial diagnostic-and-send behavior
+when there is no confirmed cache. A successful empty list is valid cache data.
+Do not borrow AntiFlood's global-only fallback or its negative-cache policy.
+
+Preserve these observed database semantics before considering improvements:
+
+- False prepare/execute, thrown operations, invalid rows/reference values and
+  a fetch error after partial rows fail the whole read.
+- Undefined word values are skipped; ordinary scalar words retain current `lc`
+  normalization, ordering and duplicates. No new regex or Unicode folding rule.
+- Capture complete-read success before finish, which can clear driver errors.
+  Attempt finish for an acquired statement; a finish exception is currently
+  contained and does not turn a completed read into failure.
+- Keep the existing diagnostic and query-error metric at the policy boundary;
+  logger/metric failures remain contained. Do not leak database details to IRC.
+
+Extend [native output case 1306](../t/cases/1306_mb881_irc_output_policy.t)
+and its existing fixtures. Preserve RaiseError 0/1, partial-fetch failure,
+empty-list recovery, exact TTL boundary, mixed-case cache identity, unrelated
+channel isolation, add/remove invalidation and unchanged wire/history targets.
+Add direct reader checks only where native coverage cannot observe the contract.
+Run the targeted output/command lane, then the full suite once before commit.
+The new reader should load without pulling in the bot or transport graph.
+
+MB1234 validation is documentation links/source symbols and guarded patch flow;
+no bot test suite is needed for these documentation-only edits. The reader
+extraction is the next implementation, not a runtime change in this checkpoint.

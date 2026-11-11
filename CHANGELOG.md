@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1234 — Checkpoint channel data-access boundaries
+
+- Record the committed antifloodset pilot and distinguish the remaining chaninfo
+  and chanset bootstrap queries from its read/write contracts.
+- Select the outgoing badword reader next, preserving complete-read validation,
+  last-confirmed cache policy and native failure coverage.
+- Documentation only; no runtime, schema, configuration or service change.
+
 ### MB1233 — Isolate the operator flood-rule display read
 
 - Move antifloodset's name-based JOIN into Channel::FloodRules::read_for_display,

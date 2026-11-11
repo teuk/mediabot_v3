@@ -1,13 +1,14 @@
 # Runtime resource ownership — phase D inventory
 
-Current checkpoint: MB1231, reviewed at MB1230 commit
-`9508ecbf31e5993bba0430e32ac99b061263e987` against the supplied 19:01 snapshot.
-Connection output, nicklist, achievement/archive collection and plugin-job
-ownership/recovery increments are implemented and committed. Detailed missing
-host reports are not reconstructed from commits.
+Current continuation checkpoint: MB1234, reviewed at MB1233 commit
+`7b4785676667d3111fdca084b2a8137531f69eb8` against the supplied 19:41 snapshot.
+The phase D inventory and its implemented ownership increments remain unchanged;
+this checkpoint does not constitute a new audit of every resource family.
+Detailed missing host reports are not reconstructed from commits.
 
-Next implementation returns to the channel-rule write boundary; see
-[the current roadmap](ARCHITECTURE_ROADMAP.md#mb1231--checkpoint-and-channel-rule-write-boundary).
+The antifloodset data-access pilot is committed. Next implementation isolates the
+outgoing badword database read; see
+[the current roadmap](ARCHITECTURE_ROADMAP.md#mb1234--channel-data-access-checkpoint).
 Generic-worker final-exit coordination and DB timer cleanup remain separate
 review candidates; neither is automatically the next migration.
 This is a bounded inventory, not a universal cleanup API or a claim that all
