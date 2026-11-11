@@ -19,10 +19,10 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1235 implements the complete outgoing badword
-reader selected in MB1234. Host acceptance remains pending. Sender retains cache
-and fallback policy; command writes/invalidation are unchanged. Review that
-command boundary next before extending the channel-domain component.
+Current continuation point: MB1236 implements badword command data access after
+MB1235 (`043310dd`, committed). Host acceptance remains pending. Read and write SQL
+now have a channel-domain owner; cache, permissions and presentation remain with
+their existing callers. Checkpoint this pilot before selecting another family.
 Earlier “Next” paragraphs are historical decisions, not current instructions.
 
 ## Phase A / MB1208
@@ -901,3 +901,33 @@ Full host acceptance and commit/push are pending at package preparation.
 Next: review add/remove command data access and its no-op/invalidation semantics
 before moving writes; do not change storage collation, matching, TTL or fail-open
 versus confirmed-rule behavior as a side effect. Phase C remains incremental.
+
+## MB1236 — badword command data access
+
+Base `043310dd85bc12f11b552015d8e0f8706dabdd88` (MB1235 on origin/master),
+matched against `snap_mediabot_v3_teuk_20261111_200023.zip` for changed inputs.
+MB1235 is committed; no detailed host assertion total is inferred from its commit.
+
+Channel::Badwords now owns the exact add/remove lookup queries, INSERT and DELETE.
+The command-specific functions return DBI result, statement and original SQL for
+existing diagnostics. Their private executor is local to this domain, not a new
+generic database abstraction. Exceptions and DBI 0E0 truth remain unchanged.
+
+Commands still own fetch/finish sequencing, authorization, raw-word normalization,
+no-op replies and audit messages. Existing add no-op replies/audits before finish;
+remove no-op finishes before replying. Mutation success invalidates lower-case,
+canonical and typed cache keys before reply/audit/finish, as before. A finish or
+notice exception after mutation does not undo the already-completed invalidation.
+No new transaction, upsert, retry, row-count interpretation or collation change.
+The outgoing reader and last-confirmed cache policy are unchanged.
+
+Existing MB881 fixture gains 134 command assertions, passing on the old handlers
+before extraction and the new ones afterwards. Together with MB1235's 146 read
+checks, the offline/native shared fixture has 280 assertions. Case 1306 runs both;
+no new historical test file is added. Full native integration still requires bot
+dependencies absent locally and remains mandatory on the host before commit.
+
+Next: checkpoint the channel badword pilot after acceptance. The read/write SQL
+boundary is implemented; do not merge command ownership or cache policies simply
+because they share the table. Reassess the remaining B/C and D priorities before
+starting another family. Full host acceptance and commit remain pending here.

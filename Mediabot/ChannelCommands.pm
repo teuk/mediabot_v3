@@ -24,6 +24,7 @@ use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
 use Mediabot::Channel::FloodRules ();
+use Mediabot::Channel::Badwords ();
 use Mediabot::DynamicTemplate qw(normalize_name);
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
@@ -3683,10 +3684,9 @@ sub channelAddBadword_ctx {
     my $canon_chan = eval { $channel_obj->get_name } || $chan;
 
     # Already exists?
-    my $sth = $self->{dbh}->prepare(
-        "SELECT id_badwords, badword FROM BADWORDS WHERE id_channel=? AND badword=?"
-    );
-    unless ($sth && $sth->execute($id_channel, $badword)) {
+    my $result = Mediabot::Channel::Badwords::find_for_add($self->{dbh}, $id_channel, $badword);
+    my $sth = $result->{statement};
+    unless ($result->{ok}) {
         $self->{logger}->log(1, "channelAddBadword_ctx() SQL Error: $DBI::errstr");
         $sth->finish if $sth;
         return;
@@ -3706,8 +3706,9 @@ sub channelAddBadword_ctx {
     $sth->finish;
 
     # Insert
-    $sth = $self->{dbh}->prepare("INSERT INTO BADWORDS (id_channel, badword) VALUES (?, ?)");
-    unless ($sth && $sth->execute($id_channel, $badword)) {
+    $result = Mediabot::Channel::Badwords::insert($self->{dbh}, $id_channel, $badword);
+    $sth = $result->{statement};
+    unless ($result->{ok}) {
         $self->{logger}->log(1, "channelAddBadword_ctx() SQL Error: $DBI::errstr");
         $sth->finish if $sth;
         return;
@@ -3796,9 +3797,10 @@ sub channelRemBadword_ctx {
     }
 
     # Find badword id
-    my $sql_sel = "SELECT id_badwords FROM BADWORDS WHERE id_channel = ? AND badword = ?";
-    my $sth = $self->{dbh}->prepare($sql_sel);
-    unless ($sth && $sth->execute($id_channel, $badword)) {
+    my $result = Mediabot::Channel::Badwords::find_for_remove($self->{dbh}, $id_channel, $badword);
+    my $sql_sel = $result->{sql};
+    my $sth = $result->{statement};
+    unless ($result->{ok}) {
         $self->{logger}->log(1, "channelRemBadword_ctx() SQL Error: $DBI::errstr Query: $sql_sel");
         $sth->finish if $sth;
         return;
@@ -3815,9 +3817,10 @@ sub channelRemBadword_ctx {
     my $id_badwords = $ref->{id_badwords};
 
     # Delete
-    my $sql_del = "DELETE FROM BADWORDS WHERE id_badwords = ?";
-    $sth = $self->{dbh}->prepare($sql_del);
-    unless ($sth && $sth->execute($id_badwords)) {
+    $result = Mediabot::Channel::Badwords::delete_by_id($self->{dbh}, $id_badwords);
+    my $sql_del = $result->{sql};
+    $sth = $result->{statement};
+    unless ($result->{ok}) {
         $self->{logger}->log(1, "channelRemBadword_ctx() SQL Error: $DBI::errstr Query: $sql_del");
         $sth->finish if $sth;
         return;

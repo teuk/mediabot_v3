@@ -25,6 +25,7 @@ use Mediabot::Context ();
 use Mediabot::Channel ();
 use MB881OutputFixture;
 MB881OutputFixture::check_badword_read_contracts();
+MB881OutputFixture::check_badword_write_contracts();
 
 my @warnings_1073;
 local $SIG{__WARN__}=sub {push @warnings_1073,@_};

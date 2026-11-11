@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1236 — Isolate badword command database operations
+
+- Move add/remove lookups, INSERT and DELETE into Channel::Badwords with exact
+  SQL/binds and explicit statement handoff to the command handlers.
+- Keep authorization, normalization, no-op responses, audit/finish order and
+  successful-mutation cache invalidation in ChannelCommands.
+- Extend existing native fixtures for failures, exceptions and DBI 0E0; no schema,
+  transaction, collation, command behavior or new historical test file change.
+
 ### MB1235 — Isolate complete outgoing badword reads
 
 - Move SQL, fetch validation and statement cleanup from IRC::Sender into

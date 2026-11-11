@@ -28,4 +28,36 @@ sub read {
     return $complete ? { status => 'ok', words => \@words } : { status => 'error' };
 }
 
+# Command operations hand the statement back: fetch/finish, diagnostics, notices
+# and cache invalidation have different ordering in add and remove handlers.
+# Exceptions propagate and DBI truth (including 0E0) is not normalized by rows.
+sub _execute_command {
+    my ($dbh, $sql, @bind) = @_;
+    my $sth = $dbh->prepare($sql);
+    my $ok = $sth && $sth->execute(@bind);
+    return { ok => $ok, statement => $sth, sql => $sql };
+}
+sub find_for_add {
+    my ($dbh, $id_channel, $word) = @_;
+    return _execute_command($dbh,
+        "SELECT id_badwords, badword FROM BADWORDS WHERE id_channel=? AND badword=?",
+        $id_channel, $word);
+}
+sub find_for_remove {
+    my ($dbh, $id_channel, $word) = @_;
+    return _execute_command($dbh,
+        "SELECT id_badwords FROM BADWORDS WHERE id_channel = ? AND badword = ?",
+        $id_channel, $word);
+}
+sub insert {
+    my ($dbh, $id_channel, $word) = @_;
+    return _execute_command($dbh,
+        "INSERT INTO BADWORDS (id_channel, badword) VALUES (?, ?)", $id_channel, $word);
+}
+sub delete_by_id {
+    my ($dbh, $id_badwords) = @_;
+    return _execute_command($dbh,
+        "DELETE FROM BADWORDS WHERE id_badwords = ?", $id_badwords);
+}
+
 1;
