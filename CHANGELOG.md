@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1231 — Checkpoint the architecture roadmap after plugin ownership
+
+- Record the committed plugin-job boundary and distinguish remaining phase D
+  review questions from confirmed defects.
+- Select the bounded channel flood-rule UPDATE extraction next, preserving
+  authorization, DBI failure semantics, cache invalidation and wire responses.
+- Documentation only; no runtime, schema, configuration or service change.
+
 ### MB1230 — Bind plugin jobs to exact Scheduler registrations
 
 - Capture the Scheduler instance and callback registration ID at mount; start,

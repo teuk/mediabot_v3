@@ -15,15 +15,15 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Phase D remains open; current priorities are in the MB1227 checkpoint below. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; see the MB1231 checkpoint below. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
-Current continuation point: MB1230 implements exact plugin-job ownership and
-mount rollback after MB1228/MB1229. Host acceptance is pending; checkpoint the
-remaining phases before choosing another runtime family. Overall scope: [MB1227 checkpoint](#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
-Earlier “Next” paragraphs record decisions at their original increment; they do
-not override this checkpoint.
+Current continuation point: MB1231 reviews the remaining boundaries after
+MB1230, committed/pushed as `9508ecbf`. The next implementation is the bounded
+channel flood-rule write boundary, with command authorization and cache
+invalidation retained at the command layer. See [MB1231 checkpoint](#mb1231--checkpoint-and-channel-rule-write-boundary).
+Earlier “Next” paragraphs are historical decisions, not current instructions.
 
 ## Phase A / MB1208
 
@@ -697,3 +697,53 @@ in MB1227, subject to host acceptance. It does not complete all phase D. Next:
 checkpoint remaining generic-worker/final-exit questions and phases B/C data
 access responsibilities before selecting another family. Do not append another
 shutdown migration automatically or introduce a universal resource framework.
+
+## MB1231 — checkpoint and channel rule write boundary
+
+Reviewed base `9508ecbf31e5993bba0430e32ac99b061263e987` and supplied snapshot
+`snap_mediabot_v3_teuk_20261111_190100.zip`. MB1230 is now committed on
+origin/master. Its full host test totals are not supplied here and are not
+inferred from that commit. Earlier pending-acceptance notes describe delivery time.
+
+| Area | State after review | Next decision |
+| --- | --- | --- |
+| A / Partyline | Plugin administration extraction delivered. | No further split without a concrete boundary and tests. |
+| B / Helpers | Output admission delegated; broader responsibilities remain. | Preserve compatibility delegates; do not split by file size alone. |
+| C / channel rules | Reader extracted; command still owns UPDATE and cache invalidation. | Selected next: isolate the UPDATE behind the existing domain module. |
+| D / ownership | Connection output, nicklist, achievement/archive and plugin-job increments delivered. | Generic worker final-exit coordination and DB timer cleanup remain review candidates, not established leaks. |
+| E / PluginManager | Persistence/diagnostics extracted; lifecycle authority retained. | Keep exact registration ownership and incomplete-unload recovery together. |
+
+### Selected next increment: flood-rule UPDATE only
+
+Source: [ChannelCommands](../Mediabot/ChannelCommands.pm),
+`setChannelAntiFloodParams_ctx`, and [FloodRules](../Mediabot/Channel/FloodRules.pm),
+`read`. Extract only the UPDATE into this existing data-access component. It
+receives a DBI-compatible handle, channel ID and raw validated values; no bot,
+transport, logger, clock or cache. Characterize behavior before choosing its
+result shape; distinguish prepare failure from execute failure for diagnostics.
+This is a structural change, not a newly demonstrated production bug.
+
+Keep Master authorization, channel resolution, argument validation, AntiFlood
+chanset gates and exact replies in the command. Keep invalidation of `_af_params`
+and `_chan_flood_conf` for canonical and requested spellings there, after the
+same successful execute/finish boundary. No new cache, normalization, transaction,
+row creation, schema change or automatic retry is part of this increment.
+
+Preserve DBI truth semantics including `0E0`, bind order, finish call order,
+exception identity and failure diagnostics. Failed prepare/execute must not
+invalidate caches or emit success; a thrown finish must not silently become
+success. Do not fix input edge cases or zero-row semantics incidentally.
+The no-argument display JOIN by channel name is a separate read contract; leave
+it intact. Admission reader failure policy remains unchanged.
+
+Extend existing [case 398](../t/cases/398_mb162_badword_and_afparams_cache_invalidation.t)
+with actual component/command behavior, not just source-string checks. Cover
+success, false prepare/execute, thrown DBI operations, `0E0`, cache-key isolation,
+permission/validation refusals and unchanged display behavior. Keep reader and
+admission cases 627/337 and native command routing in targeted acceptance, then
+run the full suite once before the runtime commit. Avoid another historical
+case file merely for this extraction.
+
+MB1231 itself changes documentation only. Validate relative links, reviewed
+symbols and the guarded patch/commit workflow; no runtime suite is needed for
+this checkpoint. The write extraction is planned, not implemented by MB1231.
