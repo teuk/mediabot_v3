@@ -19,10 +19,10 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1234 checkpoints the completed antifloodset
-read/write pilot and selects the outgoing badword reader as the next bounded
-phase C increment. See [MB1234 checkpoint](#mb1234--channel-data-access-checkpoint).
-Keep its last-confirmed-rules policy separate from AntiFlood admission fallback.
+Current continuation point: MB1235 implements the complete outgoing badword
+reader selected in MB1234. Host acceptance remains pending. Sender retains cache
+and fallback policy; command writes/invalidation are unchanged. Review that
+command boundary next before extending the channel-domain component.
 Earlier “Next” paragraphs are historical decisions, not current instructions.
 
 ## Phase A / MB1208
@@ -872,3 +872,32 @@ The new reader should load without pulling in the bot or transport graph.
 MB1234 validation is documentation links/source symbols and guarded patch flow;
 no bot test suite is needed for these documentation-only edits. The reader
 extraction is the next implementation, not a runtime change in this checkpoint.
+
+## MB1235 — complete outgoing badword reads
+
+Base `289e8487ae9d2e30fc87910cea6422d6203f99d4` (MB1234 on origin/master).
+No newer snapshot was supplied; tracked inputs come exclusively from this Git
+revision. The existing commit.sh hash guard is retained from the last supplied
+snapshot, not reconstructed from GitHub.
+
+`Channel::Badwords::read` owns the unchanged query, literal target bind, fetch
+validation, lower-case scalar list and finish attempt. It returns only a complete
+successful list (including an empty list) or explicit failure without partial
+words. It has no bot, cache, clock, logger or transport dependency.
+
+Sender retains the current 300-second freshness rule, lower-case cache identity,
+original query/wire target, last-confirmed words and age after failure, initial
+empty fallback, retry and existing diagnostic/metric behavior. Successful read
+status is still captured before finish; finish exceptions remain contained and do
+not invalidate a completed read. No command write or invalidation code changes.
+
+The existing MB881 fixture now has 146 fault/policy assertions that passed against
+Sender before extraction and after it. Existing case 1306 invokes these checks;
+o new historical case file is introduced. Existing case 1304 verifies cold module
+loading without Helpers or provider dependencies. The full native case 1306 needs
+full bot dependencies absent locally and remains required on the target host.
+Full host acceptance and commit/push are pending at package preparation.
+
+Next: review add/remove command data access and its no-op/invalidation semantics
+before moving writes; do not change storage collation, matching, TTL or fail-open
+versus confirmed-rule behavior as a side effect. Phase C remains incremental.

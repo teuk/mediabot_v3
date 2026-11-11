@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1235 — Isolate complete outgoing badword reads
+
+- Move SQL, fetch validation and statement cleanup from IRC::Sender into
+  Channel::Badwords, without loading transport or bot dependencies.
+- Keep shared PRIVMSG/ACTION cache age, confirmed-rule fallback, diagnostics and
+  error accounting in Sender; failed partial reads never publish partial rules.
+- Preserve DBI failure and finish semantics; extend native output fixtures and
+  existing module-isolation checks without another historical test file.
+
 ### MB1234 — Checkpoint channel data-access boundaries
 
 - Record the committed antifloodset pilot and distinguish the remaining chaninfo

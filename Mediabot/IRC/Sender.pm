@@ -6,6 +6,7 @@ use utf8;
 use Encode qw(encode);
 use Time::HiRes ();
 use Scalar::Util qw(refaddr);
+use Mediabot::Channel::Badwords ();
 
 # Internal implementation reached by Helpers. Callers use IRC::Output or the
 # legacy Helpers facade; these bodies are not exported. Resolve the existing
@@ -33,28 +34,10 @@ sub _badwords_for_channel {
     return $cache->{words} // []
         if $cache && ($now - ($cache->{ts} // 0)) <= 300;
 
-    my ($sth, @words);
-    my $complete = eval {
-        $sth = $self->{dbh}->prepare(
-            "SELECT badword FROM CHANNEL"
-            . " JOIN BADWORDS ON BADWORDS.id_channel = CHANNEL.id_channel"
-            . " WHERE CHANNEL.name = ?"
-        ) or die "badword_prepare\n";
-        $sth->execute($target) or die "badword_execute\n";
-        while (my $row = $sth->fetchrow_hashref) {
-            die "badword_row\n" unless ref($row) eq 'HASH';
-            next unless defined $row->{badword};
-            die "badword_value\n" if ref($row->{badword});
-            push @words, lc($row->{badword});
-        }
-        die "badword_fetch\n" if $sth->err;
-        1;
-    };
-    # Capture success before finish(), which may clear a driver's error flag.
-    eval { $sth->finish } if $sth;
-    if ($complete) {
-        $self->{_badword_cache}{$key} = { ts => $now, words => \@words };
-        return \@words;
+    my $result = Mediabot::Channel::Badwords::read($self->{dbh}, $target);
+    if ($result->{status} eq 'ok') {
+        $self->{_badword_cache}{$key} = { ts => $now, words => $result->{words} };
+        return $result->{words};
     }
 
     eval { $self->{logger}->log(1, 'Outgoing badword lookup failed; last confirmed rules retained')
