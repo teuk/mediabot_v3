@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1203 — Preserve exact quote and factoid record integers
+
+- Reject all zero spellings for positive record IDs, including leading zeros.
+- Reject integer conversions that round or overflow instead of exposing an
+  altered ID, author ID or hit count through detached plugin records.
+- Preserve valid leading-zero inputs, zero counters and native unsigned maxima.
+  Extend the existing quote and factoid tests; no schema or service change.
+
 ### MB1202 — Share plugin failure streaks across IRC channel aliases
 
 - Key failure-ledger channels with the same RFC1459 casemapping as quarantine.

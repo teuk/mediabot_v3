@@ -26,9 +26,15 @@ sub _uint {
     my ($value, $field, $positive) = @_;
     die "QuoteRecordV3: $field must be an unsigned integer\n"
         unless defined($value) && !ref($value) && "$value" =~ /\A[0-9]+\z/;
+    # Normalize accepted leading zeros before checking positivity and exactness.
+    my $digits = "$value";
+    $digits =~ s/\A0+(?=[0-9])//;
     die "QuoteRecordV3: $field must be positive\n"
-        if $positive && "$value" eq '0';
-    return 0 + $value;
+        if $positive && $digits eq '0';
+    my $number = 0 + $digits;
+    die "QuoteRecordV3: $field exceeds native integer range\n"
+        unless "$number" eq $digits;
+    return $number;
 }
 
 sub new {
