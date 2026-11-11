@@ -1,15 +1,16 @@
 # Runtime resource ownership — phase D inventory
 
-Reviewed at MB1210, commit `97ced23eb5989dade4f3711526f2a7c5bcb31776`.
-MB1211 was a documentation-only checkpoint. MB1212 implements the NOTICE pilot
-below (accepted as `62f83c0`, 39,423 assertions). MB1213 extends retirement to
-paced PRIVMSG (accepted as `52e250e`, 39,462 assertions). MB1214 adds AntiFlood
-drain ownership/retirement (committed as `b321e17`; detailed host report not
-supplied). MB1217 rechecks the nicklist cleanup gap at `a9d10caa` and selects it
-as the next bounded runtime increment. MB1218 is committed as `7f1529b3`;
-detailed host results were not supplied. MB1219 gates late achievement results. No universal cleanup API is claimed.
-This is a bounded inventory of the core lifecycle and first migration candidates,
-not a claim that every plugin, HTTP request or timer has been audited.
+Current checkpoint: MB1227, reviewed at MB1226 commit
+`473a0b1b462f93ba631ddc906f34c44d4ce93d5f` against the supplied snapshot.
+Connection output retirement (MB1212–1214), nicklist retirement (MB1218),
+achievement child ownership/collection (MB1219–1225), and bounded archive
+collection (MB1226) are implemented. Detailed missing host reports are not
+reconstructed from commits. Historical migration notes below retain their scope.
+
+Next priority is exact plugin-job ownership and incomplete-removal recovery; see
+[the current roadmap](ARCHITECTURE_ROADMAP.md#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
+This is a bounded inventory, not a universal cleanup API or a claim that all
+plugins, HTTP requests and timers have been audited.
 
 ## Three different lifecycle boundaries
 
@@ -17,7 +18,7 @@ not a claim that every plugin, HTTP request or timer has been audited.
 | --- | --- | --- |
 | IRC reconnect | [mediabot.pl](../mediabot.pl), `reconnect`; [Mediabot.pm](../Mediabot/Mediabot.pm), `restart_irc` and `setIrc` | Reuses the loop so Partyline survives; removes the old IRC object, rebuilds nicklist/main timers and replaces the IRC object. `setIrc` invalidates output registries only when transport identity changes. |
 | Rehash | [Mediabot.pm](../Mediabot/Mediabot.pm), `rehash_runtime_state` | Reads config, reloads logging and rebuilds channels/nicklist timers. This is not shutdown or a blanket cancellation of workers/output. |
-| Final process exit | [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | Revokes Wit authorization, attempts QUIT, stops the archive worker, stops/collects the active achievement worker, saves achievements/Hailo, disconnects DB, releases PID ownership and closes/flushes logging before exit. |
+| Final process exit | [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | Revokes Wit authorization, attempts QUIT, stops the archive worker, attempts bounded collection of all tracked achievement children (including detached ones), saves achievements/Hailo, disconnects DB, releases PID ownership and closes/flushes logging before exit. |
 
 Do not replace these with one generic stop-all operation. Reconnect must retain
 Partyline and process ownership; rehash must not silently discard unrelated work.
@@ -34,13 +35,13 @@ integration question for a later migration, not proof that every resource leaks.
 | [Paced NOTICE](../Mediabot/IRC/PacedOutput.pm), `queueBotNotices` | `_notice_queue_timers` array identity, plus each countdown | Expiry releases its slot; MB1212 setIrc detaches the registry, publishes transport, then explicitly cancels its timers | Removal exceptions leave inert notifiers in the broken loop and produce a diagnostic; cancellation is not a physical cleanup retry API. |
 | [Paced PRIVMSG](../Mediabot/IRC/PacedOutput.pm), `_queue_irc_chunks` | `_external_ai_output_queues` target state; `timer`, `current`, `batches`; guarded pump | MB1213 detaches all old targets, clears batches/guards/pump ownership and cancels their countdowns; arm identity preserves inline successors | MB1213 accepted; final-exit coordination remains separate. |
 | [Deferred AntiFlood](../Mediabot/IRC/DeferredOutput.pm), `_arm_flood_drain` | `_flood_outq` target queue; owned countdown handle and arm identity; weak expected queue in callback | MB1214 detaches/clears old queues before cancelling notifiers; expiry releases handle before normal drain/retry | Committed as `b321e17`; reconnect retirement does not change final-exit policy. |
-| [AsyncWorker](../Mediabot/AsyncWorker.pm), `cancel`, `_cleanup`, `_complete` | Worker owner PID, task ID, process/stream, timeout/kill/force timers | Cancel initiates TERM/KILL/backstop; cleanup deletes timer/stream/FD slots; finalized gate allows completion once | Cancellation request is not synchronous child completion. Consumers must retain result/reaping semantics during shutdown. |
+| [AsyncWorker](../Mediabot/AsyncWorker.pm), `cancel`, `_cleanup`, `_complete` | Worker owner PID, task ID, process/stream, timeout/kill/force timers | Cancel initiates TERM/KILL/backstop; cleanup deletes timer/stream/FD slots; finalized gate allows completion once; active_workers excludes finalized entries | Cancellation request is not synchronous child completion. Consumers must retain result/reaping semantics during shutdown. |
 | [Scheduler](../Mediabot/Scheduler.pm), `stop`, `remove`, `registration_id` | Named task plus exact registration ID/generation | Calendar stop removes notifier; ordinary periodic stop stops it; generation changes invalidate old execution; remove has its own semantics | Stop and remove are not interchangeable. Stop failure must not be reported as successful retirement. |
-| [Plugin jobs](../Mediabot/PluginManager.pm), `_stop_v3_jobs`, `_remove_v3_jobs` | Plugin entry's `mounted_jobs`, mediated by Scheduler | Stops in reverse order and reports failures; removal is separate | Keep plugin lifecycle/capability authority in PluginManager; never remove a replacement registration by name alone. |
+| [Plugin jobs](../Mediabot/PluginManager.pm), `_stop_v3_jobs`, `_remove_v3_jobs` | Plugin entry's `mounted_jobs` stores names/clocks, mediated by Scheduler | Stops/removes by name; stop reports failures, but removal clears the mounted list even on false returns | MB1227 priority: capture exact registration identity, preserve successors and retain incomplete cleanup ownership; include mount rollback. Lifecycle/capability authority stays in PluginManager. |
 | [Partyline watch](../Mediabot/Partyline/ShellWatch.pm), `_dispose`, `_remove_owned` | Exact session/stream/state, owner PID and task ID; weak owner references | Marks done, drops renderer, removes only its own scheduler registration; reports incomplete removal | Useful existing model for revoke-first cleanup; preserve session authorization rather than copying it into a generic timer helper. |
 | [Nicklist timers](../Mediabot/Channel/NicklistTimers.pm), Mediabot setup/stop delegates | Public `channel_nicklist_timers` map plus private weak-key callback metadata and setup generation | MB1218 detaches/revokes before independent remove/stop; late setup cannot overwrite successors; failures return 0 and log incomplete cleanup | Committed as `7f1529b3`; no detailed host report supplied. Failed physical cleanup is not retried by repeated retirement; final shutdown remains separate. |
 | [DB timers](../Mediabot/DBCommands.pm), `_stop_all_runtime_db_timers`, `onStartTimers` | `hTimers` map, detached before cleanup | Stops and removes each old timer in separate eval blocks when rebuilding | Keep DB-command scheduling and reconnect publication behavior covered; do not merge with Scheduler solely because both use timers. |
-| [Achievement worker](../Mediabot/Achievements.pm), `shutdown_worker` | `_worker_process` PID and `_shutting_down` flag | MB1219 revokes logical delivery; MB1224 detaches the active worker resources and attempts bounded TERM/KILL collection without running the loop; final save follows in clean_and_exit | Late success/failure cannot mutate parent state. MB1220 bounds reaping after rejected watcher installation; MB1221 cleans notifier setup failures while the accepted watcher retains reaping. MB1224 reports unconfirmed collection rather than assuming TERM implies exit. MB1225 retains detached accepted children separately until physical collection. |
+| [Achievement worker](../Mediabot/Achievements.pm), `shutdown_worker` | Active `_worker_process` plus physical `_worker_children` registry and `_shutting_down` gate | MB1219–1225 revoke logical delivery, retain accepted detached children, clean notifier setup failures and attempt bounded shared-budget TERM/KILL collection without running the loop | Unconfirmed records remain owned and diagnosed; watcher completion retires exact records. This is family-specific, not generic AsyncWorker shutdown. |
 | Archive worker in [Mediabot.pm](../Mediabot/Mediabot.pm), `clean_and_exit` | `_channel_log_archive_pid` | MB1226: checked TERM/KILL with bounded WNOHANG polling before DB teardown; watcher refusal uses the same routine with immediate KILL | Retain unconfirmed PID ownership and diagnose uncertainty. No blocking waitpid or loop iteration; ordinary reconnect is unchanged. |
 
 The inspected reconnect resets `_af`, `_af_params`, `_chan_flood`, `_nick_flood`,

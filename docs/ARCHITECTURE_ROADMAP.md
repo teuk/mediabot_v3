@@ -15,9 +15,13 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1214 AntiFlood retirement committed/pushed as `b321e17`; three-family output pilot delivered. Detailed MB1214 host test report not supplied. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Phase D remains open; current priorities are in the MB1227 checkpoint below. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
+
+Current continuation point: [MB1227 checkpoint](#mb1227--phase-d-checkpoint-and-plugin-job-ownership).
+Earlier “Next” paragraphs record decisions at their original increment; they do
+not override this checkpoint.
 
 ## Phase A / MB1208
 
@@ -536,3 +540,65 @@ change. Scheduling and syscall overhead may exceed nominal sleep budgets.
 Next: checkpoint phase D across all documented owners. Achievement and archive
 shutdown are now bounded at the reviewed paths, but this does not establish a
 universal shutdown protocol for AsyncWorker consumers, scheduler and plugins.
+
+## MB1227 — phase D checkpoint and plugin job ownership
+
+Reviewed at `473a0b1b462f93ba631ddc906f34c44d4ce93d5f` (MB1226), matching
+`snap_mediabot_v3_teuk_20261111_142227.zip`. Commit presence and inspected source
+confirm implementation; no missing host test totals are inferred. This increment
+changes documentation only. It does not declare phase D complete.
+
+| Boundary | Delivered behavior | Remaining scope |
+| --- | --- | --- |
+| Connection output | NOTICE, paced PRIVMSG and deferred AntiFlood callbacks are retired when transport identity changes (MB1212–1214). | Final exit is a distinct boundary; physical loop removal can fail. |
+| Nicklist timers | Exact registration retirement precedes independent stop/remove attempts (MB1218). | No universal retry or final-exit service was introduced. |
+| Achievement children | Logical result ownership is separate from physical child ownership; accepted detached children remain tracked until collection; final shutdown polls within shared TERM/KILL budgets (MB1219–1225). | Unconfirmed collection stays explicit; this does not govern generic AsyncWorker children. |
+| Archive child | Final exit and watcher refusal use bounded ownership checks and collection; late callbacks cannot clear another PID (MB1226). | Unconfirmed PID stays recorded; no claim of guaranteed collection under OS errors. |
+| Scheduler/plugin jobs | Scheduler already exposes exact registration identity; plugin jobs retain name/clock records and lifecycle authorization gates. | Next: preserve exact ownership and failed cleanup records at the plugin/Scheduler boundary. |
+| Generic AsyncWorker | Per-loop observational registry and asynchronous cancellation exist. | Review final-exit ownership separately; the active registry excludes finalized workers and is not a physical-child inventory. |
+
+### Next runtime increment: plugin job registration ownership
+
+Source inspection of [PluginManager](../Mediabot/PluginManager.pm)
+`_mount_v3_jobs`, `_stop_v3_jobs` and `_remove_v3_jobs` finds that mounted records
+contain a task name and clock, but no Scheduler registration identity. Stop and
+remove operate by name. `_remove_v3_jobs` clears the entire mounted list even
+when a remove returns false. Mount rollback also removes by name. These are
+concrete source findings to reproduce, not a claim of a production incident.
+
+[Scheduler](../Mediabot/Scheduler.pm) already provides `registration_id` and
+`task_info`; [ShellWatch](../Mediabot/Partyline/ShellWatch.pm) `_remove_owned`
+shows an existing exact-owner adapter. Reuse the established identity contract
+where appropriate. Audit reentrancy inside Scheduler removal as well as the
+caller: a pre-call identity check alone is not sufficient if cleanup replaces
+the registration. Keep authorization, quarantine and lifecycle policy with the
+manager; no general scheduler rewrite or new framework is required.
+
+Acceptance for the next bounded patch:
+
+1. Reproduce a same-name successor and a false/throwing removal against the real
+   manager and Scheduler boundary before changing behavior.
+2. Capture ownership at registration; old stop, unload and mount rollback must
+   not stop or delete a successor. Preserve API v2 behavior and existing public
+   task names, intervals and disabled-on-load behavior.
+3. Retain enough ownership to diagnose and retry incomplete removal. Do not
+   silently discard a still-owned task or report complete teardown on failure.
+4. Keep existing entry/capability/enable/quarantine gates and test retained old
+   callbacks after disable/unload; registration ownership complements these gates.
+5. Extend [1072](../t/cases/1072_mb743_v3_events_jobs_lifecycle.t) and relevant
+   [1091 diagnostics](../t/cases/1091_mb750_plugin_diagnostics.t) coverage instead
+   of adding another historical test file. Cover normal lifecycle, rollback,
+   repeated cleanup, reentrant replacement and failure recovery. Preserve native
+   Scheduler integration and run the full suite once before the runtime commit.
+
+After this boundary, checkpoint again before expanding scope. Generic worker
+final-exit policy and DB timer cleanup remain candidates, not an instruction to
+migrate every family. Phases B/C still have command-side writes and shared-cache
+invalidation to review; phase E retains discovery/security/lifecycle authority.
+Radio, YouTube, schema changes and a universal shutdown container remain outside
+this increment. No runtime performance gain is claimed.
+
+Validation for MB1227: documentation links and source symbols, snapshot/base
+comparison, patch/reverse guards and the real commit script against a temporary
+local remote. No runtime changes: do not rerun the full runtime suite solely for
+this checkpoint. Host application/commit of MB1227 remains pending delivery.

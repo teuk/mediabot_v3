@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1227 — Checkpoint resource ownership and select plugin job retirement
+
+- Refresh phase D status through MB1226; distinguish implemented family-specific
+  cleanup from open generic-worker and final-exit integration questions.
+- Correct the inventory to include detached achievement children and document
+  name-only plugin job teardown and discarded failed-removal ownership.
+- Set exact registration ownership and recovery as the next bounded runtime
+  priority, with existing-test acceptance criteria. Documentation only.
+
 ### MB1226 — Bound archive child collection during shutdown and setup failure
 
 - Replace both blocking waitpid paths with one archive-specific bounded routine.
