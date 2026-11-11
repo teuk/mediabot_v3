@@ -1,7 +1,7 @@
 use strict;
 use warnings;
 use Test::More;
-use Scalar::Util qw(weaken);
+use Scalar::Util qw(weaken refaddr);
 use IO::Async::Timer::Countdown;
 use Mediabot::Helpers ();
 use Mediabot::Mediabot ();
@@ -24,7 +24,7 @@ use Mediabot::CommandAsync ();
         push @{$self->{pending}}, $timer;
         push @{$self->{delays}}, $timer->{delay};
     }
-    sub remove {$_[1]{removed} = 1}
+    sub remove {$_[1]{removed} = 1; my $id=Scalar::Util::refaddr($_[1]); @{$_[0]{pending}}=grep {Scalar::Util::refaddr($_)!=$id} @{$_[0]{pending}};1}
     sub tick {my $timer = shift @{$_[0]{pending}}; $timer->{on_expire}->() if $timer}
     sub drain {my ($self) = @_; my $n = 0; while (@{$self->{pending}}) {die 'fixture loop did not finish' if ++$n > 100; $self->tick}}
 }
@@ -119,13 +119,16 @@ is_deeply($reject->{_notice_queue_timers}, [], 'failed scheduling releases its t
 
     @wire = ();
     my $retired = $bot->{_notice_queue_timers};
+    my @retired_timers = @$retired;
     Mediabot::setIrc($bot, $new);
     queue_notices($bot, 'nick', qw(fresh next));
     is_deeply($bot->{loop}{delays}, [0, 1.5, 0, 1.5],
         'retired NOTICE slots do not delay a fresh connection');
-    $bot->{loop}->tick;
+    is(scalar @{$bot->{loop}{pending}},2,'only new NOTICE timers remain attached after transport replacement');
+    ok(!grep({!$_->{stopped} || !$_->{removed}} @retired_timers),'retired NOTICE timers are stopped and removed promptly');
+    $_->{on_expire}->() for @retired_timers;
     is_deeply([\@wire, $retired, scalar @{$bot->{_notice_queue_timers}}], [[], [], 2],
-        'retired NOTICE expiry cleans only its own slot and sends nothing');
+        'retained old expiry callbacks are inert and cannot consume new slots');
     $bot->{loop}->drain;
     is_deeply([\@wire, $bot->{_notice_queue_timers}],
         [[['notice', 'nick', 'fresh'], ['notice', 'nick', 'next']], []],
@@ -157,4 +160,27 @@ is_deeply([map {[@$_[0 .. 2]]} @$intents], [
     ['privmsg', '#test', 'worker one'], ['privmsg', '#test', 'worker two'], ['notice', 'nick', 'worker notice']],
     'worker facade captures every generic output with its kind and target');
 is(scalar @wire, 0, 'generic APIs cannot bypass worker output collection');
+# MB1212: cleanup may publish another transport and queue recursively.
+{
+    @wire=();
+    my $bot=bless {loop=>MB880::Loop->new,irc=>bless({},'MB880::Transport')},'MB880::Bot';
+    queue_notices($bot,'nick','old');
+    my $successor=bless {},'MB880::Transport';
+    my $stop=MB880::Timer->can('stop');my $nested=0;
+    {
+        no warnings 'redefine';
+        local *MB880::Timer::stop=sub {
+            unless ($nested++) {Mediabot::setIrc($bot,$successor);queue_notices($bot,'nick','new')}
+            $stop->(@_);
+        };
+        Mediabot::setIrc($bot,bless({},'MB880::Transport'));
+    }
+    is(refaddr($bot->{irc}),refaddr($successor),'outer cleanup cannot overwrite a nested transport replacement');
+    is(scalar @{$bot->{_notice_queue_timers}},1,'nested new registry survives old cleanup');
+    $bot->{loop}->drain;
+    is_deeply(\@wire,[['notice','nick','new']],'only nested successor output is delivered');
+    queue_notices($bot,'nick','disconnect');
+    Mediabot::setIrc($bot,undef);
+    is(scalar @{$bot->{loop}{pending}},0,'undef transport promptly retires NOTICE timers');
+}
 done_testing;

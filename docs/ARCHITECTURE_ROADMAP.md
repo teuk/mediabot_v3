@@ -15,7 +15,7 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. Further Helpers boundaries remain incremental. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 accepted: 39,386 assertions; committed/pushed as `97ced23`. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1211 inventory and NOTICE retirement acceptance plan documented; runtime migration pending. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | MB1211 inventory accepted/pushed as `a29a67f`; MB1212 NOTICE retirement implemented, host acceptance pending. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | Planned. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538). |
 
@@ -97,10 +97,26 @@ callbacks and notifiers on transport replacement. Existing registry identity
 already prevents stale sends; physical removal and payload revocation need an
 explicit contract, including inline expiry, reentrancy and cleanup failures.
 
-MB1211 changes documentation only. Inventory is complete for its stated scope;
-no runtime cancellation API or global shutdown coordinator is implemented.
-Next delivery implements the NOTICE pilot against the documented acceptance
-matrix. Other phase B/C work and phase E remain incremental.
+MB1211 documentation checkpoint was accepted and pushed as `a29a67f` after
+reference/patch checks; no runtime suite was required for that docs-only change.
+
+### MB1212 — explicit NOTICE retirement
+
+`IRC::Timer::cancel_countdown` revokes the callback and its captured payload before
+attempting stop/remove independently. Weak-key registrations do not own notifier
+lifetimes. A cleanup exception returns 0; repeated calls are inert and do not
+retry failed physical removal. The existing countdown return value is preserved.
+`PacedOutput::retire_notice_timers` empties only the detached registry and reports
+incomplete cleanup. `setIrc` publishes the new transport before retirement, so
+nested replacement/sends cannot be overwritten or cancelled by the old cleanup.
+Late timers returned after a transport change during add/start are retired too.
+
+Same-transport assignments and rehash retain their behavior. PRIVMSG and flood
+queues keep existing identity invalidation; no global shutdown coordinator or
+child-process migration is introduced. Existing tests cover cancellation faults,
+retained callbacks, native notifier removal, inline expiry and reentrant wiring.
+MB1212 host acceptance is pending. Next: assess the paced PRIVMSG pump's coupled
+state/timer ownership before extending explicit retirement to that family.
 
 ## Rules for subsequent phases
 

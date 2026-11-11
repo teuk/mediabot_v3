@@ -2,7 +2,7 @@ use strict;
 use warnings;
 use Test::More;
 use Scalar::Util qw(refaddr weaken);
-use Mediabot::IRC::Timer qw(countdown);
+use Mediabot::IRC::Timer qw(countdown cancel_countdown);
 BEGIN { $INC{'IO/Async/Timer/Countdown.pm'} = __FILE__ }
 {
     package IO::Async::Timer::Countdown;
@@ -61,5 +61,57 @@ for my $mode (qw(success callback_error add_error)) {
     is(scalar keys %{$loop->{attached}},1,'successor remains attached');
     $successor->{on_expire}->();
     is(scalar keys %{$loop->{attached}},0,'successor cleans up independently');
+}
+# MB1212: cancellation revokes before any reentrant cleanup and releases payload.
+for my $fault ('', 'stop', 'remove', 'both') {
+    my $loop=MB1146::Loop->new;$loop->{deferred}=1;
+    my ($stops,$removes,$calls)=(0,0,0);
+    my $owner=bless {},'MB1212::Payload';my $weak=$owner;weaken($weak);
+    my $timer=countdown(loop=>$loop,delay=>100,on_expire=>(sub {
+        my($held)=@_;return sub {$calls++ if $held};
+    })->($owner));
+    undef $owner;
+    my $callback=$timer->{on_expire};
+    no warnings 'redefine';
+    local *IO::Async::Timer::Countdown::stop=sub {
+        $stops++;$callback->();
+        die "stop fault\n" if $fault eq 'stop' || $fault eq 'both';1;
+    };
+    local *MB1146::Loop::remove=sub {
+        $removes++;$callback->();
+        die "remove fault\n" if $fault eq 'remove' || $fault eq 'both';
+        delete $_[0]{attached}{refaddr($_[1])};1;
+    };
+    is(cancel_countdown($timer),$fault eq ''?1:0,'cancellation reports physical cleanup failure');
+    is_deeply([$stops,$removes,$calls],[1,1,0],'both cleanup operations run and reentrant expiry is inert');
+    ok(!defined $weak,'cancellation releases payload even when callback is retained');
+    is(cancel_countdown($timer),1,'repeated cancellation is inert');
+    $callback->();
+    is_deeply([$stops,$removes,$calls],[1,1,0],'late callback and repeat do not run cleanup or user code twice');
+}
+{
+    my $loop=MB1146::Loop->new;$loop->{deferred}=1;
+    my ($timer,$successor);
+    $timer=countdown(loop=>$loop,delay=>100,on_expire=>sub {fail('cancelled callback ran')});
+    my $stop=IO::Async::Timer::Countdown->can('stop');
+    no warnings 'redefine';
+    local *IO::Async::Timer::Countdown::stop=sub {
+        is(cancel_countdown($timer),1,'nested cancellation is already revoked');
+        $successor=countdown(loop=>$loop,delay=>100,on_expire=>sub {});
+        $stop->(@_);
+    };
+    is(cancel_countdown($timer),1,'reentrant cleanup completes');
+    is(scalar keys %{$loop->{attached}},1,'reentrant successor is retained');
+    is($successor->{starts},1,'successor remains scheduled once');
+}
+{
+    my $loop=MB1146::Loop->new;$loop->{deferred}=1;
+    no warnings 'redefine';
+    my $add=MB1146::Loop->can('add');
+    local *MB1146::Loop::add=sub {$add->(@_);cancel_countdown($_[1])};
+    my $timer=countdown(loop=>$loop,delay=>100,on_expire=>sub {fail('inline cancelled callback ran')});
+    is($timer,undef,'cancellation during add returns no live timer');
+    is(scalar keys %{$loop->{attached}},0,'inline cancellation removes timer without starting it');
+    $loop->{callbacks}[0]->();
 }
 done_testing;

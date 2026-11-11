@@ -1,8 +1,9 @@
 # Runtime resource ownership — phase D inventory
 
 Reviewed at MB1210, commit `97ced23eb5989dade4f3711526f2a7c5bcb31776`.
-MB1211 is a documentation-only checkpoint. The observations below describe
-current code; the migration contract is proposed work, not an implemented API.
+MB1211 was a documentation-only checkpoint. MB1212 implements the NOTICE pilot
+below (host acceptance pending). Other observations remain the bounded MB1211
+baseline; no universal cleanup API is claimed.
 This is a bounded inventory of the core lifecycle and first migration candidates,
 not a claim that every plugin, HTTP request or timer has been audited.
 
@@ -25,8 +26,8 @@ integration question for a later migration, not proof that every resource leaks.
 
 | Family and source | Resource owner / identity | Completion or retirement today | Remaining question |
 | --- | --- | --- | --- |
-| [IRC countdown](../Mediabot/IRC/Timer.pm), `countdown` | One notifier; weak timer reference in its expiry callback; strong setup owner | Stops/removes before user callback; completed/failed-setup callbacks become inert; preserves original exceptions | Early stop/remove is explicitly not callback revocation. External callback owners can retain payload. |
-| [Paced NOTICE](../Mediabot/IRC/PacedOutput.pm), `queueBotNotices` | `_notice_queue_timers` array identity, plus each countdown | Expiry checks registry identity before sending and releases its slot; setIrc deletes the registry | Old notifier may remain loop-owned until expiry. Define explicit payload revocation and physical removal together. |
+| [IRC countdown](../Mediabot/IRC/Timer.pm), `countdown` | One notifier; weak timer reference in its expiry callback; strong setup owner | Stops/removes before user callback; completed/failed-setup callbacks become inert; preserves original exceptions | MB1212 adds explicit `cancel_countdown` revocation; stop/remove alone still do not revoke callbacks. |
+| [Paced NOTICE](../Mediabot/IRC/PacedOutput.pm), `queueBotNotices` | `_notice_queue_timers` array identity, plus each countdown | Expiry releases its slot; MB1212 setIrc detaches the registry, publishes transport, then explicitly cancels its timers | Removal exceptions leave inert notifiers in the broken loop and produce a diagnostic; cancellation is not a physical cleanup retry API. |
 | [Paced PRIVMSG](../Mediabot/IRC/PacedOutput.pm), `_queue_irc_chunks` | `_external_ai_output_queues` target state; `timer`, `current`, `batches`; guarded pump | State identity gates sends; finish clears batches/closures; setIrc retires the registry | Cancellation must break pump/schedule/state ownership without touching a successor queue or replaying an attempted send. |
 | [Deferred AntiFlood](../Mediabot/IRC/DeferredOutput.pm), `_arm_flood_drain` | `_flood_outq` target queue; weak expected queue in callback | Identity gate prevents old callbacks draining new queues; expiry/retry handles backlog | Countdown handle is not stored in the queue. Immediate cancellation needs explicit ownership before a global cleanup can remove it. |
 | [AsyncWorker](../Mediabot/AsyncWorker.pm), `cancel`, `_cleanup`, `_complete` | Worker owner PID, task ID, process/stream, timeout/kill/force timers | Cancel initiates TERM/KILL/backstop; cleanup deletes timer/stream/FD slots; finalized gate allows completion once | Cancellation request is not synchronous child completion. Consumers must retain result/reaping semantics during shutdown. |
@@ -48,10 +49,10 @@ registry. Do not infer that changing an IRC reference cleans all bot state.
 Choose NOTICE before the coupled PRIVMSG pump or child processes: there is an
 explicit notifier array and existing connection-identity tests. The goal is
 prompt retirement of old NOTICE payload/notifiers on transport replacement,
-while preserving wire behavior, pacing, truncation and fallback. This is planned,
-not shipped in MB1211.
+while preserving wire behavior, pacing, truncation and fallback. Implemented in
+MB1212 with host acceptance pending; not part of the docs-only MB1211 commit.
 
-Required design and order:
+Migration contract (MB1212):
 
 1. Capture and revoke the old registry identity before invoking stop/remove or
    user-visible callbacks. Publish no old registry back into the bot.

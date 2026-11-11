@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1212 — Retire NOTICE callbacks and timers on transport replacement
+
+- Add explicit countdown cancellation that revokes captured output before
+  attempting stop/remove independently, reporting incomplete physical cleanup.
+- Detach old NOTICE registries and publish the replacement IRC object before
+  retirement; preserve reentrant successor queues and handle late timer setup.
+- Keep same-connection pacing, fallback and wire behavior. Extend existing timer,
+  paced-output and native lifecycle tests; record phase D progress.
+
 ### MB1211 — Map runtime resource ownership
 
 - Document the core timer/worker owners and distinguish IRC reconnect, rehash

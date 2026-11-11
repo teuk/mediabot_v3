@@ -4,7 +4,7 @@ use Test::More;
 use Scalar::Util qw(weaken refaddr);
 use IO::Async::Loop;
 use IO::Async::Timer::Countdown;
-use Mediabot::IRC::Timer qw(countdown);
+use Mediabot::IRC::Timer qw(countdown cancel_countdown);
 use Mediabot::IRC::PacedOutput qw(queue_notices queue_privmsg_chunks);
 use Mediabot::IRC::Output qw(privmsg action);
 use MB881OutputFixture;
@@ -305,5 +305,17 @@ sub quotegame_fixture {
     Mediabot::UserCommands::checkQuotegameAnswer($bot, 'Player', '#test', 'late');
     is_deeply([$round->{active}, scalar @wire, timer_count($loop)], [0,1,0],
         'lazy quote expiry still works once after timer setup fails');
+}
+{
+    my $loop=IO::Async::Loop->really_new;
+    my $owner=bless {},'MB1212::NativePayload';my $weak=$owner;weaken($weak);
+    my $calls=0;
+    my $timer=countdown(loop=>$loop,delay=>60,on_expire=>(sub {my($held)=@_;return sub {$calls++ if $held}})->($owner));
+    my $callback=$timer->{on_expire};undef $owner;
+    is(cancel_countdown($timer),1,'native cancellation stops and removes its notifier');
+    is(timer_count($loop),0,'native cancelled timer leaves the loop immediately');
+    ok(!defined $weak,'native cancellation releases captured payload before expiry');
+    $callback->();is($calls,0,'retained native callback stays inert');
+    is(cancel_countdown($timer),1,'native cancellation is idempotent');
 }
 done_testing;

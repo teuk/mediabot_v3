@@ -212,6 +212,25 @@ sub _queue_irc_chunks {
     return $queued_count;
 }
 
+# The caller has already detached this exact registry and published the new
+# transport. Never inspect or clear a successor registry during cleanup.
+sub retire_notice_timers {
+    my ($self, $timers) = @_;
+    return 1 unless $timers;
+    my @retired = @$timers;
+    @$timers = ();
+    my $ok = 1;
+    for my $timer (@retired) {
+        next unless $timer;
+        $ok = 0 unless Mediabot::IRC::Timer::cancel_countdown($timer);
+    }
+    unless ($ok) {
+        eval { $self->{logger}->log(1,
+            'NOTICE output revoked; timer cleanup incomplete') if $self->{logger}; };
+    }
+    return $ok;
+}
+
 sub queueBotNotices {
     my ($self, $nick, @lines) = @_;
 
@@ -269,7 +288,13 @@ sub queueBotNotices {
                     die $error unless $sent;
                 },
             );
-            push @$timers, $timer;
+            if ($is_current->()) {
+                push @$timers, $timer if $timer;
+            } else {
+                # Transport replacement during add/start precedes publication
+                # in the old registry. Retire this late result explicitly.
+                retire_notice_timers($self, [$timer]);
+            }
             1;
         };
 

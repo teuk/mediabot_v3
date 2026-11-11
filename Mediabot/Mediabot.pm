@@ -1831,14 +1831,22 @@ sub refresh_channel_hashes {
 
 # Set IRC object
 sub setIrc {
-	my ($self,$irc) = @_;
-	# Deferred sends belong to the connection that admitted them.
-	if ((refaddr($self->{irc}) // 0) != (refaddr($irc) // 0)) {
-		delete $self->{_flood_outq};
-		delete $self->{_notice_queue_timers};
-		delete $self->{_external_ai_output_queues};
-	}
-	$self->{irc} = $irc;
+    my ($self, $irc) = @_;
+    if ((refaddr($self->{irc}) // 0) != (refaddr($irc) // 0)) {
+        my $notices = delete $self->{_notice_queue_timers};
+        delete $self->{_flood_outq};
+        delete $self->{_external_ai_output_queues};
+        # Publish before cleanup: reentrant sends belong to the new transport,
+        # and a nested setIrc must not be overwritten after cleanup returns.
+        $self->{irc} = $irc;
+        if ($notices) {
+            require Mediabot::IRC::PacedOutput;
+            Mediabot::IRC::PacedOutput::retire_notice_timers($self, $notices);
+        }
+    } else {
+        $self->{irc} = $irc;
+    }
+    return $irc;
 }
 
 # Get IRC object
