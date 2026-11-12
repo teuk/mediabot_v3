@@ -12,6 +12,7 @@ use Mediabot::Context ();
 our ($state,$error);
 sub event {
  my ($name,@args)=@_;push @{$state->{events}},[$name,@args];
+ $now=$state->{advance}{$name} if exists $state->{advance}{$name};
  die $error if ($state->{fail}//'') eq $name;
 }
 {
@@ -22,16 +23,26 @@ sub event {
  sub execute {main::event('execute',@_[1..$#_]);return $main::state->{false_execute}?0:'0E0'}
  sub fetchrow_hashref {
   main::event('fetch');my $r=shift @{$main::state->{remaining}};return unless $r;
+  if ($main::state->{reuse_row}) {
+   %{$main::state->{shared_row}}=%$r;return $main::state->{shared_row};
+  }
   return {%$r};
  }
  sub finish {main::event('finish');return $main::state->{false_finish}?0:1}
  package MB1248::Logger;
- sub log {main::event('log',$_[1],$_[2])}
+ sub log {
+  main::event('log',$_[1],$_[2]);
+  my $stage=$_[2]=~/cache hit/?'cache':$_[2]=~/Matched user id=/?'matched':$_[2]=~/SQL Error/?'sql':$_[2]=~/No user matched/?'absent':'initial';
+  die $main::error if ($main::state->{log_fail}//'') eq $stage;
+ }
  package MB1248::Bot;
  sub get_user_from_message {Mediabot::Helpers::get_user_from_message(@_)}
  sub clear_user_cache {Mediabot::Helpers::clear_user_cache(@_)}
  sub _dbg_auth_snapshot {main::event($_[1]);}
  sub _ensure_logged_in_state {main::event('ensure');}
+ package MB1249::NoAuto;
+ our @ISA=('MB1248::User');
+ sub can {return if $_[1] eq 'maybe_autologin';UNIVERSAL::can(@_)}
  package MB1248::User;
  sub load_level {main::event('level')}
  sub maybe_autologin {main::event('auto')}
@@ -60,7 +71,7 @@ sub count_op {my ($n)=@_;scalar grep {$_->[0] eq $n} @{$state->{events}}}
   my ($auth,$row,$mask)=@_;event('match',$row->{id_user},$mask);
   return defined($row->{score})?(1,'fixture-mask',undef,$row->{score}):(0,undef,undef,-1);
  };
- local *Mediabot::User::new=sub {event('user_new');bless {%{$_[1]}},'MB1248::User'};
+ local *Mediabot::User::new=sub {event('user_new');bless {%{$_[1]}},($state->{no_auto}?'MB1249::NoAuto':'MB1248::User')};
  my $b=setup();my $u=resolve($b);
  is($u->id,1,'native Helpers resolves selected user');
  is_deeply(ops(),[qw(auth_new prepare execute fetch match fetch finish user_new level pre-auto auto post-auto ensure post-ensure return)],'native lookup and callback order');
@@ -113,5 +124,57 @@ sub count_op {my ($n)=@_;scalar grep {$_->[0] eq $n} @{$state->{events}}}
  $auth->_invalidate_bot_session('alice',{hostmask=>'Alice!ident@host'});
  ok(!exists $b->{_user_cache}{'Alice!ident@host'},'real Auth invalidates Helpers cache');
  ok(!exists $b->{sessions}{alice} && !exists $b->{logged_in_by_nick}{alice} && !exists $b->{users_by_nick}{alice},'real Auth removes session aliases');
+ # MB1249: publication, borrowed rows and optional callbacks.
+ for my $stage (qw(initial cache sql absent matched)) {
+  $b=setup(log_fail=>$stage,rows=>$stage eq 'absent'?[]:[{id_user=>1,nickname=>'alice',score=>10}],false_execute=>$stage eq 'sql');
+  my $cached=bless {id_user=>99},'MB1248::User';
+  if ($stage eq 'cache') {$b->{_user_cache}{'Alice!ident@host'}=$cached;$b->{_user_cache_ts}{'Alice!ident@host'}=100}
+  my $caught;eval {resolve($b);1} or $caught=$@;
+  is($caught,$error,"$stage logger exception retains identity");
+  my $published=$stage eq 'cache' || $stage eq 'matched';
+  is(exists($b->{_user_cache}{'Alice!ident@host'})?1:0,$published?1:0,"$stage logger cache boundary");
+  is(exists($b->{_user_cache_ts}{'Alice!ident@host'})?1:0,$published?1:0,"$stage logger timestamp boundary");
+  is(count_op('return'),0,"$stage logger failure prevents return callback");
+  if ($stage eq 'matched') {
+   my $held=$b->{_user_cache}{'Alice!ident@host'};delete $state->{log_fail};
+   is(resolve($b),$held,'matched logger failure leaves already-published object reusable');
+   is(count_op('prepare'),1,'reuse after diagnostic failure performs no new query');
+  }
+ }
+ for my $prefix (undef,'') {
+  $b=setup(rows=>[{id_user=>1,nickname=>'alice'}]);
+  ok(!defined $b->get_user_from_message(message($prefix)),'undefined/empty prefix with rows does not invent a cloak identity');
+  my ($match)=grep {$_->[0] eq 'match'} @{$state->{events}};
+  is($match->[2],'','matcher receives empty fullmask');
+  is(count_op('user_new'),0,'no user is built for unmatched empty prefix');
+ }
+ $b=setup(no_auto=>1);$u=resolve($b);
+ ok($u,'user without optional autologin resolves');is(count_op('auto'),0,'optional autologin is skipped');
+ is(count_op('ensure'),1,'session synchronization still runs without autologin');
+ is($b->{_user_cache}{'Alice!ident@host'},$u,'optional callback absence still publishes user');
+ $b=setup(advance=>{auto=>110});$u=resolve($b);
+ is($now,110,'lookup fixture advances clock during autologin');
+ is($b->{_user_cache_ts}{'Alice!ident@host'},100,'slow lookup retains start-time cache age');
+ $state->{remaining}=[@{$state->{rows}}];resolve($b);is(count_op('prepare'),2,'slow lookup can already be expired on next access');
+ $b=setup(reuse_row=>1,shared_row=>{},rows=>[{id_user=>1,nickname=>'winner',score=>10},{id_user=>2,nickname=>'loser',score=>1}]);
+ $u=resolve($b);is($u->id,1,'winning row is copied before cursor storage is reused');is($u->nickname,'winner','copied winner retains its own fields');
+ $state->{shared_row}{nickname}='mutated';is($u->nickname,'winner','later row mutation cannot alter selected user');
+ $b=setup();$c=Mediabot::Context->new(bot=>$b,message=>message('Alice!ident@host'));$u=$c->user;
+ $b->clear_user_cache();$now=200;
+ is($c->user,$u,'Context retains its own positive memo after global cache clear');
+ is(count_op('prepare'),1,'same Context does not repeat lookup');
+ $state->{remaining}=[@{$state->{rows}}];$c2=Mediabot::Context->new(bot=>$b,message=>message('Alice!ident@host'));
+ isnt($c2->user,$u,'new Context resolves after global cache clear');
+ $b->{_user_cache}{'Other!i@host'}='other';$b->{_user_cache_ts}{'Other!i@host'}=200;
+ $b->{sessions}{other}=1;$b->{users_by_nick}{other}=1;$b->{logged_in_by_nick}{other}=1;
+ $auth=bless {bot=>$b},'Mediabot::Auth';
+ $auth->_invalidate_bot_session('alice',{hostmask=>'Alice!ident@host'});
+ is($b->{_user_cache}{'Other!i@host'},'other','known-session invalidation preserves another hostmask');
+ ok($b->{sessions}{other} && $b->{users_by_nick}{other} && $b->{logged_in_by_nick}{other},'known-session invalidation preserves other aliases');
+ $auth->_invalidate_bot_session('alice',{});
+ is_deeply($b->{_user_cache},{},'missing session hostmask clears all Helpers objects');
+ is_deeply($b->{_user_cache_ts},{},'missing session hostmask clears all Helpers timestamps');
+ ok($b->{sessions}{other},'global cache clear does not erase unrelated session aliases');
+
 }
 done_testing;

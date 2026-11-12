@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1249 — Characterize user-cache publication boundaries
+
+- Extend the existing isolated native probe with logger failures before/after
+  cache publication, optional autologin, empty prefixes and slow lookup timing.
+- Verify selected-row snapshots, Context positive memoization and session-scoped
+  versus global cache invalidation without changing production behavior.
+- Record the preserved contracts and select a streaming SQL boundary for the
+  next extraction; keep matching and authorization in the existing caller.
+
 ### MB1248 — Characterize native user resolution before extraction
 
 - Extend existing case 194 with a fresh-process probe of actual Helpers and

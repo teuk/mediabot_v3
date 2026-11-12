@@ -19,8 +19,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1248 begins native user-resolution characterization.
-See [MB1248](#mb1248--native-user-resolution-characterization).
+Current continuation point: MB1249 extends native user-resolution characterization
+and selects a streaming SQL boundary. See [MB1249](#mb1249--user-cache-publication-contracts).
 Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
@@ -1539,3 +1539,44 @@ The package runs targeted tests and one full host suite before commit/push to
 verify the new child probe integrates with the shared runner. Full host acceptance
 is pending; schema, configuration, services and production authentication remain
 unchanged. Broader phases B/C/D remain open.
+
+
+## MB1249 — User-cache publication contracts
+
+Base `fb0b53f97a79c40149b26e733a39fb09cd8db06d` is committed MB1248. All tracked files
+match the supplied 2026-11-12 13:54:16 snapshot; commit.sh is guarded against it.
+No unprovided host acceptance totals are inferred. Production modules are unchanged.
+
+[The existing child probe](../t/lib/MB1248UserResolution.pl) now passes 132
+assertions. Added checks cover initial/cache/SQL/absence/matched logger exceptions,
+object and timestamp publication, optional autologin absence, undefined/empty
+prefixes with candidate rows, clock advancement during lookup, a reused cursor
+row, Context positive memoization and real Auth invalidation scopes.
+
+Observed contracts that the extraction must retain:
+
+- Initial/cache-hit logging can throw before lookup or return. A matched diagnostic
+  runs after object and timestamp publication: its failure does not undo the cache.
+- A slow lookup stores the timestamp captured before SQL and callbacks. It can be
+  expired on its next access. No clock-policy improvement is bundled here.
+- Copying the winning row prevents a later fetch from replacing its fields.
+- An already-resolved Context retains its user after global cache clearing; new
+  Contexts can resolve afresh. This is not a process-wide negative/positive cache.
+- Known-session invalidation clears that fullmask while preserving another user.
+  Missing hostmask clears Helpers maps but still removes only the requested aliases.
+
+The existing targeted lane (194/591/596) passes 80 runner assertions; the isolated
+probe separately passes 132 assertions. Mutations removing the winning-row copy
+or replacing lookup-start time with completion time are detected. The test still
+runs in a bounded fresh interpreter, leaving runner time and DBI state untouched.
+The package requires one full host suite before commit to check integration.
+
+Next implementation: isolate only the user/hostmask SELECT preparation and execute
+behind a domain-owned cursor-opening function. Keep the exact projection, grouping,
+ordering, no-argument execute and original statement identity. Preserve false/error
+and 0E0 behavior and leave fetch/matching interleaved in Helpers. Do not eagerly
+materialize all users or move cache/session/authorization into the data reader.
+Keep Helpers entry points and their call order; update case 194's SQL projection
+check to inspect the new owner while retaining native behavior coverage. Compare
+full observable traces before/after and run the native plus session/rekey lane,
+then one complete host suite. Broader phases B/C/D remain open.

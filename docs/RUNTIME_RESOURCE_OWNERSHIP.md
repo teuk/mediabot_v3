@@ -1,12 +1,10 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1248 R2, prepared against committed MB1247
-`ad256b888251b0449d3f30c566e46a5654be261f`.
-The bounded chaninfo reader split is committed. Its command retains statement
-cleanup and disclosure. Native user-resolution characterization now runs in a bounded child interpreter;
-its clock and mocks cannot alter the shared runner. No production cache, session,
-timer or worker lifetime changes.
-See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1248--native-user-resolution-characterization).
+Current continuation checkpoint: MB1249, prepared against committed MB1248
+`fb0b53f97a79c40149b26e733a39fb09cd8db06d`.
+The isolated native probe now covers cache publication and Context/session scope.
+Production cache, session, timer and worker lifetimes remain unchanged.
+See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1249--user-cache-publication-contracts).
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all
@@ -197,3 +195,8 @@ attempts cache clearing for a known session hostmask (or all keys when absent),
 then removes nickname-keyed aliases. These scopes must remain distinct.
 The upcoming characterization must observe callback/cache publication order;
 this inventory does not certify the complete authentication lifecycle.
+
+MB1249 additionally characterizes publication before the matched-user diagnostic,
+lookup-start timestamp ownership, winning-row snapshots and Context positive
+memoization after a Helpers cache clear. These tests preserve existing behavior;
+they introduce neither a universal invalidation API nor a new cache lifetime.
