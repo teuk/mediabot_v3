@@ -374,4 +374,49 @@ MB881OutputFixture::with_policy(sub {
     ok(!defined $weak_bot,'retained old callback does not retain bot');
 }
 
+# MB1259: member observations are owned by the current transport.
+{
+    my @maps = qw(hChannelsNicks hChannelsNicksTmp hChannelsNicksEnd);
+    my $old = bless {}, 'MB1259::IRC';
+    my $fresh = bless {}, 'MB1259::IRC';
+    my $bot = bless {irc=>$old, channels=>{'#keep'=>{}},
+        hChannelsNicks=>{'#a'=>['Departed']},
+        hChannelsNicksTmp=>{'#a'=>['PartialOld'], '#b'=>['OtherOld']},
+        hChannelsNicksEnd=>{'#a'=>0, '#b'=>1}}, 'Mediabot';
+    my @original = @{$bot}{@maps};
+    Mediabot::setIrc($bot, $old);
+    is_deeply([map {refaddr($_)} @{$bot}{@maps}], [map {refaddr($_)} @original],
+        'same transport retains member buffers and readiness objects');
+    is(Mediabot::setIrc($bot, $fresh), $fresh, 'replacement retains setter return contract');
+    ok(!exists($bot->{$_}), "replacement retires $_") for @maps;
+    is_deeply($bot->{channels}, {'#keep'=>{}}, 'configured channels remain registered');
+    push @{$bot->{hChannelsNicksTmp}{'#a'}}, 'Fresh';
+    is_deeply($bot->{hChannelsNicksTmp}{'#a'}, ['Fresh'], 'new NAMES accumulation cannot append to old partial list');
+    $bot->{hChannelsNicksEnd}{'#a'}=1;
+    Mediabot::setIrc($bot, undef);
+    ok(!exists($bot->{$_}), "detachment retires $_") for @maps;
+    Mediabot::setIrc($bot, undef);
+    ok(!exists $bot->{hChannelsNicksTmp}, 'repeated detachment leaves no synthetic member state');
+
+    # Cleanup can reenter the setter. The successor observations must survive.
+    my $next = bless {}, 'MB1259::IRC';
+    $bot->{irc}=$old;
+    $bot->{hChannelsNicksTmp}={'#a'=>['Obsolete']};
+    $bot->{_flood_outq}={old=>1};
+    require Mediabot::IRC::DeferredOutput;
+    no warnings 'redefine';
+    local *Mediabot::IRC::DeferredOutput::retire_flood_queues = sub {
+        is($_[0]{irc}, $fresh, 'cleanup sees published successor transport');
+        ok(!exists $_[0]{hChannelsNicksTmp}, 'old NAMES state is gone before cleanup callbacks');
+        Mediabot::setIrc($_[0], $next);
+        $_[0]{hChannelsNicksTmp}={'#a'=>['NestedFresh']};
+        $_[0]{hChannelsNicksEnd}={'#a'=>0};
+    };
+    Mediabot::setIrc($bot, $fresh);
+    is($bot->{irc}, $next, 'nested replacement remains authoritative');
+    is_deeply($bot->{hChannelsNicksTmp}, {'#a'=>['NestedFresh']}, 'outer cleanup cannot erase successor NAMES');
+    is_deeply($bot->{hChannelsNicksEnd}, {'#a'=>0}, 'successor synchronization marker survives');
+}
+# END MB1259
+
 done_testing;

@@ -1757,6 +1757,9 @@ sub setIrc {
         my $notices = delete $self->{_notice_queue_timers};
         my $flood = delete $self->{_flood_outq};
         my $privmsg = delete $self->{_external_ai_output_queues};
+        # Membership, partial NAMES and completion markers describe the old
+        # transport. Retire them before cleanup can publish successor state.
+        delete @{$self}{qw(hChannelsNicks hChannelsNicksTmp hChannelsNicksEnd)};
         # Publish before cleanup: reentrant sends belong to the new transport,
         # and a nested setIrc must not be overwritten after cleanup returns.
         $self->{irc} = $irc;

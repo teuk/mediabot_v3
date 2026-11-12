@@ -23,7 +23,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; remaining identity consumers stay open. |
-| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Not assessed. Presence of handlers is not proof of the contract. |
+| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots at transport replacement; event authority and synchronized-decision boundaries remain open. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
@@ -161,3 +161,38 @@ and one full suite remain mandatory before commit. No live service was restarted
 Next bounded audit: trace external NAMES accumulation/publication and Fullop
 readiness across reconnect and interrupted synchronization, then record the
 remaining identity consumers without changing their durable keys by default.
+
+
+## MB1259 — Retire member snapshots with their transport
+
+Base `bd7695c4fae1a5ffcac5283c5047ef94a17e025a` is committed MB1258 and matches
+all tracked files of the 2026-11-12 19:25:53 snapshot. Commit presence does not
+establish a numerical host acceptance result or running-version activation.
+
+Reproduced gap: [NAMES handlers](../mediabot.pl) accumulate chunks in
+hChannelsNicksTmp, publish membership in hChannelsNicks and record completion in
+hChannelsNicksEnd. These three maps survived transport replacement. Appending a
+fresh chunk after an interrupted old snapshot therefore retained old members.
+The old complete snapshot and its completion flags were also still available.
+
+[setIrc](../Mediabot/Mediabot.pm) now deletes these observations on an actual
+transport identity change, including detachment. Retirement precedes output
+cleanup callbacks, so a reentrant replacement can publish its own new observations
+without the outer call erasing them. Reassigning the same object preserves all
+three maps. Configured channels and durable user/permission state are unchanged.
+
+Validation: 16 new checks extend existing native lifecycle case 1311. A local
+probe loads the real Mediabot module with unrelated import dependencies stubbed;
+the baseline fails 9 checks, while the corrected module passes all 16. This is
+not a live IRC replay. Nine neighboring cases 1031/1032/1033/1051/1052/1304/1428/
+1520/608 pass 655 assertions. Native unmodified module loading and full case 1311
+need installed dependencies (local Config::Simple is missing). Cases 388 and 744
+pass another 75 assertions; case 1392 is blocked by the same missing dependency. Host syntax,
+expanded targeted validation and one complete suite precede commit.
+
+Row 2 remains partial: this removes inherited observations, but does not reject
+late events from old IRC objects, gate every moderation action until channel
+synchronization, or handle every same-connection PART/KICK/rejoin boundary.
+Next: audit callback authority and synchronization readiness on the real event
+path before adding further state machinery. Rows 3–5 remain to be assessed;
+this bounded correction does not reopen the completed architecture extraction.

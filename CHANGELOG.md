@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1259 — Obliviate: retire old connection member lists
+
+- Retire published members, partial NAMES buffers and completion flags when
+  setIrc replaces or detaches a transport; same-object assignment retains state.
+- Clear observations before cleanup callbacks, preserving reentrant successor
+  state, configured channels and existing output retirement behavior.
+- Extend native lifecycle coverage and record remaining channel-state audit
+  boundaries in the IRC contract roadmap. No schema or service action.
+
+
 ### MB1258 — Reset Fullop observations for each IRC transport
 
 - Clear old server capabilities, channel-mode snapshots and delegated-ban
