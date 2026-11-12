@@ -1,11 +1,11 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1242, prepared against committed MB1241
-`55eedd9e7fdc4de524f9ca0dbe36ac419822b29b`, matching the supplied snapshot.
-Version command presentation now has an explicit component; Local and Remote
-retain file/cache and network/worker ownership respectively. No timer/worker
-lifetime changes. See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1242--version-command-presentation).
-Local behavior checks pass; complete host acceptance remains pending.
+Current continuation checkpoint: MB1243, reviewed against MB1242 commit
+`2db3d45be89332d731874aca71f298325975ef9f` and the supplied 11:54:51 snapshot.
+The bounded version split is committed. The next selected domain boundary is
+chaninfo's ID-based antiflood read, with command-owned disclosure and cleanup.
+See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1243--version-checkpoint-and-chaninfo-read).
+This documentation checkpoint changes no timer, worker or runtime behavior.
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all

@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1243 — Checkpoint version ownership and select chaninfo's read boundary
+
+- Record the committed Local/Command version split and its remaining compatibility
+  hooks, without inferring missing host acceptance totals.
+- Select chaninfo's ID-based antiflood read as the next bounded domain extraction;
+  preserve its notification column, statement order and command-owned disclosure.
+- Specify before/after native command tests and failure cases before moving SQL.
+  Documentation only: no runtime, database, configuration or lifecycle change.
+
 ### MB1242 — Separate version command presentation from Helpers
 
 - Give Version::Command ownership of immediate identity replies, asynchronous

@@ -13,14 +13,14 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | Phase | Objective and bounded first increment | Status |
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
-| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 local VERSION policy is committed (`55eedd9e`). MB1242 separates version command presentation; host acceptance pending. |
+| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 local VERSION policy is committed (`55eedd9e`). MB1242 command presentation is committed (`2db3d45b`); detailed host acceptance totals not supplied. MB1243 checkpoints this bounded split. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are implemented and committed; broader phase C remains open. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1242 isolates version command presentation with
-explicit dependencies. See [MB1242](#mb1242--version-command-presentation).
+Current continuation point: MB1243 checkpoints the version domain and selects
+chaninfo's remaining antiflood read. See [MB1243](#mb1243--version-checkpoint-and-chaninfo-read).
 Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
@@ -1226,3 +1226,85 @@ remaining phase B/C candidates against concrete coupling. Do not extract the
 remaining small facade delegates for line-count reduction. Authentication lookup
 and its cache invalidation need an explicit security contract before moving;
 generic-worker final-exit coordination remains a separate phase D investigation.
+
+
+## MB1243 — Version checkpoint and chaninfo read
+
+Reviewed at `2db3d45be89332d731874aca71f298325975ef9f` (MB1242 on
+origin/master), matching all tracked files in the supplied
+`snap_mediabot_v3_teuk_20261112_115451.zip`. MB1241 (`55eedd9e`) and
+MB1242 (`2db3d45b`) are committed. Their complete host acceptance transcripts
+were not supplied; no assertion counts are inferred. This is a documentation
+checkpoint, not a runtime extraction or a claim that phase B is complete.
+
+### Version domain after the bounded split
+
+| Owner | Responsibility retained | Compatibility boundary |
+| --- | --- | --- |
+| [Format](../Mediabot/Version/Format.pm) | Normalization, grammar and comparison. | Existing optional Helpers parser/comparator hooks remain call-time. |
+| [Local](../Mediabot/Version/Local.pm) | First-line file identity and cached fallback. | Helpers supplies its historical path anchor and hooks; Update keeps its distinct project reader. |
+| [Remote](../Mediabot/Version/Remote.pm) | Remote VERSION requests, diagnostics and AsyncWorker adaptation. | Optional Helpers hooks remain; no-loop synchronous fallback is unchanged. |
+| [Command](../Mediabot/Version/Command.pm) | Immediate reply, audit and remote follow-up presentation. | Helpers supplies callbacks; Context owns reply routing; core dispatch still uses versionCheck. |
+
+[539](../t/cases/539_mb317_version_check_async_nonblocking.t),
+[606](../t/cases/606_mb388_release_version_identity.t),
+[607](../t/cases/607_mb389_local_startup_semantic_version_compare.t) and
+[609](../t/cases/609_mb391_core_command_release_contract.t) retain native facade,
+path, presentation and wiring coverage. The current modules clarify ownership;
+further moving small Helpers forwarding wrappers would not add a useful boundary.
+
+### Candidate review and next bounded implementation
+
+- **Selected: chaninfo's antiflood parameter read.**
+  [ChannelCommands::userChannelInfo_ctx](../Mediabot/ChannelCommands.pm) still
+  prepares an ID-based CHANNEL_FLOOD SELECT after reading its flags. The domain
+  already has [FloodRules](../Mediabot/Channel/FloodRules.pm), but neither its
+  admission read nor its operator name-based display read has this exact contract.
+- **Defer whole chaninfo extraction.** Owner metadata, flags, Master-only key
+  disclosure and response/audit sequencing are command responsibilities. Moving
+  all three queries at once would unnecessarily enlarge this increment.
+- **Defer authentication/cache extraction.** Helpers::get_user_from_message
+  combines a five-second hostmask cache, lazy Auth/User construction and identity
+  lookup; getIdChannelSet has separate 120-second positive/negative caching.
+  They require their own invalidation/security contract, not mechanical copying.
+- **Keep generic-worker final-exit coordination separate.** Existing phase D
+  inventory remains authoritative; no universal shutdown coordinator is added.
+
+Add a narrowly named FloodRules reader for chaninfo, receiving only the DB handle
+and channel ID. Preserve the exact five-column SELECT (nbmsg_max, nbmsg, duration,
+timetowait, notification), bound ID and LIMIT 1. Do not substitute the existing
+three-column read or the name-based JOIN. Do not normalize DB values, interpret
+0E0 as failure, introduce caching or change admission defaults.
+
+Before implementation, characterize the actual userChannelInfo_ctx handler and
+compare the same scenarios after extraction. Existing
+[case 398](../t/cases/398_mb162_badword_and_afparams_cache_invalidation.t)
+already has native FloodRules/ChannelCommands fixtures and is the first candidate
+for extending coverage without another historical case file. Its current
+antifloodset tests do not by themselves prove chaninfo's distinct contract.
+
+Required behavior and failure matrix:
+
+- Preserve explicit-channel versus Context-channel selection, original target
+  spelling, cache object/id validation, notice target and final audit arguments.
+- Main owner lookup remains first. Missing owner or failed main query must not
+  launch flags/flood reads. Preserve public notices and authenticated Master-only
+  modes/key/autojoin disclosure, including denied/throwing level checks.
+- No nonempty flag means no flag notice; only the existing case-insensitive
+  /AntiFlood/ match triggers flood reading. Do not tighten matching in this refactor.
+- The flags statement finishes before its notice; flood success fetches, replies
+  (including the exact missing-row text), then finishes, then audits. Notification
+  uses existing Perl truth for ON/OFF. Preserve undefined/raw-value behavior.
+- False flood prepare/execute logs the same query diagnostic and reaches final
+  audit without a flood notice or new finish call. Exceptions from prepare,
+  execute, fetch, notice, finish or logger retain identity and historical order.
+- Keep DBI diagnostic tests isolated from real DBI magic and preserve pre-existing
+  state. Retain every existing admission/display/write test in case 398/627.
+
+The reader may return its original statement and SQL for command-owned cleanup
+and diagnostics, following the existing domain pattern; do not hide exceptions
+or add a generic database abstraction. Any cleanup improvement discovered during
+characterization needs a separately justified behavior change, not a silent fix.
+Target native chaninfo plus existing FloodRules tests, then run the complete suite
+once before the eventual runtime commit. MB1243 itself needs documentation
+link/symbol and guarded patch/commit checks only; no full bot suite is required.
