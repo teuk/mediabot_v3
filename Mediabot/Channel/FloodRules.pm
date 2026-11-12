@@ -58,4 +58,26 @@ sub write {
     return { status => $ok ? 'updated' : 'execute_error', statement => $sth };
 }
 
+# chaninfo's ID-based projection includes notification and keeps its exact LIMIT.
+# The command owns notices, diagnostics and finish order, even on false execute.
+# Do not use admission defaults/cache or the name-based operator display reader.
+sub read_for_channel_info {
+    my ($dbh, $id_channel) = @_;
+    my $sql = q{
+                SELECT nbmsg_max, nbmsg, duration, timetowait, notification
+                FROM CHANNEL_FLOOD
+                WHERE id_channel = ?
+                LIMIT 1
+            };
+    my $sth = $dbh->prepare($sql);
+    unless ($sth && $sth->execute($id_channel)) {
+        return { status => 'error', statement => $sth, sql => $sql };
+    }
+    my $row = $sth->fetchrow_hashref();
+    return {
+        status => $row ? 'found' : 'missing', row => $row,
+        statement => $sth, sql => $sql,
+    };
+}
+
 1;

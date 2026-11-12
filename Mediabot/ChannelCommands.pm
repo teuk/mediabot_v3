@@ -2948,15 +2948,13 @@ sub userChannelInfo_ctx {
 
         # If AntiFlood flag is present, fetch flood parameters
         if ($hasAntiFlood) {
-            my $sql3 = q{
-                SELECT nbmsg_max, nbmsg, duration, timetowait, notification
-                FROM CHANNEL_FLOOD
-                WHERE id_channel = ?
-                LIMIT 1
-            };
-            my $sth3 = $self->{dbh}->prepare($sql3);
-            if ($sth3 && $sth3->execute($id_channel)) {
-                if (my $rf = $sth3->fetchrow_hashref()) {
+            my $result = Mediabot::Channel::FloodRules::read_for_channel_info(
+                $self->{dbh}, $id_channel,
+            );
+            my $sth3 = $result->{statement};
+            my $sql3 = $result->{sql};
+            if ($result->{status} ne 'error') {
+                if (my $rf = $result->{row}) {
                     my $nbmsg_max  = $rf->{nbmsg_max};
                     my $duration   = $rf->{duration};
                     my $timetowait = $rf->{timetowait};

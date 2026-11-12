@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1244 — Give chaninfo's antiflood read its domain owner
+
+- Move chaninfo's exact ID-based five-column SELECT into Channel::FloodRules,
+  retaining notification and LIMIT 1 without reusing admission/display defaults.
+- Keep notices, Master-only disclosure, diagnostics, finish and audit sequencing
+  in ChannelCommands; propagate original DBI/callback exceptions unchanged.
+- Extend existing case 398 with actual chaninfo scenarios covering raw/absent
+  values, flag matching, SQL faults and unchanged cache/permission behavior.
+
 ### MB1243 — Checkpoint version ownership and select chaninfo's read boundary
 
 - Record the committed Local/Command version split and its remaining compatibility

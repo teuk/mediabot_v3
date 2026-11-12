@@ -53,6 +53,8 @@ use Scalar::Util qw(refaddr);
 
 return sub {
     my ($assert)=@_;
+    require MB1244Chaninfo;
+    MB1244Chaninfo::check(sub { $assert->ok($_[0], $_[1]) });
     my $json=JSON::PP->new->canonical;
     my $equal=sub { $json->encode($_[0]) eq $json->encode($_[1]) };
     for my $mode (qw(success zero_rows prepare_false execute_false)) {
