@@ -295,4 +295,91 @@ is(scalar @{$bot->{fullop}{sweeps}},1,'detached callbacks cannot trigger another
     }
 }
 
+
+# MB1263: actual lifecycle bodies, isolated recording collaborators (no IRC socket).
+{
+    package MB1263::Recorder;
+    sub reset {push @{$_[0]{calls}},'reset'}
+    sub log {push @{$_[0]{calls}},'log'}
+    sub inc {push @{$_[0]{calls}},['inc',$_[1]]}
+    sub set {push @{$_[0]{calls}},['set',$_[1],$_[2]]}
+    sub mark_connected {push @{$_[0]{calls}},'connected'}
+    sub mark_disconnected {push @{$_[0]{calls}},'disconnected'}
+    sub on_login {push @{$_[0]{calls}},'auth_login'}
+    sub defer_joins {0}
+    sub connect_modes {''}
+    package MB1263::Bot;
+    sub _network_stats_exporter {$_[0]{rec}}
+    sub xauth {$_[0]{rec}}
+    sub getServerHostname {'server.example.invalid'}
+    sub getQuit {$_[0]{quit}}
+    sub setQuit {$_[0]{quit}=$_[1]}
+    sub setConnectionTimestamp {$_[0]{timestamp}=$_[1]}
+    sub setLastRandomQuote {$_[0]{quote}=$_[1]}
+    sub onStartTimers {$_[0]{timers}++}
+    sub setServer {$_[0]{server}=$_[1]}
+    sub getShutdownExitCode {42}
+    sub clean_and_exit {$_[0]{exit}=$_[1]}
+}
+{
+    my @names=qw(on_login on_message_ERROR on_message_KILL);
+    my $bodies=join "\n",map {
+        my($body)=$main =~ /(^sub \Q$_\E \{.*?^\})/ms;
+        die "missing $_" unless $body;$body;
+    } @names;
+    my $make=eval q{
+        package MB1263::Replay;
+        use Scalar::Util ();
+        our ($mediabot,$loop);
+        sub log_debug_args {push @{$mediabot->{rec}{calls}},'debug'}
+        sub _irc_message_args {('server','Bot','closed')}
+    }.$bodies.q{
+        sub { $mediabot=$_[0]; +{map {$_=>__PACKAGE__->can($_)} qw(on_login on_message_ERROR on_message_KILL)} }
+    };
+    die $@ unless $make;
+    no warnings qw(redefine once);
+    local $INC{'Mediabot/Update.pm'}=1;
+    local *Mediabot::Update::update_completion_on_login=sub {$_[0]{completion}++};
+    for my $event (@names) {
+        for my $source (qw(old absent detached current)) {
+            my $current=bless {},'MB1262::IRC';my $old=bless {},'MB1262::IRC';
+            my $rec=bless {calls=>[]},'MB1263::Recorder';
+            my $b=bless {irc=>$current,rec=>$rec,logger=>$rec,metrics=>$rec,
+                wit_runtime_state=>$rec,conf=>bless({},'MB1262::Conf'),channels=>{},
+                quit=>0,server=>'current-server'},'MB1263::Bot';
+            my $handlers=$make->($b);
+            my $sender=$source eq 'old' ? $old : $source eq 'absent' ? undef : $current;
+            $b->{irc}=undef if $source eq 'detached';
+            my $ok=eval {$handlers->{$event}->($sender,undef,{});1};
+            ok($ok,"$event/$source: lifecycle callback completes") or diag $@;
+            if ($source ne 'current') {
+                is_deeply([$rec->{calls},@{$b}{qw(server quit timestamp quote timers completion exit)}],
+                    [[],'current-server',0,undef,undef,undef,undef,undef],
+                    "$event/$source: no auth, metrics, runtime, startup or shutdown effect");
+            } elsif ($event eq 'on_login') {
+                is_deeply([@{$b}{qw(server quit timers completion)}],['current-server',0,1,1],
+                    'current login retains startup and update completion');
+                ok($b->{timestamp} && $b->{quote},'current login retains timestamps');
+                is_deeply([grep {!ref && /^(reset|connected|auth_login)$/} @{$rec->{calls}}],
+                    ['reset','connected','auth_login'],'current login retains exporter, connectivity and authentication');
+            } else {
+                ok(!defined $b->{server},"$event: current disconnect clears server");
+                is_deeply([grep {!ref && /^(reset|disconnected)$/} @{$rec->{calls}}],
+                    ['reset','disconnected'],"$event: current disconnect resets auth and connectivity");
+            }
+        }
+    }
+    for my $event (qw(on_message_ERROR on_message_KILL)) {
+        for my $current_source (0,1) {
+            my $irc=bless {},'MB1262::IRC';my $old=bless {},'MB1262::IRC';
+            my $rec=bless {calls=>[]},'MB1263::Recorder';
+            my $b=bless {irc=>$irc,rec=>$rec,logger=>$rec,metrics=>$rec,
+                wit_runtime_state=>$rec,quit=>1,server=>'current-server'},'MB1263::Bot';
+            $make->($b)->{$event}->($current_source ? $irc : $old,undef,{});
+            is($b->{exit},$current_source ? 42 : undef,"$event: only current source may complete requested shutdown ($current_source)");
+            is($b->{server},'current-server',"$event: shutdown branch does not enter reconnect branch ($current_source)");
+        }
+    }
+}
+
 done_testing();

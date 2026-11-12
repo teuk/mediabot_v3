@@ -298,3 +298,34 @@ entry points, then same-connection synchronization readiness and record row-2's
 remaining limits. Reentrant replacement midway through a handler and the period
 before transport replacement remain outside these entry guards. Rows 3–5 retain
 their finite audit scope; no new structural extraction is being opened.
+
+
+## MB1263 — Login and disconnect ingress ownership
+
+Base `5a14e4b87d75c94b7e48b73aad0053ccfd8b470c` is committed MB1262 and matches
+all tracked files of the 2026-11-12 20:36:02 snapshot. Commit presence alone does
+not establish target-host test totals or live activation.
+
+Replaying the actual [on_login, ERROR and KILL bodies](../mediabot.pl) shows that
+an obsolete transport can reset authentication, change connectivity and server
+selection, rerun login initialization, or complete a requested process shutdown.
+The callbacks now require source reference identity with the installed transport
+before the first effect, including the login exporter reset. Accepted current
+login and disconnect/quit branches retain their previous behavior. No new retry
+policy, configuration, permission, schema or service action is introduced.
+
+36 new checks extend existing case 1032. The unchanged runtime fails 11; the
+corrected case passes all 154 assertions. The local targeted run passes 1,107
+assertions across 21 available cases, with case 858 unable to load because
+Net::Async::IRC is absent. A separate attempt at native XAuth protocol case 1223
+has the same missing dependency. These are blocked validations, not passes;
+the package requires both cases, native main syntax and the complete suite on
+the installed host before commit. Extracted callback replay is not full native
+protocol integration.
+
+Next bounded review: timers created by an accepted login can outlive that login;
+the entry guard does not cancel those closures. Examine their connection ownership,
+then synchronization readiness within one connection and consolidate row-2's
+acceptance/residual limits. Other unreviewed callbacks, replacement midway through
+a handler and the interval before transport replacement remain outside this
+increment. Rows 3–5 retain their existing finite audit scope.

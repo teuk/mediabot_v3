@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1263 — Keep login and disconnect events on their connection
+
+- Reject obsolete, absent or detached sources in on_login, ERROR and KILL
+  before exporter, authentication, connectivity, startup or shutdown effects.
+- Preserve current login initialization and the existing disconnect/quit paths.
+- Extend isolated lifecycle replay checks and record remaining deferred startup
+  and synchronization-readiness work in the IRC contract roadmap.
+
+
 ### MB1262 — Reject departed membership and moderation events
 
 - Guard JOIN/PART/KICK/NICK/QUIT/MODE by installed transport identity before

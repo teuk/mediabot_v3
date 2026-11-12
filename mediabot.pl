@@ -3257,8 +3257,10 @@ sub on_message_NOTICE {
 }
 
 sub on_login {
-    eval { $mediabot->_network_stats_exporter->reset; };
     my ( $self, $message, $hints ) = @_;
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
+    eval { $mediabot->_network_stats_exporter->reset; };
 
     $mediabot->{logger}->log(0,"on_login() Connected to irc server " . $mediabot->getServerHostname());
     # mb701-B: a successful login restores transport connectivity only. No
@@ -5337,6 +5339,8 @@ sub on_message_RPL_WHOISUSER {
 
 sub on_message_ERROR {
     my ($self, $message, $hints) = @_;
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
     eval { $mediabot->xauth->reset; };
     log_debug_args('on_message_ERROR', $message);
     my @error_args = _irc_message_args($message);
@@ -5366,6 +5370,8 @@ sub on_message_ERROR {
 
 sub on_message_KILL {
     my ($self, $message, $hints) = @_;
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
     eval { $mediabot->xauth->reset; };
     log_debug_args('on_message_KILL', $message);
     my @kill_args = _irc_message_args($message);
