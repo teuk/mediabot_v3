@@ -70,23 +70,8 @@ return sub {
     my $expected_version = _slurp_mb388($version_file);
     $expected_version =~ s/\s+\z//;
 
-    $assert->like(
-        $src,
-        qr/my \$HELPERS_SOURCE_FILE = abs_path\(__FILE__\)/,
-        'Helpers anchors the source file to an absolute path'
-    );
-
-    $assert->like(
-        $src,
-        qr/my \$LOCAL_VERSION_FILE\s+=\s+File::Spec->catfile\(\$MEDIABOT_ROOT_DIR, 'VERSION'\)/,
-        'local VERSION path is derived from the source tree'
-    );
-
-    $assert->unlike(
-        $src,
-        qr/open my \$fh, '<', 'VERSION'/,
-        'no cwd-relative VERSION open remains'
-    );
+    # Source anchoring, symlink/foreign-cwd behavior and cold dependencies are
+    # exercised through actual temporary trees by case 607's shared fixture.
 
     require $helpers_file;
 

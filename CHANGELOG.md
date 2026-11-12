@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1241 — Isolate local version identity from Helpers
+
+- Move local VERSION reading and cache/fallback policy into Version::Local,
+  which loads without Helpers, HTTP, DBI or AsyncWorker. Remote's cold local
+  fallback now uses this component rather than importing the Helpers facade.
+- Keep Helpers entry points, its original source-path anchor and call-time
+  normalizer/reader overrides, including changes made during logger callbacks.
+- Preserve first-line/raw file semantics, diagnostics, cache behavior and logger
+  exceptions. Update-tree version reading and network transport are unchanged.
+- Extend cases 606/607 with real temporary-tree/load-order checks; no new case file.
+
 ### MB1240 — Map the next Helpers dependency boundary
 
 - Record committed DB-timer publication and tick-ownership increments, without

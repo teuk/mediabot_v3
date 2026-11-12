@@ -13,16 +13,15 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | Phase | Objective and bounded first increment | Status |
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
-| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1240 selects local VERSION identity as the next bounded Helpers boundary; extraction not yet implemented. |
+| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 extracts local VERSION policy; native checks pass locally, full host acceptance pending. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are implemented and committed; broader phase C remains open. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1240 selects the local VERSION identity boundary
-inside Helpers, after committed DB-timer fixes. See
-[MB1240 checkpoint](#mb1240--helpers-local-version-boundary).
-Earlier “Next” paragraphs are historical decisions, not current instructions.
+Current continuation point: MB1241 implements the selected local VERSION
+boundary. See [MB1241](#mb1241--local-version-component) for validation and the
+next bounded review. Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
 
@@ -1136,3 +1135,47 @@ patch/commit workflow; do not spend another full bot suite on this checkpoint.
 Phase B remains open until the extraction is implemented and accepted. Phases C/D
 still include broader domain boundaries and generic-worker final-exit questions;
 this selection does not declare the architecture roadmap complete.
+
+
+## MB1241 — Local version component
+
+Base: MB1240 commit `c1cc262b9ee59e6cc69101e3c24a22e10586736e` from GitHub.
+No newer snapshot was supplied; commit.sh is guarded against the last supplied
+21:50:52 snapshot. [Local](../Mediabot/Version/Local.pm) owns first-line reading,
+normalization through an explicit callback, cache access and fallback policy.
+It has only core file/path dependencies plus Format; no reverse Helpers import.
+
+Helpers remains the compatibility adapter. It deliberately retains its original
+load-time absolute source anchor, including symlink resolution, and passes that
+path to Local. Moving this anchor into a lazily loaded helper would change
+behavior after cwd/source-tree changes. Normalizer and reader adapters resolve
+legacy symbols when invoked, even if a logger replaces a hook during the call.
+The standalone Local entry point anchors its own tree when the component loads.
+
+Remote prefers existing Helpers hooks when present; otherwise local/cache
+fallback uses Local without importing Helpers. Network requests, TLS, worker
+limits, versionCheck rendering, comparison grammar and Update's different
+project-tree reader remain unchanged. This is one bounded phase B extraction,
+not elimination of every bidirectional compatibility hook.
+
+[Case 607](../t/cases/607_mb389_local_startup_semantic_version_compare.t) uses
+[the shared native fixture](../t/lib/MB1241LocalVersion.pm) with independent
+temporary trees and the existing bounded cold-probe helper. It covers first
+line/whitespace, non-semantic usable labels, empty/missing/Undefined input,
+foreign cwd, a symlinked Helpers source, cache immutability, exact diagnostics,
+logger exception identity, hook overrides and six load/entry configurations.
+[Case 606](../t/cases/606_mb388_release_version_identity.t) replaces three
+source-location checks with this behavioral coverage; its runtime checks remain.
+
+The 64 legacy assertions pass on the unchanged base. All 189 extended assertions
+pass after extraction. Four executable targeted cases pass 264 assertions locally.
+Cases 818 and 834 fail on both base and candidate because HTML::Entities is absent
+from this environment; this is not a passing integration lane. The delivery runs
+all six targeted cases and one full host suite before commit/push. No host result
+is claimed until supplied. No schema, runtime configuration or service action.
+
+Next review: remaining Helpers versionCheck presentation/routing is still a
+command concern, while Remote owns transport. Inspect its callers and existing
+539/607 tests before deciding whether another extraction is useful. Do not move
+small wrappers merely to shrink the file, and do not combine this with Update's
+separate deployment identity or generic-worker shutdown work.

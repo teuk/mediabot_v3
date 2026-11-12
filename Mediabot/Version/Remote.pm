@@ -19,8 +19,8 @@ our @EXPORT_OK = qw(
 );
 
 # Remote VERSION transport and its AsyncWorker adapter share one owner.
-# Local VERSION path/cache ownership stays in Helpers. Preserve its optional
-# runtime hooks at the point of each call, including legacy URL-list overrides.
+# Local VERSION policy belongs to Local. Preserve optional Helpers hooks at
+# call time without importing the whole facade for a cold local fallback.
 
 sub _compat_remote_version_urls {
     return Mediabot::Helpers::_remote_version_urls(@_)
@@ -77,13 +77,17 @@ sub _compare_mediabot_versions {
 }
 
 sub _cached_local_version {
-    require Mediabot::Helpers unless defined &Mediabot::Helpers::_cached_local_version;
-    return Mediabot::Helpers::_cached_local_version(@_);
+    return Mediabot::Helpers::_cached_local_version(@_)
+        if defined &Mediabot::Helpers::_cached_local_version;
+    require Mediabot::Version::Local;
+    return Mediabot::Version::Local::cached(@_);
 }
 
 sub getLocalVersion {
-    require Mediabot::Helpers unless defined &Mediabot::Helpers::getLocalVersion;
-    return Mediabot::Helpers::getLocalVersion(@_);
+    return Mediabot::Helpers::getLocalVersion(@_)
+        if defined &Mediabot::Helpers::getLocalVersion;
+    require Mediabot::Version::Local;
+    return Mediabot::Version::Local::getLocalVersion(@_);
 }
 
 # mb638-B1: LE fetch de la version distante, et la RAISON de son echec.

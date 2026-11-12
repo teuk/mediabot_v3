@@ -57,6 +57,9 @@ sub _slurp_mb389 {
 return sub {
     my ($assert) = @_;
 
+    require MB1241LocalVersion;
+    MB1241LocalVersion::check(sub { $assert->ok($_[0], $_[1]) });
+
     my $root = abs_path('.');
     my $helpers_file = File::Spec->catfile($root, 'Mediabot', 'Helpers.pm');
     my $main_file    = File::Spec->catfile($root, 'mediabot.pl');

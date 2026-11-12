@@ -1,12 +1,11 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1240, reviewed against MB1239 commit
-`8437a8901e42da62238c55cd68718e0b1f43507a` and the supplied 21:50:52 snapshot.
-The bounded DB timer publication/tick fixes are committed. The next selected
-boundary is local VERSION identity in Helpers; see
-[the current roadmap](ARCHITECTURE_ROADMAP.md#mb1240--helpers-local-version-boundary).
-MB1240 is documentation only. It neither adds lifecycle behavior nor certifies
-unseen host acceptance transcripts.
+Current continuation checkpoint: MB1241, prepared against MB1240 commit
+`c1cc262b9ee59e6cc69101e3c24a22e10586736e`.
+Local VERSION file/cache policy now has its own component. Helpers retains its
+historical path anchor and optional hooks; no timer/worker lifetime is changed.
+See [the current roadmap](ARCHITECTURE_ROADMAP.md#mb1241--local-version-component).
+Native local-version checks pass; full host acceptance remains pending.
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all

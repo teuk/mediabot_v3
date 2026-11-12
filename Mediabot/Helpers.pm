@@ -38,6 +38,7 @@ use Cwd qw(abs_path);
 use File::Basename qw(dirname);
 use File::Spec;
 use Mediabot::AsyncWorker;
+use Mediabot::Version::Local ();
 use Mediabot::DynamicTemplate qw(render_template);
 
 our @EXPORT = qw(
@@ -1192,48 +1193,21 @@ sub _usable_local_version {
     return Mediabot::Version::Format::_usable_local_version(@_);
 }
 
+# Local owns the file/cache policy; the facade supplies its stable source path
+# and resolves legacy overrides at call time rather than capturing them at load.
 sub _cached_local_version {
-    my ($self) = @_;
-    return 'Undefined' unless ref($self);
-    return _usable_local_version($self->{main_prog_version}) // 'Undefined';
+    return Mediabot::Version::Local::cached($_[0], sub { _usable_local_version(@_) });
 }
 
 sub _read_local_version {
-    my ($self) = @_;
-
-    if (open my $fh, '<', $LOCAL_VERSION_FILE) {
-        my $value = <$fh>;
-        close $fh;
-
-        return _usable_local_version($value) // 'Undefined';
-    }
-
-    $self->{logger}->log(
-        1,
-        "Unable to read local VERSION file '$LOCAL_VERSION_FILE': $!",
-    ) if $self && $self->{logger};
-
-    return 'Undefined';
+    return Mediabot::Version::Local::read($_[0], $LOCAL_VERSION_FILE,
+        sub { _usable_local_version(@_) });
 }
 
-# MB389: startup identity is local-only. Reading VERSION must never trigger
-# DNS, GitHub or any other public-network dependency.
 sub getLocalVersion {
-    my ($self) = @_;
-
-    $self->{logger}->log(1, "Reading local version from $LOCAL_VERSION_FILE...")
-        if $self && $self->{logger};
-
-    my $local_version = _read_local_version($self);
-    my $usable = _usable_local_version($local_version)
-        // _usable_local_version($self->{main_prog_version});
-
-    if (defined $usable) {
-        $self->{main_prog_version} = $usable if ref($self);
-        return $usable;
-    }
-
-    return 'Undefined';
+    return Mediabot::Version::Local::getLocalVersion($_[0], $LOCAL_VERSION_FILE,
+        normalize => sub { _usable_local_version(@_) },
+        read => sub { _read_local_version(@_) });
 }
 
 sub _version_parts {
