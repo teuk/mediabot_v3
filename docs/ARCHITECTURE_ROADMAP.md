@@ -19,8 +19,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1249 extends native user-resolution characterization
-and selects a streaming SQL boundary. See [MB1249](#mb1249--user-cache-publication-contracts).
+Current continuation point: MB1250 extracts the user candidate cursor opener.
+See [MB1250](#mb1250--user-candidate-cursor-owner).
 Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
@@ -1580,3 +1580,38 @@ Keep Helpers entry points and their call order; update case 194's SQL projection
 check to inspect the new owner while retaining native behavior coverage. Compare
 full observable traces before/after and run the native plus session/rekey lane,
 then one complete host suite. Broader phases B/C/D remain open.
+
+
+## MB1250 — User candidate cursor owner
+
+Base `41abc50b9a45b5edef62c23663d5c59aa93fab20` is committed MB1249 and matches all
+tracked files of the supplied 2026-11-12 14:04:09 snapshot. commit.sh is guarded
+against that snapshot. Missing host acceptance totals are not inferred.
+
+[User::Lookup::open_candidates](../Mediabot/User/Lookup.pm) now owns only the exact
+user/hostmask SELECT, prepare and no-argument execute. It returns explicit success
+and the original statement, including the false-execute statement. It neither
+fetches nor finishes, imports no bot/DBI/Auth dependencies, and preserves 0E0 and
+exception propagation. Helpers loads it lazily after existing Auth initialization.
+
+[Helpers::get_user_from_message](../Mediabot/Helpers.pm) keeps the interleaved
+fetch/matching loop, winning-row snapshot, failure diagnostics, finish and all
+User/autologin/session/cache callbacks. SQL bytes, projection, grouping and
+ordering are unchanged; no password enters the candidate projection. Context
+memoization and Auth invalidation are unaffected.
+
+[Case 194](../t/cases/194_get_user_from_message_no_password_select.t) checks the
+SQL projection at its new owner and retains credential separation and actual
+resolution coverage. [The child probe](../t/lib/MB1248UserResolution.pl) has an
+optional trace output argument for release comparisons; normal test execution
+writes no file. All 132 assertions pass before and after, and complete collected
+operation/log traces are byte-identical. The targeted 194/591/596 lane passes 82
+runner assertions. Cold loading confirms no Helpers/Auth/User/DBI dependency.
+The delivery requires one full host suite before commit/push; acceptance is pending.
+
+Next: review the remaining Helpers identity-resolution responsibilities against
+these preserved contracts, then choose a single explicit boundary (matching or
+cache policy) only if it reduces coupling without hiding authorization. Do not
+merge Context/Helpers caching or generalize SQL readers mechanically. Changes to
+clock rollback, failure cleanup or diagnostic exceptions require separate behavior
+changes and regression cases. Broader phases B/C/D remain open.

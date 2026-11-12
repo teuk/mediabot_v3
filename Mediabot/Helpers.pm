@@ -165,30 +165,10 @@ sub get_user_from_message {
         metrics => $self->{metrics}, # mb362-B1: preserve Auth gauge on lazy init
     );
 
-    my $sth = $self->{dbh}->prepare(q{
-        SELECT
-            u.id_user,
-            u.nickname,
-            u.username,
-            u.id_user_level,
-            u.auth,
-            u.info1,
-            u.info2,
-            GROUP_CONCAT(uh.hostmask ORDER BY uh.id_user_hostmask SEPARATOR ',') AS hostmasks
-        FROM USER u
-        LEFT JOIN USER_HOSTMASK uh ON uh.id_user = u.id_user
-        GROUP BY
-            u.id_user,
-            u.nickname,
-            u.username,
-            u.id_user_level,
-            u.auth,
-            u.info1,
-            u.info2
-        ORDER BY u.id_user
-    });
-
-    unless ($sth && $sth->execute) {
+    require Mediabot::User::Lookup;
+    my $lookup = Mediabot::User::Lookup::open_candidates($self->{dbh});
+    my $sth = $lookup->{statement};
+    unless ($lookup->{ok}) {
         $self->{logger}->log(1, " get_user_from_message() SQL Error: $DBI::errstr");
         return;
     }

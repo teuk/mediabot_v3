@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1250 — Give user candidate SQL its own owner
+
+- Extract the exact user/hostmask SELECT preparation and execution into
+  User::Lookup, returning the original statement with explicit success status.
+- Keep streaming fetch/matching, row snapshots, diagnostics, finish, autologin
+  and both cache scopes in their existing owners; retain false/0E0 semantics.
+- Adapt credential-projection checks and compare native operation traces before
+  and after the move, without changing authentication policy or schema.
+
 ### MB1249 — Characterize user-cache publication boundaries
 
 - Extend the existing isolated native probe with logger failures before/after

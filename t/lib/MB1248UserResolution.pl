@@ -10,6 +10,7 @@ use Mediabot::Context ();
 
 # This file runs only in a fresh interpreter: its clock never changes the runner.
 our ($state,$error);
+my @traces;
 sub event {
  my ($name,@args)=@_;push @{$state->{events}},[$name,@args];
  $now=$state->{advance}{$name} if exists $state->{advance}{$name};
@@ -53,6 +54,7 @@ sub event {
 sub setup {
  my (%opts)=@_;$now=100;$error=bless {},'MB1248::Error';
  $state={events=>[],rows=>[{id_user=>1,nickname=>'alice',score=>10}],%opts};
+ push @traces, $state->{events};
  $state->{remaining}=[@{$state->{rows}}];
  return bless {dbh=>bless({},'MB1248::DB'),logger=>bless({},'MB1248::Logger'),metrics=>{}},'MB1248::Bot';
 }
@@ -176,5 +178,12 @@ sub count_op {my ($n)=@_;scalar grep {$_->[0] eq $n} @{$state->{events}}}
  is_deeply($b->{_user_cache_ts},{},'missing session hostmask clears all Helpers timestamps');
  ok($b->{sessions}{other},'global cache clear does not erase unrelated session aliases');
 
+}
+# Optional differential trace for release verification; normal runner writes no file.
+if (@ARGV) {
+ require JSON::PP;
+ open my $fh, '>:raw', $ARGV[0] or die $!;
+ print {$fh} JSON::PP->new->utf8->canonical->encode(\@traces);
+ close $fh or die $!;
 }
 done_testing;

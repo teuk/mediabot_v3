@@ -1,10 +1,10 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1249, prepared against committed MB1248
-`fb0b53f97a79c40149b26e733a39fb09cd8db06d`.
-The isolated native probe now covers cache publication and Context/session scope.
-Production cache, session, timer and worker lifetimes remain unchanged.
-See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1249--user-cache-publication-contracts).
+Current continuation checkpoint: MB1250, prepared against committed MB1249
+`41abc50b9a45b5edef62c23663d5c59aa93fab20`.
+User::Lookup opens the original candidate statement; Helpers retains streaming
+fetch/matching, diagnostics and finish. No cache/session lifetime is relocated.
+See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1250--user-candidate-cursor-owner).
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all

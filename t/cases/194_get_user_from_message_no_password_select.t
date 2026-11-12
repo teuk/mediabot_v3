@@ -68,14 +68,16 @@ return sub {
         File::Spec->catfile('.', 'Mediabot', 'Auth.pm')
     );
 
+    my $lookup = _slurp_194(File::Spec->catfile('.', 'Mediabot', 'User', 'Lookup.pm'));
+
     my $body = _extract_sub_body_194($helpers, 'get_user_from_message');
 
     $assert->ok(defined $body, 'get_user_from_message body found');
 
     $assert->like(
-        $body // '',
+        $lookup,
         qr/GROUP_CONCAT\(uh\.hostmask ORDER BY uh\.id_user_hostmask SEPARATOR ','\) AS hostmasks/,
-        'get_user_from_message still loads hostmasks'
+        'lookup reader still loads ordered hostmasks'
     );
 
     $assert->like(
@@ -85,13 +87,13 @@ return sub {
     );
 
     $assert->unlike(
-        $body // '',
+        $lookup,
         qr/\bu\.password\s*,/,
         'get_user_from_message no longer SELECTs or GROUPs u.password'
     );
 
     $assert->unlike(
-        $body // '',
+        $lookup,
         qr/\bUSER\.password\s*,/,
         'get_user_from_message no longer SELECTs USER.password'
     );
@@ -107,6 +109,10 @@ return sub {
         qr/sub verify_credentials/,
         'Mediabot::Auth::verify_credentials remains the password-checking path'
     );
+    $assert->like($body // '', qr/Mediabot::User::Lookup::open_candidates/,
+        'Helpers delegates candidate cursor opening');
+    $assert->unlike($body // '', qr/GROUP_CONCAT\(/,
+        'Helpers no longer owns candidate SQL');
     require ColdProbeBatch;
     my $results = ColdProbeBatch::run_perl_probes([
         q{do './t/lib/MB1248UserResolution.pl' or die($@ || $! || 'resolution probe failed')},
