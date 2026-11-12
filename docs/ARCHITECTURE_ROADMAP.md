@@ -1,5 +1,9 @@
 # Mediabot architecture roadmap
 
+Current continuation: [IRC contract roadmap](IRC_CONTRACT_ROADMAP.md), accepted
+on 2026-11-12. The bounded architecture chapter below remains the historical
+record; do not reopen broad extraction work by default.
+
 Accepted by the maintainer on 2026-11-11, after review of MB1207
 (`d2efb58ddea9c370505b92639e2973233d2d02e0`).
 

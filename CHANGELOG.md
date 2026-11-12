@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1256 — Follow connection identity rules for conversational exclusions
+
+- Start a bounded five-contract comparison with pinned Eggdrop 1.10.2 sources,
+  distinguishing reproduced defects from unassessed behavior and optional parity.
+- Pass the current connection casemapping to both conversational bot exclusions;
+  ASCII no longer merges bracket nicknames, and strict RFC1459 distinguishes ^/~.
+- Preserve legacy helper defaults and persistent keys; cover capability changes,
+  removal and reconnect without changing authorization or runtime configuration.
+
 ### MB1255 — Keep safe AI worker failure diagnostics
 
 - Record an allowlisted worker error/stage once in operational logs instead of

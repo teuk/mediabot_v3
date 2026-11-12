@@ -22,6 +22,9 @@ sub new {
     }, $class;
 }
 
+# The current connection rule is also used by conversational bot exclusions.
+sub casemapping { return $_[0]{casemapping}; }
+
 sub _channel_key {
     my ($self, $channel) = @_;
     croak 'channel must be a public IRC channel'

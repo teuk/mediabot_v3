@@ -3989,6 +3989,8 @@ sub _on_message_PRIVMSG_body {
         my $from_conversation_bot =
             Mediabot::Spark::Identity::is_known_bot_nick(
                 nick => $who,
+                casemapping => $mediabot->{wit_runtime_state}
+                    ? $mediabot->{wit_runtime_state}->casemapping : 'ascii',
                 bot_nick => $self->nick,
                 configured_bot_nicks =>
                     $mediabot->{conf}->get('main.BOT_NICKS'),
@@ -4056,6 +4058,8 @@ sub _on_message_PRIVMSG_body {
             my $from_wit_ignored = $from_conversation_bot
                 || Mediabot::Spark::Identity::is_known_bot_nick(
                     nick => $who,
+                    casemapping => $mediabot->{wit_runtime_state}
+                        ? $mediabot->{wit_runtime_state}->casemapping : 'ascii',
                     configured_bot_nicks => $wit_ignore_nicks,
                 );
             eval {
