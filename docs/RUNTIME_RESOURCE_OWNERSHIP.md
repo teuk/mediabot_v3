@@ -1,11 +1,12 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1247, prepared against committed MB1246
-`7326eb8151caf0cdfa2f6a06be2c689f569be8e9`.
+Current continuation checkpoint: MB1248 R2, prepared against committed MB1247
+`ad256b888251b0449d3f30c566e46a5654be261f`.
 The bounded chaninfo reader split is committed. Its command retains statement
-cleanup and disclosure. The next step characterizes user-resolution ownership;
-this documentation checkpoint changes no cache, session, timer or worker lifetime.
-See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1247--user-resolution-contract-checkpoint).
+cleanup and disclosure. Native user-resolution characterization now runs in a bounded child interpreter;
+its clock and mocks cannot alter the shared runner. No production cache, session,
+timer or worker lifetime changes.
+See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1248--native-user-resolution-characterization).
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all

@@ -107,4 +107,13 @@ return sub {
         qr/sub verify_credentials/,
         'Mediabot::Auth::verify_credentials remains the password-checking path'
     );
+    require ColdProbeBatch;
+    my $results = ColdProbeBatch::run_perl_probes([
+        q{do './t/lib/MB1248UserResolution.pl' or die($@ || $! || 'resolution probe failed')},
+    ], jobs => 1, timeout => 30);
+    my $probe = $results->[0];
+    $assert->ok($probe->{status} == 0,
+        'native user-resolution contracts: ' . ($probe->{status} ? $probe->{stdout} . $probe->{stderr} : 'PASS'));
+    $assert->ok($probe->{stderr} eq '', 'native resolution is warning-free');
+
 };

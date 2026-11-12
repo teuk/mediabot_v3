@@ -19,8 +19,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1247 checkpoints chaninfo and selects native
-user-resolution characterization. See [MB1247](#mb1247--user-resolution-contract-checkpoint).
+Current continuation point: MB1248 begins native user-resolution characterization.
+See [MB1248](#mb1248--native-user-resolution-characterization).
 Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
@@ -1500,3 +1500,42 @@ MB1247 requires documentation references/symbol checks and guarded patch/commit
 checks only. The next runtime increment requires native targeted cases and one
 full host suite before commit. Broader phases B/C/D remain open; generic-worker
 final-exit coordination remains separate from identity resolution.
+
+
+## MB1248 — Native user-resolution characterization
+
+Base `ad256b888251b0449d3f30c566e46a5654be261f` is committed MB1247. R1 was stopped
+by its base guard before application because it expected MB1246. R2 is rebased
+onto MB1247 and preserves the committed checkpoint. Source code and test changes
+are identical to R1; no runtime module is modified. The guarded commit.sh still
+matches the supplied 2026-11-12 13:33:37 snapshot. No newer snapshot was supplied.
+
+[Case 194](../t/cases/194_get_user_from_message_no_password_select.t) retains its
+credential-projection checks and runs [a native probe](../t/lib/MB1248UserResolution.pl)
+through [ColdProbeBatch](../t/lib/ColdProbeBatch.pm) with one child and a 30-second
+bound. The child loads actual Helpers, Context and Auth; it does not reconstruct
+function bodies. Clock, DB and User callbacks are controlled only in the child,
+so shared-runner DBI state, symbol tables and time remain untouched.
+
+The 86 assertions cover successful call order, Auth bot/metrics initialization,
+no-password SQL projection and ordering, 0E0, five-second expiry, current rollback
+behavior, exact fullmask keys, scoped/global clearing, unmatched lookup versus
+Context absence caching, score/tie selection, Undernet cloak boundaries, statement
+and callback exceptions, false DB results/finish and actual Auth invalidation.
+Existing cases 591/596 retain native session lifecycle and nick-rekey coverage.
+Three local mutations (TTL boundary, tie selection and timestamp clearing) are
+rejected by the probe. The targeted three-file runner passes 80 assertions,
+including probe status checks; the child separately passes 86 assertions. These
+are different counts, not a claim of 166 runner assertions.
+
+This is a first characterization slice, not completion of the entire MB1247
+matrix. Next add callback log/publication failure checks, missing/undefined prefix
+cases with rows, optional autologin absence, slow lookup start-time behavior and
+selected-row snapshot checks before choosing an extraction. Retain Context positive
+memoization and session alias boundaries in that next review. Keep runtime code
+unchanged until the remaining characterization justifies a bounded SQL boundary.
+
+The package runs targeted tests and one full host suite before commit/push to
+verify the new child probe integrates with the shared runner. Full host acceptance
+is pending; schema, configuration, services and production authentication remain
+unchanged. Broader phases B/C/D remain open.

@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1248 — Characterize native user resolution before extraction
+
+- Extend existing case 194 with a fresh-process probe of actual Helpers and
+  Context behavior; isolate the deterministic clock from the shared runner.
+- Cover TTL boundaries, exact cache keys, absence, matching scores/ties/cloaks,
+  lazy Auth dependencies, callback failures and real Auth session invalidation.
+- Preserve runtime code unchanged and extend the committed MB1247 checkpoint
+  with native characterization before any identity lookup extraction.
+
 ### MB1247 — Checkpoint chaninfo and map user-resolution ownership
 
 - Record the committed chaninfo registration/flags/flood readers and the
