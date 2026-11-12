@@ -281,6 +281,7 @@ for my $entry ('Mediabot::Karma') {
     $bot->{hChannelsNicksTmp}={'#test'=>['Bob','Carol'], '#sync'=>['Gone','Here']};
     $peer->do('CREATE TABLE CHANNEL (id_channel INTEGER, name TEXT)');
     my $irc=bless {},'MB1126::IRC';
+    $bot->{irc}=$irc; # The replay source is the installed transport.
     local $MB1126::Ingress::mediabot=$bot;
     local *Mediabot::Helpers::chanset_enabled=sub {0};
     local *Mediabot::UserCommands::deliverReminders=sub {};

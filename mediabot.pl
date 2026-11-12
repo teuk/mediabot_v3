@@ -3390,6 +3390,9 @@ sub on_message_INVITE {
     
 sub on_message_KICK {
     my ($self,$message,$hints) = @_;
+    # Membership and moderation events belong to the installed transport.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
 
     log_debug_args('on_message_KICK', $message);
     my ($kicker_nick,$target_name,$kicked_nick,$text) = @{$hints}{qw<kicker_nick target_name kicked_nick text>};
@@ -3448,6 +3451,9 @@ sub on_message_KICK {
 
 sub on_message_MODE {
     my ($self,$message,$hints) = @_;
+    # Membership and moderation events belong to the installed transport.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
 
     log_debug_args('on_message_MODE', $message);
     my ($target_name,$modechars,$modeargs) = @{$hints}{qw<target_name modechars modeargs>};
@@ -3535,6 +3541,9 @@ sub purge_claude_session_for_nick {
 
 sub on_message_NICK {
     my ($self,$message,$hints) = @_;
+    # Membership and moderation events belong to the installed transport.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
 
     log_debug_args('on_message_NICK', $message);
     my %hChannelsNicks = ();
@@ -3626,6 +3635,9 @@ sub on_message_NICK {
 
 sub on_message_QUIT {
     my ($self,$message,$hints) = @_;
+    # Membership and moderation events belong to the installed transport.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
 
     log_debug_args('on_message_QUIT', $message);
     my %nick_channels;
@@ -3698,6 +3710,9 @@ sub on_message_QUIT {
 
 sub on_message_PART {
     my ($self, $message, $hints) = @_;
+    # Membership and moderation events belong to the installed transport.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
 
     log_debug_args('on_message_PART', $message);
     my ($target_name, $text) = @{$hints}{qw<target_name text>};
@@ -4775,6 +4790,9 @@ sub on_message_WHOWAS {
                 
 sub on_message_JOIN {
     my ($self,$message,$hints) = @_;
+    # Membership and moderation events belong to the installed transport.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
 
     log_debug_args('on_message_JOIN', $message);
     my %hChannelsNicks = ();

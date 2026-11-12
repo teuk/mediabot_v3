@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1262 — Reject departed membership and moderation events
+
+- Guard JOIN/PART/KICK/NICK/QUIT/MODE by installed transport identity before
+  membership, auth, observer, audit or Fullop side effects.
+- Preserve current-event behavior; extend isolated replay coverage for all six
+  handlers and install the source transport in the existing karma ingress test.
+- Record the transport-authority checkpoint and remaining synchronization work.
+
+
 ### MB1261 — Keep server observations on their own connection
 
 - Reject obsolete or detached 005/324 callbacks before they can replace Fullop

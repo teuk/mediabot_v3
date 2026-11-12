@@ -213,4 +213,86 @@ is(scalar @{$bot->{fullop}{sweeps}},1,'detached callbacks cannot trigger another
     ok(eval {$support->(undef,undef,undef);$modes->(undef,undef,undef);1},'absent source is refused before malformed payload access');
 }
 
+
+# MB1262: isolated replay of membership/MODE handlers with recording collaborators.
+{
+    package MB1262::IRC;
+    sub nick {'Bot'}
+    sub is_nick_me {$_[1] eq 'Bot'}
+    sub _set_nick {$_[0]{renamed}=$_[1]}
+    package MB1262::Message;
+    sub prefix {'Alice!ident@example.invalid'}
+    package MB1262::Conf;
+    sub get {0}
+    package MB1262::Recorder;
+    sub log {push @{$_[0]{calls}},'log'}
+    sub inc {push @{$_[0]{calls}},'metric'}
+    sub set {push @{$_[0]{calls}},'metric'}
+    sub logout {push @{$_[0]{calls}},'logout'}
+    sub rename_session {push @{$_[0]{calls}},'rename';1}
+    sub handle_mode {push @{$_[0]{calls}},'mode'}
+    sub handle_join {push @{$_[0]{calls}},'join'}
+    package MB1262::Bot;
+    sub gethChannelNicks {$_[0]{hChannelsNicks}}
+    sub sethChannelNicks {$_[0]{hChannelsNicks}=$_[1]}
+    sub getMessageNickIdentHost {('Alice','ident','example.invalid')}
+    sub observe_channel_event {push @{$_[0]{effects}},'event'}
+    sub updateUserSeen {push @{$_[0]{effects}},'seen'}
+    sub logBotAction {push @{$_[0]{effects}},'audit'}
+    sub userOnJoin {push @{$_[0]{effects}},'userjoin'}
+    sub channelNicksRemove {
+        my($s,$c,$n)=@_;$s->{hChannelsNicks}{$c}=[grep {$_ ne $n} @{$s->{hChannelsNicks}{$c}||[]}];
+    }
+}
+{
+    my @events=qw(JOIN PART KICK NICK QUIT MODE);
+    my $bodies='';
+    for my $event (@events) {
+        my($body)=$main =~ /(^sub on_message_\Q$event\E \{.*?^\})/ms;
+        die "missing $event" unless $body;$bodies.=$body."\n";
+    }
+    my $make=eval q{
+        package MB1262::Replay;
+        use Scalar::Util ();
+        our $mediabot;
+        sub log_debug_args {push @{$mediabot->{effects}},'debug'}
+        sub _irc_message_args {('#test','+m')}
+        sub _irc_target_is_channel {defined $_[0] && $_[0] =~ /^#/}
+        sub purge_claude_session_for_nick {push @{$_[0]{effects}},'purge'}
+    }.$bodies.q{
+        sub { $mediabot=$_[0]; +{map {$_=>__PACKAGE__->can('on_message_'.$_)} qw(JOIN PART KICK NICK QUIT MODE)} }
+    };
+    die $@ unless $make;
+    no warnings qw(redefine once);
+    local *Mediabot::AI::MetaRuntime::note_rename=sub {};
+    local *Mediabot::UserCommands::deliverReminders=sub {};
+    my $message=bless {},'MB1262::Message';
+    my $hints={target_name=>'#test',text=>'bye',old_nick=>'Alice',new_nick=>'Renamed',
+        kicker_nick=>'Carol',kicked_nick=>'Alice',modechars=>'+m',modeargs=>[]};
+    for my $event (@events) {
+        for my $source (qw(old absent detached current)) {
+            my $current=bless {},'MB1262::IRC';my $old=bless {},'MB1262::IRC';
+            my $rec=bless {calls=>[]},'MB1262::Recorder';
+            my $b=bless {irc=>$current,conf=>bless({},'MB1262::Conf'),
+                logger=>$rec,metrics=>$rec,auth=>$rec,fullop=>$rec,effects=>[],
+                hChannelsNicks=>{'#test'=>['Alice']}},'MB1262::Bot';
+            my $handlers=$make->($b);
+            my $sender=$source eq 'old' ? $old : $source eq 'absent' ? undef : $current;
+            $b->{irc}=undef if $source eq 'detached';
+            my $ok=eval {$handlers->{$event}->($sender,$message,$hints);1};
+            ok($ok,"$event/$source: callback completes") or diag $@;
+            if ($source ne 'current') {
+                is_deeply([$b->{effects},$rec->{calls},$b->{hChannelsNicks}],
+                    [[],[],{'#test'=>['Alice']}],"$event/$source: no state, auth, policy or observer side effects");
+            } else {
+                ok(@{$b->{effects}}>0,"$event: installed transport still reaches handler");
+                my @expected=$event eq 'JOIN' ? ('Alice','Alice') : $event eq 'NICK' ? ('Renamed') : $event eq 'MODE' ? ('Alice') : ();
+                is_deeply($b->{hChannelsNicks}{'#test'},\@expected,"$event: current membership behavior retained");
+                my $effect=$event eq 'MODE' ? 'mode' : $event eq 'JOIN' ? 'join' : $event eq 'NICK' ? 'rename' : 'logout';
+                ok(grep({$_ eq $effect} @{$rec->{calls}}),"$event: current policy/auth side effect retained");
+            }
+        }
+    }
+}
+
 done_testing();

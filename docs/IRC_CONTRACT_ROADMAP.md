@@ -23,7 +23,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
-| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. Other event authority and synchronized-decision boundaries remain open. |
+| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. Login/disconnect authority and synchronized-decision boundaries remain open. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
@@ -262,3 +262,39 @@ Next bounded audit: membership events JOIN/PART/KICK/NICK/QUIT and MODE still ne
 source authority review. Login/disconnect events and readiness before synchronization
 also remain open. Consolidate these findings into row-2 acceptance; do not call
 all IRC callbacks protected. Rows 3–5 retain the same finite audit scope.
+
+
+## MB1262 — Membership and moderation events require their transport
+
+Base `46b89d408fc0db4ce031f2945a36b97cf5fbee04` is committed MB1261 and matches
+all tracked files of the 2026-11-12 20:11:00 snapshot. No numerical target-host
+acceptance or running-version activation is inferred from commit presence.
+
+The [JOIN/PART/KICK/NICK/QUIT/MODE handlers](../mediabot.pl) previously accepted
+obsolete callback sources. An isolated replay demonstrates member additions,
+removals/renames, authentication logout/rename, observer/audit activity and Fullop
+calls after the source transport has been replaced. This is a reproduced handler
+gap, not evidence of a live server incident or an estimate of its frequency.
+
+All six handlers now check reference identity against the installed IRC object
+before logging, parsing or side effects, matching the existing 353/366/005/324
+contract. Current events retain the existing behavior. No authorization rule,
+network mapping, persisted identity, database schema or configuration is changed.
+
+Validation: 60 checks extend existing case 1032 with the six actual extracted
+handler bodies and recording collaborators. Baseline fails 22; corrected case
+passes 118 assertions. The accepted path checks existing member updates and
+policy/auth calls, while old/absent/detached sources leave state and collaborators
+untouched. This remains an isolated replay, not full native IRC integration.
+The karma ingress fixture in case 1358 now explicitly installs its replay source;
+local execution is blocked by missing Config::Simple, so it remains a mandatory
+host gate. Nineteen available targeted cases pass 1,040 assertions. Host native
+syntax, expanded targeted lane and one full suite run before commit.
+
+Checkpoint: transport replacement now retires member snapshots and guards NAMES,
+capabilities/mode snapshots and the six membership/MODE ingress paths. This does
+not establish authority for every callback. Next examine login/disconnect/error
+entry points, then same-connection synchronization readiness and record row-2's
+remaining limits. Reentrant replacement midway through a handler and the period
+before transport replacement remain outside these entry guards. Rows 3–5 retain
+their finite audit scope; no new structural extraction is being opened.
