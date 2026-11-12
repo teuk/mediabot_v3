@@ -22,7 +22,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
-| 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes one reproduced exclusion mismatch; broader consumers remain to audit. |
+| 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. Other consumers and reconnect remain to audit. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Not assessed. Presence of handlers is not proof of the contract. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
@@ -75,3 +75,48 @@ and one complete suite are mandatory before commit. Host acceptance is pending.
 Next: finish row 1's remaining identity consumers and inventory row 2's channel
 synchronization authority. Choose the next correction only from demonstrated
 behavior, preserving persistent identities and established permissions.
+
+
+## MB1257 — Fullop retires withdrawn capability semantics
+
+Base `381484276e88c3df202fb3703d787e41359efad9` is committed MB1256 and matches
+every tracked file of the supplied 2026-11-12 18:03:51 snapshot. Commit presence
+does not independently establish the numerical full-host test result or activation.
+
+Reproduced defect: update_isupport removed -KEY from its raw table while keeping
+the effective network, folding, prefix, mode grammar and batching fields. After
+CASEMAPPING=ascii, PREFIX=(ohv)@%+ and MODES=1 were withdrawn, real op sweeps still
+separated RFC-equivalent names into one-op batches and NAMES still stripped %.
+This is a local replay of server announcements, not evidence of a live incident.
+
+Correction in [Fullop](../Mediabot/Fullop.pm): withdrawal of an advertised key
+restores its constructor fallback: CASEMAPPING=rfc1459, PREFIX=(ov)@+,
+CHANMODES=beI,k,l,imnpst and MODES=4. NETWORK returns to the original configured
+network (or the empty constructor fallback), not a withdrawn server claim.
+These are Mediabot's existing fallbacks, not Eggdrop's numeric defaults.
+ConversationRuntimeState's conservative ASCII fallback is intentionally unchanged;
+this delivery does not claim that all identity consumers now share one policy.
+
+Withdrawn identity/prefix/mode grammar invalidates the old in-memory mode snapshot
+and delegated-ban correlations; old keys and mode categories cannot be reused
+under the restored interpretation. NETWORK withdrawal also clears correlations.
+Fresh observations rebuild the snapshot. Durable ChannelBan records, user data,
+configuration callbacks, exemptions and normal advertised behavior are unchanged.
+Unknown capabilities only lose their raw entry. Repeated withdrawal of a key
+already absent is inert; re-advertisement becomes effective normally.
+
+Comparative finding: pinned Eggdrop isupport.c has effective default values and
+an internal isupport_unset API, but its isupport_parse explicitly logs that wire
+-KEY unsetting is unsupported and skips it. Do not report Eggdrop 1.10.2 as passing
+this wire-withdrawal contract. The comparison guides questions, not blind parity.
+
+Validation: existing case 1031 extended to 81 native assertions; the baseline
+fails 12 of these checks. The seven-case lane 1031/1032/1033/1051/1052/1304/1428
+passes 476 assertions, covering policy, privilege boundaries, network-service
+exceptions, integration wiring and wire budgets. Full installed-host validation
+remains mandatory before commit; no full local suite or live restart is claimed.
+
+Remaining row-1 work: Fullop lifecycle across transport replacement, live mapping
+replacement and other identity consumers, especially durable identities. Neither
+this withdrawal fix nor MB1256 closes the whole identity contract. Row 2 still
+requires a trace of channel readiness and decisions made during partial sync.

@@ -397,4 +397,63 @@ my ($disabled, $disabled_sent) = build_guard(enabled => 0);
 is($disabled->handle_join('#closed', 'Alice'), 0, 'feature fails closed without +Fullop');
 is_deeply($disabled_sent, [], 'disabled channel receives no IRC mutation');
 
+# MB1257: withdrawn server rules must stop affecting actual policy operations.
+my ($withdrawn, $withdrawn_sent) = build_guard(network => 'GenericNet');
+$withdrawn->update_isupport('CASEMAPPING=ascii', 'PREFIX=(ohv)@%+',
+    'CHANMODES=beI,k,x,imnpst', 'MODES=1', 'NETWORK=EpikNet');
+is($withdrawn->sweep_channel('#open', '[Alice', '{Alice'), 2,
+    'withdrawal fixture starts with distinct ASCII nicknames');
+is(scalar @$withdrawn_sent, 2, 'advertised MODES=1 emits separate batches');
+is_deeply([$withdrawn->names_from_blob('%Half @Op')], ['Half','Op'],
+    'advertised halfop prefix is consumed');
+my @before_modes = $withdrawn->parse_mode_changes('+x', '12');
+is($before_modes[0]{category}, 'C', 'advertised mode grammar is active');
+$withdrawn->remember_channel_modes('#open', '+k', 'old-key');
+$withdrawn->{pending_delegated_bans} = [{ channel => '#open' }];
+$withdrawn->update_isupport('-CASEMAPPING', '-PREFIX', '-CHANMODES', '-MODES', '-NETWORK');
+is_deeply($withdrawn->{isupport}, {}, 'withdrawn rules disappear from raw announcements');
+is_deeply($withdrawn->{channel_state}, {}, 'old mode snapshot is not reinterpreted');
+is_deeply($withdrawn->{pending_delegated_bans}, [], 'old correlations are retired');
+is($withdrawn->network_name, 'GenericNet', 'withdrawal restores configured network');
+@$withdrawn_sent = ();
+is($withdrawn->sweep_channel('#open', '[Alice', '{Alice', 'Bob'), 2,
+    'withdrawal restores historical RFC1459 deduplication');
+is_deeply($withdrawn_sent, [['MODE', undef, '#open', '+oo', '[Alice', 'Bob']],
+    'withdrawal restores batching instead of retaining MODES=1');
+is_deeply([$withdrawn->names_from_blob('%Half @Op +Voice')], ['%Half','Op','Voice'],
+    'withdrawn prefix no longer strips a nickname character');
+my @after_modes = $withdrawn->parse_mode_changes('+xl', '23');
+is_deeply([map { [$_->{category}, $_->{arg}] } @after_modes],
+    [['unknown', undef], ['C', '23']], 'withdrawn grammar no longer consumes the limit argument');
+$withdrawn->remember_channel_modes('#fresh', '+k', 'fresh-key');
+$withdrawn->update_isupport('-CASEMAPPING','-PREFIX','-CHANMODES','-MODES','-NETWORK','-UNSEEN');
+is($withdrawn->_prior_scalar_arg('#fresh','k'), 'fresh-key',
+    'repeated withdrawals do not destroy newly observed state');
+$withdrawn->update_isupport('MODES=1','CASEMAPPING=ascii','PREFIX=(ohv)@%+');
+@$withdrawn_sent = ();
+is($withdrawn->sweep_channel('#open', '[Alice', '{Alice'), 2,
+    'a later announcement becomes authoritative again');
+is(scalar @$withdrawn_sent, 2, 'reannounced batching is used');
+is_deeply([$withdrawn->names_from_blob('%Half')], ['Half'], 'reannounced prefix is used');
+
+# Every withdrawal independently clears its derived value, not just a batch.
+for my $case (
+    ['CASEMAPPING', 'ascii', 'casemapping', 'rfc1459'],
+    ['MODES', '1', 'max_modes', 4],
+    ['PREFIX', '(ohv)@%+', 'prefix_order', 'ov'],
+    ['CHANMODES', 'beI,k,x,imnpst', 'chanmode_groups', ['beI','k','l','imnpst']],
+    ['NETWORK', 'EpikNet', 'network', 'GenericNet'],
+) {
+    my ($key,$value,$field,$expected) = @$case;
+    my ($guard) = build_guard(network => 'GenericNet');
+    $guard->update_isupport("$key=$value", 'CUSTOM=keep');
+    $guard->update_isupport(':-' . lc($key));
+    is_deeply($guard->{$field}, $expected, "$key withdrawal restores its own baseline");
+    is($guard->{isupport}{CUSTOM}, 'keep', "$key withdrawal preserves unrelated announcements");
+}
+my ($unknown) = build_guard;
+$unknown->remember_channel_modes('#open', '+k', 'kept');
+$unknown->update_isupport('CUSTOM=one', '-CUSTOM');
+is($unknown->_prior_scalar_arg('#open','k'), 'kept', 'unknown capability removal preserves mode state');
+
 done_testing();

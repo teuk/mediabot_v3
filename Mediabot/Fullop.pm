@@ -50,6 +50,7 @@ sub new {
         };
     }
     $self->{network} = defined($configured_network) ? $configured_network : '';
+    $self->{configured_network} = $self->{network};
 
     return $self;
 }
@@ -96,6 +97,36 @@ sub enabled {
     return $enabled ? 1 : 0;
 }
 
+# Withdrawal restores the pre-advertisement policy, not the last advertised one.
+# Saved MODE state cannot be reinterpreted with a different identity/mode grammar.
+sub _withdraw_isupport {
+    my ($self, $key) = @_;
+    return unless exists $self->{isupport}{$key};
+    delete $self->{isupport}{$key};
+    if ($key eq 'NETWORK') {
+        $self->{network} = $self->{configured_network};
+        $self->{pending_delegated_bans} = [];
+    }
+    elsif ($key eq 'CASEMAPPING') {
+        $self->{casemapping} = 'rfc1459';
+    }
+    elsif ($key eq 'MODES') {
+        $self->{max_modes} = 4;
+    }
+    elsif ($key eq 'PREFIX') {
+        $self->{prefix_modes} = { o => '@', v => '+' };
+        $self->{prefix_order} = 'ov';
+    }
+    elsif ($key eq 'CHANMODES') {
+        $self->{chanmode_groups} = [ 'beI', 'k', 'l', 'imnpst' ];
+    }
+    if ($key eq 'CASEMAPPING' || $key eq 'PREFIX' || $key eq 'CHANMODES') {
+        $self->{channel_state} = {};
+        $self->{pending_delegated_bans} = [];
+    }
+    return;
+}
+
 sub update_isupport {
     my ($self, @tokens) = @_;
 
@@ -105,7 +136,7 @@ sub update_isupport {
         next if $token =~ /\s/;
 
         if ($token =~ /^-(\w+)$/) {
-            delete $self->{isupport}{uc($1)};
+            $self->_withdraw_isupport(uc($1));
             next;
         }
         next unless $token =~ /^(\w+)(?:=(.*))?$/;

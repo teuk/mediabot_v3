@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1257 — Retire withdrawn Fullop capability semantics
+
+- Restore existing Fullop fallbacks when the server withdraws an advertised
+  identity, prefix, mode grammar, batching or network capability.
+- Retire transient mode snapshots and delegated-ban correlations when their
+  interpretation is withdrawn; preserve durable records and configured policy.
+- Cover withdrawal, repetition and re-advertisement through native policy tests;
+  record Eggdrop 1.10.2's own wire-withdrawal limitation in the comparison roadmap.
+
 ### MB1256 — Follow connection identity rules for conversational exclusions
 
 - Start a bounded five-contract comparison with pinned Eggdrop 1.10.2 sources,
