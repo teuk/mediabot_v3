@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1253 — Resolve the generic-worker final-exit decision
+
+- Record native process evidence separating active work, cancellation and
+  logical finalization from confirmed child collection.
+- Require explicit physical ownership and bounded final-exit collection without
+  arbitrary callback delivery during teardown; preserve reconnect semantics.
+- Keep the final runtime correction and host acceptance visibly pending. This
+  checkpoint changes documentation only and does not claim the gap is fixed.
+
 ### MB1252 — Bound the architecture chapter and its exit criteria
 
 - Checkpoint the committed user lookup/selection split and retain cohesive

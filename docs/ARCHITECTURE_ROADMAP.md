@@ -19,11 +19,11 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1252 fixes the exit criteria for this chapter.
-The bounded A/B/C/E pilots are delivered; this is not a claim that all modules
-have been refactored. Phase D has one remaining decision gate, followed by a
-chapter acceptance checkpoint. No new extraction family enters this chapter.
-See [the closing plan](#mb1252--close-the-chapter-with-explicit-exit-criteria).
+Current continuation point: MB1253 resolves the generic-worker exit decision:
+explicit final-exit ownership and bounded collection are required. The native
+probe demonstrates the missing mechanism, not full bot shutdown acceptance.
+Next delivery implements that one correction; chapter acceptance follows it.
+No new extraction family enters this chapter. See [the decision](#mb1253--generic-worker-final-exit-decision).
 Earlier “Next” paragraphs are historical decisions, superseded by this plan.
 
 ## Phase A / MB1208
@@ -1728,3 +1728,64 @@ explicitly excluded from [the inventory](RUNTIME_RESOURCE_OWNERSHIP.md).
 They do not block closure unless the final review demonstrates a concrete defect
 within the agreed exit contract. No service, schema or configuration change is
 part of this checkpoint.
+
+
+## MB1253 — Generic-worker final-exit decision
+
+Base `8117164d85d808675f0bcdec467515a00549d000` is committed MB1252 and matches all tracked files of the
+2026-11-12 15:37:11 snapshot. This delivery records a reproduced lifecycle gap
+and the bounded correction required to close phase D. It changes no runtime code.
+
+The release probe uses the real [AsyncWorker](../Mediabot/AsyncWorker.pm), native
+IO::Async timers, fork/pipe and a Linux subreaper observer. A disposable parent
+starts a child which acknowledges readiness and ignores TERM. No HTTP, IRC,
+configuration or bot service is accessed. The observer kills and collects its
+own process group even if an assertion fails.
+
+| Scenario | Observed result |
+| --- | --- |
+| Active worker; parent exits without generic-worker orchestration | Child remains running and is adopted by the test observer. |
+| cancel accepted; parent exits before another loop iteration | TERM-resistant child remains running; the armed escalation timers cannot run in the departed parent. |
+| Process-watcher notification deliberately withheld; native cancellation backstop completes | on_done runs once and active_workers is empty while child_done is false. The observer subsequently collects the SIGKILL-terminated child. |
+
+The third case injects delayed watcher notification through an IO::Async::Loop::Poll
+subclass. It does not show a live child resisting SIGKILL or claim a naturally
+occurring watcher fault. The first two cases demonstrate process-exit semantics,
+not calls to clean_and_exit. Source review separately confirms that
+[clean_and_exit](../Mediabot/Mediabot.pm) explicitly handles archive/achievement
+workers but does not coordinate generic AsyncWorker children. Service-manager
+cgroup cleanup can provide an additional deployment boundary; it does not supply
+an application-level collection contract or make cancel synchronous.
+
+Caller review matters: [AI::Client](../Mediabot/AI/Client.pm) propagates completion
+to caller code, while [TikTok](../Mediabot/External/TikTok.pm) completion changes
+pending/cache state and invokes recipients. Driving the loop or invoking arbitrary
+completion callbacks during final teardown could publish output or start more work.
+This sample is sufficient to reject a blanket cancel-and-run-the-loop approach;
+it is not an exhaustive audit of every worker consumer.
+
+### Decision and next correction
+
+Implement an explicit final-exit operation in AsyncWorker and wire it into
+clean_and_exit before database/logger teardown. Its contract must include:
+
+- Track physical child ownership separately from the weak active-task registry;
+  retain finalized-but-unconfirmed children until their accepted watcher observes
+  exit or bounded final collection confirms it. Never signal a reused/non-owned PID.
+- Revoke generic result/progress delivery and new submissions for the terminating
+  owner/loop before cleanup. Normal completion and operator cancellation keep
+  their existing contracts; reconnect and rehash do not invoke final shutdown.
+- Detach owned streams/timers, check child ownership before TERM/KILL, and share a
+  bounded collection budget across children. Do not run arbitrary event-loop
+  callbacks or use unbounded waitpid. Keep uncertain records and report failure.
+- Handle watcher/setup failures, already reaped children, delayed watcher callbacks,
+  repeated shutdown and attempts to submit work from cleanup callbacks. Preserve
+  different loops/process owners and exact registration identity.
+- Validate native clean_and_exit integration and successful ordinary async calls,
+  then one full host suite. The release probe here is evidence for the decision,
+  not regression acceptance for that future implementation.
+
+This is the final runtime work item in the frozen chapter. If its tests expose
+another defect necessary for this contract, report it explicitly. Do not expand
+into a universal resource framework. After its successful host acceptance, publish
+the chapter closing record and move to the operational baseline selected in MB1252.

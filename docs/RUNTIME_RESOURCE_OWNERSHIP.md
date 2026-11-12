@@ -1,10 +1,11 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1252, prepared against committed MB1251
-`32ed060b720549dbd1d6aaeab262af5e4ca62cae`.
-The user-resolution split is sufficient for this chapter. Generic-worker
-final-exit coordination is the last decision gate, followed by recorded chapter
-acceptance. See [the finite closing plan](ARCHITECTURE_ROADMAP.md#mb1252--close-the-chapter-with-explicit-exit-criteria).
+Current continuation checkpoint: MB1253, prepared against committed MB1252
+`8117164d85d808675f0bcdec467515a00549d000`.
+The generic-worker decision now requires an explicit final-exit correction:
+physical child ownership and bounded collection cannot use active_workers alone.
+See [the evidence and correction contract](ARCHITECTURE_ROADMAP.md#mb1253--generic-worker-final-exit-decision).
+The correction and full host acceptance are still pending; this is not closure.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all
 plugins, HTTP requests and timers have been audited.
@@ -222,3 +223,17 @@ The next delivery must resolve this decision or explicitly document why a larger
 follow-up is required. Do not expand the inventory to every plugin or listener as
 a prerequisite. The final chapter checkpoint records this disposition and host
 acceptance; it does not certify a universal shutdown API.
+
+
+## MB1253 — Generic-worker decision resolved, implementation pending
+
+The isolated native exit probe demonstrates that cancel plus immediate parent
+exit does not collect a TERM-resistant child. With deliberately delayed process
+notification, logical finalization removes active-task visibility before physical
+collection is confirmed. The observer owns cleanup in these probes; they neither
+invoke the full bot exit path nor certify deployment service-manager behavior.
+Source inspection confirms that clean_and_exit lacks a generic-worker shutdown
+operation. The required next increment is separate physical ownership, callback
+revocation and bounded batch collection at final exit. No new resource family is
+added to this chapter. Archive/achievement behavior and ordinary reconnect remain
+outside that correction except for preserving their established ordering.
