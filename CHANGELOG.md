@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1258 — Reset Fullop observations for each IRC transport
+
+- Clear old server capabilities, channel-mode snapshots and delegated-ban
+  correlations before the common builder creates a fresh IRC transport.
+- Retain configured policy, callbacks and persistent bans; prevent restoration
+  of a channel key learned on the previous connection.
+- Cover fresh negotiation, repeated resets, privileges and inactive channels;
+  record remaining channel synchronization boundaries in the IRC roadmap.
+
 ### MB1257 — Retire withdrawn Fullop capability semantics
 
 - Restore existing Fullop fallbacks when the server withdraws an advertised

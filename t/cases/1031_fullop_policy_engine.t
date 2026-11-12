@@ -456,4 +456,58 @@ $unknown->remember_channel_modes('#open', '+k', 'kept');
 $unknown->update_isupport('CUSTOM=one', '-CUSTOM');
 is($unknown->_prior_scalar_arg('#open','k'), 'kept', 'unknown capability removal preserves mode state');
 
+# MB1258: model a transport replacement without reconstructing Fullop policy.
+my ($transport, $transport_sent, $transport_announced, $transport_bans) =
+    build_guard(network => 'GenericNet');
+$transport->update_isupport('NETWORK=EpikNet', 'CASEMAPPING=ascii',
+    'PREFIX=(ohv)@%+', 'CHANMODES=beI,k,x,imnpst', 'MODES=1', 'CUSTOM=old');
+$transport->remember_channel_modes('#open', '+k', 'previous-server-key');
+$transport->{pending_delegated_bans} = [{ channel => '#open', mask => '*!*@old' }];
+my $reset = $transport->can('reset_connection');
+ok($reset, 'Fullop owns an explicit connection reset');
+$reset->($transport) if $reset;
+is($transport->{channel_ban}, $transport_bans, 'connection reset retains the durable ban service');
+is_deeply($transport->{channel_state}, {}, 'connection reset discards prior channel modes');
+is_deeply($transport->{pending_delegated_bans}, [], 'connection reset retires delegated correlations');
+is_deeply($transport->{isupport}, {}, 'connection reset removes custom and known announcements');
+is($transport->network_name, 'GenericNet', 'connection reset restores configured network');
+is_deeply($transport_sent, [], 'reset emits no IRC commands');
+is_deeply($transport_announced, [], 'reset emits no channel announcements');
+is_deeply($transport_bans->{added}, [], 'reset writes no persistent ban');
+is_deeply([$transport->names_from_blob('%Half @Op +Voice')], ['%Half','Op','Voice'],
+    'old server prefix cannot strip the new server names');
+my @grammar = $transport->parse_mode_changes('+xl','42');
+is_deeply([map { [$_->{category}, $_->{arg}] } @grammar],
+    [['unknown',undef],['C','42']], 'old server grammar cannot consume a new limit');
+is($transport->sweep_channel('#open','[Alice','{Alice','Bob'), 2,
+    'new connection uses the baseline folding rule');
+is_deeply($transport_sent, [['MODE',undef,'#open','+oo','[Alice','Bob']],
+    'new connection uses baseline batching');
+@$transport_sent = ();
+$transport->handle_mode(channel=>'#open', prefix=>'Bad!ident@host',
+    mode_string=>'-k', mode_args=>['*']);
+ok(!grep({ join(' ', map { defined($_) ? $_ : '' } @$_) =~ /previous-server-key/ } @$transport_sent),
+    'a new-server removal cannot restore the previous-server channel key');
+$reset->($transport) if $reset;
+$reset->($transport) if $reset;
+is_deeply($transport->{channel_state}, {}, 'repeated reset leaves empty connection state');
+$transport->update_isupport('CASEMAPPING=ascii','PREFIX=(ohv)@%+','MODES=1');
+@$transport_sent = ();
+is($transport->sweep_channel('#open','[Alice','{Alice'), 2,
+    'new server can announce a different mapping');
+is(scalar @$transport_sent, 2, 'new server batching becomes effective');
+is_deeply([$transport->names_from_blob('%Half')], ['Half'], 'new server prefixes become effective');
+$transport->remember_channel_modes('#open', '+k', 'new-server-key');
+is($transport->_prior_scalar_arg('#open','k'), 'new-server-key', 'new channel observations rebuild state');
+my ($privileged_reset, $privileged_sent) = build_guard(privileged=>1, network=>'EpikNet');
+$privileged_reset->update_isupport('NETWORK=OtherNet');
+$reset->($privileged_reset) if $reset;
+is($privileged_reset->network_name, 'EpikNet', 'configured service network survives reset');
+$privileged_reset->handle_mode(channel=>'#open',prefix=>'Owner!i@h',mode_string=>'+m',mode_args=>[]);
+is_deeply($privileged_sent, [], 'privileged actor callback remains authoritative');
+my ($disabled_reset, $disabled_wire) = build_guard(enabled=>0);
+$reset->($disabled_reset) if $reset;
+is($disabled_reset->handle_join('#closed','Alice'),0,'disabled policy remains disabled after reset');
+is_deeply($disabled_wire, [], 'reset cannot enable moderation');
+
 done_testing();

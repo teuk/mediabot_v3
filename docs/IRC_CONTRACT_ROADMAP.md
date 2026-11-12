@@ -22,7 +22,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
-| 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. Other consumers and reconnect remain to audit. |
+| 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Not assessed. Presence of handlers is not proof of the contract. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
@@ -120,3 +120,44 @@ Remaining row-1 work: Fullop lifecycle across transport replacement, live mappin
 replacement and other identity consumers, especially durable identities. Neither
 this withdrawal fix nor MB1256 closes the whole identity contract. Row 2 still
 requires a trace of channel readiness and decisions made during partial sync.
+
+
+## MB1258 — Fullop observations belong to one transport
+
+Base `a16dabbbc5c14d3161a5ebad75131527fb2ea755` is committed MB1257 and matches
+every tracked file of the 2026-11-12 18:42:49 snapshot. No numerical target-host
+acceptance or running-version claim is inferred from the commit.
+
+Reproduced gap: the main program keeps one Fullop instance while _build_irc creates
+a fresh IRC object for reconnect. Old ISUPPORT, MODE snapshots and delegated-ban
+correlations survived that replacement. A native policy replay demonstrates that
+an old channel key remains available for restoration after a new-server -k *;
+old network, prefix, folding and batching observations also remain effective.
+
+[Fullop::reset_connection](../Mediabot/Fullop.pm) now restores the existing
+constructor defaults and original configured network, and clears raw ISUPPORT,
+channel-mode snapshots and delegated-ban correlations. It retains the policy
+callbacks, explicit service masks, durable ChannelBan service and enabled/privileged
+checks. It performs no IRC send, database write or configuration mutation.
+[The common transport builder](../mediabot.pl) invokes it before constructing or
+registering Net::Async::IRC. Initial startup, reconnect and subsequent failed
+construction attempts therefore start with fresh Fullop observations.
+
+This is a transport-construction boundary, not a new disconnected moderation
+state machine. It does not reject late callbacks from obsolete transports, clear
+external NAMES buffers, redefine ready-channel semantics, or change live mapping
+replacement. Those boundaries must be examined in the channel-state audit.
+No persistent identity, permission policy, radio or preview behavior changes.
+
+Validation: native case 1031 passes 104 assertions, including loss of the previous
+key, fresh capability negotiation, repeated resets, retained privilege/disabled
+policy and no reset-time output/storage side effects. Case 1032 checks placement
+in the shared builder; it is a source-wiring check, not a real network reconnect.
+Eight targeted cases 1031/1032/1033/1051/1052/1304/1428/608 pass 521 assertions.
+The baseline fails the new reset cases. Native full-main compilation needs the
+installed host dependencies (local Config::Simple is absent); host compilation
+and one full suite remain mandatory before commit. No live service was restarted.
+
+Next bounded audit: trace external NAMES accumulation/publication and Fullop
+readiness across reconnect and interrupted synchronization, then record the
+remaining identity consumers without changing their durable keys by default.

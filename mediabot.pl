@@ -2886,6 +2886,10 @@ $loop->run;
 sub _build_irc {
     my ($loop) = @_;
 
+    # Reset before construction/registration: even a failed attempt cannot retain
+    # Fullop observations from the previous transport.
+    $mediabot->{fullop}->reset_connection() if $mediabot->{fullop};
+
     my $bind_ip = $mediabot->{conf}->get('connection.CONN_BIND_IP');
 
     my $irc = Net::Async::IRC->new(

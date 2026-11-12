@@ -55,6 +55,22 @@ sub new {
     return $self;
 }
 
+# A fresh transport must not inherit observations from the departed server.
+# Keep policy callbacks and persistent storage; reset only connection observations.
+sub reset_connection {
+    my ($self) = @_;
+    $self->{isupport} = {};
+    $self->{network} = $self->{configured_network};
+    $self->{casemapping} = 'rfc1459';
+    $self->{prefix_modes} = { o => '@', v => '+' };
+    $self->{prefix_order} = 'ov';
+    $self->{chanmode_groups} = [ 'beI', 'k', 'l', 'imnpst' ];
+    $self->{max_modes} = 4;
+    $self->{channel_state} = {};
+    $self->{pending_delegated_bans} = [];
+    return 1;
+}
+
 sub _log {
     my ($self, $level, $text) = @_;
     return unless $self->{bot} && $self->{bot}{logger};
