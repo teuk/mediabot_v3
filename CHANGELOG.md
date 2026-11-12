@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1251 — Separate streaming user candidate selection
+
+- Move the candidate scan, score ranking and Undernet cloak fallback into
+  User::Candidate, preserving first-row ties and winning-row snapshots.
+- Inject the existing Auth matcher; keep cursor finish, diagnostics, session
+  synchronization, autologin and cache publication in Helpers.
+- Extend native tests with real Auth matching and compare complete operation
+  traces before/after the extraction without changing authentication policy.
+
 ### MB1250 — Give user candidate SQL its own owner
 
 - Extract the exact user/hostmask SELECT preparation and execution into

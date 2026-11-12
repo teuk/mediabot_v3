@@ -1,10 +1,11 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1250, prepared against committed MB1249
-`41abc50b9a45b5edef62c23663d5c59aa93fab20`.
-User::Lookup opens the original candidate statement; Helpers retains streaming
-fetch/matching, diagnostics and finish. No cache/session lifetime is relocated.
-See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1250--user-candidate-cursor-owner).
+Current continuation checkpoint: MB1251, prepared against committed MB1250
+`6092b04022ca215eba0de304a613e7b5c6fe0b3b`.
+Lookup opens the candidate cursor and Candidate selects from it; Helpers retains
+finish and authentication effects. The injected matcher is used synchronously
+and is not retained. Cache, Context and session lifetimes remain unchanged.
+See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1251--streaming-user-candidate-selection).
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all

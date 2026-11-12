@@ -19,8 +19,8 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1250 extracts the user candidate cursor opener.
-See [MB1250](#mb1250--user-candidate-cursor-owner).
+Current continuation point: MB1251 separates streaming candidate selection.
+See [MB1251](#mb1251--streaming-user-candidate-selection).
 Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
@@ -1615,3 +1615,37 @@ cache policy) only if it reduces coupling without hiding authorization. Do not
 merge Context/Helpers caching or generalize SQL readers mechanically. Changes to
 clock rollback, failure cleanup or diagnostic exceptions require separate behavior
 changes and regression cases. Broader phases B/C/D remain open.
+
+
+## MB1251 — Streaming user candidate selection
+
+Base `6092b04022ca215eba0de304a613e7b5c6fe0b3b` is committed MB1250 and matches all
+tracked files in the supplied 2026-11-12 14:15:00 snapshot. commit.sh is guarded
+against that snapshot. No missing host acceptance totals are inferred.
+
+[User::Candidate::select_best](../Mediabot/User/Candidate.pm) owns the streaming
+candidate scan, strict score ranking, first-row tie rule, selected-row copy and
+existing Undernet cloak fallback. It accepts the original cursor, fullmask, parsed
+host and a matcher callback. It neither opens nor finishes the statement and
+imports no Helpers/Auth/User/DBI module. No sorting or eager row collection occurs.
+
+[Helpers](../Mediabot/Helpers.pm) provides a callback that resolves the current
+Auth object for every row, preserving the previous dynamic lookup. Auth still
+owns mask comparison. Helpers retains prefix parsing, SQL failure diagnostics,
+finish, User creation, level loading, autologin, session synchronization, logs
+and cache publication. Candidate selection does not authenticate a session.
+The original SQL owner [Lookup](../Mediabot/User/Lookup.pm) is unchanged.
+
+[The native probe](../t/lib/MB1248UserResolution.pl) additionally exercises actual
+Auth matching for exact-versus-wildcard priority, equal masks, valid cloak and
+spoofed cloak suffix. Its Auth constructor fixture now retains supplied dependencies
+so the real matcher sees a DB handle. Each case verifies fetch/match interleaving.
+All 144 assertions pass before and after; complete collected operation/log traces
+are byte-identical. The targeted lane passes 82 assertions; cold loading confirms
+component independence. Full host acceptance remains required before commit/push.
+
+Next: checkpoint the identity-resolution split and review whether remaining
+Helpers orchestration has a cohesive owner before making another extraction.
+Do not split cache reads/writes into tiny wrappers or merge Context and Helpers
+caches. Authentication policy changes, clock rollback and cleanup improvements
+remain separate work. Broader phases B/C/D remain open.

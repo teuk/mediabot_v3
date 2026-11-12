@@ -11,6 +11,7 @@ use Mediabot::Context ();
 # This file runs only in a fresh interpreter: its clock never changes the runner.
 our ($state,$error);
 my @traces;
+my $native_match = Mediabot::Auth->can('hostmask_matches');
 sub event {
  my ($name,@args)=@_;push @{$state->{events}},[$name,@args];
  $now=$state->{advance}{$name} if exists $state->{advance}{$name};
@@ -67,10 +68,11 @@ sub count_op {my ($n)=@_;scalar grep {$_->[0] eq $n} @{$state->{events}}}
  my $diagnostic='fixture DB error';local *DBI::errstr=\$diagnostic;
  local *Mediabot::Auth::new=sub {
   my ($class,%args)=@_;event('auth_new');
-  $state->{auth_args}=\%args;return bless {},$class;
+  $state->{auth_args}=\%args;return bless {%args},$class;
  };
  local *Mediabot::Auth::hostmask_matches=sub {
   my ($auth,$row,$mask)=@_;event('match',$row->{id_user},$mask);
+  return $native_match->(@_) if $state->{native_match};
   return defined($row->{score})?(1,'fixture-mask',undef,$row->{score}):(0,undef,undef,-1);
  };
  local *Mediabot::User::new=sub {event('user_new');bless {%{$_[1]}},($state->{no_auto}?'MB1249::NoAuto':'MB1248::User')};
@@ -126,6 +128,19 @@ sub count_op {my ($n)=@_;scalar grep {$_->[0] eq $n} @{$state->{events}}}
  $auth->_invalidate_bot_session('alice',{hostmask=>'Alice!ident@host'});
  ok(!exists $b->{_user_cache}{'Alice!ident@host'},'real Auth invalidates Helpers cache');
  ok(!exists $b->{sessions}{alice} && !exists $b->{logged_in_by_nick}{alice} && !exists $b->{users_by_nick}{alice},'real Auth removes session aliases');
+ # MB1251: real Auth matching across the selection boundary.
+ for my $case (
+  ['specific mask',[{id_user=>1,nickname=>'broad',hostmasks=>'*!ident@host'},{id_user=>2,nickname=>'exact',hostmasks=>'Alice!ident@host'}],2,'Alice!ident@host'],
+  ['equal masks',[{id_user=>1,nickname=>'first',hostmasks=>'Alice!ident@host'},{id_user=>2,nickname=>'second',hostmasks=>'Alice!ident@host'}],1,'Alice!ident@host'],
+  ['real cloak',[{id_user=>1,nickname=>'ALICE',hostmasks=>''}],1,'x!i@Alice.users.undernet.org'],
+  ['real spoof',[{id_user=>1,nickname=>'alice',hostmasks=>''}],undef,'x!i@alice.users.undernet.org.evil']) {
+  my ($label,$rows,$want,$mask)=@$case;$b=setup(native_match=>1,rows=>$rows);
+  my $found=resolve($b,$mask);is($found?$found->id:undef,$want,"native Auth: $label");
+  is(count_op('match'),scalar(@$rows),"native Auth: $label evaluates each row once");
+  my @order=map {$_->[0]} grep {$_->[0] eq 'fetch' || $_->[0] eq 'match' || $_->[0] eq 'finish'} @{$state->{events}};
+  is_deeply(\@order,[(map {('fetch','match')} @$rows),'fetch','finish'],"native Auth: $label preserves streaming order");
+ }
+
  # MB1249: publication, borrowed rows and optional callbacks.
  for my $stage (qw(initial cache sql absent matched)) {
   $b=setup(log_fail=>$stage,rows=>$stage eq 'absent'?[]:[{id_user=>1,nickname=>'alice',score=>10}],false_execute=>$stage eq 'sql');

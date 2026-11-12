@@ -173,42 +173,12 @@ sub get_user_from_message {
         return;
     }
 
-    my $best_row;
-    my $best_reason = '';
-    my $best_score  = -1;
-
-    while (my $row = $sth->fetchrow_hashref) {
-        my $matched = 0;
-        my $reason  = '';
-        my $score   = -1;
-
-        my ($mask_ok, $matched_mask, undef, $mask_score) = $self->{auth}->hostmask_matches($row, $fullmask);
-        if ($mask_ok) {
-            $matched = 1;
-            $reason  = "hostmask:$matched_mask";
-            $score   = $mask_score;
-        }
-        else {
-            my $db_nick = lc($row->{nickname} // '');
-
-            if ($host =~ /(^|\.)users\.undernet\.org\z/i) {
-                my ($leftmost) = split(/\./, $host, 2);
-                if (defined $leftmost && $leftmost ne '' && $db_nick ne '' && lc($leftmost) eq $db_nick) {
-                    $matched = 1;
-                    $reason  = "undernet_cloak";
-                    $score   = 0;
-                }
-            }
-        }
-
-        next unless $matched;
-
-        if ($score > $best_score) {
-            $best_row    = { %$row };
-            $best_reason = $reason;
-            $best_score  = $score;
-        }
-    }
+    require Mediabot::User::Candidate;
+    my ($best_row, $best_reason, $best_score) =
+        Mediabot::User::Candidate::select_best(
+            $sth, $fullmask, $host,
+            sub { $self->{auth}->hostmask_matches(@_) },
+        );
 
     $sth->finish;
 
