@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1265 — Preserve live arrivals and renames during NAMES
+
+- Mirror JOINs into an existing pending NAMES buffer for the same channel.
+- Apply NICK changes to every matching buffered occurrence, including channels
+  without a published nicklist, before 366 publishes and Fullop sweeps the list.
+- Preserve ordinary live handling and avoid creating pending transactions for
+  unrelated events; extend interleaved handler replay coverage.
+
+
 ### MB1264 — Keep deferred startup with its original connection
 
 - Bind staggered login JOIN and subsequent WHO callbacks to their originating

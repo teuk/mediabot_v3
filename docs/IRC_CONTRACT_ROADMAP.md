@@ -23,7 +23,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
-| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. Synchronized-decision boundaries remain open. |
+| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. Synchronized-decision boundaries remain open. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
@@ -365,3 +365,39 @@ service authentication and channel-join paths. No network incident is asserted.
 Next: review same-connection NAMES/WHO/MODE synchronization and decisions made
 before completion, then consolidate row-2 evidence and residual limits. Rows
 3–5 retain their finite scope; the architecture extraction chapter stays closed.
+
+
+## MB1265 — Interleaved arrivals and renames survive NAMES publication
+
+Base `554ceb25df68df661787e188d85502e77720f6ec` is committed MB1264 and matches
+all tracked files of the 2026-11-12 21:03:09 snapshot. Commit presence is not a
+numerical host acceptance result or confirmation of runtime activation.
+
+The [membership and NAMES handlers](../mediabot.pl) update published lists on
+JOIN/NICK, while 366 replaces that list with buffered 353 chunks. In a replay
+of the actual handlers, an interleaved newcomer disappears at 366 and an old
+nickname is republished, including in the list sent to Fullop. PART/KICK/QUIT
+already use [channelNicksRemove](../Mediabot/Helpers.pm) to update pending data.
+
+JOIN now also appends to an existing pending buffer on the matching channel,
+using the same lowercased channel comparison as removal. NICK updates every
+exact old-nickname occurrence across pending lists, including duplicates and
+channels without published membership. Final deduplication and Fullop sweep
+remain at 366. No new pending transaction is created by an ordinary JOIN/NICK.
+The existing nickname comparison policy, auth/session behavior, live membership
+handling, database schema and configuration remain unchanged.
+
+13 new checks in case 1032 replay interleaved 353/JOIN/NICK/353/366 and verify
+both publication and Fullop's input. The baseline fails 6; the corrected case
+passes 201 assertions. Twenty-one available targeted cases pass 1,154 assertions.
+This is extracted-handler replay, not native full-main integration. Local missing
+Net::Async::IRC/Config::Simple dependencies leave native syntax and installed
+integration gates to the host package, followed by one complete suite before commit.
+
+Limits: this reconciles already buffered chunks with subsequently observed events;
+it does not invent transaction identifiers or reject a later stale fragment from
+the same transport. Exact nickname matching and existing channel case comparison
+are retained rather than expanding identity policy in this patch. It does not
+establish a complete NAMES/WHO/MODE readiness barrier. Next audit the consumers'
+decisions before synchronization completes, then consolidate row-2 evidence and
+residual limits. Rows 3–5 retain the accepted finite scope.

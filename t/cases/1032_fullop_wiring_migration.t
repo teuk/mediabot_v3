@@ -470,4 +470,66 @@ is(scalar @{$bot->{fullop}{sweeps}},1,'detached callbacks cannot trigger another
     }
 }
 
+
+# MB1265: replay interleaved NAMES/JOIN/NICK through their actual handler bodies.
+{
+    package MB1265::Bot;
+    our @ISA=('MB1262::Bot','MB1260::Bot');
+    sub getMessageNickIdentHost {($_[1]{nick},'ident','example.invalid')}
+    package MB1265::Fullop;
+    our @ISA=('MB1260::Fullop');
+    sub handle_join {push @{$_[0]{joins}},[@_[1..$#_]]}
+}
+{
+    my @names=qw(on_message_RPL_NAMEREPLY on_message_RPL_ENDOFNAMES on_message_JOIN on_message_NICK);
+    my $bodies=join "\n",map {
+        my($body)=$main =~ /(^sub \Q$_\E \{.*?^\})/ms;
+        die "missing $_" unless $body;$body;
+    } @names;
+    my $make=eval q{
+        package MB1265::Replay;
+        use Scalar::Util ();
+        our $mediabot;
+        sub log_debug_args {}
+        sub _irc_message_args {@{$_[0]{args}}}
+        sub purge_claude_session_for_nick {}
+    }.$bodies.q{
+        sub {$mediabot=$_[0]; +{map {$_=>__PACKAGE__->can('on_message_'.$_)} qw(RPL_NAMEREPLY RPL_ENDOFNAMES JOIN NICK)}}
+    };
+    die $@ unless $make;
+    no warnings qw(redefine once);
+    local *Mediabot::AI::MetaRuntime::note_rename=sub {};
+    local *Mediabot::UserCommands::deliverReminders=sub {};
+    my $irc=bless {},'MB1262::IRC';
+    my $rec=bless {calls=>[]},'MB1262::Recorder';
+    my $fullop=bless {sweeps=>[],joins=>[]},'MB1265::Fullop';
+    my $b=bless {irc=>$irc,logger=>$rec,metrics=>$rec,auth=>$rec,fullop=>$fullop,
+        conf=>bless({},'MB1262::Conf'),effects=>[],hChannelsNicks=>{}},'MB1265::Bot';
+    my $h=$make->($b);
+    my $chunk=sub {my($c,$blob)=@_;$h->{RPL_NAMEREPLY}->($irc,{args=>['Bot','=',$c,$blob]},{target_name=>$c})};
+    my $end=sub {my($c)=@_;$h->{RPL_ENDOFNAMES}->($irc,{args=>['Bot',$c]}, {})};
+    $chunk->('#test','Alice Alice Keeper');
+    $chunk->('#other','Alice Other');
+    $h->{JOIN}->($irc,{nick=>'Newcomer'},{target_name=>'#TEST'});
+    ok(grep({$_ eq 'Newcomer'} @{$b->{hChannelsNicks}{'#TEST'}}),'interleaved JOIN updates live membership');
+    ok(grep({$_ eq 'Newcomer'} @{$b->{hChannelsNicksTmp}{'#test'}}),'interleaved JOIN also updates case-equivalent pending channel');
+    is_deeply($b->{hChannelsNicksTmp}{'#other'},['Alice','Other'],'JOIN does not enter another pending channel');
+    $h->{NICK}->($irc,{nick=>'Alice'},{old_nick=>'Alice',new_nick=>'Renamed'});
+    is_deeply($b->{hChannelsNicksTmp}{'#test'},['Renamed','Renamed','Keeper','Newcomer'],'NICK replaces every buffered occurrence including duplicate chunks');
+    is_deeply($b->{hChannelsNicksTmp}{'#other'},['Renamed','Other'],'NICK reaches pending-only channel membership');
+    $chunk->('#test','Later');
+    $end->('#test');
+    is_deeply($b->{hChannelsNicks}{'#test'},['Renamed','Keeper','Newcomer','Later'],'366 publishes the updated deduplicated membership');
+    is_deeply($fullop->{sweeps}[-1],['#test','Renamed','Keeper','Newcomer','Later'],'Fullop sweep receives the corrected snapshot');
+    ok(!exists $b->{hChannelsNicksTmp}{'#test'},'completed pending buffer is released');
+    is($b->{hChannelsNicksEnd}{'#test'},1,'completion still marks NAMES finished');
+    $end->('#other');
+    is_deeply($b->{hChannelsNicks}{'#other'},['Renamed','Other'],'other channel publishes its own renamed snapshot');
+    $h->{JOIN}->($irc,{nick=>'Outside'},{target_name=>'#idle'});
+    ok(!exists $b->{hChannelsNicksTmp}{'#idle'},'ordinary JOIN does not manufacture a pending NAMES transaction');
+    $h->{NICK}->($irc,{nick=>'Outside'},{old_nick=>'Outside',new_nick=>'Moved'});
+    is_deeply($b->{hChannelsNicks}{'#idle'},['Moved'],'ordinary live rename remains intact');
+    is_deeply($b->{hChannelsNicksTmp},{},'ordinary NICK does not recreate pending buffers');
+}
+
 done_testing();

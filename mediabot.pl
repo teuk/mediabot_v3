@@ -3626,6 +3626,18 @@ sub on_message_NICK {
         ) } if $old_nick;
     }
 
+    # MB1265: 366 will publish the buffered list, so a rename must also
+    # update every occurrence in chunks already received, even on channels
+    # with no published nicklist yet. Keep the existing exact-nick comparison.
+    if (ref($mediabot->{hChannelsNicksTmp}) eq 'HASH') {
+        for my $list (values %{$mediabot->{hChannelsNicksTmp}}) {
+            next unless ref($list) eq 'ARRAY';
+            for my $nick (@$list) {
+                $nick = $new_nick if defined($nick) && $nick eq $old_nick;
+            }
+        }
+    }
+
     # Change nick in %hChannelsNicks
     for my $sChannel (keys %hChannelsNicks) {
         # mb107-B2: guard contre canal dont la nicklist n'est pas un ARRAY
@@ -4938,6 +4950,16 @@ sub on_message_JOIN {
         }
 
         push @{$hChannelsNicks{$target_name}}, $sNick;
+        # MB1265: preserve JOINs observed during an in-progress NAMES reply.
+        # Match channel spelling as channelNicksRemove does; do not create a
+        # pending list when no NAMES chunks are being collected.
+        if (ref($mediabot->{hChannelsNicksTmp}) eq 'HASH') {
+            for my $channel (keys %{$mediabot->{hChannelsNicksTmp}}) {
+                next unless lc($channel) eq lc($target_name);
+                my $list = $mediabot->{hChannelsNicksTmp}{$channel};
+                push @$list, $sNick if ref($list) eq 'ARRAY';
+            }
+        }
         $mediabot->sethChannelNicks(\%hChannelsNicks);
         # mb109-IMP2: Prometheus counter — other nick joins
         $mediabot->{metrics}->inc('mediabot_joins_total', { channel => $target_name })
