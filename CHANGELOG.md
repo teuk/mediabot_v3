@@ -1,5 +1,15 @@
 ## [Unreleased] — 3.8dev
 
+### MB1267 — Retire Fullop observations when channel membership ends
+
+- Reset only the departed channel's observed modes and pending delegated-ban
+  correlations on self PART/KICK, before requesting rejoin after a kick.
+- Start self JOIN with fresh Fullop observations, retaining other channels,
+  connection capabilities, policy and persistent bans.
+- Cover current/obsolete/other-user departures and scope the channel-state
+  roadmap checkpoint before moving to control-traffic review.
+
+
 ### MB1266 — Preserve independent observations during channel MODE refresh
 
 - Keep Fullop's observed list modes and member statuses when a 324 channel-mode

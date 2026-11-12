@@ -23,7 +23,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
-| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. Synchronized-decision boundaries remain open. |
+| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
@@ -436,3 +436,50 @@ not establish that every correction is safe with unknown prior scalar state,
 nor add a WHO/MODE/NAMES completion barrier. Next consolidate those unknown-state
 and departure/rejoin cases into a bounded row-2 verdict before moving to control
 traffic (row 3); retain residual risks rather than claiming full synchronization.
+
+
+## MB1267 — Channel departure/rejoin and row-2 checkpoint
+
+Base `50b110fa16fb1b8ad26c167a4810872d286b5ae9` is committed MB1266 and matches
+all tracked files of the 2026-11-12 22:01:49 snapshot. No numerical target-host
+acceptance or activation is inferred from commit presence.
+
+Replaying actual self PART/KICK handlers with native Fullop reproduces retained
+channel modes and delegated-ban correlations after departure. The new
+[reset_channel](../Mediabot/Fullop.pm) removes both for the folded channel only.
+[Ingress](../mediabot.pl) calls it on self PART/KICK, before KICK's rejoin request,
+and on self JOIN before activation. Other-user departures and obsolete transports
+do not retire this state. Network capabilities, other channels, policy callbacks
+and persistent ChannelBan storage are untouched. Repeated/invalid resets are safe.
+
+23 checks extend case 1032: baseline fails 8; corrected case passes 224 assertions.
+The departure replay uses native Fullop but extracted executable callbacks;
+self-JOIN placement additionally has a source wiring check, not native startup
+integration. Twenty-one available targeted cases pass 1,189 assertions. Native
+main/protocol integration still requires installed host dependencies; the package
+runs those gates and one full suite before commit. No restart/config/schema change.
+
+### Bounded channel-state verdict: partly covered
+
+| Expected guarantee | Evidence / owner | Verdict and limit |
+| --- | --- | --- |
+| New transport cannot inherit old observations | setIrc, Fullop reset_connection; MB1258–1264 | Covered for selected snapshots/ingress/startup closures; not every callback. |
+| Buffered NAMES preserves subsequent membership events | channelNicksRemove, JOIN/NICK and 366; MB1265 | Covered for already received chunks; no transaction ID for delayed same-connection fragments. |
+| MODE refresh does not erase independent lists/status | Fullop remember_channel_modes; native case 1031, MB1266 | Covered for known observations; not proof of a complete initial list. |
+| Leaving a channel cannot preserve Fullop authority from that membership | reset_channel plus own PART/KICK/JOIN; MB1267 | Implemented/tested locally; installed-host acceptance remains required. |
+| Decisions wait for complete NAMES/WHO/MODE | Fullop handle_join/sweep_channel/handle_mode | Not guaranteed: immediate op-on-JOIN is existing policy; there is no combined readiness barrier. |
+
+Unknown-state limit: scalar restoration uses an observed previous value (or the
+argument of a removed category-B mode); an unknown removed category-C value is
+not reconstructed. Existing sanctions can still occur without a reconstructable
+correction. This checkpoint does not certify such behavior as fully synchronized
+or change the established +Fullop policy. Likewise same-transport delayed replies,
+reentrant replacement outside the checked paths, exact nickname matching and
+per-user status refresh across NICK/PART remain residual audit items, not hidden
+parity claims. A full synchronization state machine is not added in this patch.
+
+The selected bounded row-2 defects are delivered through MB1267, pending its host
+acceptance. Keep the verdict partly covered and retain these limits. Next work
+moves to row 3: trace the actual Net::Async::IRC output queue and Mediabot control
+traffic under load. Rows 4–5 still require explicit verdicts. The roadmap is not
+declared complete and the architecture extraction chapter remains closed.

@@ -71,6 +71,18 @@ sub reset_connection {
     return 1;
 }
 
+# Observations and one-shot service correlations end with channel membership.
+sub reset_channel {
+    my ($self, $channel) = @_;
+    return 0 unless defined($channel) && $channel ne '';
+    my $key = $self->_fold($channel);
+    delete $self->{channel_state}{$key};
+    $self->{pending_delegated_bans} = [
+        grep { $_->{channel} ne $key } @{ $self->{pending_delegated_bans} || [] }
+    ];
+    return 1;
+}
+
 sub _log {
     my ($self, $level, $text) = @_;
     return unless $self->{bot} && $self->{bot}{logger};

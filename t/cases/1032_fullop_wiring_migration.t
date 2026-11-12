@@ -532,4 +532,69 @@ is(scalar @{$bot->{fullop}{sweeps}},1,'detached callbacks cannot trigger another
     is_deeply($b->{hChannelsNicksTmp},{},'ordinary NICK does not recreate pending buffers');
 }
 
+
+# MB1267: native Fullop state through actual PART/KICK ingress bodies.
+{
+    package MB1267::Bot;
+    our @ISA=('MB1262::Bot');
+    sub getMessageNickIdentHost {($_[1]{nick},'ident','example.invalid')}
+    sub joinChannel {
+        my($s,$c)=@_;
+        $s->{state_at_rejoin}=exists $s->{fullop}{channel_state}{$s->{fullop}->_fold($c)} ? 1 : 0;
+        $s->{rejoins}++;
+    }
+}
+{
+    require Mediabot::Fullop;
+    my $bodies=join "\n",map {my($body)=$main =~ /(^sub on_message_\Q$_\E \{.*?^\})/ms;die "missing $_" unless $body;$body} qw(PART KICK);
+    my $make=eval q{
+        package MB1267::Replay;
+        use Scalar::Util ();
+        our $mediabot;
+        sub log_debug_args {}
+        sub _irc_message_args {('#OPEN','bye')}
+    }.$bodies.q{
+        sub {$mediabot=$_[0];+{PART=>\&on_message_PART,KICK=>\&on_message_KICK}}
+    };
+    die $@ unless $make;
+    for my $event (qw(PART KICK)) {
+        for my $kind (qw(self other obsolete)) {
+            my $irc=bless {},'MB1262::IRC';
+            my $old=bless {},'MB1262::IRC';
+            my $rec=bless {calls=>[]},'MB1262::Recorder';
+            my $f=Mediabot::Fullop->new(enabled_cb=>sub{1});
+            $f->remember_channel_modes('#open','+k','old-key');
+            $f->remember_channel_modes('#other','+k','keep-key');
+            $f->{pending_delegated_bans}=[{channel=>'#open',host=>'old.invalid'}, {channel=>'#other',host=>'keep.invalid'}];
+            my $b=bless {irc=>$irc,logger=>$rec,conf=>bless({},'MB1262::Conf'),
+                fullop=>$f,effects=>[],hChannelsNicks=>{'#OPEN'=>['Bot','Alice']}},'MB1267::Bot';
+            my $nick=$kind eq 'other' ? 'Alice' : 'Bot';
+            $make->($b)->{$event}->($kind eq 'obsolete' ? $old : $irc,{nick=>$nick},
+                {target_name=>'#OPEN',kicked_nick=>$nick,kicker_nick=>'Carol',text=>'bye'});
+            is(exists($f->{channel_state}{'#open'}) ? 1 : 0,$kind eq 'self' ? 0 : 1,
+                "$event/$kind: only own current departure retires channel observations");
+            is(scalar @{$f->{pending_delegated_bans}},$kind eq 'self' ? 1 : 2,
+                "$event/$kind: delegation follows the same membership scope");
+            is($f->{channel_state}{'#other'}{scalar}{k},'keep-key',"$event/$kind: other channel is preserved");
+            if ($event eq 'KICK' && $kind eq 'self') {
+                is($b->{rejoins},1,'self KICK keeps the existing rejoin request');
+                is($b->{state_at_rejoin},0,'old state is retired before the rejoin call');
+            }
+        }
+    }
+    my $f=Mediabot::Fullop->new;
+    if ($f->can('reset_channel')) {
+        $f->remember_channel_modes('#Room[','+k','stale');
+        $f->reset_channel('#room{');$f->reset_channel('#room{');
+        is_deeply($f->{channel_state},{},'channel reset follows live IRC casemapping and is idempotent');
+        $f->reset_channel(undef);$f->reset_channel('');
+        is_deeply($f->{channel_state},{},'invalid reset does not create state');
+    } else {
+        fail('channel reset follows live IRC casemapping and is idempotent');
+        fail('invalid reset does not create state');
+    }
+    like($main,qr/if \( \$sNick eq \$self->nick \) \{\s*eval \{ \$mediabot->\{fullop\}->reset_channel\(\$target_name\)/,
+        'self JOIN also retires Fullop observations before channel activation');
+}
+
 done_testing();

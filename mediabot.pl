@@ -3421,6 +3421,7 @@ sub on_message_KICK {
         is_self => (($self->is_nick_me($kicker_nick) || $self->is_nick_me($kicked_nick)) ? 1 : 0)); };
 
     if ($self->is_nick_me($kicked_nick)) {
+        eval { $mediabot->{fullop}->reset_channel($target_name) if $mediabot->{fullop}; };
         # mb701-B: invalidate the channel generation before requesting rejoin.
         eval { $mediabot->{wit_runtime_state}->mark_left($target_name) if $mediabot->{wit_runtime_state}; };
         if (defined($mediabot->{conf}->get('main.MAIN_PROG_LIVE')) && ($mediabot->{conf}->get('main.MAIN_PROG_LIVE') == 1)) {
@@ -3757,6 +3758,7 @@ sub on_message_PART {
 
     # mb701-B: self-PART revokes the generation immediately.
     if ($sNick eq $self->nick) {
+        eval { $mediabot->{fullop}->reset_channel($target_name) if $mediabot->{fullop}; };
         eval { $mediabot->{wit_runtime_state}->mark_left($target_name) if $mediabot->{wit_runtime_state}; };
     }
 
@@ -4835,6 +4837,7 @@ sub on_message_JOIN {
         host    => $sHost, is_self => ($sNick eq $self->nick ? 1 : 0)); };
 
     if ( $sNick eq $self->nick ) {
+        eval { $mediabot->{fullop}->reset_channel($target_name) if $mediabot->{fullop}; };
         # A new membership starts with no old NAMES data. Until this JOIN's
         # nicklist arrives, stale entries must not authorize shorthand votes.
         my $channel_key = lc $target_name;
