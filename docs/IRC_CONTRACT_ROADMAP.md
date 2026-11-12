@@ -23,7 +23,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; remaining identity consumers stay open. |
-| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots at transport replacement; event authority and synchronized-decision boundaries remain open. |
+| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. Other event authority and synchronized-decision boundaries remain open. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
@@ -196,3 +196,37 @@ synchronization, or handle every same-connection PART/KICK/rejoin boundary.
 Next: audit callback authority and synchronization readiness on the real event
 path before adding further state machinery. Rows 3–5 remain to be assessed;
 this bounded correction does not reopen the completed architecture extraction.
+
+
+## MB1260 — NAMES callbacks must belong to the installed transport
+
+Base `0cce27e8c7a6325c1a0228fdb3bf2a475d72067e` is committed MB1259 and matches
+all tracked files of the 2026-11-12 19:40:58 snapshot. Commit presence alone is
+not a numerical host acceptance result or a live activation claim.
+
+Reproduced in an isolated handler replay: after transport replacement, an old
+353 can append to the successor's NAMES buffer and an old 366 can consume that
+buffer, mark it complete, publish counts and call Fullop's sweep. Clearing maps
+at replacement (MB1259) does not itself prevent later callbacks rebuilding them.
+This replay establishes the handler gap, not the frequency of live late events.
+
+Both [NAMES handlers](../mediabot.pl) now compare the callback source object's
+reference identity with the installed IRC transport, before logging or parsing.
+Missing or replaced transports are ignored. Current-transport normalization,
+accumulation, ordering, deduplication, completion metrics and sweep are preserved.
+The [Net::Async::IRC::Protocol callback contract](https://metacpan.org/pod/Net::Async::IRC::Protocol)
+passes the IRC object as the first argument; no nickname/network-text comparison
+is used to infer transport identity.
+
+Validation: case 1032 adds 14 checks replaying the actual two handler bodies with
+bounded collaborators; baseline fails 9, corrected case passes all 47 assertions.
+This source-body harness is explicitly not native full-main integration. Eleven
+targeted cases pass 744 assertions. Native main compilation and full integration
+remain target-host gates because local Config::Simple/Net::Async::IRC dependencies
+are absent. Host syntax, expanded targeted lane and one full suite precede commit.
+
+Scope remains bounded: old events of other types, the interval before replacement,
+reentrant changes during a current handler, and synchronization readiness on the
+same connection are not solved by this guard. Next: audit shared callback authority
+and channel readiness, then give remaining roadmap rows explicit verdicts rather
+than treating handler presence as proof. No schema, configuration or service action.

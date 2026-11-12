@@ -55,6 +55,7 @@ use Mediabot::DCC qw(parse_ctcp_payload parse_dcc_payload is_ctcp_chat is_dcc_ch
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use Time::HiRes ();
+use Scalar::Util ();
 use Mediabot::Scheduler;
 use Mediabot::RSS::Runtime;
 use Mediabot::RandomQuote::Runtime;
@@ -4665,6 +4666,9 @@ sub on_message_LIST {
 
 sub on_message_RPL_NAMEREPLY {
     my ($self, $message, $hints) = @_;
+    # Only the installed transport may contribute to or complete this snapshot.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
 
     log_debug_args('on_message_RPL_NAMEREPLY', $message);
 
@@ -4701,6 +4705,9 @@ sub on_message_RPL_NAMEREPLY {
 # Numeric 366 RPL_ENDOFNAMES
 sub on_message_RPL_ENDOFNAMES {
     my ($self, $message, $hints) = @_;
+    # Only the installed transport may contribute to or complete this snapshot.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
 
     log_debug_args('on_message_RPL_ENDOFNAMES', $message);
 

@@ -97,4 +97,68 @@ like($main, qr/sub _build_irc \{\s*my \(\$loop\) = \@_;.*?\$mediabot->\{fullop\}
 is(scalar(() = $main =~ /_build_irc\(\$loop\)/g), 3,
     'shared builder is documented and used for initial connection and reconnect');
 
+
+# MB1260: replay the two unchanged handler bodies in a bounded harness.
+# This is not a full Net::Async::IRC integration test.
+{
+    package MB1260::Bot;
+    sub sethChannelsNicksOnChan {my($s,$c,@n)=@_;$s->{hChannelsNicks}{$c}=\@n}
+    sub sethChannelsNicksEndOnChan {$_[0]{hChannelsNicksEnd}{$_[1]}=$_[2]}
+    package MB1260::Log;
+    sub log {$_[0]{calls}++}
+    package MB1260::Metrics;
+    sub set {push @{$_[0]{calls}}, [@_[1..$#_]]}
+    package MB1260::Fullop;
+    sub names_from_blob {my $s=shift;$s->{parses}++;my $b=shift;$b=~s/[@+]//g;split /\s+/,$b}
+    sub sweep_channel {push @{$_[0]{sweeps}},[@_[1..$#_]]}
+}
+my $handlers='';
+for my $name (qw(on_message_RPL_NAMEREPLY on_message_RPL_ENDOFNAMES)) {
+    my ($body)=$main=~ /(^sub \Q$name\E \{.*?^\})/ms;
+    die "missing $name" unless $body;
+    $handlers.=$body."\n";
+}
+my $factory=eval q{
+    package MB1260::Replay;
+    use Scalar::Util ();
+    our $mediabot;
+    sub log_debug_args { $mediabot->{debug_calls}++ }
+    sub _irc_message_args { @{$_[0]} }
+}.$handlers.q{
+    sub { $mediabot=$_[0]; return (\&on_message_RPL_NAMEREPLY,\&on_message_RPL_ENDOFNAMES) }
+};
+die $@ unless $factory;
+my $old=bless {},'MB1260::IRC';
+my $current_transport=bless {},'MB1260::IRC';
+my $bot=bless {irc=>$current_transport,logger=>bless({},'MB1260::Log'),
+    metrics=>bless({},'MB1260::Metrics'),fullop=>bless({},'MB1260::Fullop'),
+    hChannelsNicks=>{'#test'=>['Published']},
+    hChannelsNicksTmp=>{'#test'=>['Fresh']},hChannelsNicksEnd=>{'#test'=>0}},'MB1260::Bot';
+my($chunk,$end)=$factory->($bot);
+$chunk->($old,['bot','=',' #unused','@Departed'],{target_name=>'#test'});
+is_deeply($bot->{hChannelsNicksTmp}{'#test'},['Fresh'],'old 353 cannot contaminate current partial snapshot');
+$end->($old,['bot','#test'],{});
+is_deeply($bot->{hChannelsNicks}, {'#test'=>['Published']},'old 366 cannot publish or replace current membership');
+is_deeply($bot->{hChannelsNicksTmp}, {'#test'=>['Fresh']},'old 366 cannot consume current buffer');
+is($bot->{hChannelsNicksEnd}{'#test'},0,'old 366 cannot mark synchronization complete');
+ok(!$bot->{fullop}{parses} && !$bot->{fullop}{sweeps},'old events perform no Fullop normalization or sweep');
+ok(!$bot->{debug_calls} && !$bot->{logger}{calls} && !$bot->{metrics}{calls},'old events have no log or metric side effects');
+# Reset fixture so accepted-path checks remain independent of the baseline failure.
+$bot->{hChannelsNicksTmp}={'#test'=>['Fresh']};
+$bot->{fullop}{sweeps}=[];
+$chunk->($current_transport,['bot','=','#test','@Alice +Bob Alice'],{target_name=>'#test'});
+is_deeply($bot->{hChannelsNicksTmp}{'#test'},[qw(Fresh Alice Bob Alice)],'current 353 preserves prefix normalization and accumulation');
+$end->($current_transport,['bot','#test'],{});
+is_deeply($bot->{hChannelsNicks}{'#test'},[qw(Fresh Alice Bob)],'current 366 preserves order and deduplication');
+ok(!exists $bot->{hChannelsNicksTmp}{'#test'} && $bot->{hChannelsNicksEnd}{'#test'}==1,'current completion consumes buffer and marks ready');
+is_deeply($bot->{fullop}{sweeps},[['#test',qw(Fresh Alice Bob)]],'current completion performs exactly one sweep');
+is($bot->{metrics}{calls}[-1][1],3,'current completion retains member count metric');
+$bot->{irc}=undef;
+$bot->{hChannelsNicksTmp}={'#test'=>['Detached']};
+$chunk->($current_transport,['bot','=','#test','Late'],{target_name=>'#test'});
+$end->($current_transport,['bot','#test'],{});
+ok(eval {$chunk->(undef,undef,undef);$end->(undef,undef,undef);1}, 'absent transport is rejected before payload access');
+is_deeply($bot->{hChannelsNicksTmp},{'#test'=>['Detached']},'detached or absent source cannot mutate buffers, even with malformed payload');
+is(scalar @{$bot->{fullop}{sweeps}},1,'detached callbacks cannot trigger another sweep');
+
 done_testing();

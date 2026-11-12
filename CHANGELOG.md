@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1260 — Reject NAMES events from departed transports
+
+- Require source-object identity in 353/366 callbacks before touching membership,
+  completion flags, logs, metrics or Fullop sweeps.
+- Preserve current-transport NAMES behavior; cover stale and absent sources in
+  the existing integration-wiring case with an explicitly isolated handler replay.
+- Record remaining event-authority and readiness boundaries in the IRC roadmap.
+
+
 ### MB1259 — Obliviate: retire old connection member lists
 
 - Retire published members, partial NAMES buffers and completion flags when
