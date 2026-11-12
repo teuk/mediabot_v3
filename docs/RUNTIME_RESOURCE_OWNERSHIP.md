@@ -1,11 +1,11 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1241, prepared against MB1240 commit
-`c1cc262b9ee59e6cc69101e3c24a22e10586736e`.
-Local VERSION file/cache policy now has its own component. Helpers retains its
-historical path anchor and optional hooks; no timer/worker lifetime is changed.
-See [the current roadmap](ARCHITECTURE_ROADMAP.md#mb1241--local-version-component).
-Native local-version checks pass; full host acceptance remains pending.
+Current continuation checkpoint: MB1242, prepared against committed MB1241
+`55eedd9e7fdc4de524f9ca0dbe36ac419822b29b`, matching the supplied snapshot.
+Version command presentation now has an explicit component; Local and Remote
+retain file/cache and network/worker ownership respectively. No timer/worker
+lifetime changes. See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1242--version-command-presentation).
+Local behavior checks pass; complete host acceptance remains pending.
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all

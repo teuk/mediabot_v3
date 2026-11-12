@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1242 — Separate version command presentation from Helpers
+
+- Give Version::Command ownership of immediate identity replies, asynchronous
+  follow-up wording and their order; Context retains reply routing.
+- Keep Helpers::versionCheck as the public adapter with call-time dependencies,
+  including overrides installed during audit or before remote completion.
+- Preserve cache fallback, diagnostic text, return values and exception identity;
+  local file policy and remote HTTP/worker behavior remain in their existing owners.
+- Replace command-body source checks in case 539 with actual component/facade
+  behavior tests; retain startup/worker and core command integration checks.
+
 ### MB1241 — Isolate local version identity from Helpers
 
 - Move local VERSION reading and cache/fallback policy into Version::Local,

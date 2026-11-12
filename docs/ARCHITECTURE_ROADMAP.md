@@ -13,15 +13,15 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | Phase | Objective and bounded first increment | Status |
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
-| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 extracts local VERSION policy; native checks pass locally, full host acceptance pending. |
+| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 local VERSION policy is committed (`55eedd9e`). MB1242 separates version command presentation; host acceptance pending. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are implemented and committed; broader phase C remains open. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1241 implements the selected local VERSION
-boundary. See [MB1241](#mb1241--local-version-component) for validation and the
-next bounded review. Earlier “Next” paragraphs are historical decisions.
+Current continuation point: MB1242 isolates version command presentation with
+explicit dependencies. See [MB1242](#mb1242--version-command-presentation).
+Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
 
@@ -1179,3 +1179,50 @@ command concern, while Remote owns transport. Inspect its callers and existing
 539/607 tests before deciding whether another extraction is useful. Do not move
 small wrappers merely to shrink the file, and do not combine this with Update's
 separate deployment identity or generic-worker shutdown work.
+
+
+## MB1242 — Version command presentation
+
+Base `55eedd9e7fdc4de524f9ca0dbe36ac419822b29b` (MB1241 on origin/master)
+exactly matches the tracked files in `snap_mediabot_v3_teuk_20261112_111856.zip`.
+MB1241 is committed; its full host assertion total was not supplied and is not
+inferred from that commit.
+
+The caller review found the core `version` dispatch in
+[Mediabot](../Mediabot/Mediabot.pm) and historical Helpers imports. The command
+has a distinct contract: emit cached/local identity first, audit, then request
+an optional remote follow-up. This belongs neither to file policy nor HTTP.
+[Version::Command](../Mediabot/Version/Command.pm) now owns that orchestration
+and wording. It imports no Helpers, file reader, HTTP, DBI or worker. Context
+still owns target routing. Six explicit callbacks supply normalization, cached
+identity, local read, comparison, audit and remote submission.
+
+Helpers::versionCheck remains the exported adapter. Callback closures resolve
+historical functions at invocation time, including an audit replacing the remote
+hook and a comparator replaced before deferred completion. No production caller
+is redirected away from this compatibility surface. Local, Format, Remote,
+Update, remote completion/lifecycle and command permission checks are unchanged.
+The no-loop synchronous compatibility path still belongs to Remote; the command
+extraction does not promise to make that path asynchronous.
+
+The same 135 behavioral assertions pass through actual Helpers before and after
+extraction. The standalone component passes 134 assertions. These check immediate
+versus deferred/inline completion, missing and invalid identity, remote ordering,
+exact messages/audit arguments, fallback cache and exception identity at reply,
+audit, submission and comparison. Submission returning false still leaves the
+historical command return of 1; no retry or duplicate-completion policy is added.
+Existing [case 539](../t/cases/539_mb317_version_check_async_nonblocking.t) runs
+[the fixture](../t/lib/MB1242VersionCommand.pm) without a new historical case file
+or sleep. Its worker/startup checks remain; core case 609 follows the new owner.
+
+Five executable targeted cases pass 555 assertions locally. The wider seven-case
+lane has 31 failures in cases 818/834 because loading External requires the absent
+IO::Socket::SSL dependency here; it is not a passing lane. The package requires
+all seven cases and one full suite on the target host before commit/push.
+No full host acceptance, schema/configuration/service change or speedup is claimed.
+
+Next: checkpoint the version domain (Format, Local, Remote, Command) and inspect
+remaining phase B/C candidates against concrete coupling. Do not extract the
+remaining small facade delegates for line-count reduction. Authentication lookup
+and its cache invalidation need an explicit security contract before moving;
+generic-worker final-exit coordination remains a separate phase D investigation.

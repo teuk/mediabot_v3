@@ -129,7 +129,8 @@ return sub {
     my $context = _slurp_mb391($context_file);
     my $party   = _slurp_mb391($party_file) . "\n" . _slurp_mb391($party_cmds);
 
-    my $version = _extract_sub_mb391($helpers, 'versionCheck');
+    my $version = _extract_sub_mb391(
+        _slurp_mb391(File::Spec->catfile($root, 'Mediabot', 'Version', 'Command.pm')), 'run');
     my $pacing = _slurp_mb391(File::Spec->catfile('.', 'Mediabot', 'IRC', 'PacedOutput.pm'));
     my $queue = _extract_sub_mb391($pacing, 'queueBotNotices');
     my $uptime  = _extract_sub_mb391($main, 'mbUptime_ctx');
@@ -147,7 +148,7 @@ return sub {
     $assert->ok(defined $pl_up, 'Partyline uptime body found');
 
     my $reply_pos = index($version // '', '$ctx->reply("$bot_name version: $local_version")');
-    my $async_pos = index($version // '', 'getVersion_async(');
+    my $async_pos = index($version // '', '$deps->{remote}->(');
     $assert->ok(
         $reply_pos >= 0 && $async_pos > $reply_pos,
         'version replies from local identity before scheduling GitHub work'

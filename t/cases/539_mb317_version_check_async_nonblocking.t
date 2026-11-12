@@ -80,12 +80,13 @@ return sub {
     my $remote = _slurp_mb317(File::Spec->catfile('.', 'Mediabot', 'Version', 'Remote.pm'));
     my $main = _slurp_mb317(File::Spec->catfile('.', 'mediabot.pl'));
     my $async = _extract_sub_mb317($remote, 'getVersion_async');
-    my $command = _extract_sub_mb317($src, 'versionCheck');
     my $sync = _extract_sub_mb317($remote, 'getVersion');
 
     $assert->ok(defined $sync, 'existing synchronous getVersion helper remains available');
     $assert->ok(defined $async, 'getVersion_async helper found');
-    $assert->ok(defined $command, 'versionCheck command found');
+    require MB1242VersionCommand;
+    MB1242VersionCommand::check(sub { $assert->ok($_[0], $_[1]) }, 'component');
+    MB1242VersionCommand::check(sub { $assert->ok($_[0], $_[1]) }, 'facade');
 
     $assert->like(
         $main,
@@ -199,64 +200,9 @@ return sub {
     );
 
     $assert->like(
-        $command // '',
-        qr/getVersion_async\s*\(/,
-        'runtime version command schedules the asynchronous helper'
-    );
-
-    $assert->unlike(
-        $command // '',
-        qr/->getVersion\s*\(/,
-        'runtime version command no longer performs the synchronous lookup'
-    );
-
-    $assert->like(
-        $command // '',
-        qr/my\s+\$message\s*=\s*\$ctx->message/,
-        'command captures its log context before async completion'
-    );
-
-    $assert->like(
-        $command // '',
-        qr/my\s+\$local_version\s*=\s*_usable_local_version\(_cached_local_version\(\$self\)\)/,
-        'runtime version command captures the last known local identity'
-    );
-
-    $assert->like(
-        $command // '',
-        qr/\$self->\{main_prog_version\}\s*=\s*\$local_version\s+if\s+\$local_version\s+ne\s+'unknown'/s,
-        'runtime version state is refreshed only with a usable local value'
-    );
-
-    $assert->unlike(
-        $command // '',
-        qr/\$self->\{main_prog_version\}\s*=\s*['\"]Undefined['\"]/,
-        'runtime version command never stores the Undefined sentinel'
-    );
-
-    $assert->like(
         $async // '',
         qr/my\s+\$fallback_local\s*=\s*_cached_local_version\(\$self\)/,
         'async worker keeps the cached local version for failure paths'
-    );
-
-    $assert->like(
-        $command // '',
-        qr/\$ctx->reply\("\$bot_name version: \$local_version"\)/,
-        'local version is replied immediately through Context routing'
-    );
-
-    my $reply_pos = index($command // '', '$ctx->reply("$bot_name version: $local_version")');
-    my $async_pos = index($command // '', 'getVersion_async(');
-    $assert->ok(
-        $reply_pos >= 0 && $async_pos > $reply_pos,
-        'local version reply is emitted before the remote worker is scheduled'
-    );
-
-    $assert->like(
-        $command // '',
-        qr/logBot\(\$self,\s*\$message,\s*undef,\s*'version'/,
-        'command logging occurs with the immediate local reply'
     );
 
     $assert->like(

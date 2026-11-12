@@ -1229,69 +1229,17 @@ sub _compare_mediabot_versions {
 
 # Send a private message to a target
 sub versionCheck {
-    my ($ctx) = @_;
-
-    my $self     = $ctx->bot;
-    my $conf     = $self->{conf};
-    my $bot_name = $conf->get('main.MAIN_PROG_NAME') // 'Mediabot';
-    my $message  = $ctx->message;
-
-    # MB391: the core identity command must answer immediately from the local
-    # source of truth. GitHub remains an optional asynchronous follow-up and can
-    # never delay or suppress the basic version reply.
-    my $local_version = _usable_local_version(_cached_local_version($self))
-        // _usable_local_version(getLocalVersion($self))
-        // 'unknown';
-
-    $self->{main_prog_version} = $local_version
-        if $local_version ne 'unknown';
-
-    $ctx->reply("$bot_name version: $local_version");
-    logBot($self, $message, undef, 'version', undef);
-
-    getVersion_async(
-        $self,
-        sub {
-            my ($worker_local, $remote_version) = @_;
-
-            $worker_local = _usable_local_version($worker_local)
-                // _usable_local_version($local_version)
-                // 'unknown';
-            $remote_version = _usable_local_version($remote_version);
-
-            if ($local_version eq 'unknown' && $worker_local ne 'unknown') {
-                $local_version = $worker_local;
-                $self->{main_prog_version} = $worker_local;
-                $ctx->reply("$bot_name version: $worker_local");
-            }
-
-            return unless defined $remote_version;
-
-            my $comparison = _compare_mediabot_versions(
-                $local_version,
-                $remote_version,
-            );
-
-            if (!defined $comparison) {
-                $ctx->reply(
-                    "$bot_name repository version format unknown: $remote_version"
-                );
-            }
-            elsif ($comparison < 0) {
-                $ctx->reply(
-                    "$bot_name update available: $remote_version (local: $local_version)"
-                );
-            }
-            elsif ($comparison > 0) {
-                $ctx->reply(
-                    "$bot_name local build newer than repository: $local_version (repository: $remote_version)"
-                );
-            }
-        },
-    );
-
-    return 1;
+    require Mediabot::Version::Command;
+    return Mediabot::Version::Command::run($_[0], {
+        normalize => sub { _usable_local_version(@_) },
+        cached    => sub { _cached_local_version(@_) },
+        local     => sub { getLocalVersion(@_) },
+        compare   => sub { _compare_mediabot_versions(@_) },
+        audit     => sub { logBot(@_) },
+        remote    => sub { getVersion_async(@_) },
+    });
 }
+
 
 # 🧙‍♂️ Handle private commands with centralized dispatching and full command set.
 
