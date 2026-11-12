@@ -1311,7 +1311,20 @@ sub clean_and_exit {
     if ($ALREADY_EXITING) { CORE::exit($iRetValue); }
     $ALREADY_EXITING = 1;
 
-    # mb701-B: revoke proactive-Wit authorization before any shutdown work.
+    # MB1254: retire generic worker delivery before final saves and DB teardown.
+    # No event-loop iteration: callbacks must not restart work or publish replies.
+    my $worker_shutdown = eval {
+        require Mediabot::AsyncWorker;
+        Mediabot::AsyncWorker->shutdown_loop($self->{loop});
+    };
+    unless (ref($worker_shutdown) eq 'HASH' && $worker_shutdown->{ok}) {
+        eval {
+            $self->{logger}->log(1, 'AsyncWorker final cleanup incomplete')
+                if $self->{logger};
+        };
+    }
+
+    # mb701-B: revoke proactive-Wit authorization before final saves.
     # clean_and_exit() is the common final path, including admin-triggered exits.
     eval { $self->{wit_runtime_state}->mark_shutdown() if $self->{wit_runtime_state}; };
 

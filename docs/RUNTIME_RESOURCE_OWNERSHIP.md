@@ -1,11 +1,10 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1253, prepared against committed MB1252
-`8117164d85d808675f0bcdec467515a00549d000`.
-The generic-worker decision now requires an explicit final-exit correction:
-physical child ownership and bounded collection cannot use active_workers alone.
-See [the evidence and correction contract](ARCHITECTURE_ROADMAP.md#mb1253--generic-worker-final-exit-decision).
-The correction and full host acceptance are still pending; this is not closure.
+Current continuation checkpoint: MB1254, prepared against committed MB1253
+`50e7632b02c38124a1426b2bff16e068ab3c2638`.
+Generic-worker physical ownership and bounded final collection are implemented.
+The remaining chapter gate is installed-host validation and commit/push, not a
+new extraction. See [the closure record](ARCHITECTURE_ROADMAP.md#mb1254--final-worker-collection-and-chapter-closure).
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all
 plugins, HTTP requests and timers have been audited.
@@ -21,9 +20,9 @@ plugins, HTTP requests and timers have been audited.
 Do not replace these with one generic stop-all operation. Reconnect must retain
 Partyline and process ownership; rehash must not silently discard unrelated work.
 `clean_and_exit` has a process-wide reentrance guard and exits; it is not a reusable
-idempotent cleanup service. The inspected function does not explicitly iterate
-all AsyncWorker registrations, scheduler tasks or output notifiers. That is an
-integration question for a later migration, not proof that every resource leaks.
+idempotent cleanup service. MB1254 explicitly retires generic AsyncWorker work for the bot loop before final
+saves and teardown. It does not iterate all scheduler tasks or output notifiers;
+those exclusions are not proof that every excluded resource leaks.
 
 ## Ownership map
 
@@ -33,7 +32,7 @@ integration question for a later migration, not proof that every resource leaks.
 | [Paced NOTICE](../Mediabot/IRC/PacedOutput.pm), `queueBotNotices` | `_notice_queue_timers` array identity, plus each countdown | Expiry releases its slot; MB1212 setIrc detaches the registry, publishes transport, then explicitly cancels its timers | Removal exceptions leave inert notifiers in the broken loop and produce a diagnostic; cancellation is not a physical cleanup retry API. |
 | [Paced PRIVMSG](../Mediabot/IRC/PacedOutput.pm), `_queue_irc_chunks` | `_external_ai_output_queues` target state; `timer`, `current`, `batches`; guarded pump | MB1213 detaches all old targets, clears batches/guards/pump ownership and cancels their countdowns; arm identity preserves inline successors | MB1213 accepted; final-exit coordination remains separate. |
 | [Deferred AntiFlood](../Mediabot/IRC/DeferredOutput.pm), `_arm_flood_drain` | `_flood_outq` target queue; owned countdown handle and arm identity; weak expected queue in callback | MB1214 detaches/clears old queues before cancelling notifiers; expiry releases handle before normal drain/retry | Committed as `b321e17`; reconnect retirement does not change final-exit policy. |
-| [AsyncWorker](../Mediabot/AsyncWorker.pm), `cancel`, `_cleanup`, `_complete` | Worker owner PID, task ID, process/stream, timeout/kill/force timers | Cancel initiates TERM/KILL/backstop; cleanup deletes timer/stream/FD slots; finalized gate allows completion once; active_workers excludes finalized entries | Cancellation request is not synchronous child completion. Consumers must retain result/reaping semantics during shutdown. |
+| [AsyncWorker](../Mediabot/AsyncWorker.pm), `cancel`, `_cleanup`, `_complete` | Worker owner PID, task ID, process/stream, timeout/kill/force timers | Cancel initiates TERM/KILL/backstop; cleanup deletes timer/stream/FD slots; finalized gate allows completion once; active_workers excludes finalized entries | MB1254 separates CHILDREN from active observation and adds shutdown_loop: revoke callbacks, detach notifiers, bounded TERM/KILL collection; unconfirmed children remain owned. Ordinary cancel is still asynchronous. |
 | [Scheduler](../Mediabot/Scheduler.pm), `stop`, `remove`, `registration_id` | Named task plus exact registration ID/generation | Calendar stop removes notifier; ordinary periodic stop stops it; generation changes invalidate old execution; remove has its own semantics | MB1228 rechecks exact task identity after stop/remove callbacks so outer cleanup cannot erase a successor. Stop failure still remains a failure; MB1230 now checks plugin-side exact ownership. |
 | [Plugin jobs](../Mediabot/PluginManager.pm), `_stop_v3_jobs`, `_remove_v3_jobs` | Plugin entry's `mounted_jobs` stores name/clock plus Scheduler identity and registration ID (MB1230) | MB1230 checks exact ownership before start/stop/remove and rollback; MB1229 retains failed removal records on a disabled entry and reports incomplete unload | MB1230 implements exact identity and rollback; committed as `9508ecbf`, without a host test total recorded here. Unknown ownership is refused, not inferred from a name. Lifecycle/capability authority stays in PluginManager. |
 | [Partyline watch](../Mediabot/Partyline/ShellWatch.pm), `_dispose`, `_remove_owned` | Exact session/stream/state, owner PID and task ID; weak owner references | Marks done, drops renderer, removes only its own scheduler registration; reports incomplete removal | Useful existing model for revoke-first cleanup; preserve session authorization rather than copying it into a generic timer helper. |
@@ -237,3 +236,24 @@ operation. The required next increment is separate physical ownership, callback
 revocation and bounded batch collection at final exit. No new resource family is
 added to this chapter. Archive/achievement behavior and ordinary reconnect remain
 outside that correction except for preserving their established ordering.
+
+
+## MB1254 — Final-exit implementation
+
+CHILDREN strongly owns each forked worker until its watcher observes exit or a
+checked wait confirms collection/absence. ACTIVE remains weak and logical.
+shutdown_loop combines physical and logical owners, refuses new starts using weak
+loop keys plus owner PID, and revokes the entire batch before invoking cleanup.
+All waitpid calls are nonblocking; the two polling phases share sleep budgets
+across children. No event-loop iteration or consumer completion callback runs.
+
+Confirmed collection releases physical ownership and attempts unwatch_process;
+errors are distinguished from unconfirmed children. Repeated collection can retry
+uncertain child ownership but does not retry detached notifier removal. Retained
+callbacks remain inert. Main final exit diagnoses failure and continues saves,
+DB/PID/log teardown. Reconnect, rehash and ordinary result delivery are unchanged.
+
+The existing case 1251 launches a fresh native probe, including the actual main
+exit function with unrelated imports stubbed. Host native/targeted/full validation
+is still required. Successful MB1254 host validation and commit/push closes the
+bounded chapter; the wider exclusions are retained, not silently certified.

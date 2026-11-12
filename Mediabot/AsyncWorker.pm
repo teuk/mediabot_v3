@@ -6,9 +6,13 @@ use warnings;
 use JSON::PP ();
 use Time::HiRes ();
 use Scalar::Util qw(weaken refaddr);
+use Hash::Util::FieldHash qw(fieldhash);
+use Errno qw(ECHILD);
 
 # Observation never owns worker lifetime. IDs are process-local monotonic
 # handles, distinct from OS PIDs; every lookup is scoped to the owning loop.
+our (%CHILDREN, %EXITING);
+fieldhash %EXITING; # Weak loop keys; a reused address is not a shutdown owner.
 our (%ACTIVE, $SERIAL); # Preserve IDs and registrations across an in-process module reload.
 sub active_workers {
     my ($class, $loop) = @_;
@@ -52,6 +56,7 @@ my $PROTOCOL_VERSION     = 1;
 sub start {
     my ($class, %args) = @_;
 
+    return undef if ref($args{loop}) && ($EXITING{$args{loop}} // 0) == $$;
     my $done = $args{on_done};
     return undef unless ref($done) eq 'CODE';
 
@@ -130,6 +135,9 @@ sub start {
         return undef;
     }
 
+    if (($EXITING{$loop} // 0) == $$) {
+        close $read_fh; close $write_fh; return undef;
+    }
     my $pid = fork();
     unless (defined $pid) {
         eval { close $read_fh };
@@ -152,18 +160,21 @@ sub start {
     $self->{task_id} = 'w'.++$SERIAL;
     $ACTIVE{$self->{task_id}} = $self;
     weaken($ACTIVE{$self->{task_id}});
+    $CHILDREN{$self->{task_id}} = $self; # Physical ownership outlives result delivery.
     $self->{read_fh}  = $read_fh;
     $self->{write_fh} = $write_fh;
     eval { close $write_fh };
     delete $self->{write_fh};
 
+    $self->{watch_attempted} = 1;
     my $watch_ok = eval {
         $loop->watch_process(
             $pid,
             sub {
                 my ($seen_pid, $wait_status) = @_;
-                return if $self->{finalized};
                 return unless defined($seen_pid) && $seen_pid == $pid;
+                return if $self->{child_done};
+                $self->_forget_child;
 
                 $self->{wait_status} = $wait_status;
                 $self->{child_done}  = 1;
@@ -173,6 +184,7 @@ sub start {
         1;
     };
 
+    return undef if $self->{retired};
     unless ($watch_ok) {
         my $error = _exception_text($@ || 'watch_process registration failed');
         $self->_signal_child('KILL');
@@ -186,7 +198,9 @@ sub start {
             require POSIX;
             for (1 .. 20) {
                 my $seen = waitpid($pid, POSIX::WNOHANG());
-                last if $seen == $pid || $seen == -1;
+                if ($seen == $pid || ($seen == -1 && $! == ECHILD)) {
+                    $self->{child_done} = 1; $self->_forget_child; last;
+                }
                 Time::HiRes::sleep(0.005);
             }
             1;
@@ -211,6 +225,7 @@ sub start {
         1;
     };
 
+    if ($self->{retired}) { $self->_cleanup; return undef; }
     unless ($stream_ok) {
         my $error = _exception_text($@ || 'stream setup failed');
         $self->_signal_child('KILL');
@@ -231,6 +246,7 @@ sub start {
         1;
     };
 
+    if ($self->{retired}) { $self->_cleanup; return undef; }
     unless ($timer_ok) {
         my $error = _exception_text($@ || 'timeout timer setup failed');
         $self->_signal_child('KILL');
@@ -479,6 +495,7 @@ sub _begin_termination {
 
 sub _signal_child {
     my ($self, $signal) = @_;
+    return 0 if $self->{retired};
     return 0 unless $self->{pid} && ($self->{owner_pid} // 0) == $$ && !$self->{child_done};
 
     if ($signal eq 'TERM') {
@@ -509,8 +526,11 @@ sub _new_timer {
             delay     => $delay,
             on_expire => _new_timer_callback(\$callback),
         );
+        die "worker retired during timer setup\n" if $self->{retired};
         $self->{loop}->add($timer);
+        die "worker retired during timer setup\n" if $self->{retired};
         $timer->start;
+        die "worker retired during timer setup\n" if $self->{retired};
         1;
     };
     unless ($ok) {
@@ -722,6 +742,82 @@ sub _complete {
     delete $self->{child};
     delete $self->{on_progress};
     return 1;
+}
+
+# Physical ownership is independent of ACTIVE's logical result lifetime.
+sub _forget_child {
+    my ($self) = @_;
+    my $id = $self->{task_id};
+    delete $CHILDREN{$id} if defined($id) && $CHILDREN{$id}
+        && refaddr($CHILDREN{$id}) == refaddr($self);
+}
+
+# 1: confirmed gone, 0: still ours, -1: observation uncertain (never signal).
+sub _shutdown_poll {
+    my ($self) = @_;
+    my $seen = waitpid($self->{pid}, POSIX::WNOHANG());
+    return 0 if $seen == 0;
+    return -1 unless $seen == $self->{pid} || ($seen == -1 && $! == ECHILD);
+    $self->{child_done} = 1;
+    $self->_forget_child;
+    if ($self->{watch_attempted}) {
+        my $ok = eval { $self->{loop}->unwatch_process($self->{pid}); 1 };
+        $self->{shutdown_cleanup_errors}++ unless $ok;
+    }
+    return 1;
+}
+
+# Final process teardown only. Do not call from reconnect or rehash.
+# Suppress arbitrary consumer callbacks; preserve ordinary cancel semantics.
+sub shutdown_loop {
+    my ($class, $loop) = @_;
+    return {ok=>1, remaining=>0, cleanup_errors=>0} unless ref($loop);
+    $EXITING{$loop} = $$; # Publish refusal before any cleanup can re-enter start.
+    my %seen;
+    my @workers = grep { $_ && !$seen{refaddr($_)}++ && ($_->{owner_pid} // 0) == $$ && ref($_->{loop})
+        && refaddr($_->{loop}) == refaddr($loop) } (values %CHILDREN, values %ACTIVE);
+    # Revoke the entire batch before invoking any notifier methods.
+    for my $w (@workers) {
+        $w->{retired} = 1;
+        $w->{finalized} = 1;
+        delete $ACTIVE{$w->{task_id}};
+        delete @$w{qw(on_done on_progress child final_record)};
+        $w->{buffer} = '';
+    }
+    for my $w (@workers) {
+        for my $slot (qw(timeout_timer kill_timer force_timer)) {
+            my $timer = delete $w->{$slot} or next;
+            $w->{shutdown_cleanup_errors}++ unless eval { $timer->stop; 1 };
+            $w->{shutdown_cleanup_errors}++ unless eval { $loop->remove($timer); 1 };
+        }
+        if (my $stream = delete $w->{stream}) {
+            $w->{shutdown_cleanup_errors}++ unless $w->{stream_removed}
+                || eval { $loop->remove($stream); 1 };
+            $w->{stream_removed} = 1;
+        }
+        for my $slot (qw(read_fh write_fh)) {
+            my $fh = delete $w->{$slot} or next;
+            eval { close $fh };
+        }
+    }
+    my @pending = @workers;
+    # Shared fixed polling budgets: at most 100ms per phase, not per child.
+    for my $signal (qw(TERM KILL)) {
+        for my $w (@pending) {
+            next if $w->{child_done};
+            my $state = $w->_shutdown_poll;
+            kill($signal, $w->{pid}) if $state == 0;
+        }
+        for (0 .. 20) {
+            @pending = grep { !$_->{child_done} && $_->_shutdown_poll != 1 } @pending;
+            last unless @pending;
+            Time::HiRes::sleep(0.005) if $_ < 20;
+        }
+    }
+    my $errors = 0;
+    $errors += $_->{shutdown_cleanup_errors} // 0 for @workers;
+    return {ok=>(!@pending && !$errors ? 1 : 0), remaining=>scalar(@pending),
+        cleanup_errors=>$errors};
 }
 
 sub _write_all {

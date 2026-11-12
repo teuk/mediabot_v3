@@ -15,15 +15,16 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 local VERSION policy is committed (`55eedd9e`). MB1242 command presentation is committed (`2db3d45b`); detailed host acceptance totals not supplied. MB1243 checkpoints this bounded split. MB1248–1251 user contracts, SQL and selection are committed through `32ed060`; MB1252 freezes the bounded phase B scope. |
 | C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are committed. MB1244 antiflood read is committed (`dd2a8605`). MB1245 registration is committed (`15680ec`). MB1246 flags reader is committed (`7326eb8`). MB1247 checkpoints the bounded chaninfo split; detailed host totals were not supplied. MB1250–1251 add user lookup/selection. MB1252 closes the bounded pilot scope; wider query extraction is deferred. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D has the final-exit decision and chapter acceptance gates defined by MB1252; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). MB1254 implements generic-worker final collection; the last gate is successful host acceptance; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1253 resolves the generic-worker exit decision:
-explicit final-exit ownership and bounded collection are required. The native
-probe demonstrates the missing mechanism, not full bot shutdown acceptance.
-Next delivery implements that one correction; chapter acceptance follows it.
-No new extraction family enters this chapter. See [the decision](#mb1253--generic-worker-final-exit-decision).
+Current continuation point: MB1254 implements the last bounded runtime item.
+The architecture chapter has no further planned extraction or resource migration.
+Its closure gate is successful MB1254 native/targeted/full host validation and
+commit/push; this prepared patch does not claim that host result in advance.
+After that gate, proceed directly to the operational baseline, not another
+architecture checkpoint patch. See [chapter closure](#mb1254--final-worker-collection-and-chapter-closure).
 Earlier “Next” paragraphs are historical decisions, superseded by this plan.
 
 ## Phase A / MB1208
@@ -1789,3 +1790,73 @@ This is the final runtime work item in the frozen chapter. If its tests expose
 another defect necessary for this contract, report it explicitly. Do not expand
 into a universal resource framework. After its successful host acceptance, publish
 the chapter closing record and move to the operational baseline selected in MB1252.
+
+
+## MB1254 — Final worker collection and chapter closure
+
+Base `50e7632b02c38124a1426b2bff16e068ab3c2638` is committed MB1253 and matches all tracked files in the
+supplied 2026-11-12 15:45:48 snapshot. No private configuration is packaged.
+
+[AsyncWorker](../Mediabot/AsyncWorker.pm) now retains physical child ownership
+separately from weak active-task observation. An accepted watcher removes that
+ownership even after forced logical completion. Confirmed rejected-watch cleanup
+also releases it. Normal callbacks and operator cancellation retain their contract.
+
+shutdown_loop permanently refuses new work for that exact loop in its owning
+process, revokes the entire owned batch before notifier cleanup, and suppresses
+result/progress callbacks. It covers both logically pending work whose child was
+already reaped and finalized work whose child remains unconfirmed. Collection uses
+WNOHANG before signalling, TERM then KILL, and two shared polling windows with at
+most twenty 5ms sleeps each, rather than a delay per child. These are polling sleep
+budgets, not a hard wall-time guarantee for arbitrary overridden notifier methods.
+Wait errors retain ownership and never authorize a signal; ECHILD confirms absence.
+Notifier exceptions are reported separately from unconfirmed child counts.
+
+[clean_and_exit](../Mediabot/Mediabot.pm) calls the operation before final saves,
+QUIT and database teardown. It logs incomplete cleanup and continues established
+final-save/PID/log cleanup. It never drives the event loop to finish unrelated
+callbacks. Reconnect/rehash do not call this API; other loops and parent-owned
+workers inherited by a fork remain outside the caller's authority.
+
+[The native child probe](../t/lib/MB1254WorkerShutdown.pl), invoked from existing
+[case 1251](../t/cases/1251_mb852_worker_termination_timers.t), exercises 58 assertions:
+active/cancelled/forced children, withheld EOF, late callbacks, reentrant shutdown,
+new-submission refusal, wait errors/retry, removal failure, setup faults, shutdown
+during timer installation, independent loop/process ownership and normal results.
+It loads the full native Mediabot module with unrelated subsystem dependencies
+stubbed, then executes clean_and_exit in disposable children. It checks real
+collection before DB teardown, failure diagnostics, saves and the exit status;
+it is not a live-service integration test.
+
+Local qualification: all 58 native assertions pass; the available eight-case
+runner lane passes 552 assertions. Broader local checks encountered missing
+DateTime (case 1311) and IO::Socket::SSL (case 834); these are not passing checks.
+The delivery keeps both cases mandatory on the host and requires one full suite
+with --progress before the existing commit.sh owns VERSION and push. No full local
+suite success is claimed. The host must also compile the actual main module with
+its installed dependencies.
+
+### Closure record and remaining limitations
+
+| Gate | Disposition |
+| --- | --- |
+| A/B/C/E bounded decomposition goals | Delivered in the preceding committed increments; no further extraction required. |
+| D final-exit decision | MB1253 evidence resolved the decision; MB1254 implements the selected correction. |
+| Native regression and main exit-path checks | Pass locally with the dependency boundary described above. |
+| Full installed-host acceptance and commit/push | Required by validate_commit.sh; pending at package preparation. Its successful transcript closes this chapter. |
+| Next planned work after acceptance | Operational baseline, predictable tests, then one measured reliability/performance issue at a time. |
+
+There is no promise that every module or resource has been audited. The explicit
+resource exclusions remain in [the inventory](RUNTIME_RESOURCE_OWNERSHIP.md).
+Physical removal errors leave revoked callbacks inert; this is not a universal
+notifier-removal retry service. Unconfirmed children remain recorded and diagnosed.
+The operation is final-exit-only and cannot reopen a retired loop. Physical records
+start with workers launched by this implementation; it cannot reconstruct children
+already lost by code loaded before it. No production service is restarted here.
+No schema, configuration, radio or YouTube behavior is changed.
+
+If host validation fails, correct that demonstrated failure before closure; do
+not silently waive it or expand the roadmap. If it succeeds, retain the transcript
+as acceptance evidence and move to the next chapter without an extra docs-only
+release. The next chapter begins by inventorying existing diagnostics/metrics and
+choosing one observed issue, not by building a new generic framework.

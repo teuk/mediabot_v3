@@ -1,5 +1,16 @@
 ## [Unreleased] — 3.8dev
 
+### MB1254 — Collect generic workers at final process exit
+
+- Retain physical child ownership beyond logical completion and release it on
+  confirmed watcher/reap outcomes; keep active-task observation separate.
+- Revoke worker delivery and new submissions before bounded batch TERM/KILL
+  collection, preserving different loop/process owners and ordinary cancellation.
+- Integrate final collection before saves and DB teardown, diagnose incomplete
+  cleanup, and exercise native process ownership and the real main exit path.
+- Make successful host validation and commit the architecture chapter's closure
+  gate; proceed next to operational evidence rather than further extraction.
+
 ### MB1253 — Resolve the generic-worker final-exit decision
 
 - Record native process evidence separating active work, cancellation and

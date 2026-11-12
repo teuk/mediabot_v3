@@ -134,4 +134,11 @@ for my $kind (qw(timeout cancel)) {
         'an inherited handle cannot signal or cancel the parent-owned worker');
     $release->(); cleanup($loop);
 }
+# Keep the shutdown registry and dependency fixtures in a fresh interpreter.
+require ColdProbeBatch;
+my $shutdown = ColdProbeBatch::run_perl_probes([
+    q{do './t/lib/MB1254WorkerShutdown.pl' or die($@ || $! || 'shutdown probe failed')},
+], jobs=>1, timeout=>30)->[0];
+ok($shutdown->{status} == 0, 'native final-exit ownership and main-module integration');
+diag($shutdown->{stdout} . $shutdown->{stderr}) if $shutdown->{status};
 done_testing;
