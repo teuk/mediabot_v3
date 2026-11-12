@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1245 — Give chaninfo registration its own reader
+
+- Move the exact owner/registration SELECT into Channel::Registration, keeping
+  the level-500 join, LIMIT 1 and raw fields without defaults or caching.
+- Retain Master-only key disclosure, formatting, diagnostics and statement
+  cleanup in chaninfo, including its original failure and exception sequencing.
+- Extend the existing actual-command fixture with registration faults and raw
+  metadata cases; compare complete traces against the unchanged command.
+
 ### MB1244 — Give chaninfo's antiflood read its domain owner
 
 - Move chaninfo's exact ID-based five-column SELECT into Channel::FloodRules,

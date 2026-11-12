@@ -14,13 +14,13 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 local VERSION policy is committed (`55eedd9e`). MB1242 command presentation is committed (`2db3d45b`); detailed host acceptance totals not supplied. MB1243 checkpoints this bounded split. |
-| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are committed. MB1244 isolates chaninfo's antiflood read; host acceptance pending. Broader phase C remains open. |
+| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are committed. MB1244 antiflood read is committed (`dd2a8605`). MB1245 isolates chaninfo registration; host acceptance pending. Broader phase C remains open. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1244 implements the selected chaninfo antiflood
-read boundary. See [MB1244](#mb1244--chaninfo-antiflood-reader).
+Current continuation point: MB1245 isolates the chaninfo registration read.
+See [MB1245](#mb1245--chaninfo-registration-reader).
 Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
@@ -1353,3 +1353,38 @@ bulk relocation of permission/presentation code. Keep key disclosure in the
 command and retain admission versus display failure-policy differences. Phase B
 and broader C/D remain open, including authentication cache contracts and
 separate generic-worker final-exit coordination.
+
+
+## MB1245 — Chaninfo registration reader
+
+Base `dd2a8605a8227a4d479af8953b1374535e5ce8ba` is committed MB1244.
+Every tracked source file matches the supplied 2026-11-12 12:20:32 snapshot;
+commit.sh is guarded against that snapshot. No missing host totals are inferred.
+
+[Channel::Registration::read_for_info](../Mediabot/Channel/Registration.pm)
+owns the exact registration SELECT, prepare, execute and fetch. The USER_CHANNEL,
+USER and CHANNEL join, level 500, LIMIT 1, bound channel ID and all raw fields
+(including key) remain unchanged. Its found/missing/error result carries the
+original row, statement and SQL. It loads independently without bot, transport,
+DBI or cache dependencies and introduces no defaults or schema changes.
+
+[Chaninfo](../Mediabot/ChannelCommands.pm) retains channel selection, permissions,
+Master-only key/mode/autojoin disclosure, defaults, notices, diagnostics, finish
+and audit. Success finishes before presentation; false execute logs and notices
+before finish. Thrown prepare/execute/fetch/finish/logger/notice failures retain
+identity and ordering. No cleanup improvement is smuggled into the extraction.
+Flags and antiflood follow only after successful registration as before.
+
+[The existing fixture](../t/lib/MB1244Chaninfo.pm), still invoked by case 398,
+now covers 41 scenarios and 416 assertions. All pass against both the original
+command and the extraction; complete traces match. Added cases exercise every
+registration statement failure, false finish, throwing diagnostics/notices,
+raw metadata and defined empty strings. Ordinary callers cannot receive keys.
+The six-file targeted lane passes 1,024 assertions locally. The package checks
+cold loading and baseline traces, then requires the targeted lane and one full
+host suite before commit/push. Complete host acceptance remains pending.
+
+Next: characterize the remaining chaninfo flags query before deciding whether
+its own domain reader is worthwhile. Keep permission and presentation authority
+in the command. Broader phases B/C/D remain open, including authentication cache
+contracts and separate generic-worker final-exit coordination.

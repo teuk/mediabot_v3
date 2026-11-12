@@ -24,6 +24,7 @@ use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
 use Mediabot::Channel::FloodRules ();
+use Mediabot::Channel::Registration ();
 use Mediabot::Channel::Badwords ();
 use Mediabot::DynamicTemplate qw(normalize_name);
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
@@ -2867,32 +2868,19 @@ sub userChannelInfo_ctx {
     }
 
     # --- Main SQL query: channel info + owner (level 500) ---
-    my $sql1 = q{
-        SELECT
-            U.nickname       AS nickname,
-            U.last_login     AS last_login,
-            C.creation_date  AS creation_date,
-            C.description    AS description,
-            C.`key`          AS c_key,
-            C.chanmode       AS chanmode,
-            C.auto_join      AS auto_join,
-            C.timezone       AS timezone
-        FROM USER_CHANNEL UC
-        JOIN `USER`  U ON U.id_user    = UC.id_user
-        JOIN CHANNEL C ON C.id_channel = UC.id_channel
-        WHERE UC.id_channel = ? AND UC.level = 500
-        LIMIT 1
-    };
-
-    my $sth1 = $self->{dbh}->prepare($sql1);
-    unless ($sth1 && $sth1->execute($id_channel)) {
+    my $registration = Mediabot::Channel::Registration::read_for_info(
+        $self->{dbh}, $id_channel,
+    );
+    my $sql1 = $registration->{sql};
+    my $sth1 = $registration->{statement};
+    if ($registration->{status} eq 'error') {
         $self->{logger}->log(1, "userChannelInfo_ctx() SQL Error: $DBI::errstr | Query: $sql1");
         botNotice($self, $nick, "Internal error (query failed).");
         $sth1->finish if $sth1;
         return;
     }
 
-    my $ref = $sth1->fetchrow_hashref();
+    my $ref = $registration->{row};
     $sth1->finish;
 
     unless ($ref) {

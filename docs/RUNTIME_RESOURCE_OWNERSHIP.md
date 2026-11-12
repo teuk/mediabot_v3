@@ -1,10 +1,11 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1244, prepared against committed MB1243
-`a9343f0485423ec5f364304ad45a355aca73afe6`.
-Chaninfo's antiflood SQL read now belongs to FloodRules. The command retains
-statement finish, diagnostics and notices; no timer or worker lifetime changes.
-See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1244--chaninfo-antiflood-reader).
+Current continuation checkpoint: MB1245, prepared against committed MB1244
+`dd2a8605a8227a4d479af8953b1374535e5ce8ba`.
+Chaninfo's owner/registration read belongs to Channel::Registration; its antiflood
+read belongs to FloodRules. The command retains statement finish, diagnostics,
+notices and key disclosure. No timer or worker lifetime changes.
+See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1245--chaninfo-registration-reader).
 Local characterization and targeted checks pass; complete host acceptance is pending.
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
