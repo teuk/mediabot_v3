@@ -23,7 +23,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
-| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. Synchronized-decision boundaries remain open. |
+| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. Synchronized-decision boundaries remain open. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
@@ -401,3 +401,38 @@ are retained rather than expanding identity policy in this patch. It does not
 establish a complete NAMES/WHO/MODE readiness barrier. Next audit the consumers'
 decisions before synchronization completes, then consolidate row-2 evidence and
 residual limits. Rows 3–5 retain the accepted finite scope.
+
+
+## MB1266 — Channel MODE refresh preserves independent observations
+
+Base `e395a62aaf05c24b06c443ff592d1ada41361aea` is committed MB1265 and matches
+all tracked files of the 2026-11-12 21:22:00 snapshot. No target-host test total
+or runtime activation is inferred from commit presence.
+
+[Fullop::remember_channel_modes](../Mediabot/Fullop.pm), called by the 324 handler,
+previously replaced simple, scalar, list and status observations together.
+[IRC client protocol section 5.2](https://www.rfc-editor.org/rfc/rfc2812#section-5.2)
+describes channel-mode and ban-list replies separately. A channel-mode refresh
+must not infer removal of independent observed bans or member statuses.
+
+Native component reproduction: accept a privileged +b/+o, receive +mkl then +nt
+snapshots, and receive the same +b again. Previously the snapshot erased the
+known ban, so the duplicate was reversed with -b. Now the snapshot replaces only
+simple/scalar maps. Known list/status entries survive; explicit -b/-o still remove
+them. Another channel is untouched and reset_connection still clears everything.
+No new sanction policy or authorization exemption is introduced; the existing
+handling of the actor remains unchanged even when no correction is required.
+
+Twelve native Fullop checks extend case 1031: baseline fails 4; corrected case
+passes 116 assertions. Twenty-one available targeted cases pass 1,166 assertions.
+The package also verifies the extracted main-handler case; native full-main and
+protocol integration still require the installed host dependencies, followed by
+one full suite before commit. No schema/configuration/service action is performed.
+
+Readiness checkpoint: Fullop intentionally oppes individual JOINs immediately
+and sweeps NAMES at 366. Its protected-mode corrections use event arguments and
+known state; this patch prevents losing known information during refresh. It does
+not establish that every correction is safe with unknown prior scalar state,
+nor add a WHO/MODE/NAMES completion barrier. Next consolidate those unknown-state
+and departure/rejoin cases into a bounded row-2 verdict before moving to control
+traffic (row 3); retain residual risks rather than claiming full synchronization.

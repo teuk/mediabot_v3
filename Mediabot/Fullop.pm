@@ -380,9 +380,11 @@ sub remember_channel_modes {
     my ($self, $channel, $mode_string, @args) = @_;
     return 0 unless defined($channel) && $channel ne '';
 
-    $self->{channel_state}{$self->_fold($channel)} = {
-        simple => {}, scalar => {}, list => {}, status => {},
-    };
+    # 324 replaces channel flags/parameters, not separately observed lists
+    # or member statuses. Connection resets still discard all observations.
+    my $state = $self->_state_for($channel);
+    $state->{simple} = {};
+    $state->{scalar} = {};
     my @changes = $self->parse_mode_changes($mode_string, @args);
     $self->_remember_change($channel, $_) for @changes;
     return scalar @changes;

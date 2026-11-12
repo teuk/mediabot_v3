@@ -510,4 +510,46 @@ $reset->($disabled_reset) if $reset;
 is($disabled_reset->handle_join('#closed','Alice'),0,'disabled policy remains disabled after reset');
 is_deeply($disabled_wire, [], 'reset cannot enable moderation');
 
+
+# MB1266: a channel-mode snapshot is not a replacement ban/member-status list.
+{
+    my ($guard,$sent)=build_guard(privileged=>1);
+    $guard->handle_mode(channel=>'#open',prefix=>'Admin!i@host',
+        mode_string=>'+bo',mode_args=>['*!*@kept.example','Alice']);
+    $guard->remember_channel_modes('#other','+k','other-key');
+    is($guard->remember_channel_modes('#open','+mkl','first-key',12),3,
+        'channel snapshot retains its parsed-change count');
+    is_deeply($guard->{channel_state}{'#open'}{list},{b=>{'*!*@kept.example'=>1}},
+        '324 does not erase a separately observed ban');
+    is_deeply($guard->{channel_state}{'#open'}{status},{o=>{alice=>'Alice'}},
+        '324 does not erase a separately observed member status');
+    $guard->remember_channel_modes('#open','+nt');
+    is_deeply($guard->{channel_state}{'#open'}{simple},{n=>1,t=>1},
+        'a new snapshot still replaces absent simple modes');
+    is_deeply($guard->{channel_state}{'#open'}{scalar},{},
+        'a new snapshot still removes absent key and limit');
+    is_deeply($guard->{channel_state}{'#other'}{scalar},{k=>'other-key'},
+        'snapshot does not alter another channel');
+    $guard->{privileged_cb}=sub {0};
+    my $r=$guard->handle_mode(channel=>'#open',prefix=>'User!i@host',
+        mode_string=>'+b',mode_args=>['*!*@kept.example']);
+    is($r->{corrected},0,'duplicate ban is not inverted after a channel snapshot');
+    ok(!grep({$_->[0] eq 'MODE' && $_->[3] eq '-b' && $_->[4] eq '*!*@kept.example'} @$sent),
+        'existing ban is not removed by an erroneous correction');
+    $guard->{privileged_cb}=sub {1};
+    $guard->handle_mode(channel=>'#open',prefix=>'Admin!i@host',
+        mode_string=>'-bo',mode_args=>['*!*@kept.example','Alice']);
+    $guard->remember_channel_modes('#open','+s');
+    ok(!exists $guard->{channel_state}{'#open'}{list}{b}{'*!*@kept.example'},
+        'explicit ban removal remains removed after a snapshot');
+    ok(!exists $guard->{channel_state}{'#open'}{status}{o}{alice},
+        'explicit status removal remains removed after a snapshot');
+    $guard->reset_connection;
+    is_deeply($guard->{channel_state},{},'transport reset still discards all observed state');
+    $guard->remember_channel_modes('#fresh','+k','fresh-key');
+    is_deeply($guard->{channel_state}{'#fresh'},
+        {simple=>{},scalar=>{k=>'fresh-key'},list=>{},status=>{}},
+        'first snapshot on a new transport starts with empty independent lists');
+}
+
 done_testing();

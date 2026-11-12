@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1266 — Preserve independent observations during channel MODE refresh
+
+- Keep Fullop's observed list modes and member statuses when a 324 channel-mode
+  snapshot replaces simple flags and scalar parameters.
+- Prevent a later duplicate ban from being wrongly inverted after that refresh.
+- Cover explicit removals, channel isolation and full connection reset using
+  the native Fullop component; record the remaining readiness boundary.
+
+
 ### MB1265 — Preserve live arrivals and renames during NAMES
 
 - Mirror JOINs into an existing pending NAMES buffer for the same channel.
