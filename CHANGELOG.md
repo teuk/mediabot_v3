@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1247 — Checkpoint chaninfo and map user-resolution ownership
+
+- Record the committed chaninfo registration/flags/flood readers and the
+  command-owned disclosure, formatting and statement cleanup boundaries.
+- Select native characterization of Helpers user resolution as the next step:
+  distinguish five-second hostmask caching from Context-local negative caching.
+- Require matching, autologin, session invalidation and failure-order coverage
+  before extracting identity lookup; introduce no runtime or auth policy change.
+
 ### MB1246 — Give chaninfo flags their domain reader
 
 - Move the exact flags SELECT and raw row collection into Channel::Flags;

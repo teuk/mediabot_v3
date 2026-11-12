@@ -1,12 +1,11 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1246, prepared against committed MB1245
-`15680ec6700d209572ec3c00c4621c13886c2abc`.
-Chaninfo's raw flags read belongs to Channel::Flags, alongside Registration and
-FloodRules. The command retains statement finish, diagnostics, notices and
-permission/disclosure policy. No timer or worker lifetime changes.
-See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1246--chaninfo-flags-reader).
-Local characterization and targeted checks pass; complete host acceptance is pending.
+Current continuation checkpoint: MB1247, prepared against committed MB1246
+`7326eb8151caf0cdfa2f6a06be2c689f569be8e9`.
+The bounded chaninfo reader split is committed. Its command retains statement
+cleanup and disclosure. The next step characterizes user-resolution ownership;
+this documentation checkpoint changes no cache, session, timer or worker lifetime.
+See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1247--user-resolution-contract-checkpoint).
 Generic-worker final-exit coordination remains a separate open question.
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all
@@ -181,3 +180,19 @@ Partial add ownership is captured before cleanup. Failed removal still retains
 its disabled owner for retry as in MB1229. Unknown identity fails closed; names
 alone cannot recover pre-change in-memory ownership. This is a bounded plugin
 adapter change using the existing native Scheduler registration API.
+
+
+## User-resolution cache ownership checkpoint (MB1247)
+
+[Helpers](../Mediabot/Helpers.pm) stores positive user objects and timestamps in
+`_user_cache` / `_user_cache_ts`, keyed by exact fullmask. Its five-second freshness
+check uses wall-clock subtraction; it does not purge all stale entries or cache
+unmatched users. `clear_user_cache` removes one key from both maps or replaces
+both maps. No monotonic clock, eviction bound or cache-policy change is delivered.
+
+[Context::user](../Mediabot/Context.pm) has a separate `_user_fetched` marker and
+memoizes absence for that Context object. [Auth::_invalidate_bot_session](../Mediabot/Auth.pm)
+attempts cache clearing for a known session hostmask (or all keys when absent),
+then removes nickname-keyed aliases. These scopes must remain distinct.
+The upcoming characterization must observe callback/cache publication order;
+this inventory does not certify the complete authentication lifecycle.

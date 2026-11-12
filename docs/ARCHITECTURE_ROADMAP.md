@@ -14,13 +14,13 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
 | B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 local VERSION policy is committed (`55eedd9e`). MB1242 command presentation is committed (`2db3d45b`); detailed host acceptance totals not supplied. MB1243 checkpoints this bounded split. |
-| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are committed. MB1244 antiflood read is committed (`dd2a8605`). MB1245 registration is committed (`15680ec`). MB1246 isolates chaninfo flags; host acceptance pending. Broader phase C remains open. |
+| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are committed. MB1244 antiflood read is committed (`dd2a8605`). MB1245 registration is committed (`15680ec`). MB1246 flags reader is committed (`7326eb8`). MB1247 checkpoints the bounded chaninfo split; detailed host totals were not supplied. Broader phase C remains open. |
 | D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1246 isolates the chaninfo flags read.
-See [MB1246](#mb1246--chaninfo-flags-reader).
+Current continuation point: MB1247 checkpoints chaninfo and selects native
+user-resolution characterization. See [MB1247](#mb1247--user-resolution-contract-checkpoint).
 Earlier “Next” paragraphs are historical decisions.
 
 ## Phase A / MB1208
@@ -1423,3 +1423,80 @@ module dependencies before selecting another phase B/C boundary. Avoid further
 fragmentation of presentation code merely to move lines. Keep authentication
 cache contracts and generic-worker final-exit coordination as separate open
 work; broader phases B/C/D are not declared complete.
+
+
+## MB1247 — User-resolution contract checkpoint
+
+Base `7326eb8151caf0cdfa2f6a06be2c689f569be8e9` is committed MB1246. All tracked
+files match the supplied 2026-11-12 13:04:22 snapshot. This delivery changes only
+CHANGELOG and architecture documentation; it does not change authentication.
+No absent host test transcript or acceptance total is reconstructed from Git.
+
+### Chaninfo boundary now established
+
+[ChannelCommands::userChannelInfo_ctx](../Mediabot/ChannelCommands.pm) orchestrates
+[Registration](../Mediabot/Channel/Registration.pm),
+[Flags](../Mediabot/Channel/Flags.pm) and
+[FloodRules](../Mediabot/Channel/FloodRules.pm). Those readers do not import
+Helpers or command presentation. The command still imports Helpers, DynamicTemplate
+and TextBudget for its wider responsibilities; the split does not make the entire
+ChannelCommands module independently loadable or remove all bidirectional edges.
+
+Keep context/target selection, Master-only key/mode/autojoin disclosure, defaults,
+flag filtering, AntiFlood substring matching, notices, diagnostics, finish and
+audit in the command. Preserve different error/cleanup orders between the three
+queries. No further decomposition of its short presentation blocks is selected.
+The existing [actual-command fixture](../t/lib/MB1244Chaninfo.pm) remains the
+regression owner for this bounded split.
+
+### Next bounded step: characterize user resolution before extraction
+
+[Helpers::get_user_from_message](../Mediabot/Helpers.pm) combines hostmask parsing,
+a five-second cache, lazy Auth creation, a grouped user/hostmask SELECT, matching,
+User construction, level loading, autologin and session synchronization.
+[Context::user](../Mediabot/Context.pm) separately memoizes both success and absence
+for one Context object. [Auth](../Mediabot/Auth.pm) owns credential verification,
+hostmask matching and session invalidation. These are distinct authorities.
+
+The first increment must execute the actual Helpers function with controlled
+clock, DB, Auth/User and bot callbacks, not reconstruct its body into a fake
+package. Extend [case 194](../t/cases/194_get_user_from_message_no_password_select.t)
+or its shared fixture. Retain
+[session lifecycle](../t/cases/591_mb372_auth_session_lifecycle.t) and
+[nick rekey](../t/cases/596_mb377_auth_nick_session_rekey.t) integration coverage.
+
+Required characterization matrix:
+
+- Missing message, missing prefix, exact fullmask cache keys and case variants;
+  the existing cache uses the full prefix, not a nick-only or canonicalized key.
+- Positive cache hit below five seconds; expiry at exactly five seconds; no
+  Helpers negative cache for an unmatched user. Context absence memoization must
+  not be confused with global absence caching.
+- Preserve current wall-clock subtraction and timestamp captured before lookup;
+  test rollback explicitly before proposing a separate clock-policy change.
+- Keep lazy Auth initialization with bot/metrics and reuse of an existing Auth.
+  No password/hash column enters the lookup or resulting identity data.
+- Exact GROUP_CONCAT ordering, user-id ordering, LEFT JOIN and projection;
+  hostmask matching first, Undernet cloak fallback only after a mask miss,
+  strictly greater score replacement and first-row tie behavior.
+- Snapshot the selected row; preserve prepare/execute/fetch/finish failure order,
+  false DBI results and 0E0 truth. Preserve diagnostic and exception identity;
+  do not silently add cleanup or turn read failures into cached absence.
+- User construction, load_level, pre-auto snapshot, optional maybe_autologin,
+  post-auto snapshot, _ensure_logged_in_state, post-ensure snapshot, cache
+  publication, matched diagnostic and return snapshot remain ordered. Check
+  each callback failure and whether cache publication has already happened.
+- clear_user_cache(fullmask) removes both object and timestamp for that key;
+  clear_user_cache() clears both maps. Auth logout invalidation and nick rekey
+  must still clear the appropriate old aliases without affecting other sessions.
+
+Only after these traces exist should the next implementation select a bounded
+SQL boundary. Prefer leaving per-row matching interleaved with fetch unless
+characterization justifies changing that order. Retain Helpers entry points and
+bot method compatibility; do not move authorization into a generic cache class,
+merge Context/Helpers caches, or relocate the full function merely to shrink a file.
+
+MB1247 requires documentation references/symbol checks and guarded patch/commit
+checks only. The next runtime increment requires native targeted cases and one
+full host suite before commit. Broader phases B/C/D remain open; generic-worker
+final-exit coordination remains separate from identity resolution.
