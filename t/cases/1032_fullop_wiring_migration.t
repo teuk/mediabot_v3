@@ -161,4 +161,56 @@ ok(eval {$chunk->(undef,undef,undef);$end->(undef,undef,undef);1}, 'absent trans
 is_deeply($bot->{hChannelsNicksTmp},{'#test'=>['Detached']},'detached or absent source cannot mutate buffers, even with malformed payload');
 is(scalar @{$bot->{fullop}{sweeps}},1,'detached callbacks cannot trigger another sweep');
 
+
+# MB1261: real policy objects behind the isolated numeric handler replay.
+{
+    require Mediabot::Fullop;
+    require Mediabot::AI::ConversationRuntimeState;
+    my $bodies='';
+    for my $name (qw(on_message_005 on_message_RPL_CHANNELMODEIS)) {
+        my ($body)=$main =~ /(^sub \Q$name\E \{.*?^\})/ms;
+        die "missing $name" unless $body;
+        $bodies.=$body."\n";
+    }
+    my $make=eval q{
+        package MB1261::Replay;
+        use Scalar::Util ();
+        our $mediabot;
+        sub log_debug_args { $mediabot->{debug_calls}++ }
+        sub _irc_message_args { @{$_[0]} }
+        sub _irc_target_is_channel { defined($_[0]) && $_[0] =~ /^#/ }
+    }.$bodies.q{
+        sub {$mediabot=$_[0];(\&on_message_005,\&on_message_RPL_CHANNELMODEIS)}
+    };
+    die $@ unless $make;
+    my $current=bless {},'MB1261::IRC';my $departed=bless {},'MB1261::IRC';
+    my $state=Mediabot::AI::ConversationRuntimeState->new;
+    $state->mark_connected;$state->update_isupport('CASEMAPPING=ascii');
+    my $generation=$state->mark_joined('#room[one]');
+    my $policy=Mediabot::Fullop->new(network=>'Configured');
+    $policy->update_isupport('NETWORK=Current','CASEMAPPING=ascii','MODES=3');
+    $policy->remember_channel_modes('#room[one]','+k','current-key');
+    my $b={irc=>$current,fullop=>$policy,wit_runtime_state=>$state,logger=>bless({},'MB1260::Log')};
+    my($support,$modes)=$make->($b);
+    $support->($departed,['bot','NETWORK=Departed','CASEMAPPING=rfc1459','MODES=1'],{});
+    is_deeply([@{$policy}{qw(network casemapping max_modes)}],['Current','ascii',3], 'old 005 cannot replace current Fullop capabilities');
+    is($state->casemapping,'ascii','old 005 cannot change conversational identity folding');
+    is($state->capture_generation('#room[one]'),$generation,'old 005 cannot revoke current conversation generation');
+    $modes->($departed,['bot','#room[one]','+k','departed-key'],{});
+    is($policy->_prior_scalar_arg('#room[one]','k'),'current-key','old 324 cannot overwrite the current channel key');
+    ok(!$b->{debug_calls} && !$b->{logger}{calls},'obsolete numeric events are silent before parsing');
+    # Accepted path still reaches both native policy owners.
+    $support->($current,['bot','NETWORK=Fresh','CASEMAPPING=strict-rfc1459','MODES=2'],{});
+    is_deeply([@{$policy}{qw(network casemapping max_modes)}],['Fresh','strict-rfc1459',2], 'current 005 negotiates Fullop capabilities');
+    is($state->casemapping,'strict-rfc1459','current 005 negotiates conversation identity');
+    $modes->($current,['bot','#room[one]','+kl','fresh-key',12],{});
+    is_deeply([$policy->_prior_scalar_arg('#room[one]','k'),$policy->_prior_scalar_arg('#room[one]','l')],['fresh-key',12],'current 324 retains parameter-bearing modes');
+    $b->{irc}=undef;
+    $support->($current,['bot','NETWORK=Detached'],{});
+    $modes->($current,['bot','#room[one]','+k','detached-key'],{});
+    is($policy->{network},'Fresh','detached 005 cannot restore server observations');
+    is($policy->_prior_scalar_arg('#room[one]','k'),'fresh-key','detached 324 cannot restore mode observations');
+    ok(eval {$support->(undef,undef,undef);$modes->(undef,undef,undef);1},'absent source is refused before malformed payload access');
+}
+
 done_testing();

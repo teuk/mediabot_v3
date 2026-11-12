@@ -4950,6 +4950,9 @@ sub on_message_004 {
 # Numeric 005 - ISUPPORT
 sub on_message_005 {
     my ($self, $message, $hints) = @_;
+    # Negotiated observations belong only to the installed transport.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
     log_debug_args('on_message_005', $message);
     my @args = _irc_message_args($message);
     shift @args; # Remove nickname (first arg)
@@ -4972,6 +4975,9 @@ sub on_message_005 {
 # restored with the previous value rather than guessed.
 sub on_message_RPL_CHANNELMODEIS {
     my ($self, $message, $hints) = @_;
+    # Negotiated observations belong only to the installed transport.
+    return unless ref($self) && ref($mediabot->{irc})
+        && Scalar::Util::refaddr($self) == Scalar::Util::refaddr($mediabot->{irc});
     log_debug_args('on_message_RPL_CHANNELMODEIS', $message);
     my @args = _irc_message_args($message);
     my $channel = $args[1] // '';

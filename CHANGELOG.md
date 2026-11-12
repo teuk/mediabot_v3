@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1261 — Keep server observations on their own connection
+
+- Reject obsolete or detached 005/324 callbacks before they can replace Fullop
+  capabilities, channel-mode snapshots or conversational identity generations.
+- Preserve current-server negotiation and mode parameters; retain the existing
+  conversation update path when Fullop parsing fails.
+- Extend isolated numeric replay coverage and document remaining IRC contracts.
+
+
 ### MB1260 — Reject NAMES events from departed transports
 
 - Require source-object identity in 353/366 callbacks before touching membership,

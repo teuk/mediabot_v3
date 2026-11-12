@@ -75,12 +75,13 @@ for my $pair (['#Room[one]','#room{ONE}'],['#Room\\one','#room|ONE'],['#Room^one
     open my $fh,'<','mediabot.pl' or die $!;local $/;my $main=<$fh>;
     my ($hook)=$main =~ /(sub on_message_005 \{.*?^\})/ms;
     ok(defined($hook),'real numeric 005 handler is available');
-    my $loaded=eval 'package MB844Hook;our $mediabot;sub log_debug_args {} sub _irc_message_args { @{$_[0]} } '.$hook.';1;';
+    my $loaded=eval 'package MB844Hook;use Scalar::Util ();our $mediabot;sub log_debug_args {} sub _irc_message_args { @{$_[0]} } '.$hook.';1;';
     ok($loaded,'real ISUPPORT handler loads in offline fixture') or diag $@;
     my $s=Mediabot::AI::ConversationRuntimeState->new;$s->mark_connected;
     no warnings 'once'; # Intentional package variable used by the extracted hook.
-    local $MB844Hook::mediabot={wit_runtime_state=>$s,logger=>bless({},'MB844Logger'),fullop=>bless({},'MB844FailingFullop')};
-    MB844Hook::on_message_005(undef,['bot','CASEMAPPING=rfc1459','are supported'],{});
+    my $transport=bless {},'MB844Hook::IRC';
+    local $MB844Hook::mediabot={irc=>$transport,wit_runtime_state=>$s,logger=>bless({},'MB844Logger'),fullop=>bless({},'MB844FailingFullop')};
+    MB844Hook::on_message_005($transport,['bot','CASEMAPPING=rfc1459','are supported'],{});
     my $gen=$s->mark_joined('#hook[room]');
     is($s->capture_generation('#hook{room}'),$gen,'real 005 hook delivers mapping even if Fullop parsing fails');
     $s->mark_left('#hook{room}');

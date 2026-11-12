@@ -22,7 +22,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
-| 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; remaining identity consumers stay open. |
+| 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. Other event authority and synchronized-decision boundaries remain open. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
@@ -230,3 +230,35 @@ reentrant changes during a current handler, and synchronization readiness on the
 same connection are not solved by this guard. Next: audit shared callback authority
 and channel readiness, then give remaining roadmap rows explicit verdicts rather
 than treating handler presence as proof. No schema, configuration or service action.
+
+
+## MB1261 — Server observations require the current transport
+
+Base `7766960240c0c27a941e6ca8299d0f8f12511848` is committed MB1260 and matches
+every tracked file of the 2026-11-12 19:57:47 snapshot. Commit presence does not
+establish a numerical host acceptance result or activation on a live bot.
+
+Reproduced by replaying the actual numeric handler bodies with native Fullop and
+ConversationRuntimeState objects: an old 005 overwrites current network, mapping
+and batching rules and invalidates conversation generations. An old 324 replaces
+the current channel key with an obsolete value. This demonstrates the handler
+authority gap, not an observed live incident or a claim about event frequency.
+
+The [005 and 324 handlers](../mediabot.pl) now require callback-source reference
+identity with the installed transport before parsing/logging. This extends the
+existing NAMES entry guard without changing policy defaults. Current 005 still
+reaches both policy owners, including conversation updates when Fullop throws;
+current 324 still records parameter-bearing modes. Absent/detached sources have
+no effect. No persisted identities, permissions or configuration are changed.
+
+Validation: 11 new isolated replay checks in case 1032; baseline fails 8, corrected
+case passes all 58 assertions. Case 1236 now supplies its installed transport,
+retaining its parser-failure and generation tests. Twelve targeted cases pass
+816 assertions. Handler extraction is explicitly not native full-main integration.
+Local missing Config::Simple/Net::Async::IRC dependencies leave native main syntax
+and complete installed-host validation mandatory before commit.
+
+Next bounded audit: membership events JOIN/PART/KICK/NICK/QUIT and MODE still need
+source authority review. Login/disconnect events and readiness before synchronization
+also remain open. Consolidate these findings into row-2 acceptance; do not call
+all IRC callbacks protected. Rows 3–5 retain the same finite audit scope.
