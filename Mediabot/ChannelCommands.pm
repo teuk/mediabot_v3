@@ -25,6 +25,7 @@ use List::Util qw(min);
 use Mediabot::Helpers;
 use Mediabot::Channel::FloodRules ();
 use Mediabot::Channel::Registration ();
+use Mediabot::Channel::Flags ();
 use Mediabot::Channel::Badwords ();
 use Mediabot::DynamicTemplate qw(normalize_name);
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
@@ -2910,20 +2911,17 @@ sub userChannelInfo_ctx {
     }
 
     # --- List CHANSET flags (by channel id) ---
-    my $sql2 = q{
-        SELECT CL.chanset
-        FROM CHANNEL_SET  CS
-        JOIN CHANSET_LIST CL ON CL.id_chanset_list = CS.id_chanset_list
-        WHERE CS.id_channel = ?
-    };
-
-    my $sth2 = $self->{dbh}->prepare($sql2);
-    if ($sth2 && $sth2->execute($id_channel)) {
+    my $flag_result = Mediabot::Channel::Flags::read_for_info(
+        $self->{dbh}, $id_channel,
+    );
+    my $sql2 = $flag_result->{sql};
+    my $sth2 = $flag_result->{statement};
+    if ($flag_result->{status} ne 'error') {
         my $flags = '';
         my $hasFlags = 0;
         my $hasAntiFlood = 0;
 
-        while (my $r = $sth2->fetchrow_hashref()) {
+        for my $r (@{$flag_result->{rows}}) {
             my $chanset = $r->{chanset};
             next unless defined $chanset && $chanset ne '';
             $flags .= "+$chanset ";

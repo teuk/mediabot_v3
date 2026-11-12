@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1246 — Give chaninfo flags their domain reader
+
+- Move the exact flags SELECT and raw row collection into Channel::Flags;
+  preserve database order, duplicates, empty results and DBI truth semantics.
+- Keep flag filtering, AntiFlood matching, notices, diagnostics and statement
+  cleanup in chaninfo. Preserve exceptions and downstream query sequencing.
+- Extend the existing command fixture with flag read/callback failures and
+  mixed rows; compare full operation traces before and after extraction.
+
 ### MB1245 — Give chaninfo registration its own reader
 
 - Move the exact owner/registration SELECT into Channel::Registration, keeping

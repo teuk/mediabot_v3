@@ -72,6 +72,7 @@ sub check {
   push @records,[$mode,\@events,defined($ret)?$ret:undef,$throws?1:0,scalar @warnings];
  }
  push @records, @{check_registration($ok)};
+ push @records, @{check_flags($ok)};
  return \@records;
 }
 # The registration reader has a different failure/finish order from flood data.
@@ -116,6 +117,43 @@ sub check_registration {
  }
  return \@records;
 }
+sub check_flags {
+ my ($ok)=@_;my @records;
+ for my $mode (qw(flags_prepare_throw flags_execute_throw flags_fetch_throw flags_finish_throw flags_finish_false flags_notice_throw flags_logger_throw flags_rows flags_zero_rows)) {
+  my (@events,@warnings);my $error=bless {},'MB1244Chaninfo::Error';
+  my $db=bless {mode=>$mode,events=>\@events,error=>$error},'MB1244Chaninfo::DB';
+  my $bot={dbh=>$db,logger=>bless({db=>$db},'MB1244Chaninfo::Logger'),channels=>{'#mixed'=>bless({mode=>$mode},'MB1244Chaninfo::Channel')}};
+  my $ctx=bless {bot=>$bot,mode=>$mode,message=>bless({},'MB1244Chaninfo::Message')},'MB1244Chaninfo::Context';
+  my ($ret,$caught);
+  {
+   no warnings 'redefine';no warnings 'once';
+   my $diag='flags DB failure';local *DBI::errstr=\$diag;
+   local $SIG{__WARN__}=sub {push @warnings,@_};
+   local *Mediabot::ChannelCommands::botNotice=sub {push @events,['notice',$_[1],$_[2]];die $error if $mode eq 'flags_notice_throw' && $_[2]=~/^Channel flags/};
+   local *Mediabot::ChannelCommands::logBot=sub {push @events,['audit',@_[2..4]]};
+   eval {$ret=Mediabot::ChannelCommands::userChannelInfo_ctx($ctx);1} or $caught=$@;
+  }
+  my $fails=$mode=~/_throw$/;
+  $ok->($fails?ref($caught)&&$caught==$error:!defined($caught),"$mode exact exception identity");
+  $ok->($fails?!defined($ret):defined($ret)&&$ret==1,"$mode return");
+  my @ops=map {$_->[0]} grep {$_->[0]=~/^(prepare|execute|fetch|finish)$/ && $_->[1] eq 'flags'} @events;
+  my @want=('prepare');push @want,'execute' unless $mode eq 'flags_prepare_throw';
+  unless ($mode=~/^flags_(prepare_throw|execute_throw|logger_throw)$/) {
+   push @want,('fetch') x ($mode eq 'flags_fetch_throw'?1:$mode eq 'flags_rows'?7:$mode eq 'flags_zero_rows'?1:2);
+   push @want,'finish' unless $mode eq 'flags_fetch_throw';
+  }
+  $ok->(join(',',@ops) eq join(',',@want),"$mode statement order");
+  my @flood=grep {$_->[0] eq 'prepare' && $_->[1] eq 'flood'} @events;
+  $ok->($fails || $mode eq 'flags_zero_rows' ? !@flood : @flood==1,"$mode flood selection");
+  my @audit=grep {$_->[0] eq 'audit'} @events;
+  $ok->($fails?!@audit:@audit==1,"$mode final audit");
+  my @notices=map {$_->[2]} grep {$_->[0] eq 'notice' && $_->[2]=~/^Channel flags/} @events;
+  $ok->($mode eq 'flags_rows' ? @notices==1 && $notices[0] eq 'Channel flags +Other +xANTIFLOODx +Other +0 ' : $mode eq 'flags_zero_rows' ? !@notices : 1,"$mode raw flags retain order duplicates zero and substring");
+  $ok->(!@warnings,"$mode warning free");
+  push @records,[$mode,\@events,defined($ret)?$ret:undef,$fails?1:0];
+ }
+ return \@records;
+}
 package MB1244Chaninfo::DB;
 sub prepare {
  my ($s,$sql)=@_;my $kind=$sql=~/FROM CHANNEL_FLOOD/?'flood':$sql=~/FROM CHANNEL_SET/?'flags':'owner';
@@ -128,12 +166,17 @@ package MB1244Chaninfo::Statement;
 sub execute {
  my ($s,@bind)=@_;my $d=$s->{db};push @{$d->{events}},['execute',$s->{kind},@bind];
  die $d->{error} if $d->{mode} eq $s->{kind}.'_execute_throw' || $s->{kind} eq 'flood' && $d->{mode} eq 'execute_throw';
+ return 0 if $s->{kind} eq 'flags' && $d->{mode} eq 'flags_logger_throw';
  return 0 if $s->{kind} eq 'owner' && $d->{mode}=~/^owner_(logger_throw|notice_throw)$/ || $d->{mode} eq $s->{kind}.'_execute_false' || $s->{kind} eq 'flood' && $d->{mode}=~/^(execute_false|logger_throw)$/;
- return $d->{mode} eq 'zero_rows'?'0E0':1;
+ return $d->{mode}=~/^(flags_)?zero_rows$/?'0E0':1;
 }
 sub fetchrow_hashref {
  my ($s)=@_;my $d=$s->{db};my $m=$d->{mode};push @{$d->{events}},['fetch',$s->{kind}];
  die $d->{error} if $m eq $s->{kind}.'_fetch_throw' || $s->{kind} eq 'flood' && $m eq 'fetch_throw';
+ if ($s->{kind} eq 'flags' && $m eq 'flags_rows') {
+  my @values=(undef,'','Other','xANTIFLOODx','Other','0');return if $s->{n}>=@values;return {chanset=>$values[$s->{n}++]};
+ }
+ return if $s->{kind} eq 'flags' && $m eq 'flags_zero_rows';
  return if $s->{n}++;
  if ($s->{kind} eq 'owner') {
   return {nickname=>'OwnerFull',last_login=>'2026-11-12',creation_date=>'2020-01-01',description=>'Raw description',timezone=>'Europe/Paris',c_key=>'private-key'} if $m eq 'owner_full';
@@ -144,9 +187,9 @@ sub fetchrow_hashref {
  my @v=$m eq 'raw'?('005','030','01'):$m eq 'nulls'?(undef,undef,undef):(5,30,1);
  return {nbmsg_max=>$v[0],duration=>$v[1],timetowait=>$v[2],nbmsg=>99,notification=>$m eq 'off'?'0':'0E0'};
 }
-sub finish {my $d=$_[0]{db};push @{$d->{events}},['finish',$_[0]{kind}];die $d->{error} if $d->{mode} eq $_[0]{kind}.'_finish_throw' || $_[0]{kind} eq 'flood' && $d->{mode} eq 'finish_throw';return $d->{mode}=~/^(owner_)?finish_false$/?0:1}
+sub finish {my $d=$_[0]{db};push @{$d->{events}},['finish',$_[0]{kind}];die $d->{error} if $d->{mode} eq $_[0]{kind}.'_finish_throw' || $_[0]{kind} eq 'flood' && $d->{mode} eq 'finish_throw';return $d->{mode}=~/^(owner_|flags_)?finish_false$/?0:1}
 package MB1244Chaninfo::Logger;
-sub log {my ($s,@a)=@_;$a[1]=~s/\s+/ /g;push @{$s->{db}{events}},['log',@a];die $s->{db}{error} if $s->{db}{mode}=~/^(owner_)?logger_throw$/}
+sub log {my ($s,@a)=@_;$a[1]=~s/\s+/ /g;push @{$s->{db}{events}},['log',@a];die $s->{db}{error} if $s->{db}{mode}=~/^(owner_|flags_)?logger_throw$/}
 package MB1244Chaninfo::Channel;
 sub get_id {$_[0]{mode} eq 'no_id'?0:42}
 package MB1244Chaninfo::Context;
