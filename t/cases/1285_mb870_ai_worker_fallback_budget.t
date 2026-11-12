@@ -107,4 +107,49 @@ for my $provider (qw(anthropic openai)) {
     ok(!$results[0]{ok}, "$provider: explicit failure remains failure");
     is(scalar @calls, 1, "$provider: neither cross-provider routing nor quota model retry is added");
 }
+# MB1255: worker transport failures retain a bounded operational diagnosis.
+{
+    package MB1255WorkerLog;
+    sub log {my($self,$level,$line)=@_;push @{$self->{lines}},[$level,$line];
+        $self->{reenter}->() if $self->{reenter}; die "logger unavailable\n" if $self->{fail};}
+}
+for my $case (
+    (map { [$_->[0],{ok=>0,error=>$_->[0],stage=>$_->[1],detail=>'SECRET request text'},$_->[0],$_->[1]] }
+        ['worker_timeout','timeout'],['worker_signal','process_exit'],['worker_exit','process_exit'],
+        ['worker_cancelled','cancel'],['worker_output_limit','payload_limit'],
+        ['worker_setup','fork'],['worker_decode','record_protocol'],['worker_liveness','watch_process'],
+        ['worker_empty','payload'],['worker_exception','child'],['worker_encode','encode']),
+    ['unknown',{ok=>0,error=>"SECRET\nforged",stage=>"SECRET\r\ninjected",detail=>'SECRET'},'worker_failed','unknown'],
+    ['reference',{ok=>0,error=>{},stage=>[]},'worker_failed','unknown'],
+    ['missing',undef,'invalid_result','unknown'],
+    ['invalid envelope',{ok=>1,value=>'SECRET',error=>'worker_timeout',stage=>'timeout'},'invalid_result','unknown'],
+) {
+    my($name,$envelope,$code,$stage)=@$case;
+    my($worker,@results);my $log=bless {lines=>[]},'MB1255WorkerLog';
+    my $client=Mediabot::AI::Client->new(conf=>conf_for(),
+        loop_owner=>{loop=>bless({},'MB870BudgetLoop'),logger=>$log},
+        worker_start=>sub {$worker={@_};bless {},'MB870BudgetWorker'});
+    $client->submit(build_request(provider=>'openai',messages=>[{role=>'user',content=>'SECRET prompt'}]),on_done=>sub {push @results,shift});
+    # Logging can re-enter the same completion; terminal ownership must be claimed first.
+    $log->{reenter}=sub {$worker->{on_done}->($envelope)};
+    $worker->{on_done}->($envelope);$worker->{on_done}->($envelope);
+    is_deeply(\@results,[{ok=>0,error=>'worker_failed',attempted=>[]}],"$name: public failure and exactly-once callback preserved");
+    is_deeply($log->{lines},[[1,"AI worker failure code=$code stage=$stage"]],"$name: one bounded diagnosis, including reentrant delivery");
+    unlike(encode_json($log->{lines}),qr/SECRET/,"$name: request, detail and arbitrary strings excluded");
+}
+for my $mode (qw(throws absent provider_failure success)) {
+    my($worker,@results);my $log=bless {lines=>[],fail=>$mode eq 'throws'},'MB1255WorkerLog';
+    my $owner={loop=>bless({},'MB870BudgetLoop')};$owner->{logger}=$log unless $mode eq 'absent';
+    my $client=Mediabot::AI::Client->new(conf=>conf_for(),loop_owner=>$owner,
+        worker_start=>sub {$worker={@_};bless {},'MB870BudgetWorker'});
+    $client->submit(build_request(provider=>'openai',messages=>[{role=>'user',content=>'fixture'}]),on_done=>sub {push @results,shift});
+    my $value=$mode eq 'success' ? {ok=>1,answer=>'answer'} : {ok=>0,error=>'response_too_large'};
+    my $envelope=$mode =~ /^(success|provider_failure)$/ ? {ok=>1,value=>$value}
+        : {ok=>0,error=>'worker_timeout',stage=>'timeout'};
+    my $ok=eval {$worker->{on_done}->($envelope);1};
+    ok($ok,"$mode: logger availability cannot interrupt completion");
+    is_deeply($results[0],$mode =~ /^(success|provider_failure)$/ ? $value : {ok=>0,error=>'worker_failed',attempted=>[]},"$mode: established result unchanged");
+    is(scalar @{$log->{lines}},$mode eq 'throws'?1:0,"$mode: provider results do not become worker diagnostics");
+}
+
 done_testing();

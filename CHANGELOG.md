@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1255 — Keep safe AI worker failure diagnostics
+
+- Record an allowlisted worker error/stage once in operational logs instead of
+  losing the distinction between timeout, signal, setup and protocol failures.
+- Preserve public errors, provider results, fallback policy and exactly-once
+  delivery even when logging fails or re-enters completion; omit raw payloads.
+- Establish a source-backed operational baseline after the committed architecture
+  work, separating existing observation surfaces from unmeasured live behavior.
+
 ### MB1254 — Collect generic workers at final process exit
 
 - Retain physical child ownership beyond logical completion and release it on

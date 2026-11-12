@@ -658,6 +658,33 @@ sub _start_worker {
     return Mediabot::AsyncWorker->start(%args);
 }
 
+# Operational diagnosis only: keep the established public worker_failed result.
+# Never copy child detail, request data, model names or arbitrary stage strings.
+sub _log_worker_failure {
+    my ($self, $result) = @_;
+    eval {
+        my $logger = $self->{loop_owner}{logger} or return;
+        my ($code, $stage) = ('invalid_result', 'unknown');
+        if (ref($result) eq 'HASH' && !$result->{ok}) {
+            my %codes = map { $_ => 1 } qw(worker_setup worker_timeout
+                worker_cancelled worker_liveness worker_signal worker_exit
+                worker_output_limit worker_decode worker_empty worker_exception worker_encode worker_failed);
+            my %stages = map { $_ => 1 } qw(child event_loop dependencies pipe fork
+                watch_process stream timeout_timer timeout cancel process_exit
+                payload_limit child_payload record_protocol payload completion encode);
+            my $raw_code = $result->{error};
+            my $raw_stage = $result->{stage};
+            $code = defined($raw_code) && !ref($raw_code) && $codes{$raw_code}
+                ? $raw_code : 'worker_failed';
+            $stage = defined($raw_stage) && !ref($raw_stage) && $stages{$raw_stage}
+                ? $raw_stage : 'unknown';
+        }
+        $logger->log(1, "AI worker failure code=$code stage=$stage");
+        1;
+    };
+    return;
+}
+
 sub submit {
     my ($self, $request, %opts) = @_;
     my $on_done = delete $opts{on_done};
@@ -696,6 +723,7 @@ sub submit {
     my $complete = sub {
         my ($result) = @_;
         return if $completed++;
+        $self->_log_worker_failure($_[1]) if @_ > 1;
         $on_done->($result);
     };
 
@@ -707,7 +735,7 @@ sub submit {
                 ok        => 0,
                 error     => 'worker_failed',
                 attempted => [],
-            });
+            }, $result);
             return;
         }
         $complete->($result->{value});

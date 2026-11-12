@@ -19,13 +19,13 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1254 implements the last bounded runtime item.
-The architecture chapter has no further planned extraction or resource migration.
-Its closure gate is successful MB1254 native/targeted/full host validation and
-commit/push; this prepared patch does not claim that host result in advance.
-After that gate, proceed directly to the operational baseline, not another
-architecture checkpoint patch. See [chapter closure](#mb1254--final-worker-collection-and-chapter-closure).
-Earlier “Next” paragraphs are historical decisions, superseded by this plan.
+Current continuation point: MB1254 is committed/pushed as `0cddd3e` and matches
+the 2026-11-12 16:07:55 snapshot. The bounded architecture implementation is complete;
+no numerical host acceptance transcript was supplied here. Retain the successful
+validation/commit transcript as its acceptance evidence rather than inventing it.
+Work now follows [the operational baseline](OPERATIONS_BASELINE.md): MB1255 fixes
+a specific lost worker diagnosis, not another structural extraction.
+Earlier “Next” paragraphs are historical decisions, superseded by this point.
 
 ## Phase A / MB1208
 
@@ -1014,7 +1014,7 @@ cannot restore an obsolete attempt's authority. This covers nested reloads;
 it does not redefine arbitrary direct hTimers writes or operator mutations.
 
 Existing [case 403](../t/cases/403_mb164_onstarttimers_stage_fresh_before_publish.t)
-uses [the native fixture](../t/lib/MB1238TimerReload.pm): 288 assertions, with
+uses [the native fixture](../t/lib/MB1238TimerReload.pm): 294 assertions, with
 58 failures against the unchanged base and all passing with the fix. Four
 adjacent cases pass 58 assertions locally. Full case 403 and XAUTH case 1223
 need missing full-bot dependencies locally; their host acceptance and the full
@@ -1860,3 +1860,19 @@ not silently waive it or expand the roadmap. If it succeeds, retain the transcri
 as acceptance evidence and move to the next chapter without an extra docs-only
 release. The next chapter begins by inventorying existing diagnostics/metrics and
 choosing one observed issue, not by building a new generic framework.
+
+
+## MB1255 — Operational baseline and bounded worker failure diagnosis
+
+Committed MB1254 is the source baseline; there is no additional architecture
+migration in this delivery. The new operational inventory distinguishes existing
+source capabilities from live measurements not yet supplied. It selects one
+concrete gap: AI::Client discards the worker failure category at completion.
+
+Log an allowlisted error/stage once at the claimed terminal boundary, preserving
+the public worker_failed contract. No raw request, child detail or credential is
+logged. Duplicate/reentrant callbacks, unavailable loggers and provider-level
+failures have explicit regression coverage. The existing four-case client lane
+passes 294 assertions locally; installed-host AI behavior/full acceptance remains
+mandatory. See [the operational baseline](OPERATIONS_BASELINE.md) for limits and
+measurement-based next steps. No additional extraction is planned for this chapter.
