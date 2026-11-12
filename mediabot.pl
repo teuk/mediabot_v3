@@ -3320,6 +3320,14 @@ sub on_login {
             $c && $c->get_auto_join
             && (($c->get_description // '') ne 'console')
         } keys %{ $mediabot->{channels} // {} };
+        # MB1264: delayed startup belongs to this login's transport. Do not
+        # retain a departed transport solely for callbacks waiting to expire.
+        my $login_irc = $self;
+        Scalar::Util::weaken($login_irc);
+        my $login_is_current = sub {
+            return ref($login_irc) && ref($mediabot->{irc})
+                && Scalar::Util::refaddr($login_irc) == Scalar::Util::refaddr($mediabot->{irc});
+        };
         my $join_delay = 0;
         for my $chan_name (@chans_to_join) {
             my $c = $mediabot->{channels}{lc $chan_name};
@@ -3328,12 +3336,16 @@ sub on_login {
             my $jt = IO::Async::Timer::Countdown->new(
                 delay => $join_delay / 1000,
                 on_expire => sub {
+                    return unless $login_is_current->();
                     $mediabot->{logger}->log(1, "NS3: joining $chan_name (throttled)");
+                    return unless $login_is_current->();
                     eval { $mediabot->joinChannel($chan_name, $key) };
+                    return unless $login_is_current->();
                     # NS4: schedule WHO after join to sync nicklist
                     my $who_t = IO::Async::Timer::Countdown->new(
                         delay     => 3,
                         on_expire => sub {
+                            return unless $login_is_current->();
                             # mb160-B2: $irc etait undef ici (defini lexicalement
                             # dans _build_irc() seulement). Donc le test
                             # `if $irc && $irc->is_connected` etait toujours

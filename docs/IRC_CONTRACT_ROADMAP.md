@@ -23,7 +23,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
-| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. Login/disconnect authority and synchronized-decision boundaries remain open. |
+| 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. Synchronized-decision boundaries remain open. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
@@ -329,3 +329,39 @@ then synchronization readiness within one connection and consolidate row-2's
 acceptance/residual limits. Other unreviewed callbacks, replacement midway through
 a handler and the interval before transport replacement remain outside this
 increment. Rows 3–5 retain their existing finite audit scope.
+
+
+## MB1264 — Deferred login work retains transport authority
+
+Base `dd9459b45ed1c7126ca3df61ab97545e44bc9c2d` is committed MB1263 and matches
+all tracked files of the 2026-11-12 20:49:08 snapshot. No host test totals or live
+activation are inferred from that commit.
+
+The actual [login handler](../mediabot.pl) schedules sorted channel JOINs and
+later WHO queries. Replaying its stored closures after transport replacement
+reproduces JOIN and WHO work against the new connection. An entry guard on the
+original login cannot protect these later callbacks.
+
+The closures now share a weak reference to their originating transport and
+check it against the installed transport before effects. JOIN checks again after
+logging and after joinChannel returns, so replacement during that call cannot
+schedule a follow-up WHO. An expired weak reference or detached bot is inert.
+Current work retains channel keys, sort order, 1.5-second staggered JOIN spacing,
+the three-second WHO delay and the existing WHO connected-state check.
+No configuration, schema, retry policy or service operation is changed.
+
+Validation: 34 deterministic checks extend case 1032 using its actual extracted
+login body and recording timers/collaborators. Baseline fails 16; corrected case
+passes 188 assertions. Twenty-one available targeted cases pass 1,141 assertions.
+This is isolated replay, not native Net::Async::IRC integration. Local native
+main and protocol integration dependencies remain unavailable; the host package
+requires native syntax, the expanded targeted lane including cases 858/1223,
+and a complete suite before commit.
+
+Limit: this retires callback authority, not the pending timer objects themselves;
+they follow their existing expiry lifecycle. It does not create a new login
+session epoch for reuse of the very same IRC object, or change other startup,
+service authentication and channel-join paths. No network incident is asserted.
+Next: review same-connection NAMES/WHO/MODE synchronization and decisions made
+before completion, then consolidate row-2 evidence and residual limits. Rows
+3–5 retain their finite scope; the architecture extraction chapter stays closed.

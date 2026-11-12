@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1264 — Keep deferred startup with its original connection
+
+- Bind staggered login JOIN and subsequent WHO callbacks to their originating
+  installed transport using a weak reference; obsolete callbacks become silent.
+- Recheck after JOIN before scheduling WHO, preserving channel keys, sorting,
+  1.5-second JOIN spacing and the three-second WHO delay for current work.
+- Extend deterministic timer replay coverage and update the IRC contract roadmap.
+
+
 ### MB1263 — Keep login and disconnect events on their connection
 
 - Reject obsolete, absent or detached sources in on_login, ERROR and KILL

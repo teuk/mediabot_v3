@@ -382,4 +382,92 @@ is(scalar @{$bot->{fullop}{sweeps}},1,'detached callbacks cannot trigger another
     }
 }
 
+
+# MB1264: deterministic replay of login-created timer closures, no network/sleeps.
+{
+    package MB1264::IRC;
+    sub is_connected {1}
+    sub send_message {push @{$_[0]{sent}},[@_[1..$#_]]}
+    package MB1264::Channel;
+    sub get_description {'ordinary'}
+    sub get_auto_join {1}
+    sub get_key {$_[0]{key}}
+    package MB1264::Loop;
+    sub add {push @{$_[0]{timers}},$_[1]}
+    package MB1264::Timer;
+    sub start {$_[0]{started}++}
+    package MB1264::Bot;
+    our @ISA=('MB1263::Bot');
+    sub joinChannel {
+        my($s,$name,$key)=@_;push @{$s->{joins}},[$name,$key];
+        $s->{irc}=$s->{replacement} if $s->{replacement};
+    }
+}
+{
+    my($body)=$main =~ /(^sub on_login \{.*?^\})/ms;
+    my $make=eval q{
+        package MB1264::Replay;
+        use Scalar::Util ();
+        our ($mediabot,$loop);
+    }.$body.q{
+        sub {$mediabot=$_[0];$loop=$_[1]; \&on_login}
+    };
+    die $@ unless $make;
+    no warnings qw(redefine once);
+    local $INC{'Mediabot/Update.pm'}=1;
+    local *Mediabot::Update::update_completion_on_login=sub {};
+    local *IO::Async::Timer::Countdown::new=sub {
+        my($class,%args)=@_;bless \%args,'MB1264::Timer';
+    };
+    my $fixture=sub {
+        my $irc=bless {sent=>[]},'MB1264::IRC';
+        my $rec=bless {calls=>[]},'MB1263::Recorder';
+        my $loop=bless {timers=>[]},'MB1264::Loop';
+        my $b=bless {irc=>$irc,rec=>$rec,logger=>$rec,metrics=>$rec,
+            wit_runtime_state=>$rec,conf=>bless({},'MB1262::Conf'),joins=>[],
+            channels=>{'#beta'=>bless({key=>'key-b'},'MB1264::Channel'),
+                       '#alpha'=>bless({key=>'key-a'},'MB1264::Channel')}},'MB1264::Bot';
+        $make->($b,$loop)->($irc,undef,{});
+        return($b,$loop,$irc);
+    };
+    {
+        my($b,$loop,$irc)=$fixture->();
+        is_deeply([map {$_->{delay}} @{$loop->{timers}}],[1.5,3],'login retains sorted staggered JOIN delays');
+        is_deeply([map {$_->{started}} @{$loop->{timers}}],[1,1],'login starts both JOIN timers');
+        $loop->{timers}[0]{on_expire}->();$loop->{timers}[1]{on_expire}->();
+        is_deeply($b->{joins},[['#alpha','key-a'],['#beta','key-b']],'current login preserves channel order and keys');
+        is_deeply([map {$_->{delay}} @{$loop->{timers}}[2,3]],[3,3],'accepted JOIN keeps three-second WHO delay');
+        $loop->{timers}[2]{on_expire}->();$loop->{timers}[3]{on_expire}->();
+        is_deeply($irc->{sent},[['WHO',undef,'#alpha'],['WHO',undef,'#beta']],'current WHO reaches original connected transport');
+    }
+    for my $stage (qw(join who)) {
+        for my $change (qw(replaced detached released)) {
+            my($b,$loop,$irc)=$fixture->();
+            $loop->{timers}[0]{on_expire}->() if $stage eq 'who';
+            my $callback=$loop->{timers}[$stage eq 'who' ? 2 : 0]{on_expire};
+            my $new=bless {sent=>[]},'MB1264::IRC';
+            $b->{irc}=$change eq 'detached' ? undef : $new;
+            my $weak=$irc;Scalar::Util::weaken($weak);
+            undef $irc if $change eq 'released';
+            my $count=@{$loop->{timers}};my $joins=@{$b->{joins}};
+            $b->{rec}{calls}=[];
+            $callback->();
+            is(scalar @{$b->{joins}},$joins,"$stage/$change: obsolete callback cannot join");
+            is(scalar @{$loop->{timers}},$count,"$stage/$change: obsolete callback cannot arm more work");
+            is_deeply($new->{sent},[],"$stage/$change: replacement receives no WHO");
+            is_deeply($b->{rec}{calls},[],"$stage/$change: obsolete work stays silent");
+            ok(!defined $weak,"$stage: pending closure does not retain old transport") if $change eq 'released';
+        }
+    }
+    {
+        my($b,$loop,$irc)=$fixture->();
+        $b->{replacement}=bless {sent=>[]},'MB1264::IRC';
+        $loop->{timers}[0]{on_expire}->();
+        is(scalar @{$b->{joins}},1,'reentrant replacement occurs during accepted JOIN');
+        is(scalar @{$loop->{timers}},2,'replacement during JOIN cannot arm a WHO for the new transport');
+        $loop->{timers}[1]{on_expire}->();
+        is(scalar @{$b->{joins}},1,'remaining original JOIN is inert after reentrant replacement');
+    }
+}
+
 done_testing();
