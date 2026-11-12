@@ -13,15 +13,18 @@ Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 | Phase | Objective and bounded first increment | Status |
 | --- | --- | --- |
 | A | Isolate Partyline `.plugins` administration behind explicit dependencies; keep historical entry points. | MB1208 accepted on host: 39,323 assertions; committed/pushed as `5fd3d59`. |
-| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 local VERSION policy is committed (`55eedd9e`). MB1242 command presentation is committed (`2db3d45b`); detailed host acceptance totals not supplied. MB1243 checkpoints this bounded split. |
-| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are committed. MB1244 antiflood read is committed (`dd2a8605`). MB1245 registration is committed (`15680ec`). MB1246 flags reader is committed (`7326eb8`). MB1247 checkpoints the bounded chaninfo split; detailed host totals were not supplied. Broader phase C remains open. |
-| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D remains open; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
+| B | Reduce Helpers' responsibilities and bidirectional dependencies. Map one output-policy path, give it a single owner, retain compatibility delegates. | MB1209 bounded increment accepted: 39,347 assertions; committed/pushed as `492a23b`. MB1241 local VERSION policy is committed (`55eedd9e`). MB1242 command presentation is committed (`2db3d45b`); detailed host acceptance totals not supplied. MB1243 checkpoints this bounded split. MB1248–1251 user contracts, SQL and selection are committed through `32ed060`; MB1252 freezes the bounded phase B scope. |
+| C | Separate domain data access from commands and IRC transport. Pilot channel output rules, retaining cache freshness, last-known-good data and failure policy. | MB1210 R2 reader accepted (`97ced23`); operator UPDATE committed in MB1232 (`cdbdbee6`). MB1233 display read committed (`7b478567`). Antifloodset and badword read/write pilots (MB1235–1236) are committed. MB1244 antiflood read is committed (`dd2a8605`). MB1245 registration is committed (`15680ec`). MB1246 flags reader is committed (`7326eb8`). MB1247 checkpoints the bounded chaninfo split; detailed host totals were not supplied. MB1250–1251 add user lookup/selection. MB1252 closes the bounded pilot scope; wider query extraction is deferred. |
+| D | Make timer/worker/resource ownership and shutdown order explicit. Inventory existing resources first; migrate one family with idempotent cleanup. Distinguish shutdown, IRC reconnect and rehash. | Connection output and nicklist retirement delivered (MB1212–1214, MB1218); achievement ownership/collection (MB1219–1225) and archive collection (MB1226, `473a0b1b`) committed. Plugin-job recovery/identity delivered (MB1228–1230). Phase D has the final-exit decision and chapter acceptance gates defined by MB1252; MB1238 publication fix committed (`35bdd3b4`); MB1239 tick revalidation committed (`8437a890`); detailed host acceptance transcripts not supplied. |
 | E | Reduce PluginManager responsibilities. Extract runtime-state persistence and diagnostics separately while keeping lifecycle/security authority explicit. | MB1215 persistence (`8467555`) and MB1216 portfolio diagnostics (`a9d10caa`) committed/pushed; bounded phase E pilot delivered. |
 | Throughout | Replace source-body reconstruction with actual component tests and injected clock/transport/storage dependencies; retain native integration tests. | MB1208 (412, 1110), MB1209 (337, 627, 1538), MB1232–1233 native antifloodset case 398. |
 
-Current continuation point: MB1251 separates streaming candidate selection.
-See [MB1251](#mb1251--streaming-user-candidate-selection).
-Earlier “Next” paragraphs are historical decisions.
+Current continuation point: MB1252 fixes the exit criteria for this chapter.
+The bounded A/B/C/E pilots are delivered; this is not a claim that all modules
+have been refactored. Phase D has one remaining decision gate, followed by a
+chapter acceptance checkpoint. No new extraction family enters this chapter.
+See [the closing plan](#mb1252--close-the-chapter-with-explicit-exit-criteria).
+Earlier “Next” paragraphs are historical decisions, superseded by this plan.
 
 ## Phase A / MB1208
 
@@ -1649,3 +1652,79 @@ Helpers orchestration has a cohesive owner before making another extraction.
 Do not split cache reads/writes into tiny wrappers or merge Context and Helpers
 caches. Authentication policy changes, clock rollback and cleanup improvements
 remain separate work. Broader phases B/C/D remain open.
+
+
+## MB1252 — Close the chapter with explicit exit criteria
+
+Base `32ed060b720549dbd1d6aaeab262af5e4ca62cae` is committed MB1251 and matches all tracked files of the
+supplied 2026-11-12 14:40:18 snapshot. MB1248 R2 through MB1251 are committed;
+missing host acceptance transcripts are not inferred from that fact. This
+checkpoint changes documentation only, not authentication or shutdown behavior.
+
+### Freeze the structural scope
+
+| Area | Delivered boundary | Chapter decision |
+| --- | --- | --- |
+| A / Partyline | Plugin administration has its own component and compatibility entry points. | Bounded goal delivered; no further command splitting required here. |
+| B / Helpers | Output policy, VERSION responsibilities and user lookup/selection have explicit owners. | Stop extracting. Helpers retains cohesive resolution orchestration and compatibility adapters. |
+| C / domain storage | Channel rules, badwords, chaninfo readers and user candidate SQL have bounded owners. | Pilots delivered; do not convert every query mechanically. |
+| D / resources | Connection output retirement, nicklist timers, achievement/archive collection, plugin jobs and DB timer ownership have focused contracts. | Resolve generic-worker final-exit coordination, then close the bounded inventory with explicit exclusions. |
+| E / PluginManager | Persistence and diagnostics are separate; lifecycle and security stay with the manager. | Bounded goal delivered; no universal manager rewrite. |
+
+[Lookup](../Mediabot/User/Lookup.pm) opens the candidate cursor;
+[Candidate](../Mediabot/User/Candidate.pm) selects through an injected matcher;
+[Auth](../Mediabot/Auth.pm) owns mask comparison and session policy.
+[Helpers](../Mediabot/Helpers.pm) retains finish, User creation, callbacks and cache
+publication. Moving that whole sequence again would mainly relocate its coupling.
+Keep the native probe and exact operation order. Context absence memoization and
+Helpers positive TTL remain distinct. Cache eviction, rollback handling and
+failure cleanup are possible behavior changes, not prerequisites for this split.
+
+### Two remaining milestones, not an open-ended extraction queue
+
+1. **Generic-worker exit decision.** Review [AsyncWorker](../Mediabot/AsyncWorker.pm)
+   and [clean_and_exit](../Mediabot/Mediabot.pm) together. Reproduce final exit in
+   a disposable process with a running child, a stopping child, and a logically
+   finalized child whose physical exit is not yet confirmed. Record which owner
+   reaps each child and whether it can outlive the parent. Inspect callers before
+   choosing callback suppression or delivery. Never treat active_workers as a
+   complete physical-child registry: it excludes finalized workers. cancel is
+   asynchronous and alone cannot prove bounded collection at final exit.
+   Produce a decision with evidence: either existing behavior satisfies the
+   documented exit contract, or implement the smallest required ownership and
+   bounded-collection fix. If a broader redesign is needed, record the risk and
+   an explicit scoped follow-up; do not silently declare it solved. Reconnect
+   and rehash must retain their separate semantics.
+2. **Chapter acceptance checkpoint.** Record the tested base, implemented boundaries,
+   final-exit decision, outstanding limitations and any host failures. For each
+   runtime fix run targeted/native coverage and one full host suite before its
+   commit. Reuse that successful result for the closing docs; do not run a second
+   full suite solely to edit a status table. If the last successful host result
+   is unavailable, obtain a recorded full baseline before claiming acceptance.
+   Mark the bounded chapter closed only after the decision and acceptance record
+   are explicit; “every module is clean” is not an exit criterion.
+
+Planning target: one focused decision/work item, then one closing checkpoint.
+A reproduced defect may require a separately reviewed correction; this is not a
+promise of exactly two commits. A correction must serve the exit criteria above,
+not add another module family. No percentage-complete estimate is meaningful.
+
+### Next chapter — operational reliability, then measured performance
+
+| Priority | Deliverable | Evidence required before changing behavior |
+| --- | --- | --- |
+| 1 | A small health baseline for workers, output queues and failure categories using existing diagnostics/metrics where possible. | Identify what is already observable; distinguish timeout, oversized response, cancellation and transport failure; keep payloads and credentials out of diagnostics. |
+| 2 | Predictable tests and actionable failures. | Reproduce a flaky or load-sensitive case, preserve its contract, use controlled clocks for pure timing logic and retain native process/loop coverage. Never hide failures with retries or globally larger timeouts. |
+| 3 | One measured runtime bottleneck or user-visible reliability defect at a time. | Before/after timings or resource counts under comparable conditions, bounded regression cases, and no weakened authorization or output policy. |
+
+Start with one baseline report and choose the first concrete defect from its
+results. These priorities define direction, not three new universal frameworks.
+Keep later feature work separately scoped and evaluate its user benefit before
+resuming broad architecture work. Radio and YouTube remain regression-sensitive.
+
+Deferred backlog: further Helpers/command decomposition, general SQL abstraction,
+universal resource registry, cache-policy redesign, and the resource families
+explicitly excluded from [the inventory](RUNTIME_RESOURCE_OWNERSHIP.md).
+They do not block closure unless the final review demonstrates a concrete defect
+within the agreed exit contract. No service, schema or configuration change is
+part of this checkpoint.

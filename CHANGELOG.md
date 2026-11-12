@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1252 — Bound the architecture chapter and its exit criteria
+
+- Checkpoint the committed user lookup/selection split and retain cohesive
+  Helpers orchestration instead of introducing more forwarding layers.
+- Freeze the chapter scope around a generic-worker final-exit decision and a
+  recorded acceptance checkpoint, with explicit limitations and deferred work.
+- Set the next direction: operational evidence, predictable tests and measured
+  reliability/performance improvements. No runtime behavior changes.
+
 ### MB1251 — Separate streaming user candidate selection
 
 - Move the candidate scan, score ranking and Undernet cloak fallback into

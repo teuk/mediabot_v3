@@ -1,12 +1,10 @@
 # Runtime resource ownership — phase D inventory
 
-Current continuation checkpoint: MB1251, prepared against committed MB1250
-`6092b04022ca215eba0de304a613e7b5c6fe0b3b`.
-Lookup opens the candidate cursor and Candidate selects from it; Helpers retains
-finish and authentication effects. The injected matcher is used synchronously
-and is not retained. Cache, Context and session lifetimes remain unchanged.
-See [the roadmap](ARCHITECTURE_ROADMAP.md#mb1251--streaming-user-candidate-selection).
-Generic-worker final-exit coordination remains a separate open question.
+Current continuation checkpoint: MB1252, prepared against committed MB1251
+`32ed060b720549dbd1d6aaeab262af5e4ca62cae`.
+The user-resolution split is sufficient for this chapter. Generic-worker
+final-exit coordination is the last decision gate, followed by recorded chapter
+acceptance. See [the finite closing plan](ARCHITECTURE_ROADMAP.md#mb1252--close-the-chapter-with-explicit-exit-criteria).
 Detailed missing host reports are not reconstructed from commits.
 This is a bounded inventory, not a universal cleanup API or a claim that all
 plugins, HTTP requests and timers have been audited.
@@ -194,10 +192,33 @@ both maps. No monotonic clock, eviction bound or cache-policy change is delivere
 memoizes absence for that Context object. [Auth::_invalidate_bot_session](../Mediabot/Auth.pm)
 attempts cache clearing for a known session hostmask (or all keys when absent),
 then removes nickname-keyed aliases. These scopes must remain distinct.
-The upcoming characterization must observe callback/cache publication order;
+The MB1248–1251 native characterization observes callback/cache publication order;
 this inventory does not certify the complete authentication lifecycle.
 
 MB1249 additionally characterizes publication before the matched-user diagnostic,
 lookup-start timestamp ownership, winning-row snapshots and Context positive
 memoization after a Helpers cache clear. These tests preserve existing behavior;
 they introduce neither a universal invalidation API nor a new cache lifetime.
+
+
+## MB1252 — Remaining final-exit decision
+
+The inspected clean_and_exit handles archive and achievement children explicitly,
+but does not enumerate generic AsyncWorker instances. active_workers is an
+observation API scoped to a loop and owner PID; it discards finalized entries.
+_complete deletes the active registration before calling on_done. cancel requests
+asynchronous termination. None of these facts alone proves that a child survives
+exit, or that every accepted child has been collected.
+
+Before wiring shutdown, characterize active, stopping and finalized-but-unreaped
+children in disposable native processes. Record ownership through completion,
+TERM/KILL, wait errors, retained callbacks and parent exit. Inspect caller result
+contracts before suppressing callbacks. If collection is needed, require a shared
+bounded budget, exact child ownership, no arbitrary event-loop iteration during
+teardown, and truthful incomplete-cleanup diagnostics. Preserve DB/log availability
+for required final saves and keep reconnect/rehash unchanged.
+
+The next delivery must resolve this decision or explicitly document why a larger
+follow-up is required. Do not expand the inventory to every plugin or listener as
+a prerequisite. The final chapter checkpoint records this disposition and host
+acceptance; it does not certify a universal shutdown API.
