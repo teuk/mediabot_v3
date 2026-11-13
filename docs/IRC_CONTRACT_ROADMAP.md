@@ -22,15 +22,25 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 
 | Order | Contract | Evidence to obtain | Current verdict |
 | --- | --- | --- | --- |
-| 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
+| 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Other identity consumers remain explicit residual scope. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered, bounded checkpoint MB1270: MB1269 PONG priority is committed; receipt/recovery probes document the remaining queue-cap, penalty and keepalive limits. No global backpressure guarantee. Next assess row 4; carry keepalive recovery into row 5. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Partly covered, bounded checkpoint MB1276: MB1271–MB1275 correct selected cache/session revocation paths. Account-wide auth, Auth nick folding and unsupported IRCv3 notification semantics remain explicit limits. Proceed to row 5. |
-| 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | In progress: MB1277 selects the silent/stalled keepalive recovery defect and wires an owned timeout into existing reconnect scheduling. Reload/lifecycle checkpoint remains before the final verdict. |
+| 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Partly covered, bounded final checkpoint MB1278: MB1277 implements owned keepalive recovery. Config publication and lifecycle ownership are covered within their tested scopes; rehash is not globally transactional. See IRC_RELOAD_CHECKPOINT.md and the acceptance boundary below. |
 
 Botnet replication, DCC file transfer and Tcl compatibility are not parity goals.
 Radio and YouTube behavior remain regression-sensitive. A useful guarantee may
 be implemented differently; an optional Eggdrop feature need not be implemented.
+
+## Final assessment status — MB1278
+
+All five rows have bounded verdicts; the selected implementation sequence ends
+here. [Reload/recovery checkpoint](IRC_RELOAD_CHECKPOINT.md) records evidence,
+entry-point differences and residual limits. MB1277 is committed in the supplied
+snapshot. Missing detailed host reports or live activation are not inferred from
+that fact: formal acceptance retains the host-validation gate above. This
+documentation/probe delivery runs the relevant lane, not another full runtime
+suite. Optional future work does not reopen this five-row assessment.
 
 ## Reference mechanisms already inspected
 
@@ -992,3 +1002,18 @@ The wider seven-file lane and full-main compilation encountered missing local
 core dependencies; neither is reported as passing. Host validation must complete
 both and the full suite before commit. Package apply/reverse/guard and actual
 commit.sh were exercised in an isolated repository with a local-only remote.
+
+
+## MB1278 — Final reload verdict and bounded handoff
+
+Review base: `7be8921498b9c7aaa3206770fcc1b5a1d71721d4`; supplied snapshot
+tracked files match exactly. The new checkpoint distinguishes in-place reload,
+SIGHUP owner replacement, sequential rehash and connection retirement. A native
+12-assertion disposable-config probe complements the existing synthetic-parser
+case. No runtime module, setting, schema or service is changed.
+
+Remaining limits include partial rehash application, retained configuration
+references, family-specific cleanup failures and the absence of a live TCP
+reconnect demonstration. The final verdict is partly covered, not full Eggdrop
+parity. Follow-up transactionality and measured backpressure are separate choices,
+not additional prerequisites invented for this chapter.

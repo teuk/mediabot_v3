@@ -1,3 +1,10 @@
+## MB1278 — Final IRC reload and recovery checkpoint
+
+- Complete the five-row assessment with an explicit partial reload/recovery verdict.
+- Document configuration publication versus non-transactional runtime rehash and activation limits.
+- Add a native disposable-config probe; retain host acceptance as a separate gate.
+- No runtime behavior, schema, configuration or service change.
+
 ## MB1277 — Recover expired IRC keepalive exchanges
 
 - Wire native keepalive expiry to current-transport retirement and the existing reconnect scheduler.
