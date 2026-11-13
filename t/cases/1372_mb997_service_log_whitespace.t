@@ -11,6 +11,11 @@ my @warnings;
 local $SIG{__WARN__} = sub { push @warnings, @_ };
 my $token = join('-', qw(example only marker));
 for my $case (
+    ["identify account $token trailing", 'identify account **** ****'],
+    ["ID account $token one two", 'ID account **** **** ****'],
+    ["\tId\taccount\t$token\textra", 'Id account **** ****'],
+    ["identify account $token \t", 'identify account ****'],
+    ["identify", 'identify'],
     ["  identify $token", 'identify ****'],
     ["\tID account $token", 'ID account ****'],
     [" \tlogin account $token", 'login account ****'],
@@ -38,12 +43,14 @@ is_deeply([map { redact_service_secret($_) } @ordinary], \@ordinary,
     sub do_PRIVMSG { my ($s,%a)=@_; push @{$s->{wire}}, ['PRIVMSG',\%a]; 1 }
     sub do_NOTICE { my ($s,%a)=@_; push @{$s->{wire}}, ['NOTICE',\%a]; 1 }
 }
+for my $command ("login " . ('a' x 405) . " $token",
+                 "identify " . ('a' x 405) . " $token trailing") {
 for my $kind (qw(privmsg action notice)) {
     my $logger = bless {entries=>[]}, 'MB997::Logger';
     my $irc = bless {wire=>[]}, 'MB997::IRC';
     my $bot = {logger=>$logger,irc=>$irc};
     # The token falls in a later wire chunk. All values are test fixtures.
-    my $input = "\t  login " . ('a' x 405) . " $token";
+    my $input = "\t  $command";
     my $original = $input;
     Mediabot::IRC::Output->can($kind)->($bot,'NickServ',$input);
     my $logs = join("\n", map { $_->[1] } @{$logger->{entries}});
@@ -65,6 +72,7 @@ for my $kind (qw(privmsg action notice)) {
     }
     is_deeply([join('',@payload),$input,$bounded,$correct_envelope,scalar(@payload)>1 ? 1 : 0],
         [$original,$original,1,1,1], "$kind preserves original private wire payload and chunk limits");
+}
 }
 is_deeply(\@warnings, [], 'redaction and actual private sends emit no warnings');
 done_testing;

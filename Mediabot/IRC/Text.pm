@@ -43,7 +43,9 @@ sub _redact_irc_service_secret_for_log {
         my $verb = lc($parts[0] // '');
 
         if ($verb eq 'identify' || $verb eq 'id') {
-            if (@parts >= 3) { $parts[-1] = '****'; }
+            # Extra arguments must not move the credential slot in log copies.
+            # Mask the entire tail; the original wire payload is untouched.
+            if (@parts >= 3) { $parts[$_] = '****' for 2 .. $#parts; }
             elsif (@parts >= 2) { $parts[1] = '****'; }
         }
         elsif ($verb eq 'login' || $verb eq 'auth'

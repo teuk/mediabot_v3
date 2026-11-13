@@ -1,3 +1,10 @@
+## MB1285 — Mask IDENTIFY credentials before trailing arguments
+
+- Mask IDENTIFY/ID credentials at their account/password position instead of the last token.
+- Redact the remaining argument tail so extra tokens cannot expose the password in logs.
+- Preserve ordinary identification forms and the original private IRC payload.
+- Extend existing redaction tests across PRIVMSG, ACTION and NOTICE, including split output.
+
 ## MB1284 — Preserve slow Partyline command errors
 
 - Capture the original command exception before best-effort slow-command logging.

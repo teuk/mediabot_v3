@@ -53,8 +53,8 @@ my $case = sub {
     my $text_src = do {local $/; <$tfh>};
     $assert->($text_src =~ /\$verb eq 'identify' \|\| \$verb eq 'id'/,
         'identify and id are handled explicitly');
-    $assert->($text_src =~ /\$parts\[-1\] = '\*\*\*\*'/,
-        'identify 3-token form redacts last argument');
+    $assert->(_redact_for_test('identify account secret extra') eq 'identify account **** ****',
+        'identify masks the credential and trailing arguments');
 
     $assert->($src =~ /mb132-B6: channel-scoped ignores/,
         'isIgnored contains mb132-B6 private/non-channel guard');
