@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1273 — Retire cached identities with the last account session
+
+- Expire fullmask resolution objects and timestamps when Auth retires an account,
+  including aliases absent from its session table and legacy UID-only state.
+- Keep unrelated accounts logged in and preserve surviving concurrent sessions;
+  reuse the existing optional bot cache invalidation hook.
+- Extend the native session-lifecycle case with real cached User objects and
+  Helpers cache clearing, including skip_db and partial logout behavior.
+
 ### MB1272 — Refresh global grants after role changes
 
 - Expire fullmask user-resolution objects and timestamps after a successful

@@ -515,6 +515,10 @@ sub _invalidate_bot_uid {
     my $bot = $self->{bot};
     return unless $bot;
 
+    # Account retirement also revokes cached fullmasks absent from sessions
+    # (case variants, old nicks, or legacy UID-only login state).
+    eval { $bot->clear_user_cache(); 1 } if $bot->can('clear_user_cache');
+
     delete $bot->{logged_in}{$uid} if ref($bot->{logged_in}) eq 'HASH';
     delete $bot->{users_by_id}{$uid} if ref($bot->{users_by_id}) eq 'HASH';
     return 1;

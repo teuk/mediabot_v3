@@ -16,6 +16,8 @@ BEGIN {
 }
 
 use Mediabot::Auth;
+use Mediabot::Helpers ();
+use Mediabot::User ();
 
 {
     package MB372::Metrics;
@@ -71,6 +73,7 @@ use Mediabot::Auth;
     sub clear_user_cache {
         my ($self, $mask) = @_;
         push @{ $self->{cache_clears} }, defined($mask) ? $mask : '<all>';
+        Mediabot::Helpers::clear_user_cache($self, $mask);
         return 1;
     }
 }
@@ -116,8 +119,8 @@ is_deeply($dbh->{executions}[0],
 ok(!$auth->is_logged_in_id(42), 'logged_in state is cleared');
 ok(!exists $auth->{sessions}{livenick}, 'Auth session is removed');
 is($metrics->last, 0, 'session gauge returns to zero');
-is_deeply($bot->{cache_clears}, ['LiveNick!ident@example.test'],
-    'hostmask cache is invalidated');
+is_deeply($bot->{cache_clears}, ['LiveNick!ident@example.test', '<all>'],
+    'session mask and account-wide resolution cache are invalidated');
 ok(!exists $bot->{logged_in}{42}, 'bot logged_in cache is cleared');
 ok(!exists $bot->{sessions}{livenick}, 'bot live-nick session cache is cleared');
 ok(!exists $bot->{users_by_id}{42}, 'bot user-by-id cache is cleared');
@@ -216,5 +219,41 @@ my $constructors = () = $help_src =~ /Mediabot::Auth->new\s*\(/g;
 my $bot_links    = () = $help_src =~ /bot\s*=>\s*\$self/g;
 is($constructors, 4, 'four lazy Auth constructors remain in Helpers');
 is($bot_links, $constructors, 'every lazy Auth constructor now receives the bot');
+
+# MB1273: account retirement must reach aliases not recorded as live sessions.
+for my $mode (qw(last numeric skip_db)) {
+    my $b = MB372::Bot->new;
+    my $d = MB372::DBH->new;
+    my $a = Mediabot::Auth->new(dbh=>$d, bot=>$b);
+    if ($mode eq 'numeric') { $a->set_logged_in(42,1); }
+    else { $a->set_session_user('Live', {id_user=>42, hostmask=>'Live!i@host'}); }
+    my $cached = Mediabot::User->new({id_user=>42, nickname=>'Account', auth=>1});
+    for my $mask ('Live!i@host', 'LIVE!i@host', 'OlderNick!i@host') {
+        $b->{_user_cache}{$mask}=$cached;
+        $b->{_user_cache_ts}{$mask}=time;
+    }
+    $b->{_user_cache}{'Other!i@other'}=Mediabot::User->new({id_user=>99,auth=>1});
+    $b->{_user_cache_ts}{'Other!i@other'}=time;
+    $a->set_session_user('Other', {id_user=>99,hostmask=>'Other!i@other'});
+    ok($a->logout($mode eq 'numeric' ? 42 : 'Live', skip_db=>$mode eq 'skip_db'), "$mode: account logout succeeds");
+    is_deeply($b->{_user_cache},{},"$mode: no fullmask alias can return a cached authenticated user");
+    is_deeply($b->{_user_cache_ts},{},"$mode: timestamps retire with the objects");
+    ok($a->is_logged_in_id(99),"$mode: unrelated account remains authenticated");
+    ok(exists $a->{sessions}{other},"$mode: unrelated live session survives cache expiry");
+    is(scalar @{$d->{executions}},$mode eq 'skip_db'?0:1,"$mode: database update count retained");
+}
+{
+    my $b=MB372::Bot->new;
+    my $d=MB372::DBH->new;
+    my $a=Mediabot::Auth->new(dbh=>$d,bot=>$b);
+    $a->set_session_user('First',{id_user=>42,hostmask=>'First!i@host'});
+    $a->set_session_user('Second',{id_user=>42,hostmask=>'Second!i@host'});
+    my $cached=Mediabot::User->new({id_user=>42,auth=>1});
+    $b->{_user_cache}{'Second!i@host'}=$cached;
+    $b->{_user_cache_ts}{'Second!i@host'}=time;
+    $a->logout('First');
+    is($b->{_user_cache}{'Second!i@host'},$cached,'surviving same-account session retains its lookup');
+    is(scalar @{$d->{executions}},0,'partial logout does not reset account authentication');
+}
 
 done_testing();
