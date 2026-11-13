@@ -369,4 +369,6 @@ MB928_NATIVE
                 . ($result->{detail} ? ': ' . $result->{detail} : ''));
         }
     }
+    my $deleted_probe = do './t/lib/MB1274DeletedAccount.pl' or die $@ || $!;
+    $deleted_probe->($assert);
 };

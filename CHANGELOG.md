@@ -1,5 +1,13 @@
 ## [Unreleased] — 3.8dev
 
+### MB1274 — Revoke deleted accounts after transaction commit
+
+- Clear resolved-user caches and the deleted UID's channel grants only after
+  deluser commits; retire all its Auth sessions with skip_db before success callbacks.
+- Preserve live authorization on confirmation-only or rolled-back deletions,
+  including deferred foreign-key commit failures; retain other account sessions.
+- Extend the existing deletion case with native Context/Auth and SQLite coverage.
+
 ### MB1273 — Retire cached identities with the last account session
 
 - Expire fullmask resolution objects and timestamps when Auth retires an account,

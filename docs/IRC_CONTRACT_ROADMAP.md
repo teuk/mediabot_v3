@@ -25,7 +25,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered, bounded checkpoint MB1270: MB1269 PONG priority is committed; receipt/recovery probes document the remaining queue-cap, penalty and keepalive limits. No global backpressure guarantee. Next assess row 4; carry keepalive recovery into row 5. |
-| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | In progress: MB1271 reproduces stale channel-level grants after modinfo and invalidates that cache entry on successful mutation. MB1272 expires fullmask resolution after global role updates. MB1273 expires aliases on account retirement. Other authority paths remain under review. |
+| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | In progress: MB1271 reproduces stale channel-level grants after modinfo and invalidates that cache entry on successful mutation. MB1272 expires fullmask resolution after global role updates. MB1273 expires aliases on account retirement. MB1274 retires deleted accounts after commit. Other authority paths remain under review. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
 
 Botnet replication, DCC file transfer and Tcl compatibility are not parity goals.
@@ -833,3 +833,41 @@ cache does not claim to prevent fresh authentication allowed by those paths.
 No runtime configuration, service restart or database migration is performed.
 Row 4 still needs host/account-change and delayed-privileged-work verdicts;
 row 5 still owns the keepalive/reload/recovery decisions.
+
+
+## MB1274 — Committed account deletion revokes live authorization
+
+Base `3154036bcfc674106ab827f1c1d794209c76253f` is committed MB1273 and matches every tracked file in the supplied
+2026-11-13 07:03:58 snapshot. Commit presence does not supply a host-suite count
+or prove that the running process loaded these changes.
+
+Row-4 explicit revocation review found that delUser_ctx deletes USER and its
+relations transactionally, then reports success without clearing its resolved
+User objects, channel-level grants or Auth sessions. Offline reproduction with
+native Context/User/Auth and an in-memory SQLite database leaves both live aliases
+logged in after successful deletion. Twelve assertions fail on the baseline.
+
+After confirmed commit, the handler now expires fullmask objects/timestamps,
+removes channel-grant keys for the exact UID followed by the NUL separator, and
+calls Auth::logout(uid, skip_db => 1) when the existing Auth owner supports logout.
+No auth UPDATE targets the deleted row. Retirement precedes the success logger,
+notice and audit callbacks. Clearing lookup objects for other accounts only forces
+fresh resolution; their sessions and channel grants remain. A bot without an Auth
+owner still clears the resolution/channel caches. No additional owner is created.
+
+The existing case 163 now runs [MB1274DeletedAccount](../t/lib/MB1274DeletedAccount.pl)
+in addition to its established 36 transaction/permission scenarios. The new
+fixture exercises successful deletion, absence of Auth, confirmation only, and
+a real deferred-foreign-key commit failure/rollback. It verifies both aliases,
+multiple channels, UID 7 versus 70, unrelated account authentication, callback
+ordering and absence of duplicate auth SQL. The native helper uses no production
+configuration or server. Its 43 assertions extend case 163 to 60; eight related
+cases pass 543 assertions locally. The host must compile UserCommands, run those
+cases and one complete --progress suite before commit.sh owns VERSION and push.
+
+No schema migration, SQL deletion-order change, confirmation-policy change,
+service action or new permission rule is introduced. Existing captured Contexts,
+previously transmitted commands and custom Auth implementations are not certified
+by this fix. It uses the established native Auth retirement behavior, including
+its optional cache hooks. Row 4 still requires verdicts for host/account changes
+and delayed privileged actions before row 5's recovery/reload assessment.

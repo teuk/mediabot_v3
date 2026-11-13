@@ -1518,6 +1518,16 @@ sub delUser_ctx {
         return;
     }
 
+    # Revoke only after commit: rolled-back deletions retain their live state.
+    Mediabot::Helpers::clear_user_cache($self);
+    my $grant_prefix = "$id_user\x00";
+    for my $key (keys %{ $self->{_uchan_level_cache} || {} }) {
+        delete $self->{_uchan_level_cache}{$key} if index($key, $grant_prefix) == 0;
+    }
+    if ($self->{auth} && $self->{auth}->can('logout')) {
+        $self->{auth}->logout($id_user, skip_db => 1);
+    }
+
     my $msg = "User $target (id_user: $id_user) has been deleted";
     $self->{logger}->log(0, "delUser_ctx: $msg (by $nick)");
     botNotice($self, $nick, $msg);
