@@ -194,3 +194,28 @@ This reports physical uncertainty; it does not retry orphan cleanup, restore the
 old channels or roll back earlier configuration/logging phases. Some new timers
 may be live even though rehash returns failure, and the diagnostics say so.
 No service restart, configuration edit or database/schema action is performed.
+
+
+## MB1283 — Preserve the operator response when logging fails
+
+Base `f3c10b24590e673404feb1b2dcf5c1d9eca662b5` is committed MB1282;
+every tracked file matches the supplied 2026-11-13 14:53:23 snapshot.
+Partyline's rehash request log was outside its operation eval. A missing or
+throwing logger prevented the authorized operation; a logger failing only on
+the subsequent error diagnostic could suppress ERR rehash failed.
+
+The request diagnostic is now best-effort. Operation failure uses the existing
+_report_operation_error helper, keeping details server-side when logging works
+and the unchanged bounded ERR reply when it does not. Master/Owner checks,
+Rehashing/OK messages and runtime rehash behavior are unchanged. This neither
+repairs the logger nor makes the command or earlier runtime phases transactional.
+Stream failure cannot be turned into guaranteed client delivery.
+
+The existing case 586 adds an extracted-method probe for the exact command and
+reporter with controlled bot/log/stream collaborators. Its 56 assertions cover
+working, absent, always-throwing and late-failing loggers crossed with success,
+false results and exceptions, plus unauthorized callers. Twenty-two fail on the
+baseline; all pass after correction. Prior cases 388/622/625 pass 190 assertions.
+The full native Partyline case is locally blocked by missing URI::Escape and is
+not claimed as passing. Host validation runs that case and related regressions,
+then one full suite before commit. No service/configuration/schema action.

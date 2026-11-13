@@ -1,3 +1,10 @@
+## MB1283 — Keep rehash reporting alive when logging fails
+
+- Make the request log best-effort so logging failure does not block an authorized rehash.
+- Route rehash failures through the existing defensive Partyline error reporter.
+- Preserve bounded client replies, authorization and normal server diagnostics.
+- Cover missing, throwing and late-failing loggers with successful and failed operations.
+
 ## MB1282 — Preserve timer cleanup failures during setup
 
 - Aggregate failed removal/stop outcomes across nicklist timer replacement.

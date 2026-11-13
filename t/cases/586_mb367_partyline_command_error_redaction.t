@@ -287,8 +287,8 @@ return sub {
     my $src = _slurp_586("$Bin/../../Mediabot/Partyline.pm") . "\n" . _slurp_586("$Bin/../../Mediabot/Partyline/Transport.pm") . "\n" . _slurp_586("$Bin/../../Mediabot/Partyline/Commands.pm");
 
     my $report_calls = () = $src =~ /->_report_operation_error\(/g;
-    $assert->is($report_calls, 8,
-        'outer dispatcher and all seven local exception paths use the shared reporter');
+    $assert->is($report_calls, 9,
+        'outer dispatcher and all eight local exception paths use the shared reporter');
 
     for my $label (
         'Partyline .reloadconf failed',
@@ -315,4 +315,6 @@ return sub {
         'successful configuration reload output is unchanged');
     $assert->like($src, qr/Kicked \$target from \$chan \(\$reason\)\\r\\n/,
         'successful kick output is unchanged');
+    my $rehash = do './t/lib/MB1283RehashReporting.pl' or die $@ || $!;
+    $rehash->($assert);
 };

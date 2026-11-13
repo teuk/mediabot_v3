@@ -2565,15 +2565,15 @@ sub _cmd_rehash {
         return;
     }
 
-    $bot->{logger}->log(2, "Partyline: $nick requested rehash");
+    eval { $bot->{logger}->log(2, "Partyline: $nick requested rehash") };
     $stream->write("Rehashing...\r\n");
 
     my $result = eval { $bot->rehash_runtime_state() };
     if (!$result) {
         my $err = $@ || 'rehash failed';
-        $bot->{logger}->log(1, "Partyline rehash failed for $nick: $err");
-        $stream->write("ERR rehash failed\r\n");
-        return;
+        return $self->_report_operation_error(
+            $stream, "Partyline rehash failed for $nick", 'ERR rehash failed', $err,
+        );
     }
 
     $stream->write("OK rehash completed\r\n");
