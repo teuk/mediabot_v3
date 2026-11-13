@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1271 — Retire stale channel grants after modinfo
+
+- Invalidate the target user's channel-level cache after a successful modinfo
+  level update, before notices/log callbacks can observe obsolete privileges.
+- Preserve other users/channels and existing authentication, hierarchy and SQL
+  failure behavior; promotions also become visible at the next authorization.
+- Extend the existing modinfo case with native command/helper replays and record
+  the first reproduced authority-over-time defect in the IRC contract roadmap.
+
 ### MB1270 — Distinguish queued keepalive from peer silence
 
 - Add an offline socket-pair probe with native timers and write receipts: stalled

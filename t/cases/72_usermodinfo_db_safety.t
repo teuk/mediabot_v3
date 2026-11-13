@@ -118,4 +118,6 @@ return sub {
         $func =~ /UPDATE USER_CHANNEL SET level=\? WHERE id_user=\? AND id_channel=\?/,
         'userModinfo keeps level update'
     );
+    my $probe = do './t/lib/MB1271ModinfoCache.pl' or die $@ || $!;
+    $probe->($assert);
 };

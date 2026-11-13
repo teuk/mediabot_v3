@@ -1092,6 +1092,10 @@ sub userModinfo_ctx {
             return;
         }
 
+        # Retire the confirmed channel grant before observable success callbacks.
+        # Match checkUserChannelLevel and channelAddUser/channelDelUser keys.
+        delete $self->{_uchan_level_cache}{"$id_user_target\x00" . lc($channel)};
+
         botNotice($self, $nick, "Set level $new_level on $channel for $target_handle");
         logBot($self, $ctx->message, $channel, "modinfo", @args);
         return $id_channel;

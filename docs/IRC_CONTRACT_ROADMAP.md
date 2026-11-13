@@ -25,7 +25,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered, bounded checkpoint MB1270: MB1269 PONG priority is committed; receipt/recovery probes document the remaining queue-cap, penalty and keepalive limits. No global backpressure guarantee. Next assess row 4; carry keepalive recovery into row 5. |
-| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
+| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | In progress: MB1271 reproduces stale channel-level grants after modinfo and invalidates that cache entry on successful mutation. Other authority paths remain under review. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
 
 Botnet replication, DCC file transfer and Tcl compatibility are not parity goals.
@@ -713,3 +713,44 @@ row 5's reload/recovery verdict. Row 5 must explicitly decide how to detect a
 stalled/silent connection without mistaking an unflushed PING for a peer failure;
 do not infer recovery merely from the dependency's callback name. The overall
 roadmap is not complete, and global backpressure remains explicitly unimplemented.
+
+
+## MB1271 — Successful modinfo retires its cached channel grant
+
+Base `448485e1802a025226f205e9cc54723a883eb9c0` is committed MB1270,
+retrieved from the development branch. No newer local snapshot was supplied.
+The architecture chapter remains closed; this is the first bounded row-4 fix.
+
+Expected contract: after a successful channel-level change, the next authorization
+must use the new level, including before success callbacks run. Reproduction uses
+native UserCommands::userModinfo_ctx and Helpers::checkUserChannelLevel with an
+in-memory SQL fixture, without a database connection or source-body extraction.
+Prime a level-450 grant through the real helper, issue an authorized modinfo level
+0, then ask the real helper for level 400. Baseline still admits it because its
+60-second cache was not invalidated. The inverse promotion also remains denied.
+Six assertions fail on baseline; this is an offline demonstrated stale decision,
+not evidence that an operator abused it on a live channel.
+
+The command now deletes only the confirmed target user/channel cache key after
+its update helper succeeds and before botNotice/logBot. It uses the existing
+lowercase channel key shared with checkUserChannelLevel and channel add/delete.
+It does not change IRC casemapping rules, permission hierarchy, SQL/schema,
+authentication or the cache TTL. Other channels/users retain their cache objects.
+
+Case 72 now runs [MB1271ModinfoCache](../t/lib/MB1271ModinfoCache.pl), covering
+promotion/demotion, differently cased channel spellings, reentrant authorization
+from the success notice, failed prepare/execute, unauthenticated and denied
+callers, and unchanged automode/greet behavior. Failed writes do not discard the
+previous cache; successful lookup refreshes once and uses the existing cache
+again. Existing static DB checks remain present. SQL failures are simulated at
+the DBI-shaped boundary; no production database or IRC connection is involved.
+
+Targeted native acceptance and one complete --progress suite are required on the
+host before commit. The existing commit.sh owns VERSION and push. No runtime
+activation/restart is performed by the delivery.
+
+Row 4 is still in progress: account-wide level/session invalidation, host/account
+changes, explicit logout and delayed privileged work need their own verdict.
+This patch does not revoke already-emitted wire commands or mutate an existing
+Context's memoized user object. Keepalive recovery remains a row-5 item; aggregate
+queue caps and global penalty scheduling remain the explicit row-3 limitations.
