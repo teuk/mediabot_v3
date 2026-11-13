@@ -1,3 +1,10 @@
+## MB1284 — Preserve slow Partyline command errors
+
+- Capture the original command exception before best-effort slow-command logging.
+- Prevent successful or failing diagnostic logging from replacing the root cause.
+- Retain generic client replies, command execution count and slow-log formatting.
+- Extend the existing reporting probe with deterministic fast/slow success/failure cases.
+
 ## MB1283 — Keep rehash reporting alive when logging fails
 
 - Make the request log best-effort so logging failure does not block an authorized rehash.

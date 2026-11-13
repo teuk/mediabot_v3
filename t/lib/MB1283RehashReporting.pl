@@ -1,9 +1,10 @@
 use strict;
 use warnings;
+use Time::HiRes ();
 return sub {
     my ($a)=@_;
     my $code='package MB1283::Partyline; use strict; use warnings;';
-    for my $entry (['Mediabot/Partyline/Commands.pm','_cmd_rehash'],['Mediabot/Partyline/Transport.pm','_report_operation_error']) {
+    for my $entry (['Mediabot/Partyline/Commands.pm','_cmd_rehash'],['Mediabot/Partyline/Transport.pm','_report_operation_error'],['Mediabot/Partyline/Transport.pm','_dispatch_line_safely']) {
         open my $f,'<',$entry->[0] or die $!;my $src=do {local $/;<$f>};close $f;
         my $name=$entry->[1];my ($body)=$src=~/^(sub \Q$name\E \{.*?)(?=^sub \w+|\z)/ms;
         die "missing $name" unless $body;$code.=$body;
@@ -34,10 +35,37 @@ return sub {
         $a->is($bot->{calls},0,'unauthorized caller cannot rehash');
         $a->is(join('',@{$stream->{writes}}),"Access denied: .rehash requires Master or Owner level.\r\n",'authorization response unchanged');
     }
+    # MB1284: timing instrumentation must not replace the command exception.
+    for my $elapsed (0.2, 2) {
+        for my $slow_log_fails (0,1) {
+            for my $fails (0,1) {
+                no warnings 'redefine';
+                local *Time::HiRes::tv_interval = sub {$elapsed};
+                local *MB1283::Partyline::_handle_line = sub {
+                    $_[0]{calls}++;die "original command failure\n" if $fails;return;
+                };
+                my $log=bless {entries=>[],fail_slow=>$slow_log_fails},'MB1283::Log';
+                my $pl=bless {bot=>{logger=>$log},users=>{}},'MB1283::Partyline';
+                my $stream=bless {writes=>[]},'MB1283::Stream';
+                my $ret=eval {$pl->_dispatch_line_safely($stream,1,'.test private-argument','DCC')};
+                my $error=$@;
+                my $label="$elapsed/$slow_log_fails/$fails";
+                $a->is($error,'',"$label: dispatch contains command and logging errors");
+                $a->is($ret,$fails?0:1,"$label: dispatch result follows command");
+                $a->is($pl->{calls},1,"$label: no command retry");
+                $a->is(join('',@{$stream->{writes}}),$fails?"Internal error.\r\n":'',"$label: generic reply remains unchanged");
+                my @errors=grep /^DCC exception:/,@{$log->{entries}};
+                $a->is(join('',@errors),$fails?'DCC exception: original command failure':'',"$label: original command diagnosis survives instrumentation");
+                my @slow=grep /^SLOW PARTYLINE:/,@{$log->{entries}};
+                $a->is(join('',@slow),$elapsed>1 && !$slow_log_fails?'SLOW PARTYLINE: .test took 2.00s':'',"$label: slow-command diagnostic retains command name only");
+            }
+        }
+    }
+
 };
 package MB1283::Bot;
 sub rehash_runtime_state {$_[0]{calls}++;die "private /srv/bot password=hunter2\n" if $_[0]{outcome} eq 'exception';return $_[0]{outcome} eq 'success'}
 package MB1283::Log;
-sub log {die "logger unavailable\n" if $_[0]{throw} || ($_[0]{late_throw} && @{$_[0]{entries}});push @{$_[0]{entries}},$_[2];1}
+sub log {die "slow logger failure\n" if $_[0]{fail_slow} && $_[1]==3;die "logger unavailable\n" if $_[0]{throw} || ($_[0]{late_throw} && @{$_[0]{entries}});push @{$_[0]{entries}},$_[2];1}
 package MB1283::Stream;
 sub write {push @{$_[0]{writes}},$_[1];1}

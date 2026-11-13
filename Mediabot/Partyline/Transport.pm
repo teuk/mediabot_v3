@@ -696,6 +696,7 @@ sub _dispatch_line_safely {
         $self->_handle_line($stream, $id, $line);
         1;
     };
+    my $command_error = $@; # Preserve the command failure across diagnostic evals.
     my $elapsed_552 = Time::HiRes::tv_interval($t0_552);
     if ($elapsed_552 > 1.0) {
         my $cmd = $line;
@@ -708,7 +709,7 @@ sub _dispatch_line_safely {
 
     return 1 if $ok;
 
-    my $err = $@ || 'unknown error';
+    my $err = $command_error || 'unknown error';
     return $self->_report_operation_error(
         $stream,
         "$transport exception",
