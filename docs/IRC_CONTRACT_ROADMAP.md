@@ -26,7 +26,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered, bounded checkpoint MB1270: MB1269 PONG priority is committed; receipt/recovery probes document the remaining queue-cap, penalty and keepalive limits. No global backpressure guarantee. Next assess row 4; carry keepalive recovery into row 5. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Partly covered, bounded checkpoint MB1276: MB1271–MB1275 correct selected cache/session revocation paths. Account-wide auth, Auth nick folding and unsupported IRCv3 notification semantics remain explicit limits. Proceed to row 5. |
-| 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
+| 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | In progress: MB1277 selects the silent/stalled keepalive recovery defect and wires an owned timeout into existing reconnect scheduling. Reload/lifecycle checkpoint remains before the final verdict. |
 
 Botnet replication, DCC file transfer and Tcl compatibility are not parity goals.
 Radio and YouTube behavior remain regression-sensitive. A useful guarantee may
@@ -936,3 +936,59 @@ Row 4 now has a bounded partly-covered verdict. The remaining assessment is row 
 reuse the lifecycle/reload tests and resolve the keepalive recovery decision from
 MB1270. Completion still requires acceptance of selected runtime fixes and a
 verdict for row 5; optional feature parity does not extend the exit gate.
+
+
+## MB1277 — Recover from an expired keepalive exchange
+
+Base `c0f985fa242cd36daeefb1a31bd416df2757307a` is committed MB1276. The prior snapshot is not presented as a
+new exact snapshot of this commit; this increment starts from current GitHub
+master. The package checks the full base SHA and the last reviewed commit.sh
+fingerprint before applying or automatically answering that script.
+
+Selected row-5 defect: the native keepalive response timer can expire while the
+socket remains open, and the main transport builder had no on_ping_timeout hook.
+A local AF_UNIX socket-pair replay reaches the timeout yet retains the connection
+state and makes no reconnect request. The probe seeds only the completed connect
+Future (socket-pair construction bypasses TCP connect); timers/parser/writes,
+stream closure and is_connected are native. It does not contact a real server.
+
+Policy decision: bound the **whole keepalive exchange**, including local output
+wait. On expiry, retire the current transport and request recovery through the
+existing main tick/reconnect mechanism. Do not label it a server PONG failure:
+MB1270 proved that the PING can still be queued locally. Native idle/response
+budgets (60/10 seconds in Net::Async::IRC 0.12) and main RECONNECT_DELAY remain
+unchanged. This is intentionally a connection-liveness policy; a sufficiently
+stalled local output queue can cause reconnection even if the remote peer is
+healthy. It neither adds global queue caps nor changes PONG priority.
+
+[Mediabot::IRC::Recovery](../Mediabot/IRC/Recovery.pm) is wired once through the
+shared [transport builder](../mediabot.pl). It accepts only the currently installed
+transport, respects intentional quit, claims a timeout once, and publishes the
+reconnect request before close/receipt callbacks. It writes no bot lifecycle state
+after closure, so a reentrant successor is not overwritten. A close or logger
+exception cannot erase the request or escape into the main event loop. The
+existing scheduler retains its delay, in-progress and single-timer guards; this
+hook neither stops the loop nor creates another reconnect timer. Queued unsent
+output fails through the established close contract and is not replayed after
+reconnect; delivered bytes cannot be recalled.
+
+Case 608 now includes native silent/stalled/responsive socket pairs and a baseline
+without recovery. It verifies failed backlog receipts, repeat/stale callbacks,
+intentional quit, close/logger errors and successor installation during close.
+The builder wiring assertion is source-level; an actual TCP login/reconnect is
+not claimed by the socket fixture. Existing transport priority and receipt tests
+remain gates, as do installed-host syntax and one complete --progress suite.
+
+Remaining row-5 work: reuse the rehash/configuration/plugin/timer lifecycle
+contracts to record a bounded reload verdict. Do not close the whole roadmap
+until this selected runtime fix has host acceptance and that final review has a
+verdict. No service restart, database migration or configuration edit is performed.
+
+Local validation for MB1277: five available cases pass 179 assertions, including
+case 608's 63 assertions. Its new 42-assertion recovery fixture also passes with
+IO::Async 0.804 and 0.805. The two MB1270 characterization tests pass; standalone
+MB1269 transport testing passes 38 assertions and skips three full-core checks.
+The wider seven-file lane and full-main compilation encountered missing local
+core dependencies; neither is reported as passing. Host validation must complete
+both and the full suite before commit. Package apply/reverse/guard and actual
+commit.sh were exercised in an isolated repository with a local-only remote.

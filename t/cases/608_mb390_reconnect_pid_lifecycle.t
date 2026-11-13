@@ -51,6 +51,7 @@ return sub {
     my ($assert) = @_;
 
     my $main = _slurp_mb390(File::Spec->catfile('.', 'mediabot.pl'));
+    $assert->like($main, qr/on_ping_timeout\s*=>\s*sub\s*\{\s*Mediabot::IRC::Recovery::ping_timeout\(\$mediabot, \$_\[0\]\)/, 'native builder wires the current-transport recovery hook');
     my $core = _slurp_mb390(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
 
     my $reset_sub = _extract_sub_mb390($main, '_reset_irc_reconnect_state');
@@ -129,4 +130,6 @@ return sub {
     $assert->ok($replacement->acquire(), 'stale unlocked PID file is replaced');
     $assert->ok($replacement->release(), 'replacement PID lock releases cleanly');
     $assert->ok(!-e $pidfile, 'replacement removes its own PID file');
+    my $keepalive = do './t/lib/MB1277KeepaliveRecovery.pl' or die $@ || $!;
+    $keepalive->($assert);
 };

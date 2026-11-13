@@ -63,6 +63,7 @@ use Mediabot::Diagnostics::Publisher;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
 use Mediabot::IRC::Transport ();
+use Mediabot::IRC::Recovery ();
 use utf8;
 use Encode qw(encode);
 
@@ -2895,6 +2896,7 @@ sub _build_irc {
     my $bind_ip = $mediabot->{conf}->get('connection.CONN_BIND_IP');
 
     my $irc = Mediabot::IRC::Transport->new(
+        on_ping_timeout => sub { Mediabot::IRC::Recovery::ping_timeout($mediabot, $_[0]); },
         on_message_text                  => \&on_private,
         on_message_motd                  => \&on_motd,
         on_message_INVITE                => \&on_message_INVITE,

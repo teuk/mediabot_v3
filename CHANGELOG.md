@@ -1,3 +1,10 @@
+## MB1277 — Recover expired IRC keepalive exchanges
+
+- Wire native keepalive expiry to current-transport retirement and the existing reconnect scheduler.
+- Diagnose the complete exchange deadline, including local output wait, without blaming an unflushed PING on the peer.
+- Preserve quit, stale-callback, duplicate and replacement ownership boundaries; fail queued receipts on retirement.
+- Extend offline socket-pair recovery tests; no schema, timeout configuration or service change.
+
 ## MB1276 — Bounded IRC authority checkpoint
 
 - Record the guarantees and limits of hostmask/account authentication and delayed privileged work.

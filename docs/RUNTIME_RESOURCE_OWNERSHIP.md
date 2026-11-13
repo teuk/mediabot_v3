@@ -272,3 +272,15 @@ No new timers, global connection registry, database data or live configuration
 are introduced. Native Net::Async::IRC timer reference cycles are outside this
 increment; this is not a claim that the entire underlying client becomes weak.
 Aggregate queue caps and whole-process shutdown policy remain explicit follow-ups.
+
+
+## MB1277 — Keepalive recovery ownership
+
+The main transport builder owns on_ping_timeout; [IRC::Recovery](../Mediabot/IRC/Recovery.pm)
+accepts only the installed transport and claims each timeout once. It publishes
+irc_reconnect_requested before closing that transport; native closure retires
+keepalive timers and queued receipts. Existing on_timer_tick/reconnect owns the
+actual delayed replacement, retains the event loop/Partyline and clears request
+state on completion. The deadline includes local output wait, not just remote
+PONG response time. Intentional quit and obsolete callbacks cannot request a new
+reconnect. No extra timer or background worker is introduced.
