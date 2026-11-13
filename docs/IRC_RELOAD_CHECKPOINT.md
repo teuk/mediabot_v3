@@ -165,3 +165,32 @@ This is outcome propagation, not all-or-nothing rehash. Config/logger changes an
 a confirmed channel map can remain applied on failure. Physical cleanup failures
 that the timer owner handles internally are outside this return-value correction.
 No service restart, schema or configuration change is performed.
+
+
+## MB1282 — Carry physical cleanup failure through timer setup
+
+Base `4186266161088d16bf6b11e992ebab0e799b4e85` is committed MB1281;
+every tracked file matches the supplied 2026-11-13 14:34:40 snapshot.
+NicklistTimers already revoked callbacks and diagnosed physical remove/stop
+failures, but setup discarded the cleanup result and returned success. Nine
+assertions reproduce this loss on the baseline.
+
+Setup now accumulates cleanup failure across initial retirement and disposal of
+superseded factory/add/start candidates. Successful new registrations still start;
+the aggregate result remains false when any attempted cleanup failed. A current
+setup reports physical cleanup incomplete instead of a complete-success summary.
+An obsolete setup returns its own cleanup result without altering its successor.
+Original setup exception identity remains unchanged. MB1281 propagates the false
+result through rebuild/rehash, preventing the existing Partyline success path.
+
+The existing case 388 uses the native timer owner with controlled loop/timer
+objects. It covers remove, stop and combined failure, reentrant initial retirement,
+factory replacement and late add disposal, callback revocation and usable
+successors. Its 76 assertions pass; cases 388/622/625 pass 190 assertions locally.
+Syntax checks pass for the owner. Native full-bot validation is not claimed with
+local DBI absent. Host native regression cases and one full suite remain required.
+
+This reports physical uncertainty; it does not retry orphan cleanup, restore the
+old channels or roll back earlier configuration/logging phases. Some new timers
+may be live even though rehash returns failure, and the diagnostics say so.
+No service restart, configuration edit or database/schema action is performed.

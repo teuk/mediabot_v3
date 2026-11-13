@@ -1,3 +1,10 @@
+## MB1282 — Preserve timer cleanup failures during setup
+
+- Aggregate failed removal/stop outcomes across nicklist timer replacement.
+- Return incomplete cleanup through rehash even when replacement timers start.
+- Preserve successor ownership, revoked callbacks and original setup exceptions.
+- Extend native timer-owner tests for initial and reentrant cleanup failures.
+
 ## MB1281 — Report incomplete nicklist setup during rehash
 
 - Propagate a false timer-setup result through channel rebuild and rehash.

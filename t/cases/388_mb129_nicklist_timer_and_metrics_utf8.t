@@ -82,6 +82,44 @@ my $case = sub {
         $assert->(!@{$b->{wire}} && !keys %{$b->{channel_nicklist_timers}},"$fault: callback revoked despite physical failure");
         $assert->($b->{logger}{messages}[-1]=~/incomplete/,"$fault: no false success diagnostic");
     }
+    # MB1282: setup must retain cleanup failures even if replacements start.
+    for my $fault (qw(remove stop both)) {
+        my $b=$new_bot->();$setup->($b);my $old=$b->{channel_nicklist_timers}{'#a'};
+        $b->{loop}{fail_remove}=($fault ne 'stop');$old->{fail_stop}=($fault ne 'remove');
+        my $ok=$setup->($b);my $fresh=$b->{channel_nicklist_timers}{'#a'};
+        $old->{on_tick}->();
+        $assert->(!$ok,"setup $fault: incomplete physical cleanup returns failure");
+        $assert->($fresh!=$old && $fresh->{starts}==1,"setup $fault: replacement still starts");
+        $assert->(!@{$b->{wire}},"setup $fault: failed old cleanup cannot restore callback");
+        $fresh->{on_tick}->();$assert->(@{$b->{wire}}==1,"setup $fault: new timer remains usable");
+        $assert->($b->{logger}{messages}[-1]=~/cleanup incomplete/ ? 1 : 0,"setup $fault: final diagnostic is not complete");
+        $b->{loop}{fail_remove}=0;$old->{fail_stop}=0;$all->($b);
+    }
+    for my $stage (qw(retire factory add)) {
+        my $b=$new_bot->();my ($old,$fresh,$ok);
+        if ($stage eq 'retire') {
+            $setup->($b);$old=$b->{channel_nicklist_timers}{'#a'};$old->{fail_stop}=1;
+            $b->{loop}{on_remove}=sub {$setup->($b);$fresh=$b->{channel_nicklist_timers}{'#a'}};
+            $ok=$setup->($b);
+        } elsif ($stage eq 'factory') {
+            $ok=Mediabot::Channel::NicklistTimers::setup($b,sub {
+                $old=$factory->(@_);$old->{fail_stop}=1;
+                $setup->($b);$fresh=$b->{channel_nicklist_timers}{'#a'};return $old;
+            });
+        } else {
+            $b->{loop}{on_add}=sub {
+                $old=shift;$setup->($b);$fresh=$b->{channel_nicklist_timers}{'#a'};
+                $b->{loop}{fail_remove}=1;
+            };
+            $ok=$setup->($b);
+        }
+        $old->{on_tick}->();
+        $assert->(!$ok,"$stage: superseded setup preserves cleanup failure");
+        $assert->($b->{channel_nicklist_timers}{'#a'}==$fresh,"$stage: successor identity survives cleanup failure");
+        $assert->(!@{$b->{wire}},"$stage: obsolete callback remains inert");
+        $fresh->{on_tick}->();$assert->(@{$b->{wire}}==1,"$stage: successor still sends once");
+        $b->{loop}{fail_remove}=0;$old->{fail_stop}=0;$all->($b);
+    }
     for my $scope (qw(one all setup)) {
         my $b=$new_bot->();$setup->($b);my $old=$b->{channel_nicklist_timers}{'#a'};
         my $successor;

@@ -86,8 +86,8 @@ sub setup {
         return IO::Async::Timer::Periodic->new(@_);
     };
     my $token = $bot->{_nicklist_setup_token} = {};
-    _stop_detached($bot);
-    return 1 unless _current($bot, $token);
+    my $cleanup_ok = _stop_detached($bot);
+    return $cleanup_ok unless _current($bot, $token);
     my $interval = $conf->get('main.MAIN_CHANNEL_NICKLIST_REFRESH_INTERVAL');
     $interval = 300 unless defined $interval && $interval =~ /^\d+$/ && $interval > 0;
     for my $name (sort keys %{ $bot->{channels} || {} }) {
@@ -119,7 +119,7 @@ sub setup {
         weaken($weak_timer);
         $owned{$timer} = $state;
         unless (_current($bot, $token) && !$bot->{channel_nicklist_timers}{$name}) {
-            _cleanup($bot, $name, $timer, _revoke($timer, $loop));
+            $cleanup_ok = 0 unless _cleanup($bot, $name, $timer, _revoke($timer, $loop));
             next;
         }
         $bot->{channel_nicklist_timers}{$name} = $timer;
@@ -138,7 +138,7 @@ sub setup {
             delete $bot->{channel_nicklist_timers}{$name}
                 if $current && refaddr($current) == refaddr($timer);
             # A late add/start may have attached a timer after reentrant retirement.
-            _cleanup($bot, $name, $timer, _revoke($timer, $loop));
+            $cleanup_ok = 0 unless _cleanup($bot, $name, $timer, _revoke($timer, $loop));
             die $error unless $ok;
             next;
         }
@@ -146,9 +146,11 @@ sub setup {
     }
     if (_current($bot, $token)) {
         my $count = scalar keys %{ $bot->{channel_nicklist_timers} || {} };
-        $bot->{logger}->log(1, "Nicklist timer setup complete ($count timers)");
+        $bot->{logger}->log(1, $cleanup_ok
+            ? "Nicklist timer setup complete ($count timers)"
+            : "Nicklist timer setup finished ($count timers); physical cleanup incomplete");
     }
-    return 1;
+    return $cleanup_ok;
 }
 
 1;
