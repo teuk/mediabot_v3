@@ -159,4 +159,6 @@ $runtime->_present_sources([$sources->[0]],sub {$completed=shift});
 ok(!defined($completed),'real shortening worker does not complete synchronously in IRC parent');
 my $deadline=time+3;$loop->loop_once(0.02) while !defined($completed) && time<$deadline;
 is_deeply($completed,$shortened,'isolated presentation result returns to its parent');
+my $budget_probe=do './t/lib/MB1286SourceBudget.pl' or die $@||$!;
+$budget_probe->();
 done_testing;

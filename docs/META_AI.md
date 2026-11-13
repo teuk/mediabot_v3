@@ -493,6 +493,14 @@ with a very short tail are reflowed at a sentence/word boundary without content
 loss; styled replies retain the normal formatter.
 
 The sources message uses up to two evidence URLs actually selected by synthesis.
+Source URLs up to **140 UTF-8 bytes** are displayed unchanged. Longer URLs are
+eligible for private shortening, and an alias is used only when it is shorter
+than the original. Two 140-byte originals, maximum 48-byte site labels, styling
+and the French prefix fit within 399 of the 400 IRC payload bytes. An all-short
+batch needs no shortening worker or service request. Failures preserve the exact
+original URL, subject to the existing source-line budget; URLs are never cut.
+This threshold applies only to MetaAI source presentation.
+
 An isolated presentation worker reuses the configured `[shorturl]` service,
 shared cache, exact destination binding and failure circuit, with at most two
 shortening attempts and a seven-second worker deadline. These are presentation

@@ -16,7 +16,7 @@ use Mediabot::AI::MetaPolicy qw(settings fold clean safe_url);
 use Mediabot::AI::MetaMemory;
 use Mediabot::AI::MetaWeb;
 use Mediabot::AI::MetaChat;
-use Mediabot::AI::MetaReply qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label);
+use Mediabot::AI::MetaReply qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label source_requires_shortening);
 use Mediabot::AI::MetaKnowledge ();
 use Mediabot::AI::MetaActivation qw(channel_policy policy_epoch);
 
@@ -180,6 +180,9 @@ sub _present_sources {
     if ($self->{shorten_start}) {
         my $ok=eval {$self->{shorten_start}->($sources,$complete);1};
         $complete->({}) unless $ok;return;
+    }
+    unless (grep {ref($_) eq 'HASH' && source_requires_shortening($_->{url})} @$sources) {
+        $complete->({});return;
     }
     unless (shorturl_ready($self->{bot})) {$complete->({});return}
     my $loop=Mediabot::AI::Transport::usable_loop($self->{bot});

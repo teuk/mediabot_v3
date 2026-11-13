@@ -33,8 +33,8 @@ for my $bad (undef,{},[],q{},'javascript:alert(1)','https://www.franceinfo.fr@ev
 }
 
 my $sources=[
-    {id=>1,url=>'https://www.franceinfo.fr/article',title=>"Wrong title\x03".'04',site_name=>'Fake Brand'},
-    {id=>2,url=>'https://imaginaire.example.org/article',title=>'FranceInfo'},
+    {id=>1,url=>'https://www.franceinfo.fr/article/'.('x'x120),title=>"Wrong title\x03".'04',site_name=>'Fake Brand'},
+    {id=>2,url=>'https://imaginaire.example.org/article/'.('x'x120),title=>'FranceInfo'},
 ];
 my $urls=display_urls($sources,{mappings=>[
     {url=>$sources->[1]{url},display_url=>'https://teuk.org/shorturl/Ghijkm45'},
@@ -54,7 +54,7 @@ like($fr,qr/\ASources : \x0314FranceInfo/,'French prefix retains its spacing and
 my $translated=$fr;$translated=~s/\ASources : /Sources: /;
 is($translated,$line,'language does not change source attribution or URLs');
 my $fallback=Mediabot::AI::MetaRuntime::_source_line([$sources->[0]],'en',{});
-is($fallback,"Sources: \x0314FranceInfo\x0f https://www.franceinfo.fr/article",
+is($fallback,"Sources: \x0314FranceInfo\x0f ".$sources->[0]{url},
     'failed shortening retains labelled exact original URL without alias styling');
 my $untrusted=display_urls($sources,{mappings=>[
     {url=>$sources->[0]{url},display_url=>'https://evil.example.org/Abcdef23'},

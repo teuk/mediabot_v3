@@ -41,9 +41,9 @@ sub fixture846 {
     my $client=bless {calls=>[]},'MB846Client';
     my $r=Mediabot::AI::MetaRuntime->new(bot=>$bot,clock=>sub {1792400000},client_factory=>sub {$client},
         schedule_cb=>sub {push @timers,$_[1];die "private scheduler failure\n" if $mode eq 'throw';$mode ne 'refuse'},
-        web_start=>sub {$_[1]->({ok=>1,sources=>[{id=>1,url=>'https://www.franceinfo.fr/reference',
+        web_start=>sub {$_[1]->({ok=>1,sources=>[{id=>1,url=>'https://www.franceinfo.fr/reference/'.('x'x120),
             text=>'An official reference describes the current state and its documented observations.',kind=>'page_excerpt'}]});1},
-        shorten_start=>sub {$_[1]->({mappings=>[{url=>'https://www.franceinfo.fr/reference',
+        shorten_start=>sub {$_[1]->({mappings=>[{url=>'https://www.franceinfo.fr/reference/'.('x'x120),
             display_url=>'https://teuk.org/shorturl/Abcdef23'}]});1});
     $bot->{_meta_ai_runtime}=$r;return ($bot,$client,$r,$dir);
 }

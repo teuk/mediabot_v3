@@ -1,3 +1,10 @@
+## MB1286 — Keep compact MetaAI source URLs readable
+
+- Keep original source URLs through 140 UTF-8 bytes; shorten longer destinations only.
+- Skip the shortening worker for all-short batches and create the shortener only when needed.
+- Preserve original destinations on errors or when an alias saves no bytes.
+- Enforce the same threshold at presentation; retain citation binding and the 400-byte envelope.
+
 ## MB1285 — Mask IDENTIFY credentials before trailing arguments
 
 - Mask IDENTIFY/ID credentials at their account/password position instead of the last token.

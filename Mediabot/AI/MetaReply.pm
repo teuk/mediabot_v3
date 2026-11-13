@@ -7,7 +7,15 @@ use Exporter 'import';
 use Mediabot::AI::MetaPolicy qw(clean safe_url);
 use Mediabot::URLShortener qw(make_bot_shortener);
 use Mediabot::AI::IRCOutput qw(format_ai_reply);
-our @EXPORT_OK=qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label);
+our @EXPORT_OK=qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label source_requires_shortening);
+
+# Two 140-byte URLs plus two maximum 48-byte labels, their colour/reset
+# controls, spaces, separator and French prefix fit in 399 of 400 wire bytes.
+sub source_requires_shortening {
+    my ($url)=@_;
+    $url=safe_url($url);
+    return defined($url) && _utf8_text_bytes($url)>140 ? 1:0;
+}
 
 sub source_label {
     my ($url)=@_;
@@ -87,15 +95,20 @@ sub shorten_sources {
     my (%args)=@_;my $sources=$args{sources};
     return {mappings=>[],events=>[]} unless ref($sources) eq 'ARRAY';
     my @events;
-    my $shorten=make_bot_shortener(bot=>$args{bot},allow_legacy=>0,
+    my $shorten;
+    my $factory=sub {make_bot_shortener(bot=>$args{bot},allow_legacy=>0,
         (exists($args{http})?(http=>$args{http}):()),
-        on_event=>sub {push @events,$_[0] if ref($_[0]) eq 'HASH' && @events<4});
+        on_event=>sub {push @events,$_[0] if ref($_[0]) eq 'HASH' && @events<4})};
     my (@mappings,%seen);
     for my $source (@$sources) {
         next unless ref($source) eq 'HASH';my $url=safe_url($source->{url});
         next unless $url && !$seen{$url}++;
-        my $display=eval {$shorten->($url)};
-        $display=$url unless defined($display) && !ref($display) && length($display);
+        my $display=$url;
+        if (source_requires_shortening($url)) {
+            $display=eval {($shorten ||= $factory->())->($url)};
+        }
+        $display=$url unless defined($display) && !ref($display) && length($display)
+            && _utf8_text_bytes($display)<_utf8_text_bytes($url);
         push @mappings,{url=>$url,display_url=>$display};
         last if @mappings>=2;
     }
@@ -115,7 +128,8 @@ sub display_urls {
         next unless defined($display) && !ref($display) && safe_url($display);
         next unless $display eq $original || (length($base)
             && $display =~ m{\A\Q$base\E[23456789A-HJ-NP-Za-km-z]{8,16}\z});
-        $urls{$original}=$display;
+        $urls{$original}=source_requires_shortening($original)
+            && _utf8_text_bytes($display)<_utf8_text_bytes($original) ? $display:$original;
     }
     return \%urls;
 }
