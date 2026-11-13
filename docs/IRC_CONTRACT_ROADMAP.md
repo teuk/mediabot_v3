@@ -1,5 +1,8 @@
 # IRC contract roadmap — Eggdrop comparison
 
+Current continuation: [qualification roadmap](QUALIFICATION_ROADMAP.md), accepted
+on 2026-11-13. The five assessment verdicts below retain their bounded scope.
+
 Accepted by the maintainer on 2026-11-12. This is the active continuation after
 the bounded architecture chapter. Baseline: Mediabot commit
 `09ec3c828f376d8d143d298ad28d68923a68c4a1` (MB1255).

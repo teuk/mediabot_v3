@@ -299,3 +299,11 @@ A contribution should say what changed, why, what remains compatible and how it
 was checked. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the PR checklist,
 [the plugin workshop](PLUGIN_WORKSHOP.md) for a first package, and
 [the command inventory](generated/COMMAND_INVENTORY.md) for existing entry points.
+
+## Qualification campaign
+
+Follow [the five-step qualification roadmap](QUALIFICATION_ROADMAP.md).
+`python3 tools/qualification/run.py --lane preflight --output /tmp/mb-preflight`
+checks committed HEAD in a disposable source clone. Use a new report directory
+and pass `--perl-lib "$PWD/local/lib/perl5"` when using local dependencies.
+This does not install modules or replace precommit checks of working changes.

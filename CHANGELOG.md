@@ -1,3 +1,11 @@
+## MB1291 — Establish isolated qualification and its five-step roadmap
+
+- Record the accepted five-step qualification campaign and explicit completion gates.
+- Qualify committed sources in disposable clones without untracked deployment files.
+- Distinguish unavailable dependencies from failed tests and preserve visible progress.
+- Write exclusive structured reports and bound each validation stage.
+- Keep dependency provisioning and native IRC journeys explicitly pending.
+
 ## MB1290 — Recognize every supported channel in achievement views
 
 - Use the shared channel classifier for progress eligibility, reply routing and next goals.
