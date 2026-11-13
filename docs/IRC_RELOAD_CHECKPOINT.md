@@ -27,7 +27,7 @@ Conf's prepare-then-publish boundary validates parser success and unchanged file
 revision, not the semantics of every subsystem setting. A syntactically valid
 configuration can still fail later initialization. At the reviewed MB1278 base, logging reload closed the old raw LOG handle before
 opening the replacement; MB1279 fixes that local publication boundary (see below).
-Channel rebuild still clears the channel map before repopulation. Failed rehash must not be described
+MB1280 subsequently stages channel reads before publication (see below). Failed rehash must not be described
 as leaving all runtime state unchanged. These source-level limitations are
 recorded for a separate transactional-rehash improvement, not silently repaired
 by this documentation increment.
@@ -103,3 +103,35 @@ Local validation passes 218 targeted assertions and 6,128 fast-lane assertions.
 Package application/reversal, rejection guards and the native commit.sh path were
 exercised with a local-only remote. Targeted and one full installed-host suite
 remain required before the real commit; no complete local suite is claimed.
+
+
+## MB1280 — Preserve the live channel snapshot on read failure
+
+Base `d65eb0d1c7b7e9a6b68ec45d33705c854f0f2f09` is committed MB1279;
+every tracked file matches the supplied 2026-11-13 13:47:09 snapshot.
+Rebuild previously cleared channels before SELECT, ignored population failure
+and could report success after losing the old map. A partial fetch could also
+publish an incomplete replacement.
+
+`populateChannels` accepts an optional destination and explicitly reports success.
+Ordinary no-argument callers retain their existing map and canonical lower-case
+keys. Rehash supplies a separate map and publishes it only after iteration and
+statement completion succeed. DBI fetch errors with RaiseError off are checked
+before finish can clear them. A genuinely empty successful read publishes an
+empty map; a failed read does not. Nicklist timer setup is not reached on read
+failure. Existing exception propagation is retained.
+
+The extended case 625 replays the exact extracted owner methods with controlled
+statement, channel-constructor and timer collaborators: prepare/execute refusal,
+partial fetch exception/error, finish exception/refusal, successful and empty
+reads. It checks live-map identity during iteration, retained timers on failure
+and publication before one timer rebuild on success. These 48 assertions include
+21 failures on the baseline. Cases 622/625 pass 82 assertions locally. This is
+not native DBI/core integration coverage; local DBI is unavailable. Host case 65
+provides the existing native SQLite/channel integration, followed by one full
+suite before commit. No local full-suite pass is claimed.
+
+Limits: this does not roll back earlier config/log phases, atomically rebuild
+timers, or make logging callbacks transactional. A timer-setup failure after a
+successful cache publication remains a separate lifecycle concern. No schema,
+service, live DB or configuration action is performed by the package.

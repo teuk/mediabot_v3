@@ -26,7 +26,7 @@ return sub {
     # --- 1. populateChannels indexe en lc ----------------------------------
     my $med = _slurp_625(File::Spec->catfile('.', 'Mediabot', 'Mediabot.pm'));
     (my $med_code = $med) =~ s/^\s*#.*$//mg;
-    $assert->like($med_code, qr/\{channels\}\{ lc\(\$ref->\{name\}\) \} = \$channel_obj;/,
+    $assert->like($med_code, qr/\$destination->\{ lc\(\$ref->\{name\}\) \} = \$channel_obj;/,
         'populateChannels indexe par lc(name)');
     $assert->unlike($med_code, qr/\{channels\}\{ \$ref->\{name\} \}/,
         'plus d\'indexation par le nom exact DB');
@@ -58,4 +58,6 @@ return sub {
     $assert->is($channels{ lc('#TEUK') }, 'from-db', 'lookup MAJUSCULES -> trouvé');
     $assert->is(scalar(keys %channels), 1, 'une seule clé pour un canal (pas de doublon)');
 
+    my $reload = do './t/lib/MB1280ChannelReload.pl' or die $@ || $!;
+    $reload->($assert);
 };

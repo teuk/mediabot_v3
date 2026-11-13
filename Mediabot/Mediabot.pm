@@ -944,10 +944,10 @@ sub rebuild_channel_cache {
     my ($self) = @_;
 
     $self->{logger}->log(1, "Rebuilding channel cache from database");
-    $self->{channels} = {};
-
-    # Populate channels from DB
-	$self->populateChannels();
+    # Stage a complete replacement before changing live channels or timers.
+    my $channels = {};
+    return unless $self->populateChannels($channels);
+    $self->{channels} = $channels;
 
 	# Start per-channel nicklist refresh timers
 	$self->setup_channel_nicklist_timers();
@@ -1253,7 +1253,8 @@ sub init_log {
 
 # Populate the channels from the database and create Channel objects
 sub populateChannels {
-    my ($self) = @_;
+    my ($self, $destination) = @_;
+    $destination //= ($self->{channels} //= {});
 
     $self->{logger}->log( 3, "populateChannels: Populating channels from database");
 
@@ -1289,14 +1290,22 @@ sub populateChannels {
         # les lookups par nom reçu d'IRC/utilisateur (casse libre, wrappés lc)
         # doivent toujours le trouver. Le nom d'affichage canonique reste dans
         # l'objet (get_name).
-        $self->{channels}{ lc($ref->{name}) } = $channel_obj;
+        $destination->{ lc($ref->{name}) } = $channel_obj;
     }
 
-    $sth->finish;
+    # DBI returns undef for both EOF and a failed fetch with RaiseError off.
+    # Capture the error before finish can clear the diagnostic.
+    my $fetch_error = $sth->err;
+    my $finished = $sth->finish;
+    if ($fetch_error || !$finished) {
+        $self->{logger}->log(1, "Channel cache read did not complete");
+        return;
+    }
 
     if ($i == 0) {
         $self->{logger}->log( 0, "No channel found in database.");
     }
+    return 1;
 }
 
 # Clean up resources and exit the program with the given return value

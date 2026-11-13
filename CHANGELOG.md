@@ -1,3 +1,10 @@
+## MB1280 — Preserve channels after failed rehash reads
+
+- Build a separate channel snapshot before replacing the active cache.
+- Refuse prepare/execute/fetch/finish failures without rebuilding nicklist timers.
+- Distinguish a successful empty table from failed or partial reads.
+- Preserve canonical channel keys and the default population path.
+
 ## MB1279 — Preserve active logs after rejected rehash
 
 - Prepare the raw log handle and object logger before replacing either live owner.
