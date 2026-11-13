@@ -24,7 +24,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
-| 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered: MB1268 reproduces FIFO control traffic behind a transport backlog with native dependencies. MB1269 adds PONG priority before native write admission; host acceptance pending. Aggregate caps, keepalive PING timing and rate penalties remain open. See the row-3 increments below. |
+| 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered, bounded checkpoint MB1270: MB1269 PONG priority is committed; receipt/recovery probes document the remaining queue-cap, penalty and keepalive limits. No global backpressure guarantee. Next assess row 4; carry keepalive recovery into row 5. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
 
@@ -637,3 +637,79 @@ assertions and runtime files. The corrected native case passes on both 0.804 and
 0.805; expanded 18-case validation and one full host suite remain commit gates.
 The repair package accepts only the exact uncommitted R1 state on the same base;
 it does not reapply the original patch or overwrite unrelated edits.
+
+
+## MB1270 — Keepalive receipts and bounded traffic-pressure checkpoint
+
+Base `f55329861736405da97a49eb219316712439eac7` is committed MB1269 R2 and
+matches every tracked file of the supplied 2026-11-13 05:35:24 snapshot. The
+maintainer accepted continuation after that delivery; commit presence does not
+supply an exact host test total or establish that the service loaded this code.
+The earlier architecture chapter remains closed.
+
+### What the native timer actually measures
+
+[irc-keepalive-probe.pl](../tools/dev/irc-keepalive-probe.pl) uses two local AF_UNIX
+socket pairs, native IO::Async timers, the real parser and public write Futures.
+It neither logs in nor reads configuration nor contacts a server. Its observer
+subclass records PING receipts and forwards every write unchanged. The stalled
+peer initially does not read: 256 ordinary frames exceed a 4096-byte requested
+send buffer. At the native timeout callback, the last payload and PING receipts
+are pending and the bytes already available to the peer contain no PING. Reading
+then resumes: all 256 frames and the single PING survive, in ordinary FIFO order,
+and their receipts complete. A separate responsive peer answers the actual PING
+through the socket and produces one on_pong_reply without a timeout.
+
+Commands (run from the repository root):
+
+```bash
+perl -I. tools/dev/irc-keepalive-probe.pl
+perl -I. tools/dev/irc-keepalive-probe.pl --mediabot
+python3 tools/dev/test_irc_keepalive_probe.py
+```
+
+The probe configures a 0.01-second idle delay, 0.03-second stalled-peer response
+deadline and a two-second responsive-peer deadline, with a ten-second process
+ceiling. It asserts event/receipt ordering, not elapsed performance. Those values
+are probe-only; production defaults are unchanged. Tests characterize the current
+behavior explicitly and must be revisited if that dependency contract changes.
+Local tests pass with Net::Async::IRC 0.12, Protocol::IRC 0.13 and IO::Async 0.804
+and 0.805. The existing PONG priority probe remains a separate regression gate.
+
+In Net::Async::IRC::Protocol 0.12, the idle timer calls send_message(PING), records
+ping_send_time and immediately starts pongtimer. It does not wait for the returned
+flush Future. on_message_PONG calculates lag from that timestamp. Thus the budget
+and reported lag can include local output waiting; the timeout is not proof that
+a flushed PING went unanswered. The timeout callback itself does not close the
+stream. Source review of the native builder and Mediabot modules found no configured
+on_ping_timeout callback. This probe intentionally installs one to observe the
+event; it does not demonstrate production reconnection or a real incident.
+
+### Row-3 verdict: partly covered, with explicit limits
+
+| Guarantee | Evidence | Disposition |
+| --- | --- | --- |
+| Automatic PONG passes pending ordinary whole frames | MB1269 native socket-pair tests; installed dependency probe | Implemented; active/native bytes and raw-write barriers remain limits. |
+| Ordinary ordering, flush receipts and old-transport retirement | MB1269 cases 1313/858/1223 and native probe | Covered for the tested paths; not server processing acknowledgements. |
+| Whole-connection bounded memory | DeferredOutput has a per-target cap; Transport/PacedOutput have no aggregate cap | Not guaranteed. Explicit residual, no silent-drop cap added. |
+| Keepalive timeout means the peer ignored a sent PING | MB1270 stalled socket and receipt probe | Not guaranteed: local waiting counts. Recovery policy remains for row 5. |
+| Network-specific flood penalties | Native FIFO/admission plus opt-in channel AntiFlood | No equivalent global penalty scheduler; explicitly outside this bounded correction. |
+
+Overflow decision: preserve current admission semantics in this delivery. Ordinary
+Sender calls use void context unless write_futures is requested; Update's final
+notification does request receipts. Fullop::_send, raw DB timer commands and
+Partyline .raw also reach the same transport. A new failed Future alone would not
+notify every void-context caller. Silent dropping, arbitrary disconnect-on-full
+and prioritizing all MODE/KICK writes are therefore not introduced as incidental
+fixes. Bounded global admission needs its own caller-visible rejection policy;
+its absence remains a reliability limitation, not a claim of Eggdrop parity.
+No live traffic measurement or server penalty calibration was performed.
+
+This is a tooling/documentation checkpoint, not another runtime refactor. Verify
+the two probe transports and their tests on the host, then use the existing
+commit.sh. No full bot suite is required for these non-runtime files. The fixed
+five-row scope is unchanged: proceed to row 4's authority/revocation audit, then
+row 5's reload/recovery verdict. Row 5 must explicitly decide how to detect a
+stalled/silent connection without mistaking an unflushed PING for a peer failure;
+do not infer recovery merely from the dependency's callback name. The overall
+roadmap is not complete, and global backpressure remains explicitly unimplemented.

@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1270 — Distinguish queued keepalive from peer silence
+
+- Add an offline socket-pair probe with native timers and write receipts: stalled
+  output can exhaust the PONG deadline before its PING reaches the peer.
+- Verify intact recovery and a responsive peer against both transport classes;
+  retain the existing PONG-priority probe unchanged.
+- Record the bounded traffic-pressure verdict and explicit overflow, penalty and
+  keepalive-recovery limits. No runtime, configuration or service behavior changes.
+
 ### MB1269 — Let PONG pass pending ordinary output
 
 - R2: scope the pacing test's zero-delay timer override to its own fixtures;
