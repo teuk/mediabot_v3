@@ -146,10 +146,11 @@ sub mbHoroscope_ctx {
     }
     my $target = (!$forced_sign && @args) ? lc($args[0]) : lc($nick);
 
-    my $reply_to = ($channel && $channel =~ /^#/) ? $channel : $nick;
+    my $is_channel = Mediabot::Helpers::isIrcChannelTarget($channel);
+    my $reply_to = $is_channel ? $channel : $nick;
 
     # mb118-IMP2: gate par chanset +Games sur canal public (PM toujours autorisé)
-    if ($channel && $channel =~ /^#/) {
+    if ($is_channel) {
         unless (Mediabot::Helpers::chanset_enabled($self, $channel, 'Games', default => 1)) {
             botNotice($self, $nick, "Games are disabled on $channel (chanset -Games)");
             return;
@@ -463,7 +464,7 @@ sub mbHoroscope_ctx {
     # (le compteur memoire reste pour les instances sans systeme
     # d'achievements, et pour ne rien changer au reste du code).
     $self->{_horoscope_count}{$nick}++;
-    if ($self->{achievements} && $channel =~ /^#/) {
+    if ($self->{achievements} && $is_channel) {
         my $count = _ach_progress($self, 'horoscope', $nick, $channel)
                  // ($self->{_horoscope_count}{$nick} // 0);
         eval { $self->{achievements}->check_horoscope($nick, $channel, $count) };

@@ -199,4 +199,7 @@ ok($http_opts[-1]{verify_SSL},'ordinary horoscope fetch verifies TLS');
     like($intents->[0][2],qr/\Q$translated\E/,'worker intent contains actual translated forecast');
     is($intents->[0][0],'privmsg','worker preserves ordinary PRIVMSG output');
 }
+my $scope_probe = do './t/lib/MB1288HoroscopeScope.pl';
+die($@ || $! || 'Cannot load horoscope scope probe') unless $scope_probe;
+$scope_probe->();
 done_testing();

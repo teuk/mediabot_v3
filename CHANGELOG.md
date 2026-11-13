@@ -1,3 +1,10 @@
+## MB1288 — Respect horoscope channel scope consistently
+
+- Use the shared IRC target classifier for Games permission, reply routing and achievements.
+- Apply channel rules to &, ! and + targets as well as # channels.
+- Preserve private replies without warnings or channel achievement attribution.
+- Cover every supported channel prefix with Games enabled and disabled.
+
 ## MB1287 — Reject birthday digits that Perl cannot interpret
 
 - Require ASCII digits in command dates, Gregorian validation and stored date parsing.
