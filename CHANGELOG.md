@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1268 — Expose the control-traffic transport boundary
+
+- Add an offline native-transport probe for automatic PONG and MODE behind a
+  preview-sized write backlog, retaining payload and flush-Future checks.
+- Record dependency versions, application queue limits and the reproduced FIFO
+  boundary in the IRC roadmap; define the next bounded priority correction.
+- Leave runtime behavior unchanged until the scheduling contract is validated.
+
+
 ### MB1267 — Retire Fullop observations when channel membership ends
 
 - Reset only the departed channel's observed modes and pending delegated-ban

@@ -24,7 +24,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
-| 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Not assessed. Trace Net::Async::IRC as well as Mediabot. |
+| 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered: MB1268 reproduces FIFO control traffic behind a transport backlog with native dependencies. No priority guarantee; host dependency characterization pending. See the bounded row-3 audit below. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
 
@@ -483,3 +483,75 @@ acceptance. Keep the verdict partly covered and retain these limits. Next work
 moves to row 3: trace the actual Net::Async::IRC output queue and Mediabot control
 traffic under load. Rows 4–5 still require explicit verdicts. The roadmap is not
 declared complete and the architecture extraction chapter remains closed.
+
+
+## MB1268 — Characterize control traffic at the real transport boundary
+
+Base `79fcb05ddb8afe16635cb9b19c30293599c350d0` (MB1267) matches every tracked
+file in the supplied 2026-11-13 04:38:50 snapshot. Commit presence is not a
+numerical host-suite result or a claim about the running service.
+
+Expected contract: pending previews must not indefinitely postpone automatic
+PONG or urgent control traffic. Complete reply frames retain their order;
+write-completion Futures must retain their meaning. Already-written TCP bytes
+cannot be overtaken. Control priorities cannot compensate for a blocked event
+loop or a genuinely unwritable socket.
+
+### Owners and observed boundaries
+
+| Owner | Existing behavior | Limit of the guarantee |
+| --- | --- | --- |
+| `IRC::Sender` | Sanitizes/splits output and calls `do_PRIVMSG` / `do_NOTICE`; opt-in callers retain write Futures | AntiFlood admission applies to enabled channels, not every transport write |
+| `IRC::DeferredOutput` | At most 30 physical lines per target, shared response expiry after 120 seconds | This is an application queue, not the socket write queue or a connection-wide cap |
+| `IRC::PacedOutput` | Explicit paced PRIVMSG batches; NOTICE calls truncate to 16 lines; transport retirement revokes pending work | No aggregate batch cap was found in `_queue_irc_chunks`; 16 NOTICE lines is per call |
+| `Protocol::IRC` 0.13 | Automatic PING handler sends PONG through `send_message`, which calls `write` | No separate control priority in this path |
+| `IO::Async::Stream` 0.805 | `write` appends a Writer; flushing consumes queue heads; scalar calls return flush Futures | A write chunk size is not an IRC flood penalty or an aggregate queue cap |
+
+Main `_build_irc` constructs `Net::Async::IRC` without a custom output scheduler.
+Native dependency sources examined: [Net-Async-IRC 0.12](https://metacpan.org/release/PEVANS/Net-Async-IRC-0.12),
+[Protocol-IRC 0.13](https://metacpan.org/release/PEVANS/Protocol-IRC-0.13), and
+[IO-Async 0.805](https://metacpan.org/release/PEVANS/IO-Async-0.805).
+The cpanfile does not pin these versions; run the probe on the installed host
+before treating this dependency combination as its actual behavior.
+The previously inspected pinned Eggdrop server queues explicitly distinguish
+mode/normal/help work and calculate penalties. This comparison does not establish
+that Eggdrop can overtake bytes already written to TCP either.
+
+### Reproduction and evidence
+
+Run `perl tools/dev/irc-control-probe.pl`. It uses a local AF_UNIX socket pair,
+real Net::Async::IRC and its inherited parser/automatic PONG handler. It does not
+connect, resolve DNS, log in, load bot configuration or send anything to IRC.
+It queues 256 synthetic preview-sized PRIVMSG frames before running the loop,
+checks the final payload's flush Future is still pending, feeds PING through
+`on_read`, and queues MODE plus a terminating NOTICE. It then drains the peer.
+This deliberately models a burst accepted before the next loop turn, not a
+measured live server flood or a benchmark of network latency.
+
+Local result: Net::Async::IRC 0.12 / Protocol::IRC 0.13 / IO::Async::Stream 0.805:
+256 preview frames precede PONG, and 256 precede MODE. All payloads are intact
+and ordered, exactly one automatic PONG and MODE arrive, and write Futures
+complete after draining. The probe has a ten-second fail-fast deadline and
+fails on malformed/lost output. Its JSON reports observed positions rather than
+asserting that FIFO is desirable; a future correct priority implementation
+should not be rejected merely because the positions improve.
+
+Verdict: partly covered, with a reproduced absence of control priority at this
+boundary. No live timeout, lost moderation action, or memory incident is claimed.
+This diagnostic/documentation delivery changes no runtime policy. Its native
+probe and patch-tool tests passed locally; host characterization is still pending.
+Earlier paced/deferred retirement coverage is relevant but does not prove every
+raw transport writer has a safe reconnect policy.
+
+### Next bounded implementation and exit gate
+
+Design a connection-owned admission/scheduling boundary before Stream::write.
+Start with preserving automatic PONG progress through a sustained ordinary-output
+backlog. Explicitly cover write Futures, whole-frame order, bounded ordinary
+queues, failure/cancellation and retirement on transport replacement. Do not
+manipulate IO::Async's private Writer queue, silently drop accepted durable work,
+or classify every command as urgent. Preserve login/service and MODE/KICK order.
+Inventory raw `write` callers as well as `send_message` callers before wiring it.
+Keep broader rate/penalty tuning separate from the first priority correction.
+Then give row 3 its final bounded verdict and proceed to rows 4 and 5; this audit
+does not reopen the earlier architecture chapter or expand the five-row exit gate.
