@@ -62,6 +62,7 @@ use Mediabot::RandomQuote::Runtime;
 use Mediabot::Diagnostics::Publisher;
 use IO::Async::Timer::Countdown;
 use Net::Async::IRC;
+use Mediabot::IRC::Transport ();
 use utf8;
 use Encode qw(encode);
 
@@ -2893,7 +2894,7 @@ sub _build_irc {
 
     my $bind_ip = $mediabot->{conf}->get('connection.CONN_BIND_IP');
 
-    my $irc = Net::Async::IRC->new(
+    my $irc = Mediabot::IRC::Transport->new(
         on_message_text                  => \&on_private,
         on_message_motd                  => \&on_motd,
         on_message_INVITE                => \&on_message_INVITE,

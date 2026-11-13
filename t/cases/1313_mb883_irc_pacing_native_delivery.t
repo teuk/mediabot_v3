@@ -17,9 +17,10 @@ sub finish_loop {
     for (1 .. 30) {last unless timer_count($loop); $loop->loop_once(0.01)}
     is(timer_count($loop), 0, 'all native paced countdowns complete and detach within the bounded drain');
 }
+my $original_new = IO::Async::Timer::Countdown->can('new');
+{ # Keep accelerated countdowns local to the pacing fixtures.
 no warnings qw(redefine once);
 my (@requested_delays, @callbacks);
-my $original_new = IO::Async::Timer::Countdown->can('new');
 local *IO::Async::Timer::Countdown::new = sub {
     my ($class, %args) = @_;
     push @requested_delays, $args{delay}; push @callbacks, $args{on_expire};
@@ -141,4 +142,9 @@ MB881OutputFixture::with_policy(sub {
     is_deeply([map {$_->{text}} @{$fresh->{wire}}], [qw(new1 new2)],
         'the old pump cannot append to or remove the replacement batch');
 });
+} # Restore native timers before testing the actual IRC transport.
+is(IO::Async::Timer::Countdown->can('new'), $original_new,
+    'native transport starts after the pacing timer override has been restored');
+do './t/lib/MB1269TransportProbe.pl' or die $@ || $!;
+
 done_testing;

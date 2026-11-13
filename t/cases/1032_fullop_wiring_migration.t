@@ -92,7 +92,7 @@ like($docs, qr/`PREFIX` distinguishes member statuses from list modes, especiall
 like($docs, qr/lasts five seconds.*?same channel and literal target host.*?first matching service `\+b`/s,
     'documentation fixes the one-shot causal service boundary');
 
-like($main, qr/sub _build_irc \{\s*my \(\$loop\) = \@_;.*?\$mediabot->\{fullop\}->reset_connection\(\) if \$mediabot->\{fullop\};.*?Net::Async::IRC->new/s,
+like($main, qr/sub _build_irc \{\s*my \(\$loop\) = \@_;.*?\$mediabot->\{fullop\}->reset_connection\(\) if \$mediabot->\{fullop\};.*?Mediabot::IRC::Transport->new/s,
     'fresh transport construction resets Fullop before new IRC registration');
 is(scalar(() = $main =~ /_build_irc\(\$loop\)/g), 3,
     'shared builder is documented and used for initial connection and reconnect');

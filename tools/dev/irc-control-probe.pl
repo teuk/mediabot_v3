@@ -7,6 +7,15 @@ use IO::Async::Loop;
 use IO::Async::Stream;
 use Net::Async::IRC;
 use JSON::PP;
+use Getopt::Long qw(GetOptions);
+my $mediabot_transport = 0;
+GetOptions('mediabot' => \$mediabot_transport) && !@ARGV
+    or die "Usage: perl -I. tools/dev/irc-control-probe.pl [--mediabot]\n";
+my $class = 'Net::Async::IRC';
+if ($mediabot_transport) {
+    require Mediabot::IRC::Transport;
+    $class = 'Mediabot::IRC::Transport';
+}
 
 local $SIG{ALRM} = sub { die "Offline transport probe exceeded 10 seconds\n" };
 alarm 10;
@@ -15,7 +24,7 @@ socketpair(my $client, my $peer, AF_UNIX, SOCK_STREAM, PF_UNSPEC)
 setsockopt($client, SOL_SOCKET, SO_SNDBUF, pack('i', 4096))
     or die "SO_SNDBUF: $!";
 my $loop = IO::Async::Loop->new;
-my $irc = Net::Async::IRC->new(handle => $client);
+my $irc = $class->new(handle => $client);
 $loop->add($irc);
 my $count = 256;
 my @expected;
@@ -68,6 +77,7 @@ $irc->close_now;
 $reader->close_now;
 alarm 0;
 print JSON::PP->new->canonical->pretty->encode({
+    transport => $class,
     net_async_irc => "$Net::Async::IRC::VERSION",
     protocol_irc => "$Protocol::IRC::VERSION",
     io_async_stream => "$IO::Async::Stream::VERSION",

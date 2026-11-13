@@ -37,7 +37,8 @@ use TestLoopWait qw(wait_for);
 
 {
     package MB673WireIRC;
-    use parent 'Net::Async::IRC';
+    use parent 'Mediabot::IRC::Transport';
+    use mro 'c3';
     # The local socket pair stands in for an already connected IRC server.
     sub is_connected { defined $_[0]->write_handle }
 }

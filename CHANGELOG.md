@@ -1,5 +1,18 @@
 ## [Unreleased] — 3.8dev
 
+### MB1269 — Let PONG pass pending ordinary output
+
+- R2: scope the pacing test's zero-delay timer override to its own fixtures;
+  restore native keepalive timers before the transport replay (0.804 and 0.805).
+
+- Add connection-owned admission before the native write queue: automatic PONG
+  may overtake pending whole frames while ordinary output retains FIFO order.
+- Preserve per-write flushing Futures, callback delivery and graceful closure;
+  retire old active/pending output after publishing a replacement transport.
+- Exercise the real transport with socket pairs and extend the offline probe
+  to compare native and Mediabot behavior. No rate or overflow policy change.
+
+
 ### MB1268 — Expose the control-traffic transport boundary
 
 - Add an offline native-transport probe for automatic PONG and MODE behind a

@@ -24,7 +24,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | --- | --- | --- | --- |
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
-| 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered: MB1268 reproduces FIFO control traffic behind a transport backlog with native dependencies. No priority guarantee; host dependency characterization pending. See the bounded row-3 audit below. |
+| 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered: MB1268 reproduces FIFO control traffic behind a transport backlog with native dependencies. MB1269 adds PONG priority before native write admission; host acceptance pending. Aggregate caps, keepalive PING timing and rate penalties remain open. See the row-3 increments below. |
 | 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Not assessed. No permission bypass is claimed. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
 
@@ -555,3 +555,85 @@ Inventory raw `write` callers as well as `send_message` callers before wiring it
 Keep broader rate/penalty tuning separate from the first priority correction.
 Then give row 3 its final bounded verdict and proceed to rows 4 and 5; this audit
 does not reopen the earlier architecture chapter or expand the five-row exit gate.
+
+
+## MB1269 — Automatic PONG bypasses pending ordinary output
+
+Base `887fcd563f6e5dd66b6f2b0cc3895e32eb1e01f3` is committed MB1268 and matches every tracked file of the supplied
+2026-11-13 04:57:52 snapshot. This is not evidence of activation or a numerical
+host acceptance result.
+
+[Transport](../Mediabot/IRC/Transport.pm) subclasses the actual Net::Async::IRC
+client with C3 method resolution, preserving inherited protocol serialization,
+login and automatic PING handling. It admits one write at a time to the native
+Stream and chooses complete PONG frames ahead of not-yet-admitted ordinary work.
+It never inspects or edits IO::Async's private Writer queue. All ordinary frames
+retain FIFO ordering: MODE, KICK, service login, PRIVMSG and NOTICE are deliberately
+not promoted. Already-written bytes and the active write cannot be overtaken.
+
+Raw writes used by DBCommands timers and Partyline .raw go through the same
+boundary. An opaque producer, partial line or multi-line write disables overtaking
+for that transport; it remains FIFO rather than inserting a PONG into an unknown
+frame boundary. Calls before loop attachment retain native behavior and are not
+covered by the priority guarantee. Main constructs and attaches the transport
+before login. Inherited automatic keepalive PING timing is not changed here.
+
+Each returned Future resolves only after its own native write finishes; failed
+or retired work is failed, never marked delivered. Cancelling a caller's Future
+continues to cancel observation rather than retract already-accepted bytes.
+Native on_write/on_flush callbacks remain in use. Pumping happens on a later
+loop turn, outside native flush callbacks; recursive sends cannot corrupt the
+native writer or overtake earlier ordinary output. Graceful close drains the
+application queue before closing; immediate close revokes it. Throwing close-time
+consumer callbacks are reported after cleanup rather than stranding later work.
+
+The shared [builder](../mediabot.pl) now creates this transport.
+[setIrc](../Mediabot/Mediabot.pm) publishes the successor before retiring the old
+transport; its active and pending writes cannot resume on the new connection.
+Legacy/custom transports without retire_output retain the existing path. This
+is connection-output retirement, not a new whole-bot shutdown coordinator.
+
+Reproduction: `perl -I. tools/dev/irc-control-probe.pl` retains the MB1268 native
+baseline. Add `--mediabot` for the production adapter. With Net::Async::IRC 0.12,
+Protocol::IRC 0.13 and IO::Async::Stream 0.805, the same 256-frame test changes
+from 256 earlier PRIVMSG frames to one before PONG. MODE still follows all 256;
+payloads and write acknowledgements remain intact. This proves an offline burst
+boundary, not a wall-clock latency guarantee, a server penalty model or a live
+incident repair. A blocked event loop/unwritable socket still delays control.
+
+The existing native pacing case 1313 now includes the socket-pair regressions
+in [MB1269TransportProbe](../t/lib/MB1269TransportProbe.pl): priority with/without
+autoflush, FIFO, per-write Futures, cancellation, callbacks, graceful/immediate
+closure, native write failure, recursive completion, raw barriers and setIrc.
+Cases 858 and 1223 now use the production adapter for update write receipts and
+authentication protocol dispatch respectively. Standalone checks exercise 38
+assertions; the native case also executes three actual Mediabot integration
+checks. After installing missing local dependencies, all 18 targeted cases pass
+1,779 assertions, including those integration checks. Native mediabot.pl and
+Mediabot.pm syntax checks also pass. Earlier dependency-blocked attempts are not
+counted as passes. Host syntax, the same targeted lane and one complete suite
+remain mandatory before commit. No full local suite or restart is claimed.
+
+Remaining row-3 scope: this preserves the existing absence of an aggregate
+transport byte/count cap; it does not claim bounded memory under indefinite
+producers. Select overflow semantics with durable-write callers before adding
+such a cap. Also evaluate keepalive PING timeout start versus actual write and
+network penalty/rate control. These are explicit residuals, not silently solved
+by PONG priority. Continue within row 3, then assess authority and recovery rows
+4–5; the finite roadmap exit gate is unchanged.
+
+
+### MB1269 R2 — Restore native timers between test fixtures
+
+Host validation stopped before commit: case 1313 failed its MODE/NOTICE tail
+checks. Reproduced with IO::Async 0.804: the unexpected final frame was a PING,
+not an inversion of the two commands. The preceding pacing fixture had localized
+Countdown::new to force delay=0 for the entire test file; the newly appended
+transport probe inherited that override and immediately fired its keepalive.
+
+R2 scopes that override to the original pacing checks and asserts that the native
+constructor is restored before the transport probe. It preserves all wire-order
+assertions and runtime files. The corrected native case passes on both 0.804 and
+0.805; expanded 18-case validation and one full host suite remain commit gates.
+The repair package accepts only the exact uncommitted R1 state on the same base;
+it does not reapply the original patch or overwrite unrelated edits.

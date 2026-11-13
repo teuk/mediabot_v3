@@ -3,7 +3,7 @@ use warnings;
 use Test::More;
 use lib '.', 't/lib';
 use IO::Async::Loop;
-use Net::Async::IRC;
+use Mediabot::IRC::Transport;
 use Protocol::IRC::Message;
 use Mediabot::Mediabot;
 use Mediabot::Update;
@@ -20,7 +20,7 @@ sub extract {
 }
 {package XH838Conf;sub get{$_[0]{$_[1]}}}
 {package XH838Log;sub log{push @{$_[0]{lines}},$_[2];1}}
-{package XH838IRC;use mro 'c3';our @ISA=('Net::Async::IRC');sub is_connected{1}sub send_message{push @{$_[0]{sent}},[@_[1..$#_]];1}}
+{package XH838IRC;use mro 'c3';our @ISA=('Mediabot::IRC::Transport');sub is_connected{1}sub send_message{push @{$_[0]{sent}},[@_[1..$#_]];1}}
 {package XH838Channel;sub get_description{$_[0]{description}}sub get_name{$_[0]{name}}sub get_key{''}sub get_auto_join{1}}
 {package XH838Bot;our @ISA=('Mediabot');sub getServerHostname{'server.undernet.org'}sub onStartTimers{1}sub setLastRandomQuote{1}
  sub joinChannels{$_[0]{joined}++}sub joinChannel{push @{$_[0]{console}},$_[1]}sub getWhoisVar{$_[0]{whois_vars}||{}}sub get_user_from_whois{$_[0]{legacy_auth_lookup}++;return undef}

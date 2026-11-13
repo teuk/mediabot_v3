@@ -1754,6 +1754,7 @@ sub refresh_channel_hashes {
 sub setIrc {
     my ($self, $irc) = @_;
     if ((refaddr($self->{irc}) // 0) != (refaddr($irc) // 0)) {
+        my $old_irc = $self->{irc};
         my $notices = delete $self->{_notice_queue_timers};
         my $flood = delete $self->{_flood_outq};
         my $privmsg = delete $self->{_external_ai_output_queues};
@@ -1763,6 +1764,11 @@ sub setIrc {
         # Publish before cleanup: reentrant sends belong to the new transport,
         # and a nested setIrc must not be overwritten after cleanup returns.
         $self->{irc} = $irc;
+        if ($old_irc && eval { $old_irc->can('retire_output') }) {
+            eval { $old_irc->retire_output; 1 } or do {
+                eval { $self->{logger}->log(1, 'IRC output retirement cleanup failed') if $self->{logger}; };
+            };
+        }
         if ($flood) {
             require Mediabot::IRC::DeferredOutput;
             Mediabot::IRC::DeferredOutput::retire_flood_queues($self, $flood);

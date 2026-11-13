@@ -257,3 +257,18 @@ The existing case 1251 launches a fresh native probe, including the actual main
 exit function with unrelated imports stubbed. Host native/targeted/full validation
 is still required. Successful MB1254 host validation and commit/push closes the
 bounded chapter; the wider exclusions are retained, not silently certified.
+
+
+## MB1269 — Connection-owned control/output admission
+
+`Mediabot::IRC::Transport` owns pending writes and one active native write.
+Complete PONGs may overtake only pending whole frames. Ordinary output remains
+FIFO; raw partial/opaque writes impose a conservative priority barrier. The loop
+owns a weakly-captured later-turn pump, which becomes inert after retirement.
+`close_now` / `retire_output` detach pending payloads before failing their Futures
+and closing native output; `close_when_empty` drains accepted work. `setIrc`
+publishes its successor before invoking retirement on the old capable transport.
+No new timers, global connection registry, database data or live configuration
+are introduced. Native Net::Async::IRC timer reference cycles are outside this
+increment; this is not a claim that the entire underlying client becomes weak.
+Aggregate queue caps and whole-process shutdown policy remain explicit follow-ups.
