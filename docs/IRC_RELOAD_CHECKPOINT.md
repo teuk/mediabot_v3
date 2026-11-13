@@ -135,3 +135,33 @@ Limits: this does not roll back earlier config/log phases, atomically rebuild
 timers, or make logging callbacks transactional. A timer-setup failure after a
 successful cache publication remains a separate lifecycle concern. No schema,
 service, live DB or configuration action is performed by the package.
+
+
+## MB1281 — Refuse false success after timer-setup refusal
+
+Base `00b886345a2f1a513b95a7e450b4991e7af7449e` is committed MB1280;
+every tracked file matches the supplied 2026-11-13 14:17:57 snapshot.
+The channel rebuild ignored setup_channel_nicklist_timers' return value. With
+no event loop, the real NicklistTimers owner refuses setup, but channel rebuild
+and rehash still reported completion. Eight probe assertions fail on the base.
+
+Rebuild now returns failure on a false/undefined setup result and diagnoses the
+partial state: the confirmed channel snapshot has already been published, but
+nicklist setup is incomplete. The existing rehash caller propagates failure;
+Partyline's existing error path consequently remains authoritative. Successful
+setup keeps the same completion messages; exceptions still propagate unchanged.
+No timers are retried or rolled back by this change, and no old snapshot is
+restored over a newly published one.
+
+The existing extracted-method probe additionally executes rehash_runtime_state.
+The missing-loop case uses native NicklistTimers::setup; explicit false, throw
+and success outcomes use controlled collaborators. Earlier config/logger phases
+are controlled, not a native full-bot integration. All 80 probe assertions and
+114 assertions across cases 622/625 pass locally. Native full-core validation is
+not claimed with local DBI absent. Host compilation, the relevant regression lane
+and one full --progress suite remain mandatory before commit.
+
+This is outcome propagation, not all-or-nothing rehash. Config/logger changes and
+a confirmed channel map can remain applied on failure. Physical cleanup failures
+that the timer owner handles internally are outside this return-value correction.
+No service restart, schema or configuration change is performed.

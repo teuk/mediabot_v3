@@ -950,7 +950,11 @@ sub rebuild_channel_cache {
     $self->{channels} = $channels;
 
 	# Start per-channel nicklist refresh timers
-	$self->setup_channel_nicklist_timers();
+    unless ($self->setup_channel_nicklist_timers()) {
+        $self->{logger}->log(1,
+            'Rehash: channel snapshot published; nicklist timer setup incomplete');
+        return;
+    }
 
     my $count = scalar keys %{ $self->{channels} };
     $self->{logger}->log(1, "Channel cache rebuilt ($count channel objects)");

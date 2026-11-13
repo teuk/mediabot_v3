@@ -1,3 +1,10 @@
+## MB1281 — Report incomplete nicklist setup during rehash
+
+- Propagate a false timer-setup result through channel rebuild and rehash.
+- Log the precise partial state: channels published, nicklist timer setup incomplete.
+- Preserve exception propagation and completed setup behavior; do not claim rollback.
+- Extend the existing rehash probe with refusal, missing loop, exception and success cases.
+
 ## MB1280 — Preserve channels after failed rehash reads
 
 - Build a separate channel snapshot before replacing the active cache.

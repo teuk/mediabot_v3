@@ -10,7 +10,7 @@ return sub {
     my $src = do { local $/; <$fh> };
     close $fh;
     my $code = 'package MB1280::Bot; use strict; use warnings;';
-    for my $name (qw(rebuild_channel_cache populateChannels)) {
+    for my $name (qw(rebuild_channel_cache populateChannels rehash_runtime_state)) {
         my ($body) = $src =~ /^(sub \Q$name\E \{.*?)(?=^sub \w+|\z)/ms;
         die "missing $name" unless $body;
         $code .= $body;
@@ -48,10 +48,41 @@ return sub {
         }
         delete $sth->{observe};
     }
+    # MB1281: propagate explicit timer refusal through the real rehash method.
+    require Mediabot::Channel::NicklistTimers;
+    for my $mode (qw(no_loop false throw success)) {
+        my @phases;
+        my $timers = {old => 1};
+        my $bot = bless {channels => {'#old'=>{}}, timers=>$timers,
+            conf=>bless({},'MB1281::Conf'),
+            logger=>bless({events=>[]},'MB1280::Logger')}, 'MB1280::Bot';
+        local *MB1280::Bot::readConfigFile = sub {push @phases,'config';1};
+        local *MB1280::Bot::reload_logger_from_config = sub {push @phases,'logger';1};
+        local *MB1280::Bot::populateChannels = sub {$_[1]{'#new'}={};push @phases,'channels';1};
+        local *MB1280::Bot::setup_channel_nicklist_timers = sub {
+            push @phases,'timers';
+            return Mediabot::Channel::NicklistTimers::setup($_[0]) if $mode eq 'no_loop';
+            return 0 if $mode eq 'false';
+            die "fixture timer failure\n" if $mode eq 'throw';
+            $_[0]{timers}={new=>1};return 1;
+        };
+        my $ok=eval {$bot->rehash_runtime_state};my $error=$@;
+        my $success=$mode eq 'success';
+        my $messages=join("\n",@{$bot->{logger}{events}});
+        $a->is($ok?1:0,$success?1:0,"$mode: rehash result follows timer outcome");
+        $a->is($error,$mode eq 'throw'?"fixture timer failure\n":'',"$mode: timer exception unchanged");
+        $a->is(join(',',@phases),'config,logger,channels,timers',"$mode: stage order preserved");
+        $a->is(join(',',keys %{$bot->{channels}}),'#new',"$mode: confirmed channels remain published");
+        $a->is(refaddr($bot->{timers})==refaddr($timers)?1:0,$success?0:1,"$mode: no fictitious rollback or extra timer mutation");
+        $a->is($messages =~ /Channel cache rebuilt/ ?1:0,$success?1:0,"$mode: cache success only on completed setup");
+        $a->is($messages =~ /Rehash runtime state completed/ ?1:0,$success?1:0,"$mode: whole rehash success only on completed setup");
+        $a->is($messages =~ /channel snapshot published; nicklist timer setup incomplete/ ?1:0,($mode eq 'false'||$mode eq 'no_loop')?1:0,"$mode: explicit partial-stage diagnostic");
+    }
+
 };
 
 package MB1280::Logger;
-sub log { 1 }
+sub log { push @{$_[0]{events}}, $_[2]; 1 }
 package MB1280::DB;
 sub prepare { return if $_[0]{sth}{mode} eq 'prepare'; $_[0]{sth} }
 package MB1280::Statement;
@@ -67,3 +98,6 @@ sub err { $_[0]{mode} eq 'fetch_error' ? 1 : undef }
 sub finish { die "fixture finish exception\n" if $_[0]{mode} eq 'finish_throw'; $_[0]{mode} ne 'finish_false' }
 package MB1280::Bot;
 sub setup_channel_nicklist_timers { $_[0]{arms}++; $_[0]{timers} = {}; 1 }
+
+package MB1281::Conf;
+sub get {0}
