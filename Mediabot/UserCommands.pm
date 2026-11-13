@@ -1441,6 +1441,9 @@ sub setUserLevel {
     # short-lived fullmask lookups so every alias reloads its confirmed role.
     # Do this before finish: cleanup can throw after the UPDATE has succeeded.
     Mediabot::Helpers::clear_user_cache($self);
+    if ($self->{partyline} && $self->{partyline}->can('refresh_account_authority')) {
+        $self->{partyline}->refresh_account_authority;
+    }
     $sth->finish;
     return 1;
 }
@@ -1526,6 +1529,9 @@ sub delUser_ctx {
     }
     if ($self->{auth} && $self->{auth}->can('logout')) {
         $self->{auth}->logout($id_user, skip_db => 1);
+    }
+    if ($self->{partyline} && $self->{partyline}->can('refresh_account_authority')) {
+        $self->{partyline}->refresh_account_authority;
     }
 
     my $msg = "User $target (id_user: $id_user) has been deleted";

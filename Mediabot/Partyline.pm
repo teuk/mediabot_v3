@@ -57,6 +57,7 @@ use Mediabot::Partyline::Transport qw(
 use Mediabot::Partyline::SessionAuth qw(
     _cancel_auth_timeout
     _close_session
+    refresh_account_authority
     _reverse_dns_timeout
     _schedule_reverse_dns_lookup
     _display_nick

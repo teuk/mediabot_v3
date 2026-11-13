@@ -115,4 +115,6 @@ return sub {
     );
     my $probe = do './t/lib/MB1272GlobalGrant.pl' or die $@ || $!;
     $probe->($assert);
+    my $party = do './t/lib/MB1275PartylineAuthority.pl' or die $@ || $!;
+    $party->($assert);
 };

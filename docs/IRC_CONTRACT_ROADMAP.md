@@ -25,7 +25,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered, bounded checkpoint MB1270: MB1269 PONG priority is committed; receipt/recovery probes document the remaining queue-cap, penalty and keepalive limits. No global backpressure guarantee. Next assess row 4; carry keepalive recovery into row 5. |
-| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | In progress: MB1271 reproduces stale channel-level grants after modinfo and invalidates that cache entry on successful mutation. MB1272 expires fullmask resolution after global role updates. MB1273 expires aliases on account retirement. MB1274 retires deleted accounts after commit. Other authority paths remain under review. |
+| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | In progress: MB1271 reproduces stale channel-level grants after modinfo and invalidates that cache entry on successful mutation. MB1272 expires fullmask resolution after global role updates. MB1273 expires aliases on account retirement. MB1274 retires deleted accounts after commit. MB1275 revalidates Partyline sessions after account mutations. Other authority paths remain under review. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
 
 Botnet replication, DCC file transfer and Tcl compatibility are not parity goals.
@@ -871,3 +871,49 @@ previously transmitted commands and custom Auth implementations are not certifie
 by this fix. It uses the established native Auth retirement behavior, including
 its optional cache hooks. Row 4 still requires verdicts for host/account changes
 and delayed privileged actions before row 5's recovery/reload assessment.
+
+
+## MB1275 — Revoke obsolete Partyline authority on account mutation
+
+Base `26c805cdd68d3147708910d21dfb89888f70ffff` (committed MB1274) matches
+all tracked files of the supplied 2026-11-13 07:23:29 snapshot.
+
+Reproduced gap: after native setUserLevel downgrades an Owner, the Partyline
+session retains its login-time level. Native Privileged::_cmd_eval still arms
+its first confirmation, and a retained ShellWatch::_tick publishes a frame.
+The local replay used SQLite and seeded successful-login fields; it did not
+perform a password handshake, execute eval code, open IRC or demonstrate a live
+incident. Auth's IRC sessions and Helpers' caches are separate from this state.
+
+SessionAuth::refresh_account_authority now reads current account/role rows for
+active Partyline sessions after successful setUserLevel and committed delUser.
+Database collation matches login spellings. New successful logins also record
+the UID, preventing a different account with a reused login from inheriting the
+session on revalidation. Unchanged privileged accounts keep their sessions;
+a changed role (including promotion), missing account, invalid role or failed
+read requires a fresh login. SQL-read failure is deliberately fail-closed for
+the session whose authority cannot be confirmed.
+
+Logical revocation clears authentication, level and pending eval confirmation
+before cleanup callbacks. Native session closure retires watches, console hooks
+and runtime state; the captured old stream closes immediately. Cleanup failure
+cannot restore authority in retained references. No SQL is added per command or
+per watch tick: revalidation occurs only at these explicit mutation boundaries.
+No schema, password policy, role hierarchy or service configuration changes.
+
+Existing case 75 adds native SQLite/Partyline regressions for multiple aliases,
+SQL case matching, role promotion/demotion, unchanged peers, actual confirmed
+account deletion, missing role, read failure, reused UID and cleanup exception.
+Retained privileged-action and watch callbacks see revocation. Targeted tests
+and one full installed-host suite are required before commit; no live restart or
+running-version acceptance is inferred from local checks.
+
+Limits: direct external SQL edits have no notification hook; custom Partyline
+implementations without this method are outside the guarantee. Already-started
+subprocesses and bytes already delivered are not withdrawn. This is not general
+mid-command cancellation. Existing pre-upgrade sessions require the normal code
+activation/reconnect; this package does not hot-patch the running process.
+
+Row 4 still needs a bounded host/account-identity verdict, then row 5 must decide
+reload/recovery and the documented keepalive gap. Do not enlarge the exit gate
+with optional Partyline or Eggdrop features.

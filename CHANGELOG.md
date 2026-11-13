@@ -1,3 +1,10 @@
+## MB1275 — Partyline account authority revocation
+
+- Revalidate live console roles after successful global-role changes and committed account deletion.
+- Retire changed, missing or unconfirmable authority before callbacks; preserve unchanged privileged sessions.
+- Clear pending eval confirmations, stop watches and close old streams; record login UID for reuse checks.
+- Extend native SQLite and Partyline regression coverage. No schema or service change.
+
 ## [Unreleased] — 3.8dev
 
 ### MB1274 — Revoke deleted accounts after transaction commit

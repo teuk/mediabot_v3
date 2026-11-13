@@ -15,6 +15,7 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use Scalar::Util qw(refaddr);
 use IO::Async::Stream;
 use IO::Async::Timer::Countdown;
 use POSIX qw(WNOHANG);
@@ -25,6 +26,7 @@ use Mediabot::Partyline::ShellWatch ();
 our @EXPORT_OK = qw(
     _cancel_auth_timeout
     _close_session
+    refresh_account_authority
     _reverse_dns_timeout
     _schedule_reverse_dns_lookup
     _display_nick
@@ -38,6 +40,55 @@ our @EXPORT_OK = qw(
     _pl_bf_clear
     _do_login
 );
+
+# Explicit account mutations revalidate durable authority for live consoles.
+# SQL performs login matching using the database collation, not Perl lc().
+sub refresh_account_authority {
+    my ($self) = @_;
+    my @retire;
+    for my $id (keys %{ $self->{users} || {} }) {
+        my $session = $self->{users}{$id};
+        next unless $session && $session->{authenticated};
+        my ($sth, $row);
+        my $ok = eval {
+            $sth = $self->{bot}{dbh}->prepare(
+                'SELECT u.id_user, ul.level FROM USER u JOIN USER_LEVEL ul '
+                . 'ON u.id_user_level=ul.id_user_level WHERE u.nickname=?');
+            die 'prepare' unless $sth;
+            die 'execute' unless $sth->execute($session->{login});
+            $row = $sth->fetchrow_hashref;
+            die 'fetch' if $sth->err;
+            die 'finish' unless $sth->finish;
+            1;
+        };
+        eval { $sth->finish } if !$ok && $sth;
+        next unless $self->{users}{$id}
+            && refaddr($self->{users}{$id}) == refaddr($session);
+        my $valid = $ok && $row && defined($row->{level})
+            && !ref($row->{level}) && "$row->{level}" =~ /\A[01]\z/
+            && defined($session->{level}) && !ref($session->{level}) && "$row->{level}" eq "$session->{level}"
+            && (!defined($session->{id_user})
+                || "$row->{id_user}" eq "$session->{id_user}");
+        next if $valid;
+        # Logical revocation precedes every cleanup/stream callback, for all
+        # affected sessions. Retained references and watch callbacks see it too.
+        $session->{authenticated} = 0;
+        delete @$session{qw(level level_desc)};
+        delete $self->{"_eval_pending_$id"};
+        push @retire, [$id, $session, $self->{streams}{$id}];
+    }
+    for my $entry (@retire) {
+        my ($id, $session, $stream) = @$entry;
+        next unless $self->{users}{$id}
+            && refaddr($self->{users}{$id}) == refaddr($session);
+        my $closed = eval { $self->_close_session($id); 1 };
+        # The captured old stream cannot close a replacement session's stream.
+        eval { $stream->close_now } if $stream;
+        eval { $self->{bot}{logger}->log(1,
+            'Partyline: revoked account session cleanup failed') } unless $closed;
+    }
+    return scalar @retire;
+}
 
 sub _cancel_auth_timeout {
     my ($self, $id) = @_;
@@ -669,6 +720,7 @@ sub _do_login {
 
     $self->{users}{$id}{authenticated} = 1;
     $self->{users}{$id}{login}         = $login;
+    $self->{users}{$id}{id_user}       = $row->{id_user};
     $self->{users}{$id}{level}         = $row->{level};
     $self->{users}{$id}{level_desc}    = $row->{description};
     $self->{users}{$id}{auth_stage}    = undef;   # clear — stop masking log lines
