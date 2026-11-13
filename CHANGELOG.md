@@ -1,3 +1,9 @@
+## MB1289 — Deliver private achievement leaderboards to their caller
+
+- Route both populated and empty achievement leaderboards to the caller in private contexts.
+- Keep public replies on their original #, &, ! or + channel using the shared target classifier.
+- Preserve ranking, alphabetical ties, the ten-entry cap and read-only count access.
+
 ## MB1288 — Respect horoscope channel scope consistently
 
 - Use the shared IRC target classifier for Games permission, reply routing and achievements.

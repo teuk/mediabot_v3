@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use Mediabot::IRC::Target ();
 
 our @EXPORT_OK = qw(mbAchievements_ctx _ach_bar _ach_num _ach_goal_line);
 
@@ -87,9 +88,10 @@ sub mbAchievements_ctx {
 
     # !achievements top  → classement par nombre d'achievements
     if (@args && lc($args[0]) eq 'top') {
+        my $reply_to = Mediabot::IRC::Target::is_channel($channel) ? $channel : $nick;
         my $counts = $ach->count_all_nicks;
         unless (%$counts) {
-            botPrivmsg($self, $channel, 'No achievements unlocked yet.'); return 1;
+            botPrivmsg($self, $reply_to, 'No achievements unlocked yet.'); return 1;
         }
         my @sorted = sort { $counts->{$b} <=> $counts->{$a} || $a cmp $b } keys %$counts;
         my $top    = scalar @sorted > 10 ? 10 : scalar @sorted;
@@ -98,7 +100,7 @@ sub mbAchievements_ctx {
             my $n = $sorted[$i];
             push @parts, "$n:$counts->{$n}";
         }
-        botPrivmsg($self, $channel, "🏆 Top achievement hunters: " . join('  |  ', @parts));
+        botPrivmsg($self, $reply_to, "🏆 Top achievement hunters: " . join('  |  ', @parts));
         return 1;
     }
 

@@ -180,4 +180,8 @@ return sub {
         'mb612-795: .status compte profils et compteurs');
     $assert->like($pl_src, qr/\(unsaved changes\)/,
         'mb612-795: ... et signale un enregistrement en attente');
+    my $top_probe = do './t/lib/MB1289AchievementTop.pl';
+    die($@ || $! || 'Cannot load achievement leaderboard probe') unless $top_probe;
+    $top_probe->($assert);
+
 };
