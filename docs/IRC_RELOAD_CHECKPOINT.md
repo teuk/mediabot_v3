@@ -25,9 +25,9 @@ or Eggdrop feature parity.
 
 Conf's prepare-then-publish boundary validates parser success and unchanged file
 revision, not the semantics of every subsystem setting. A syntactically valid
-configuration can still fail later initialization. In particular, logging reload
-closes the old raw LOG handle before opening the replacement, and channel rebuild
-clears the channel map before repopulation. Failed rehash must not be described
+configuration can still fail later initialization. At the reviewed MB1278 base, logging reload closed the old raw LOG handle before
+opening the replacement; MB1279 fixes that local publication boundary (see below).
+Channel rebuild still clears the channel map before repopulation. Failed rehash must not be described
 as leaving all runtime state unchanged. These source-level limitations are
 recorded for a separate transactional-rehash improvement, not silently repaired
 by this documentation increment.
@@ -76,3 +76,30 @@ After acceptance, prioritize separately: transactional rehash and precise phase
 diagnostics, then bounded output backpressure if real queue measurements justify
 it. Keep readiness/identity and IRCv3 account semantics explicit design decisions.
 No new mandatory feature series is opened by this handoff.
+
+
+## MB1279 — First bounded rehash correction: preserve active logging
+
+Base `ec56b361a5d0562c5274daae0c76a597deed0c2e` is committed MB1278, fetched
+from GitHub. No newer snapshot is claimed. Native regression reproduction in
+case 1220 loses raw writes after a failed open and replaces the raw destination
+before a logger-constructor exception; a false constructor can also erase the
+logger owner. Thirteen assertions fail on the unchanged base.
+
+Core `reload_logger_from_config` now opens the raw candidate, constructs the
+object logger and transfers console hooks before publishing the pair. On failed
+construction it closes the raw candidate and reports failure, retaining both
+old owners. On success it closes the old raw handle after publication. Existing
+object references, encoding, append mode and console delivery remain compatible.
+The existing case uses native core/handles/Log; only constructor error returns
+are injected. It tests actual continued file writes and hook delivery.
+
+This is atomic preparation of the logging pair, not a whole-rehash rollback.
+Configuration may already have been published; channel staging and accurate
+partial-phase reporting remain the next bounded work. Disk-write failures after
+publication and externally held logger references are outside this correction.
+No database, configuration edit, restart or running-process activation is made.
+Local validation passes 218 targeted assertions and 6,128 fast-lane assertions.
+Package application/reversal, rejection guards and the native commit.sh path were
+exercised with a local-only remote. Targeted and one full installed-host suite
+remain required before the real commit; no complete local suite is claimed.

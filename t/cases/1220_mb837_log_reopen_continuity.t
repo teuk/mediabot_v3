@@ -66,4 +66,5 @@ ok(eval { $no_file->reopen_logfile; $no_file->log(0, 'console only'); 1 }, 'cons
 my $bad = eval { Mediabot::Log->new(logfile => $dir); 1 };
 ok(!$bad && $@ =~ /Cannot open logfile/, 'initial invalid destination still fails explicitly');
 close $logger->{logfilehandle};
+do './t/lib/MB1279LoggerReload.pl' or die $@ || $!;
 done_testing;

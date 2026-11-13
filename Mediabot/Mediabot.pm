@@ -902,21 +902,13 @@ sub reload_logger_from_config {
         return;
     }
 
-    # Reopen raw LOG handle used by some legacy code paths
-    eval {
-        if (defined $self->{LOG}) {
-            my $oldfh = $self->{LOG};
-            close $oldfh if defined(fileno($oldfh));
-        }
-        1;
-    };
-
+    # Prepare both logging destinations before replacing either live owner.
+    # A rejected candidate must leave legacy raw writes and object logs usable.
     open(my $LOG, ">>", $log_path) or do {
         $self->my_log_error("Could not reopen log file '$log_path': $!");
         return;
     };
     select((select($LOG), $| = 1)[0]);
-    $self->{LOG} = $LOG;
 
     # Recreate object logger with fresh config values
     my $new_logger;
@@ -926,9 +918,11 @@ sub reload_logger_from_config {
             debug_level => $debug_level,
             logfile     => $log_path,
         );
+        die "logger constructor returned no object\n" unless $new_logger;
         1;
     } or do {
         my $err = $@ || 'unknown error';
+        close $LOG;
         $self->my_log_error("Failed to recreate logger from config: $err");
         return;
     };
@@ -937,7 +931,10 @@ sub reload_logger_from_config {
         $new_logger->{_console_hooks} = $self->{logger}->{_console_hooks};
     }
 
+    my $previous_log = $self->{LOG};
+    $self->{LOG} = $LOG;
     $self->{logger} = $new_logger;
+    close $previous_log if defined($previous_log) && defined(fileno($previous_log));
     $self->{logger}->log(1, "Logger reloaded from config (debug=$debug_level, logfile=$log_path)");
 
     return 1;

@@ -1,3 +1,10 @@
+## MB1279 — Preserve active logs after rejected rehash
+
+- Prepare the raw log handle and object logger before replacing either live owner.
+- Preserve both active destinations on open/constructor failure; close the unused candidate.
+- Retain Partyline console hooks and close the old raw descriptor only after successful replacement.
+- Extend the existing native logger regression case; no schema or service action.
+
 ## MB1278 — Final IRC reload and recovery checkpoint
 
 - Complete the five-row assessment with an explicit partial reload/recovery verdict.
