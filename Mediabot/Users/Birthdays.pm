@@ -146,7 +146,7 @@ sub _birthday_add_ctx {
     if (!defined $date || $date eq '') {
         # No date — clear birthday
         $normalized = undef;
-    } elsif ($date =~ m{^(\d{1,2})/(\d{1,2})(?:/(\d{4}))?$}) {
+    } elsif ($date =~ m{^([0-9]{1,2})/([0-9]{1,2})(?:/([0-9]{4}))?$}) {
         my ($d, $m, $y) = ($1, $2, $3);
 
         my $check_year = defined($y) ? $y : 2000; # leap year, allows 29/02 without storing a year
@@ -248,15 +248,15 @@ sub _birthday_del_ctx {
 sub _birthday_valid_date {
     my ($year, $month, $day) = @_;
 
-    return 0 unless defined($year)  && $year  =~ /^\d{4}\z/;
-    return 0 unless defined($month) && $month =~ /^\d{1,2}\z/;
-    return 0 unless defined($day)   && $day   =~ /^\d{1,2}\z/;
+    return 0 unless defined($year)  && $year  =~ /^[0-9]{4}\z/;
+    return 0 unless defined($month) && $month =~ /^[0-9]{1,2}\z/;
+    return 0 unless defined($day)   && $day   =~ /^[0-9]{1,2}\z/;
 
     return 0 if $month < 1 || $month > 12;
     return 0 if $day   < 1 || $day   > 31;
 
     # B3/A3: validate days-per-month (use provided year or 2000 as leap-year reference)
-    my $check_year = (defined($year) && $year =~ /^\d{4}\z/) ? $year : 2000;
+    my $check_year = (defined($year) && $year =~ /^[0-9]{4}\z/) ? $year : 2000;
     my @days_in_month = (0, 31,
         ($check_year % 4 == 0 && ($check_year % 100 != 0 || $check_year % 400 == 0))
             ? 29 : 28,
@@ -282,11 +282,11 @@ sub _birthday_mmdd_from_value {
 
     return undef unless defined($birthday) && $birthday ne '';
 
-    if ($birthday =~ m{^(\d{2})-(\d{2})\z}) {
+    if ($birthday =~ m{^([0-9]{2})-([0-9]{2})\z}) {
         return ($1, $2);
     }
 
-    if ($birthday =~ m{^\d{4}-(\d{2})-(\d{2})\z}) {
+    if ($birthday =~ m{^[0-9]{4}-([0-9]{2})-([0-9]{2})\z}) {
         return ($1, $2);
     }
 
@@ -297,6 +297,9 @@ sub _birthday_mmdd_from_value {
 # Count days on the local calendar, including DST and Feb 29 observance.
 sub _birthday_days_ahead {
     my ($month, $day, $now) = @_;
+
+    # Reject malformed components before comparisons or leap-day arithmetic.
+    return undef unless _birthday_valid_date(2000, $month, $day);
 
     $now //= time();
 

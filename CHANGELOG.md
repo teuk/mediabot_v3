@@ -1,3 +1,10 @@
+## MB1287 — Reject birthday digits that Perl cannot interpret
+
+- Require ASCII digits in command dates, Gregorian validation and stored date parsing.
+- Prevent mixed Unicode numerals from being silently stored as a different day or month.
+- Validate countdown components before numeric comparisons, avoiding warnings and false dates.
+- Preserve ASCII normalization, explicit clearing and February 29 observance.
+
 ## MB1286 — Keep compact MetaAI source URLs readable
 
 - Keep original source URLs through 140 UTF-8 bytes; shorten longer destinations only.

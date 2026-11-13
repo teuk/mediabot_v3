@@ -135,4 +135,6 @@ for my $raise (0,1) {
         'cleanup and logger failures cannot hide a failed read or publish its partial result');
 }
 is_deeply(\@warnings, [], 'birthday reads emit no warnings');
+my $digits_probe=do './t/lib/MB1287BirthdayDigits.pl' or die $@||$!;
+$digits_probe->();
 done_testing;
