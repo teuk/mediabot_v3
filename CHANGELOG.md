@@ -1,5 +1,14 @@
 ## [Unreleased] — 3.8dev
 
+### MB1272 — Refresh global grants after role changes
+
+- Expire fullmask user-resolution objects and timestamps after a successful
+  global role UPDATE, before SQL cleanup can throw and retain stale authority.
+- Preserve authentication sessions and channel grants; failed prepare/execute
+  does not invalidate confirmed lookups. Handle a missing prepared statement.
+- Extend moduser safety coverage with native lookup/User role decisions across
+  multiple aliases, promotions, demotions and SQL failure boundaries.
+
 ### MB1271 — Retire stale channel grants after modinfo
 
 - Invalidate the target user's channel-level cache after a successful modinfo

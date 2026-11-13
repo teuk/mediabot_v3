@@ -1434,9 +1434,13 @@ sub setUserLevel {
 
     unless ($sth && $sth->execute($id_user_level, $sUser)) {
         $self->{logger}->log(1, "SQL Error : " . $DBI::errstr . " Query : " . $sQuery);
-        $sth->finish;
+        $sth->finish if $sth;
         return 0;
     }
+    # SQL handle matching may differ from Perl nickname comparisons. Expire all
+    # short-lived fullmask lookups so every alias reloads its confirmed role.
+    # Do this before finish: cleanup can throw after the UPDATE has succeeded.
+    Mediabot::Helpers::clear_user_cache($self);
     $sth->finish;
     return 1;
 }

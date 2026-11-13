@@ -113,4 +113,6 @@ return sub {
         $func !~ /\$sth->execute\(\$target_nick, \$fortniteid\);\s*my \$already_set/s,
         'moduser no longer has unchecked fortniteid execute path'
     );
+    my $probe = do './t/lib/MB1272GlobalGrant.pl' or die $@ || $!;
+    $probe->($assert);
 };

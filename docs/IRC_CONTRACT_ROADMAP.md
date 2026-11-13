@@ -25,7 +25,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered, bounded checkpoint MB1270: MB1269 PONG priority is committed; receipt/recovery probes document the remaining queue-cap, penalty and keepalive limits. No global backpressure guarantee. Next assess row 4; carry keepalive recovery into row 5. |
-| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | In progress: MB1271 reproduces stale channel-level grants after modinfo and invalidates that cache entry on successful mutation. Other authority paths remain under review. |
+| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | In progress: MB1271 reproduces stale channel-level grants after modinfo and invalidates that cache entry on successful mutation. MB1272 expires fullmask resolution after global role updates. Other authority paths remain under review. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
 
 Botnet replication, DCC file transfer and Tcl compatibility are not parity goals.
@@ -754,3 +754,44 @@ changes, explicit logout and delayed privileged work need their own verdict.
 This patch does not revoke already-emitted wire commands or mutate an existing
 Context's memoized user object. Keepalive recovery remains a row-5 item; aggregate
 queue caps and global penalty scheduling remain the explicit row-3 limitations.
+
+
+## MB1272 — Global role updates retire fullmask resolution
+
+Base `c38134fef111eed4f4c99896d12ccc8a86792968` is committed MB1271 and matches all tracked files of the supplied
+2026-11-13 06:07:49 snapshot. This does not establish live activation or provide
+a numerical host-suite result. Continue the bounded authority-over-time review.
+
+Native Helpers::get_user_from_message caches a Mediabot::User, including its loaded
+global role, for five seconds per fullmask. UserCommands::setUserLevel updated SQL
+without expiring those objects. An offline replay primes two aliases for the same
+account, changes Master to User, and still passes Administrator checks through
+both cached aliases. A promotion has the inverse stale-denial behavior. This is
+a reproduced stale authorization decision, not a claim of live exploitation.
+
+The setter now calls the existing Helpers::clear_user_cache after execute succeeds
+and before finish. It clears all short-lived fullmask objects and timestamps:
+SQL nickname collation and live nicknames need not match a simple Perl comparison,
+so selecting cache entries by display nickname could miss an alias. The tradeoff
+is fresh resolution for other cached users after this infrequent administrative
+mutation. Auth sessions, channel-level caches, database roles and TTL policy are
+otherwise unchanged. Previously handed-out User/Context objects are not rewritten.
+
+A prepare failure also no longer calls finish on an undefined statement. Failed
+prepare/execute retains the previous lookup cache. Cleanup exceptions after a
+successful UPDATE remain visible, but cannot leave stale cached roles behind.
+No SQL transaction/retry, authentication-policy change or schema change is added.
+
+Case 75 extends its existing checks with [MB1272GlobalGrant](../t/lib/MB1272GlobalGrant.pl).
+The real setter, resolver, candidate selection, User construction/load_level and
+has_level methods run against a DBI-shaped in-memory fixture; matching/autologin
+and bot session hooks are controlled collaborators, not a live login test.
+Seventeen assertions fail on baseline, including the missing-statement cleanup;
+corrected validation covers aliases, cache ages, promotion/demotion, unchanged
+sessions/channel grants, binds and cleanup errors. The full host suite remains
+mandatory before commit, with --progress. No service action is performed.
+
+Row 4 remains open for host/account changes, logout and delayed privileged work.
+This fix addresses fresh message resolution, not reauthorization of already
+queued commands or previously captured Contexts. Row 5 still owns the explicit
+keepalive recovery decision. Neither issue is declared solved by cache expiry.
