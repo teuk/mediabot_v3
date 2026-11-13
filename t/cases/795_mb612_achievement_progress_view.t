@@ -184,4 +184,8 @@ return sub {
     die($@ || $! || 'Cannot load achievement leaderboard probe') unless $top_probe;
     $top_probe->($assert);
 
+    my $scope_probe = do './t/lib/MB1290AchievementScope.pl';
+    die($@ || $! || 'Cannot load achievement scope probe') unless $scope_probe;
+    $scope_probe->($assert);
+
 };

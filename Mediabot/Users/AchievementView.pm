@@ -50,6 +50,7 @@ sub mbAchievements_ctx {
     my $self    = $ctx->bot;
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
+    my $is_channel = Mediabot::IRC::Target::is_channel($channel);
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $ach = $self->{achievements};
@@ -88,7 +89,7 @@ sub mbAchievements_ctx {
 
     # !achievements top  → classement par nombre d'achievements
     if (@args && lc($args[0]) eq 'top') {
-        my $reply_to = Mediabot::IRC::Target::is_channel($channel) ? $channel : $nick;
+        my $reply_to = $is_channel ? $channel : $nick;
         my $counts = $ach->count_all_nicks;
         unless (%$counts) {
             botPrivmsg($self, $reply_to, 'No achievements unlocked yet.'); return 1;
@@ -110,7 +111,7 @@ sub mbAchievements_ctx {
     if (@args && lc($args[0]) =~ /\A(?:progress|prog)\z/) {
         shift @args;
         my $who = @args ? lc(shift @args) : lc($nick);
-        unless ($channel && $channel =~ /^#/) {
+        unless ($is_channel) {
             botNotice($self, $nick, 'Syntax: !achievements progress [nick]  (in a channel)');
             return 1;
         }
@@ -165,7 +166,7 @@ sub mbAchievements_ctx {
         ? $ach->get_for_nick_all($target)
         : $ach->get_for_nick($target, $channel);
 
-    my $reply_to = ($channel =~ /^#/) ? $channel : $nick;
+    my $reply_to = $is_channel ? $channel : $nick;
 
     unless (%$unlocked) {
         my $scope = $cross ? '(all channels)' : "on $channel";
@@ -173,7 +174,7 @@ sub mbAchievements_ctx {
             "$target has no achievements unlocked yet $scope. Try \x02!achievements list\x02.");
         # mb612-B1: « rien de debloque » est justement le moment ou montrer
         # ce qui est a portee — sinon la commande ne dit rien d'utile.
-        if (!$cross && $channel =~ /^#/) {
+        if (!$cross && $is_channel) {
             my $goals = eval { $ach->next_goals($target, $channel, 3) } || [];
             my @lines = grep { length } map { _ach_goal_line($ach, $defs, $_) } @$goals;
             botPrivmsg($self, $reply_to, '  Closest: ' . join('  |  ', @lines)) if @lines;
@@ -214,7 +215,7 @@ sub mbAchievements_ctx {
     # mb612-B1: et la suite ? Les 3 objectifs verrouilles les plus proches,
     # sur une seule ligne. Vue cross-canal exclue : la progression se compte
     # par canal, l'afficher a cote d'un total cross-canal serait trompeur.
-    if (!$cross && $channel =~ /^#/) {
+    if (!$cross && $is_channel) {
         my $goals = eval { $ach->next_goals($target, $channel, 3) } || [];
         my @lines = grep { length } map { _ach_goal_line($ach, $defs, $_) } @$goals;
         if (@lines) {

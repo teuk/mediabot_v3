@@ -1,3 +1,10 @@
+## MB1290 — Recognize every supported channel in achievement views
+
+- Use the shared channel classifier for progress eligibility, reply routing and next goals.
+- Support &, ! and + channels consistently with # channels without changing storage keys.
+- Keep detailed progress in notices and cross-channel views free of channel-specific goals.
+- Preserve private progress refusal and hidden achievement filtering.
+
 ## MB1289 — Deliver private achievement leaderboards to their caller
 
 - Route both populated and empty achievement leaderboards to the caller in private contexts.
