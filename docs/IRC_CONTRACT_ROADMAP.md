@@ -25,7 +25,7 @@ Record residual risks explicitly. New feature ideas do not extend the exit gate.
 | 1 | Connection-specific IRC identity | ASCII/RFC1459/strict mappings; capability replacement/removal; reconnect; bot exclusions and authorization consumers; durable-key compatibility | Partly covered. MB1256 fixes conversational exclusions; MB1257 fixes Fullop capability withdrawal. MB1258 resets Fullop at transport construction; MB1261 rejects obsolete 005/324 observations. Remaining identity consumers stay open. |
 | 2 | Trustworthy channel state | JOIN followed by partial NAMES/WHO/MODE; concurrent NICK/PART/KICK; end-of-list; disconnect/rejoin; decisions before synchronization | Partly covered. MB1259 retires inherited member snapshots; MB1260 rejects obsolete NAMES callbacks. MB1262 also rejects obsolete membership/MODE events. MB1263 guards login/disconnect ingress; MB1264 binds deferred startup to its transport. MB1265 preserves JOIN/NICK changes in buffered NAMES. MB1266 keeps independent lists/statuses across 324 refresh. MB1267 retires Fullop observations on own departure/rejoin. Bounded review checkpoint below: partly covered, residual readiness limits explicit. |
 | 3 | Control traffic under pressure | Actual transport queue ownership, caps, priorities and penalties; saturated previews alongside control commands; stale output after reconnect | Partly covered, bounded checkpoint MB1270: MB1269 PONG priority is committed; receipt/recovery probes document the remaining queue-cap, penalty and keepalive limits. No global backpressure guarantee. Next assess row 4; carry keepalive recovery into row 5. |
-| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | In progress: MB1271 reproduces stale channel-level grants after modinfo and invalidates that cache entry on successful mutation. MB1272 expires fullmask resolution after global role updates. MB1273 expires aliases on account retirement. MB1274 retires deleted accounts after commit. MB1275 revalidates Partyline sessions after account mutations. Other authority paths remain under review. |
+| 4 | Correct authority over time | Identity changes, host/account changes, explicit revocation, channel/global scopes and queued privileged work | Partly covered, bounded checkpoint MB1276: MB1271–MB1275 correct selected cache/session revocation paths. Account-wide auth, Auth nick folding and unsupported IRCv3 notification semantics remain explicit limits. Proceed to row 5. |
 | 5 | Predictable reload and recovery | Successful/failed reload, callback/timer ownership, persistent versus live state, useful operator diagnosis | Not assessed. Reuse existing lifecycle evidence before adding tests. |
 
 Botnet replication, DCC file transfer and Tcl compatibility are not parity goals.
@@ -917,3 +917,22 @@ activation/reconnect; this package does not hot-patch the running process.
 Row 4 still needs a bounded host/account-identity verdict, then row 5 must decide
 reload/recovery and the documented keepalive gap. Do not enlarge the exit gate
 with optional Partyline or Eggdrop features.
+
+
+## MB1276 — Bound the authority verdict and move to recovery
+
+The [authority checkpoint](IRC_AUTHORITY_CHECKPOINT.md) records source owners,
+observable guarantees, the account-wide authentication model and the absence of
+an IRCv3 account-notify/chghost authority contract. A new offline developer probe
+characterizes prefix cache separation, allowed/unlisted hosts, password-only
+logged-out accounts and exact versus RFC-equivalent Auth session keys.
+
+No runtime authentication behavior is changed. Existing committed corrections
+MB1271–MB1275 remain the selected fixes; direct SQL changes, captured contexts,
+already-started work and protocol extensions are not silently declared covered.
+Source and snapshot match at `454bef0573cc9e46790d1e92c2af6299cd6cd8db`.
+
+Row 4 now has a bounded partly-covered verdict. The remaining assessment is row 5:
+reuse the lifecycle/reload tests and resolve the keepalive recovery decision from
+MB1270. Completion still requires acceptance of selected runtime fixes and a
+verdict for row 5; optional feature parity does not extend the exit gate.

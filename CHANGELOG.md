@@ -1,3 +1,9 @@
+## MB1276 — Bounded IRC authority checkpoint
+
+- Record the guarantees and limits of hostmask/account authentication and delayed privileged work.
+- Add an offline native-code probe for prefix cache separation and existing Auth nickname semantics.
+- Give roadmap row 4 a partial verdict and advance to reload/recovery review; no runtime policy change.
+
 ## MB1275 — Partyline account authority revocation
 
 - Revalidate live console roles after successful global-role changes and committed account deletion.
