@@ -1,3 +1,9 @@
+## MB1306 — Refuse malformed flood protection settings
+
+- Validate the entire partyline floodset request before changing overrides or clearing an active silence.
+- Recognize warn-only only as a trailing option, never inside a channel name.
+- Retain numeric defaults, minimum clamping and explicit warn-only spellings.
+
 ## MB1305 — Keep nickname queries on the requested channel
 
 - Use the shared IRC channel classifier for nicklist and rnick target selection.

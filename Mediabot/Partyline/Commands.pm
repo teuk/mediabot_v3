@@ -3699,13 +3699,15 @@ sub _cmd_unmute {
 sub _cmd_floodset {
     my ($self, $stream, $id, $args) = @_;
     my $bot = $self->{bot};
-    unless (defined $args && $args =~ /^(#\S+)(?:\s+(\d+)(?:\s+(\d+)(?:\s+(\d+))?)?)?/) {
-        $stream->write("Usage: .floodset <#chan> [window] [max_cmds] [silence_secs]\r\n");
+    # Validate the whole request before resetting any active protection.
+    # Only a separate trailing option may enable warn-only, never the channel name.
+    unless (defined $args && $args =~ /\A(#\S+)(?:\s+(\d+)(?:\s+(\d+)(?:\s+(\d+))?)?)?(?:\s+(warn[-_]?only))?\s*\z/i) {
+        $stream->write("Usage: .floodset <#chan> [window] [max_cmds] [silence_secs] [warn-only]\r\n");
         $stream->write("  Defaults: window=10 max=8 silence=30\r\n");
         $stream->write("  Example: .floodset #quebec 10 4 60\r\n");
         return;
     }
-    my ($display_chan, $window, $max, $silence) = ($1, $2, $3, $4);
+    my ($display_chan, $window, $max, $silence, $warn_option) = ($1, $2, $3, $4, $5);
     my $chan = lc $display_chan; # Same channel key as the AF4 admission guard.
     # Store overrides in memory — used by checkChanFlood via _chan_flood_conf
     # A-68-1: clamp override values to sane minimums (matches checkChanFlood)
@@ -3716,7 +3718,7 @@ sub _cmd_floodset {
         $stream->write("Warning: values below 1 clamped to 1.\r\n");
     }
     # FF6: optional warn-only mode — bot warns but does not silence
-    my $warn_only = ($args && $args =~ /\bwarn.?only\b/i) ? 1 : 0;
+    my $warn_only = defined($warn_option) ? 1 : 0;
     $bot->{_chan_flood_conf}{$chan} = {
         window    => $safe_window,
         max       => $safe_max,

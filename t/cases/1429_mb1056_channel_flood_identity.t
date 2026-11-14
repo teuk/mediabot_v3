@@ -30,7 +30,7 @@ sub setup_1429 {
     $bot={conf=>bless({},'MB1056::Conf'),logger=>bless({rows=>[]},'MB1056::Log'),
         metrics=>bless({},'MB1056::Metrics'),dbh=>bless({},'MB1056::NoIO'),irc=>bless({},'MB1056::NoIO')};
     $stream=bless({text=>''},'MB1056::Stream');
-    $party=bless({bot=>$bot,users=>{1=>{authenticated=>1,login=>'Owner',nick=>'Owner',level=>0}},
+    $party=bless({bot=>$bot,users=>{1=>{authenticated=>1,login=>'Owner',nick=>'Owner',level=>0,rate_window=>$main::now}},
         streams=>{1=>$stream}},'Mediabot::Partyline');
 }
 sub guard_1429 { Mediabot::Helpers::checkChanFlood($bot,$_[0]) }
@@ -113,5 +113,37 @@ is_deeply([map {guard_1429($_)} (undef,'','Caller','&room')],[0,0,0,0],
     'the historical public #channel admission boundary remains unchanged');
 is_deeply([$bot->{_chan_flood},$bot->{_chan_flood_conf}],$before,
     'non-channel input never creates or changes flood state');
+
+# MB1306: parse the complete operator request before changing protection.
+setup_1429();
+operator_1429('.floodset #MiXeD 10 1 300');
+guard_1429('#mixed'); guard_1429('#mixed');
+$bot->{_chan_flood_conf}{'#other'}={window=>17,max=>9,silence=>33,warn_only=>0};
+my $protected=dclone([$bot->{_chan_flood},$bot->{_chan_flood_conf}]);
+for my $args ('#mixed nope', '#mixed -1 2 3', '#mixed 10oops 2 3',
+        '#mixed 10 2.5 3', '#mixed 10 2 3oops', '#mixed 10 2 3 extra',
+        '#mixed 10 2 3 warn-only extra', '#mixed 10 2 3 warnXonly',
+        '#mixed 10 2 3 warn-only warn-only', '#mixed warn-only 10') {
+    my $reply=operator_1429(".floodset $args");
+    like($reply,qr/\AUsage: \.floodset /,"malformed request refused: $args");
+    is_deeply([$bot->{_chan_flood},$bot->{_chan_flood_conf}],$protected,
+        'refusal preserves the active silence, hits and all operator settings');
+}
+for my $channel ('#warn-only', '#warn_only', '#warnonly') {
+    operator_1429(".floodset $channel 10 1 7");
+    is_deeply([guard_1429($channel),guard_1429($channel),
+        $bot->{_chan_flood_conf}{$channel}{warn_only}], [0,1,0],
+        "$channel is a channel name, never an implicit warn-only option");
+}
+for my $form ('#mixed', '#mixed 12', '#mixed 12 3', '#mixed 12 3 8') {
+    my @values=split / /,$form; shift @values;
+    push @values,undef while @values<3;
+    for my $option ('', ' warn-only', ' WARN_ONLY', ' warnonly') {
+        operator_1429(".floodset $form$option");
+        is_deeply($bot->{_chan_flood_conf}{'#mixed'},
+            {window=>$values[0],max=>$values[1],silence=>$values[2],warn_only=>length($option)?1:0},
+            "complete supported form retained: $form$option");
+    }
+}
 is_deeply(\@warnings,[],'native dispatcher, configuration, expiry and admission paths remain warning-free');
 done_testing;
