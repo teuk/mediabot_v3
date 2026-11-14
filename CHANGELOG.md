@@ -1,3 +1,10 @@
+## MB1303 — Qualify representative command contracts
+
+- Share exact wire, caller identity and persisted-state assertions across twelve command scenarios.
+- Cover public/private echo, Unicode, public-only spike and addbadword availability.
+- Exercise authentication, immediate role revocation, SQL failure and successful retry.
+- Accept the bounded host endurance result and remove Perl qw channel-name warnings.
+
 ## MB1302 — Fix the bounded endurance acceptance gate
 
 - Define a single 300-cycle, two-channel closing workload for qualification step 4.

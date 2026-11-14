@@ -28,6 +28,14 @@ END {
     }
 }
 {
+    package MB1303::Channel;
+    sub get_id {7}
+    sub get_name {'#qualification'}
+    package MB1303::User;
+    sub is_authenticated {$_[0]{auth}}
+    sub has_level {die 'Unexpected required role' unless $_[1] eq 'Master';$_[0]{master}}
+    sub nickname {$_[0]{nick}}
+    sub level_description {'fixture'}
     package MB1299::Conf;
     sub get {$_[0]{$_[1]}}
     package MB1299::HTTP;
@@ -207,6 +215,85 @@ END {
         is($db->{ActiveKids}, 0, 'native reader leaves no active SQL statement after recovery');
         $bot->{dbh} = $fixture_db;
         $db->disconnect;
+        # MB1303: one wire/identity/storage contract runner, native per-command semantics.
+        {
+            my $contract_db=DBI->connect('dbi:SQLite:dbname=:memory:','','',
+                {RaiseError=>0,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
+            my $create=sub {$contract_db->do('CREATE TABLE BADWORDS (id_badwords INTEGER PRIMARY KEY, id_channel INTEGER, badword TEXT)') or die 'Cannot create contract table'};
+            $contract_db->do('CREATE TABLE CHANNEL (id_channel INTEGER, name TEXT)');
+            $contract_db->do("INSERT INTO CHANNEL VALUES (7, '#qualification')");
+            $create->();
+            $bot->{dbh}=$contract_db;
+            $bot->{channels}{'#qualification'}=bless {},'MB1303::Channel';
+            delete $bot->{_badword_cache}{'#qualification'};
+            my (@lookups,@sql);
+            my $state={};
+            local *Mediabot::get_user_from_message=sub {
+                my ($self,$message)=@_;
+                push @lookups,$message->prefix;
+                return bless {auth=>$state->{auth}//0,master=>$state->{master}//0,
+                    nick=>$state->{nick}},'MB1303::User';
+            };
+            local *Mediabot::ChannelCommands::logBot=sub {1};
+            local *Mediabot::ChannelCommands::noticeConsoleChan=sub {1};
+            $contract_db->sqlite_trace(sub {push @sql,$_[0]});
+            my @contracts=(
+                {id=>'echo-public',nick=>'Alice',target=>'#qualification',text=>'!EcHo café 🪄',
+                    wire=>['PRIVMSG #qualification :café 🪄'],words=>[]},
+                {id=>'echo-private',nick=>'Bob',target=>'qualifier',text=>'!echo privé 🪄',
+                    wire=>['PRIVMSG Bob :privé 🪄'],words=>[]},
+                {id=>'echo-empty',nick=>'Alice',target=>'qualifier',text=>'!echo',wire=>[],words=>[]},
+                {id=>'spike-public',nick=>'Bob',target=>'#qualification',text=>'!spike',
+                    wire=>['PRIVMSG #qualification https://teuk.org/In_Spike_Memory.jpg'],words=>[]},
+                {id=>'spike-private-absent',nick=>'Alice',target=>'qualifier',text=>'!spike',wire=>[],words=>[]},
+                {id=>'admin-anonymous',nick=>'Alice',target=>'#qualification',text=>'!addbadword café',lookup=>1,no_sql=>1,
+                    wire=>['NOTICE Alice :You must be logged to use this command - /msg qualifier login username password'],words=>[]},
+                {id=>'admin-granted',nick=>'Alice',target=>'#qualification',text=>'!addbadword café',auth=>1,master=>1,lookup=>1,
+                    wire=>["NOTICE Alice :Added badword 'café' to #qualification"],words=>['café']},
+                {id=>'admin-revoked',nick=>'Alice',target=>'#qualification',text=>'!addbadword interdit',auth=>1,master=>0,lookup=>1,no_sql=>1,
+                    wire=>['NOTICE Alice :Your level does not allow you to use this command.'],words=>['café']},
+                {id=>'admin-other-identity',nick=>'Bob',target=>'#qualification',text=>'!addbadword interdit',auth=>1,master=>0,lookup=>1,no_sql=>1,
+                    wire=>['NOTICE Bob :Your level does not allow you to use this command.'],words=>['café']},
+                {id=>'admin-private-absent',nick=>'Alice',target=>'qualifier',text=>'!addbadword #qualification interdit',auth=>1,master=>1,no_sql=>1,
+                    wire=>[],words=>['café']},
+                {id=>'admin-sql-failed',nick=>'Alice',target=>'#qualification',text=>'!addbadword réparé',auth=>1,master=>1,lookup=>1,
+                    before=>sub {$contract_db->do('DROP TABLE BADWORDS')},sql_failed=>1,wire=>[]},
+                {id=>'admin-sql-recovered',nick=>'Alice',target=>'#qualification',text=>'!addbadword réparé',auth=>1,master=>1,lookup=>1,
+                    before=>$create,wire=>["NOTICE Alice :Added badword 'réparé' to #qualification"],words=>['réparé']},
+            );
+            for my $row (@contracts) {
+                $state=$row;$row->{before}->() if $row->{before};
+                @lookups=();@sql=();
+                my $log_start=scalar @{$bot->{logger}{rows}};
+                my $start=scalar @$new_wire;my $before=$received;
+                my $prefix="$row->{nick}!contract\@local";
+                $new_server->write(encode('UTF-8',":$prefix PRIVMSG $row->{target} :$row->{text}\r\n"));
+                $pump->(sub {$received==$before+1});
+                my $marker="contract-$row->{id}";
+                $fresh->do_NOTICE(target=>'qualifier',text=>$marker);
+                $pump->(sub {grep {$_ eq "NOTICE qualifier $marker"} @$new_wire});
+                is_deeply([@$new_wire[$start..$#$new_wire]],
+                    [map {encode('UTF-8',$_)} @{$row->{wire}},"NOTICE qualifier $marker"],
+                    "$row->{id}: exact destination, bytes, order and absence of extra replies");
+                is_deeply(\@lookups,$row->{lookup}?[$prefix]:[],
+                    "$row->{id}: fresh authorization lookup uses this frame's identity only");
+                is(scalar @sql,0,"$row->{id}: denied or unregistered command never queries storage") if $row->{no_sql};
+                if ($row->{sql_failed}) {
+                    is(scalar @sql,0,'failed prepare never executes a statement');
+                    my @diagnostics=grep {$_->[1] =~ /^channelAddBadword_ctx\(\) SQL Error:/}
+                        @{$bot->{logger}{rows}}[$log_start..$#{$bot->{logger}{rows}}];
+                    is(scalar @diagnostics,1,'failed command records one native SQL diagnostic without an IRC success');
+                } else {
+                    is_deeply($contract_db->selectall_arrayref('SELECT id_channel, badword FROM BADWORDS ORDER BY id_badwords'),
+                        [map {[7,$_]} @{$row->{words}}],"$row->{id}: exact persisted words; denial cannot write");
+                }
+                is($contract_db->{ActiveKids},0,"$row->{id}: no active SQL statement survives dispatch");
+            }
+            $contract_db->sqlite_trace(undef);
+            $bot->{dbh}=$fixture_db;delete $bot->{channels}{'#qualification'};
+            delete $bot->{_badword_cache}{'#qualification'};
+            $contract_db->disconnect;
+        }
         # MB1299: keep real version parsing, fork/pipe protocol, watchdog and
         # reaping. Only the HTTP client boundary and audit/config data are fixtures.
         require Mediabot::Version::Remote;

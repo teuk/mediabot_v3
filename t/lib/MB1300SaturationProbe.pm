@@ -169,7 +169,7 @@ sub run_timed {
             @wire=();%arrival=();
             $bot->{blocked}=1;
             my $queued_at=now();my $accepted=0;
-            for my $channel (qw(#busy #other)) {
+            for my $channel (('#busy', '#other')) {
                 $accepted+=!!Mediabot::Helpers::botPrivmsg($bot,$channel,"timed-$cycle-$_") for 1..2;
             }
             is($accepted,4,"timed $cycle: both channels admit two lines");
@@ -180,7 +180,7 @@ sub run_timed {
             $pump->(sub {exists($arrival{"PRIVMSG #busy timed-$cycle-2"}) && exists($arrival{"PRIVMSG #other timed-$cycle-2"})},10);
             $irc->do_NOTICE(target=>'qualifier',text=>"timed-barrier-$cycle");
             $pump->(sub {exists $arrival{"NOTICE qualifier timed-barrier-$cycle"}},2);
-            for my $channel (qw(#busy #other)) {
+            for my $channel (('#busy', '#other')) {
                 is_deeply([grep {/^PRIVMSG \Q$channel\E /} @wire],
                     [map {"PRIVMSG $channel timed-$cycle-$_"} 1..2],"timed $cycle $channel: native timers deliver once in FIFO order");
                 cmp_ok($arrival{"PRIVMSG $channel timed-$cycle-1"}-$queued_at,'>=',1.8,

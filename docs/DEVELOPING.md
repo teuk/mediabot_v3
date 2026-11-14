@@ -399,3 +399,25 @@ The maintainer delivery runs targeted tests, this single long workload and its
 assessment, then one full suite; existing commit.sh commit/push is last. Routine
 full/load qualification retains its short two-cycle measurement. See the roadmap
 for the bounded closure and excluded hours-long/production fairness claims.
+
+
+### Representative command contracts (MB1303)
+
+`perl t/test_commands.pl --filter '1313_mb883' --progress` includes the shared
+contract matrix in `t/lib/MB1297LocalIRCProbe.pl`. Each row declares an IRC frame,
+caller, permission state, expected exact wire replies and stored words. Native
+registry dispatch, Context, handlers, Sender and SQLite remain active. The same
+ordinary NOTICE barrier closes each exchange before checking extra replies.
+
+The twelve scenarios cover public/private echo, Unicode and empty arguments,
+public spike and its absent private registration, then addbadword authentication,
+grant/revocation, a second caller, absent private registration, failed SQL prepare
+and successful recovery. Authorization lookup and audit sinks are fixtures; this
+qualifies handler consumption of the current identity/role, not login or session
+storage. Persisted channel ID and Unicode word are checked together. Add rows to
+this runner for a concrete regression; do not infer support in an unregistered
+command scope or force all commands to share one presentation policy.
+
+The 300-cycle endurance gate is already accepted on teuk for MB1302. This delivery
+requires targeted and full tests only, ending with noninteractive commit/push.
+No new twenty-minute run is needed for the representative contract matrix.

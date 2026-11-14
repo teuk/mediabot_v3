@@ -12,8 +12,8 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 | 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | Accepted on MB1296 (`d17bb81f`): fresh Debian full lane passed; source-bound reports and native/module inventory retained. Rebuilds remain observed, not dependency-locked. |
 | 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Bounded MB1297 journeys accepted by complete offline CI on `431c45a6`; full receive-handler/login coverage remains outside scope |
 | 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | Selected MB1298/MB1299 matrix accepted by fresh CI on `e838b9fa`: SQL/diagnostic faults, HTTP 503, native worker timeout and recovery. Wider faults remain outside this bounded matrix. |
-| 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | MB1301 short timer recovery accepted by fresh CI. MB1302 fixes the closing 300-cycle local envelope; target-host long-run acceptance pending. Production fairness and hours-long stability are residual limits. |
-| 5. Shared command contracts | Reusable matrix over selected representative commands | Private/channel routing, permission revocation, identity, Unicode and storage errors covered; preserve command-specific semantics | Planned |
+| 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | Accepted on teuk for MB1302 (`d9452420`): 300 cycles, 1,200 deliveries, 1,203.047s, stable descriptors/notifiers, RSS growth 2,468 KiB. Production fairness and hours-long stability remain outside scope. |
+| 5. Shared command contracts | Reusable matrix over selected representative commands | Private/channel routing, permission revocation, identity, Unicode and storage errors covered; preserve command-specific semantics | MB1303 implements twelve representative contracts over echo, spike and addbadword; host/full CI acceptance pending. |
 
 Each step ends with an explicit pass/fail/unavailable verdict and a bounded list
 of residual limits. Report source commit separately from installed/running code.
@@ -543,3 +543,66 @@ All 191 native targeted assertions pass; a real two-cycle measurement passes its
 own assertions and is correctly refused as incomplete by the endurance assessor.
 The twenty-minute target run is pending. Local full qualification lacks
 DBD::MariaDB; the host script requires the full suite before committing.
+
+
+## MB1303 — Representative command contracts and bounded campaign closure
+
+Base `d9452420d481537ee0873cac4dc26732ec396b8f` matches every tracked byte of the
+2026-11-14 18:13:00 snapshot. The maintainer's MB1302 transcript reports a passed
+300-cycle assessment: 1,200 deliveries in 1,203.04672772205 seconds, four connected
+notifiers and eleven file descriptors, warmup RSS median 127,352 KiB, peak growth
+2,468 KiB (below 16,384). Evidence remains on teuk under
+`/home/mediabot/mb1302-endurance.I64VvIYR/`. This is transcript evidence; those host
+JSON bytes were not independently supplied. The host full suite passed 43,027
+assertions in 373s before noninteractive commit/push. Step 4 is accepted for its
+specified local envelope; no repeat long workload is required by this delivery.
+
+All three MB1302 workflows also passed. Fresh run
+https://github.com/teuk/mediabot_v3/actions/runs/43619013343 passed 42,991 assertions
+in 171s. Its short default measurement is separate from host endurance. Artifact
+14122932516 is retained in the delivery, archive SHA-256
+`26498d363626fe38f571ab0b2d9e366b5f7a2adf122d487c0a3343d36a95c131`.
+
+Step 5 uses one data-driven contract runner over twelve scenarios:
+
+| Representative | Contract |
+| --- | --- |
+| echo | Public and private destination, mixed-case dispatch, exact UTF-8 bytes, empty-argument silence |
+| spike | Exact public response; no private handler or unexpected reply |
+| addbadword | Anonymous denial, granted write, immediately revoked role, different caller identity, no private registration, SQL prepare failure and one successful retry |
+
+All frames cross the existing AF_UNIX pair, native parsing, registry dispatch,
+Context, real built-ins and Sender. Each exchange ends at an ordinary NOTICE
+barrier, then checks the entire wire slice for exact destination/content/order
+and absence of extra replies. Administrative rows check that Context requests
+the current frame's full prefix once. Denied/unregistered administrative commands
+must issue no SQL; successful writes must preserve registered channel ID 7 and
+the exact Unicode word. A disposable SQLite missing-table failure must produce
+one native diagnostic, no success reply and no active statement; restoring the
+table allows the next request to succeed once. No deployed database is touched.
+
+Authorization lookup supplies fresh fixture user objects; native handler role
+checks remain active. Audit and console sinks are fixtures. This qualifies
+permission revocation between commands, not authentication, session storage or
+revocation during an already-running asynchronous command. SQL scope is failed
+prepare with DBI RaiseError off, not all exception/transaction behaviors. Private
+absence for spike/addbadword preserves current catalogue semantics. These three
+representatives do not establish contracts for every command or network topology.
+
+The two `qw(#busy #other)` lists are replaced with explicit quoted channel names.
+This removes the warning observed on teuk without changing channels, timers or
+endurance criteria. Syntax checking of the standalone wrapper emits no qw warning.
+
+Local validation: 19 tooling tests and 244 native targeted assertions pass,
+including 53 contract assertions. A negative control bypassing the native Master
+check fails the revocation contracts. Full local qualification still lacks
+DBD::MariaDB; host targeted/full acceptance and subsequent source-bound CI remain
+required. The delivery ends with noninteractive commit.sh commit/push.
+
+### Final exit decision
+
+After MB1303 host and fresh CI pass, close the five-step campaign for the bounded
+scopes above and publish a concise result summary; no additional feature patch
+is required merely to extend the matrix. Reopen only for a reproduced defect or
+an explicitly selected new scope. Preserve the listed residual limits rather
+than calling this universal resilience, production capacity or hours-long proof.
