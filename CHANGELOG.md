@@ -1,3 +1,10 @@
+## MB1299 — Qualify HTTP faults and worker recovery over local IRC
+
+- Exercise native version commands with HTTP 503, worker timeout and successful recovery.
+- Keep real fork/pipe transport, watchdog and reaping while injecting only the HTTP client boundary.
+- Verify local identity, exact IRC replies, callback diagnostics and child collection.
+- Record MB1298 fresh qualification acceptance and preserve its source-bound evidence.
+
 ## MB1298 — Qualify SQL failure and diagnostic recovery over local IRC
 
 - Exercise a real in-memory SQL read failure through the native public command path.

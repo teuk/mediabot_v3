@@ -11,7 +11,7 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 | --- | --- | --- | --- |
 | 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | Accepted on MB1296 (`d17bb81f`): fresh Debian full lane passed; source-bound reports and native/module inventory retained. Rebuilds remain observed, not dependency-locked. |
 | 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Bounded MB1297 journeys accepted by complete offline CI on `431c45a6`; full receive-handler/login coverage remains outside scope |
-| 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | MB1298 implements confirmed-rule SQL refresh and diagnostic-sink faults; target-host acceptance pending. HTTP/worker and wider logging faults remain planned. |
+| 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | MB1298 SQL/diagnostic faults accepted by fresh CI on `3e8c98c1`; MB1299 adds HTTP 503, native worker timeout and recovery. Selected matrix implementation complete; MB1299 target-host acceptance pending. Wider faults remain outside this bounded matrix. |
 | 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | Planned |
 | 5. Shared command contracts | Reusable matrix over selected representative commands | Private/channel routing, permission revocation, identity, Unicode and storage errors covered; preserve command-specific semantics | Planned |
 
@@ -354,3 +354,51 @@ waits and the 15-second journey alarm remain in force. Fresh CI now also watches
 case 1313 and its three supporting fixtures, so a harness-only change cannot
 silently omit the fresh qualification run. Target-host targeted/full validation
 remains required before the final noninteractive commit/push.
+
+
+## MB1299 — HTTP failure, native worker timeout and recovery
+
+MB1298 is committed as `3e8c98c16bde35c7238741f82d0a551c65519064`; all tracked
+files match the 2026-11-14 12:52:17 snapshot. All three workflows passed. Fresh run
+https://github.com/teuk/mediabot_v3/actions/runs/43592049519 passed 42,909 assertions
+in 158 seconds with provisioning and inventory. No numerical host transcript was
+supplied with the snapshot. Artifact 14112798301 is verified and retained in the
+MB1299 delivery; its archive SHA-256 is
+`5e1b82bf5925b81bf71fd4ef0bae82dffcbdf31df35d6ab19d26d3abcdfc6374`.
+
+The existing socket harness now sends real public !version commands through
+native dispatch, Version::Command, Version::Remote and AsyncWorker. Its controlled
+HTTP client returns 503, blocks inside the child until the native watchdog stops
+it, then returns a valid newer version on the recovery attempt. Configuration
+and audit storage use fixtures; version reading, HTTP-response validation,
+comparison, fork, pipe protocol, result translation, timers and reaping remain
+native. A child-written PID marker proves the HTTP boundary ran in that worker,
+not in the IRC event loop. No network request is made by the HTTP fixture.
+
+Each attempt must retain the local identity and deliver one callback. HTTP 503
+and timeout reasons must survive at the adapter callback boundary. Failure must
+not produce a false remote version, false update announcement or raw diagnostic
+on IRC: the local identity reply remains available. Recovery must clear the reason
+and emit exactly one update after the local reply. After completion, both logical
+worker ownership and the physical child record are absent; waitpid confirms that
+the native worker already reaped the child. A fixture cleanup guard handles only
+children owned by this probe if a setup/wait fails.
+
+The fixture selects a 0.3-second supported adapter timeout without changing any
+production timeout. Existing two-second waits and the whole-journey 15-second
+alarm remain. Native command output is checked after an ordinary NOTICE marker,
+so all earlier ordinary frames have crossed the socket before comparison.
+
+Local validation: 16 tooling tests and 142 native case-1313 assertions pass,
+including 33 new worker/HTTP assertions. A negative control that turns HTTP 503
+into a successful remote version fails the exact wire assertion. Target-host
+full validation and the next CI acceptance remain pending before this matrix is
+closed. Commit/push stays the guarded noninteractive final local action.
+
+Limits: the injected HTTP boundary is not a real HTTP server, TCP/TLS failure,
+DNS failure or network-isolation proof. This covers normal watchdog termination,
+not every KILL escalation or uninterruptible child. Diagnostic assertions concern
+the adapter callback; the public version command keeps its existing presentation.
+Async completion after connection replacement is separate from the deferred-output
+reconnect journey and is not qualified here. No general fault tolerance claim,
+endurance budget or deployment database change follows from these selected cases.

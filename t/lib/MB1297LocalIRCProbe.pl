@@ -7,13 +7,43 @@ use Test::More;
 use Socket qw(AF_UNIX SOCK_STREAM PF_UNSPEC);
 use IO::Async::Loop;
 use IO::Async::Stream;
+use IO::Select;
+use POSIX qw(WNOHANG);
 use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
 use Mediabot::Mediabot ();
 use Mediabot::IRC::Transport;
 use Mediabot::IRC::Timer ();
 use MB881OutputFixture;
 
-# No address, DNS, configuration file or connect() call: both ends are local
+
+# Clean only children launched by this probe if an assertion setup or wait dies.
+my $probe_owner = $$;
+my %probe_pids;
+END {
+    local $?;
+    if (defined($probe_owner) && $$ == $probe_owner) {
+        for my $pid (keys %probe_pids) {
+            if (waitpid($pid,WNOHANG) == 0) {kill 'KILL',$pid; waitpid($pid,0)}
+        }
+    }
+}
+{
+    package MB1299::Conf;
+    sub get {$_[0]{$_[1]}}
+    package MB1299::HTTP;
+    sub get {
+        my ($self,$url)=@_;
+        die 'Unexpected HTTP fixture URL' unless $url eq 'http://qualification.invalid/VERSION';
+        syswrite($self->{ready}, "$$\n") or die $!;
+        close $self->{ready};
+        if ($self->{mode} eq 'timeout') {sleep 30; die 'Watchdog did not stop HTTP fixture'}
+        return $self->{mode} eq 'http_error'
+            ? {success=>0,status=>503,reason=>'fixture outage',content=>''}
+            : {success=>1,status=>200,content=>"99.0\n"};
+    }
+}
+
+# No IRC address, DNS, configuration file or connect() call: both ends are local
 # anonymous Unix sockets. This is a transport boundary, not an OS egress sandbox.
 {
     local $SIG{ALRM} = sub {die "Local IRC qualification timed out\n"};
@@ -177,6 +207,79 @@ use MB881OutputFixture;
         is($db->{ActiveKids}, 0, 'native reader leaves no active SQL statement after recovery');
         $bot->{dbh} = $fixture_db;
         $db->disconnect;
+        # MB1299: keep real version parsing, fork/pipe protocol, watchdog and
+        # reaping. Only the HTTP client boundary and audit/config data are fixtures.
+        require Mediabot::Version::Remote;
+        my $local_version = Mediabot::Helpers::getLocalVersion($bot);
+        $bot->{conf} = bless {
+            'main.MAIN_PROG_NAME'=>'Qualification',
+            'update.VERSION_URL'=>'http://qualification.invalid/VERSION',
+        }, 'MB1299::Conf';
+        local *Mediabot::Helpers::logBot = sub {1};
+        my $remote = \&Mediabot::Helpers::getVersion_async;
+        my $launch = Mediabot::AsyncWorker->can('start');
+        for my $mode (qw(http_error timeout recovered)) {
+            pipe(my $ready_r, my $ready_w) or die $!;
+            my (@completions, @launched);
+            local *Mediabot::External::_make_http = sub {
+                return bless {mode=>$mode, ready=>$ready_w}, 'MB1299::HTTP';
+            };
+            # Capture the actual worker; do not replace its child or on_done.
+            local *Mediabot::AsyncWorker::start = sub {
+                my $worker = $launch->(@_);
+                if ($worker && $worker->pid) {
+                    $probe_pids{$worker->pid}=1;
+                    push @launched,$worker;
+                }
+                return $worker;
+            };
+            local *Mediabot::Helpers::getVersion_async = sub {
+                my ($owner,$callback)=@_;
+                return $remote->($owner,sub {
+                    push @completions, [@_];
+                    $callback->(@_);
+                }, timeout=>0.3);
+            };
+            my $start = scalar @$new_wire;
+            my $before = $received;
+            $new_server->write(":Alice!test\@local PRIVMSG #qualification :!version\r\n");
+            $pump->(sub {$received == $before+1});
+            close $ready_w;
+            is(scalar @launched,1,"$mode: command launches one native worker");
+            my $worker=$launched[0] or die 'No version worker';
+            $pump->(sub {@completions && !exists $Mediabot::AsyncWorker::CHILDREN{$worker->{task_id}}});
+            ok(scalar(IO::Select->new($ready_r)->can_read(0)),"$mode: HTTP fixture reported child entry");
+            my $child_pid=<$ready_r>; close $ready_r;
+            chomp $child_pid if defined $child_pid;
+            is($child_pid,$worker->pid,"$mode: HTTP boundary ran in the actual worker process");
+            isnt($child_pid,$$,"$mode: HTTP work did not run in the IRC event loop");
+            is(scalar @completions,1,"$mode: native completion is delivered once");
+            is($completions[0][0],$local_version,"$mode: completion retains local identity");
+            if ($mode eq 'http_error') {
+                like($completions[0][2],qr/^HTTP 503 \(fixture outage\)$/,
+                    'HTTP failure retains its explicit diagnostic across the native pipe');
+                is($completions[0][1],'Undefined','HTTP error never becomes a remote version');
+            } elsif ($mode eq 'timeout') {
+                is($completions[0][2],'version check timed out','native watchdog retains its timeout diagnosis');
+                is($completions[0][1],'Undefined','timed-out work never becomes a remote version');
+            } else {
+                is($completions[0][1],'99.0','recovery validates the remote version');
+                is($completions[0][2],undef,'recovery clears prior failure reasons');
+            }
+            my $tag="worker-$mode";
+            $fresh->do_NOTICE(target=>'qualifier',text=>$tag);
+            $pump->(sub {grep {$_ eq "NOTICE qualifier $tag"} @$new_wire});
+            my @expected=("PRIVMSG #qualification :Qualification version: $local_version");
+            push @expected,"PRIVMSG #qualification :Qualification update available: 99.0 (local: $local_version)"
+                if $mode eq 'recovered';
+            push @expected,"NOTICE qualifier $tag";
+            is_deeply([@$new_wire[$start .. $#$new_wire]],\@expected,
+                "$mode: exact native replies, no failure text or false update on IRC");
+            is(scalar(Mediabot::AsyncWorker->active_workers($loop)),0,"$mode: no logical worker remains");
+            my $waited=waitpid($worker->pid,WNOHANG);
+            ok($waited==-1 && $!{ECHILD},"$mode: OS child was already reaped by the native worker");
+            delete $probe_pids{$worker->pid} if $waited != 0;
+        }
         $old->close_now; $fresh->close_now; $server->close_now; $new_server->close_now;
     });
     alarm 0;

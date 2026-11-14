@@ -330,3 +330,8 @@ The IRC lane also exercises a missing-table SQL fault in an in-memory SQLite
 fixture, a throwing diagnostic sink, and recovery. Native rules, dispatch and
 wire output remain active; only the private fixture database is modified. The
 fresh workflow watches the native journey case and its supporting fixtures.
+
+The same IRC lane now covers public `!version` with injected HTTP 503, a blocked
+HTTP fixture stopped by the real worker watchdog, and recovery. Native child
+processes and pipes are exercised; no external HTTP request is made. The test
+checks callback diagnostics, exact IRC replies and OS child collection.
