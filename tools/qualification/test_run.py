@@ -55,7 +55,7 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(json.loads((self.output/'report.json').read_text())['status'],'unavailable')
 
     def test_lanes_environment_and_disposal(self):
-        for lane,expected in [('preflight',3),('fast',5),('full',5)]:
+        for lane,expected in [('preflight',3),('fast',5),('full',5),('irc',5)]:
             output=self.root/lane
             with patch.dict(os.environ,{'PERL5OPT':'bad','PERL5LIB':'secret','PERLLIB':'secret'}):
                 with patch.object(q,'run_stage',return_value={'status':'passed','returncode':0}) as run:
@@ -66,6 +66,8 @@ class QualificationTests(unittest.TestCase):
             self.assertNotIn('PERL5OPT',args[3]);self.assertNotIn('PERL5LIB',args[3]);self.assertNotIn('PERLLIB',args[3])
             if lane!='preflight':
                 self.assertEqual('--fast' in args[1],lane=='fast');self.assertIn('--progress',args[1])
+                self.assertEqual('--filter' in args[1],lane=='irc')
+                if lane=='irc': self.assertEqual(args[1][args[1].index('--filter')+1],'1313_')
 
     def test_test_failure_preserved(self):
         with patch.object(q,'run_stage',side_effect=[{'status':'passed'}]*4+[{'status':'failed','returncode':7}]):

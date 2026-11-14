@@ -9,8 +9,8 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 
 | Step | Deliverable | Exit evidence | Status |
 | --- | --- | --- | --- |
-| 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | In progress: MB1291 provides source isolation; MB1292 adds explicit disposable dependency provisioning and observed module identity. MB1293 host acceptance passed; MB1294 supplies the fresh Debian CI gate. Its successful run remains required. |
-| 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Planned |
+| 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | Accepted on MB1296 (`d17bb81f`): fresh Debian full lane passed; source-bound reports and native/module inventory retained. Rebuilds remain observed, not dependency-locked. |
+| 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | MB1297 implementation; target-host acceptance pending |
 | 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | Planned |
 | 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | Planned |
 | 5. Shared command contracts | Reusable matrix over selected representative commands | Private/channel routing, permission revocation, identity, Unicode and storage errors covered; preserve command-specific semantics | Planned |
@@ -253,3 +253,58 @@ remain mandatory. Step 1 stays open; step 2 has not started.
 Maintainer order remains apply, tooling checks, targeted --progress, one full
 --progress, then guarded noninteractive commit.sh --skip-preflight and push as
 the final local action. No post-commit command follows.
+
+
+## MB1297 — Local native IRC journeys
+
+Step 1 acceptance is established on commit
+`d17bb81f934a6d9c0b813e5cea27eed9c5877e92`. The maintainer passed 16 tooling tests,
+432 targeted assertions and 42,918 full-suite assertions (1,139 files, 363 seconds)
+before its noninteractive commit/push. All three CI workflows passed. Fresh run
+https://github.com/teuk/mediabot_v3/actions/runs/43588184322 passed provisioning,
+module inventory, native-tool checks and 42,882 executed assertions (168 seconds).
+These totals are recorded separately; neither proves identical optional branch
+coverage on the two environments.
+
+The source-bound report, platform inventory, module inventory and qualification
+log are preserved in artifact 14111496787. Its archive SHA-256 is
+`fc28c5f59ee0d8968acb27072f74963451acaf2664b0d75c40ca0b6a37d749b5`.
+A verified copy is included in the MB1297 delivery for retention beyond the CI
+artifact's 14-day lifetime. Dependency resolution and container tags remain
+unlocked; the acceptance is a fresh setup with recorded identity.
+
+Step 2 uses anonymous AF_UNIX socket pairs. The simulated peer sends real IRC
+frames into Net::Async::IRC through Mediabot::IRC::Transport and collects the
+serialized response bytes. The harness has no server address argument, DNS or
+configuration loading. IRC/loop connect and loop resolver entry points are
+locally rejected. This is a local transport boundary, not an OS network sandbox.
+
+Three journeys use native mbCommandPublic/mbCommandPrivate and the actual built-in
+registry, handlers, Context and Sender:
+
+- Public !spike returns its expected channel reply through the wire.
+- Private !echo preserves accented/emoji UTF-8 bytes and replies only to the nick.
+- A public reply is held by the real deferred output queue. Native setIrc replaces
+  the connection, retires old output and detaches the countdown. Calling the old
+  expiry callback cannot inject a response into the successor; a new private
+  command still succeeds and PING receives PONG.
+
+Only storage/history, command admission and output-policy data use controlled
+fixtures. Countdown construction is observed but native timers execute. The
+harness's small callback maps its two fixed targets into the real dispatch API;
+it does not run mediabot.pl's complete receive handler, login/registration,
+ignore rules, channel membership or real database permissions. It tests deferred
+output retirement, not every asynchronous HTTP/worker completion.
+
+The existing native case 1313 runs these journeys after its pacing/transport
+checks. `--lane irc` selects that case in the disposable committed-source runner;
+full qualification includes it too. Each wait has a two-second bound and the
+journey has a 15-second alarm. Missing dependencies remain unavailable at the
+runner gates; assertions fail the test stage. Step 2 target-host acceptance is
+pending. Controlled-fault and endurance steps are not claimed by this increment.
+
+Local validation: 16 tooling tests passed. Native case 1313 passes 92 assertions,
+including the ten new journey assertions, with real IO::Async/Net::Async::IRC.
+A negative control replacing setIrc with a bare assignment fails the stale-wire
+assertion as expected. The timer check follows the specific deferred notifier,
+not unrelated transport timers. Full host validation still precedes commit/push.

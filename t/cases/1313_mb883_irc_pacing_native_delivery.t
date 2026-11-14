@@ -146,5 +146,6 @@ MB881OutputFixture::with_policy(sub {
 is(IO::Async::Timer::Countdown->can('new'), $original_new,
     'native transport starts after the pacing timer override has been restored');
 do './t/lib/MB1269TransportProbe.pl' or die $@ || $!;
+do './t/lib/MB1297LocalIRCProbe.pl' or die $@ || $!;
 
 done_testing;

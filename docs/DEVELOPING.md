@@ -319,3 +319,9 @@ the disposable updater rehearsal execute these native tools. The runner checks
 them before starting the suite; a missing tool is `unavailable`, not a test pass.
 The Perl-only preflight lane retains its existing scope. Fresh CI installs these
 packages explicitly and records their versions in its retained evidence.
+
+`python3 tools/qualification/run.py --lane irc --output /tmp/mb-irc-UNIQUE`
+qualifies committed HEAD using existing native case 1313, including the local
+socket journeys. The full lane runs the same case. It requires normal native
+Perl dependencies; it never starts mediabot.pl or loads deployment configuration.
+See MB1297 in the qualification roadmap for seams and remaining scope limits.

@@ -108,7 +108,8 @@ def qualify(repo, output, lane, timeout, perl_lib=None, provision=False):
                 commands.append(('suite_native_dependencies',
                     ['bash', 'tools/qualification/native-tools.sh']))
                 commands.append(('tests', ['perl', 't/test_commands.pl',
-                    *(['--fast'] if lane == 'fast' else []), '--progress']))
+                    *(['--fast'] if lane == 'fast' else []),
+                    *(['--filter', '1313_'] if lane == 'irc' else []), '--progress']))
             report['status'] = 'passed'
             code = 0
             for name, command in commands:
@@ -131,7 +132,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument('--output', type=Path, required=True, help='new report directory; must not exist')
-    parser.add_argument('--lane', choices=['preflight', 'fast', 'full'], default='preflight')
+    parser.add_argument('--lane', choices=['preflight', 'fast', 'full', 'irc'], default='preflight')
     parser.add_argument('--timeout', type=float, default=1200, help='maximum seconds per stage')
     parser.add_argument('--perl-lib', type=Path, help='explicit installed local/lib/perl5 dependency tree')
     parser.add_argument('--provision', action='store_true',

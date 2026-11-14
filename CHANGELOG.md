@@ -1,3 +1,10 @@
+## MB1297 — Exercise native command journeys over local IRC sockets
+
+- Record successful MB1296 fresh Debian qualification and retain its source-bound evidence.
+- Exercise public/private built-ins through native wire parsing, registry dispatch and Sender.
+- Prove a deferred reply and late callback cannot cross into a replacement transport.
+- Add an IRC qualification lane reusing the existing native transport case.
+
 ## MB1296 — Supply native tools required by fresh qualification
 
 - Install Node.js, Tcl and procps in the disposable Debian qualification container.
