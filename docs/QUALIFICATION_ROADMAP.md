@@ -191,3 +191,30 @@ wrapper verifies the known helper hash, exact expected files and remote base,
 stages only the reviewed patch, and supplies one final confirmation automatically.
 No post-commit local preflight or extra command follows; CI runs independently
 from the push. No global yes pipe or permanent helper modification is needed.
+
+
+## MB1295 — Repair the fresh HTTPS bootstrap
+
+MB1294 is committed as `e1fba50a928e0d2f29b51e1fa0713ed727ce3a7b`; all tracked
+files match the maintainer's 2026-11-14 11:17:13 snapshot. Existing CI and Debian
+13 fresh-install jobs passed. The new Fresh qualification run
+https://github.com/teuk/mediabot_v3/actions/runs/43583807210 failed during its first
+CPAN provisioning stage, after all 14 tooling tests passed. The evidence artifact
+was retained. No native full-suite acceptance occurred in that fresh job.
+
+The minimal image installed CA roots but no curl/wget and no Perl TLS modules.
+CPAN's HTTPS index fetch failed before IO::Socket::SSL itself could be installed,
+then reported misleading missing-distribution errors. Reproduced locally using
+cpanm 1.7048 without curl/wget/Perl TLS; adding curl resolves the same index.
+
+MB1295 installs curl as a native prerequisite, adds a visible curl version gate
+before all CPAN stages, and selects --curl --no-lwp --no-wget explicitly. It keeps
+the HTTPS mirror, CA verification, disposable module tree and no-cache policy.
+Without curl the runner reports unavailable at provision_transport_dependencies
+and never attempts CPAN or the test suite. Ordinary preflight without --provision
+still uses installed modules and does not require curl.
+
+All 15 tooling tests pass, including a real missing-executable gate and installer
+failure after a successful transport gate. Full fresh-container acceptance stays
+pending the next actual CI run; the existing two successful CI jobs do not waive
+it. Maintainer delivery still ends with the guarded noninteractive commit/push.

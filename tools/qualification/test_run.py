@@ -96,13 +96,18 @@ class QualificationTests(unittest.TestCase):
             with patch.object(q, 'run_stage', return_value={'status': 'passed'}) as run:
                 self.assertEqual(q.qualify(self.repo, self.output, 'fast', 2, provision=True), 0)
         calls = [call.args for call in run.call_args_list]
-        self.assertEqual(len(calls), 7)
-        self.assertEqual(calls[0][1][-2:], ['--installdeps', '.'])
-        self.assertEqual(calls[1][1][-1], 'DBD::SQLite')
-        self.assertTrue(calls[2][1][-1].endswith('/Hailo-0.75.tar.gz'))
-        local = Path(calls[0][1][3])
-        self.assertEqual(calls[0][1][:3], ['cpanm', '--notest', '--local-lib-contained'])
-        self.assertEqual(calls[0][1][4:6], ['--from', 'https://cpan.metacpan.org'])
+        self.assertEqual(len(calls), 8)
+        self.assertEqual(calls[0][0], 'provision_transport_dependencies')
+        self.assertEqual(calls[0][1], ['curl', '--version'])
+        installers = calls[1:4]
+        self.assertEqual(installers[0][1][-2:], ['--installdeps', '.'])
+        self.assertEqual(installers[1][1][-1], 'DBD::SQLite')
+        self.assertTrue(installers[2][1][-1].endswith('/Hailo-0.75.tar.gz'))
+        local = Path(installers[0][1][3])
+        for call in installers:
+            self.assertEqual(call[1][:3], ['cpanm', '--notest', '--local-lib-contained'])
+            self.assertEqual(call[1][4:9], ['--from', 'https://cpan.metacpan.org',
+                                          '--curl', '--no-lwp', '--no-wget'])
         self.assertFalse(local.parent.exists())
         for _, _, _, env, _ in calls:
             self.assertEqual(env['PERL5LIB'], str(local / 'lib/perl5'))
@@ -112,12 +117,25 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(set(report['dependency_inputs']), {'cpanfile', 'install/cpan_install.sh'})
 
     def test_failed_provision_stops_before_tests(self):
-        with patch.object(q, 'run_stage', return_value={'status': 'failed', 'returncode':1}) as run:
+        with patch.object(q, 'run_stage', side_effect=[{'status':'passed'},
+                          {'status': 'failed', 'returncode':1}]) as run:
             self.assertEqual(q.qualify(self.repo,self.output,'full',2,provision=True),3)
-        self.assertEqual(run.call_count,1)
+        self.assertEqual(run.call_count,2)
         with self.assertRaises(ValueError):
             q.qualify(self.repo,self.root/'another','full',2,self.root,provision=True)
         self.assertFalse((self.root/'another').exists())
+
+    def test_native_missing_curl_stops_before_cpan(self):
+        import shutil
+        bin_dir=self.root/'git-only';bin_dir.mkdir()
+        (bin_dir/'git').symlink_to(shutil.which('git'))
+        with patch.dict(os.environ, {'PATH':str(bin_dir)}):
+            self.assertEqual(q.qualify(self.repo,self.output,'full',2,provision=True),3)
+        report=json.loads((self.output/'report.json').read_text())
+        self.assertEqual(report['status'],'unavailable')
+        self.assertEqual(len(report['stages']),1)
+        self.assertEqual(report['stages'][0]['name'],'provision_transport_dependencies')
+        self.assertEqual(report['stages'][0]['error'],'FileNotFoundError')
 
     def test_native_inventory_records_missing_and_loaded_modules(self):
         script = Path(__file__).with_name('inventory.pl')

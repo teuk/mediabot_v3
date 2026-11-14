@@ -89,8 +89,12 @@ def qualify(repo, output, lane, timeout, perl_lib=None, provision=False):
                 # Contained install, including non-core dependencies already on
                 # the host. Never sudo or invoke the application configure wizard.
                 base = ['cpanm', '--notest', '--local-lib-contained', local,
-                        '--from', 'https://cpan.metacpan.org']
+                        '--from', 'https://cpan.metacpan.org',
+                        '--curl', '--no-lwp', '--no-wget']
                 commands.extend([
+                    # Bootstrap HTTPS independently of IO::Socket::SSL, which
+                    # is itself one of the modules we are about to install.
+                    ('provision_transport_dependencies', ['curl', '--version']),
                     ('provision_dependencies', base + ['--installdeps', '.']),
                     ('provision_test_dependencies', base + ['DBD::SQLite']),
                     ('provision_hailo_dependencies', base + [

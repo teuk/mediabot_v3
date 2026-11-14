@@ -1,3 +1,10 @@
+## MB1295 — Bootstrap HTTPS before installing Perl dependencies
+
+- Install curl in the fresh Debian qualification container alongside CA roots.
+- Check the native downloader before attempting CPAN dependency resolution.
+- Use curl explicitly so installing IO::Socket::SSL does not require that module first.
+- Preserve unavailable verdicts and stop before the native suite when bootstrap is missing.
+
 ## MB1294 — Qualify fresh Debian environments and preserve evidence
 
 - Run uncached dependency provisioning and the full native lane in a new Debian 13 CI container.

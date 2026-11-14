@@ -31,7 +31,7 @@ with the system administrator, then return to the ordinary account:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y perl cpanminus build-essential pkg-config libmariadb-dev
+sudo apt-get install -y perl cpanminus build-essential pkg-config libmariadb-dev curl ca-certificates
 ```
 
 Use the repository's `cpanfile` for developer dependencies, with a local module

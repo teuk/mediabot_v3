@@ -30,7 +30,7 @@ jobs:
           set -euo pipefail
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            bash ca-certificates git python3 perl cpanminus build-essential \
+            bash ca-certificates curl git python3 perl cpanminus build-essential \
             pkg-config libmariadb-dev libssl-dev zlib1g-dev util-linux passwd
           useradd --create-home --shell /bin/bash qualifier
 
