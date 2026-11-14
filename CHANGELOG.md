@@ -1,3 +1,9 @@
+## MB1305 — Keep nickname queries on the requested channel
+
+- Use the shared IRC channel classifier for nicklist and rnick target selection.
+- Honor explicit and implicit &, ! and + channels instead of inspecting the current channel.
+- Preserve authorization, unknown-channel refusal, pagination and cached nickname lists.
+
 ## MB1304 — Preserve badword command channel scope
 
 - Recognize all shared IRC channel prefixes in addbadword and rembadword.

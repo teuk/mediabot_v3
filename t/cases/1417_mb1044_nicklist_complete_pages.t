@@ -35,12 +35,14 @@ sub run_1417 {
     my $logger=bless {rows=>[]},'MB1044::Logger';
     my $bot={hChannelsNicks=>{defined($opts{key})?$opts{key}:'#room'=>$nicks},
         logger=>$logger,irc=>bless({},'MB1044::IRC')};
+    $bot->{hChannelsNicks}{'#else'}=['WrongChannel'];
     my $before=dclone($bot->{hChannelsNicks});
-    my $ctx=bless {bot=>$bot,args=>$opts{args}//[],channel=>$opts{channel}//'#room',
+    my $ctx=bless {bot=>$bot,args=>$opts{args}//[],channel=>exists($opts{channel})?$opts{channel}:'#room',
         user=>bless({auth=>exists($opts{auth})?$opts{auth}:1,
             admin=>exists($opts{admin})?$opts{admin}:1},'MB1044::User')},'MB1044::Context';
     @wire=();
-    my $ok=eval {Mediabot::ChannelCommands::channelNickList_ctx($ctx);1};
+    my $handler=$opts{random} ? \&Mediabot::ChannelCommands::randomChannelNick_ctx : \&Mediabot::ChannelCommands::channelNickList_ctx;
+    my $ok=eval {$handler->($ctx);1};
     return {ok=>$ok?1:0,wire=>[map {[@$_]} @wire],logs=>$logger->{rows},
         cache=>$bot->{hChannelsNicks},before=>$before};
 }
@@ -99,6 +101,34 @@ for my $case (
     my $guest=run_1417(['Alice'],auth=>0);my $regular=run_1417(['Alice'],admin=>0);
     ok(!grep({$_->[1]=~/\A(?:Users on |nicklist\[)/} (@{$guest->{wire}},@{$regular->{wire}})),
         'unauthenticated and non-administrator callers never receive nicklist contents');
+}
+
+# MB1305: target selection must not silently inspect the caller's channel.
+for my $prefix ('#','&','!','+') {
+    my $target=$prefix.'ROOM';
+    for my $random (0,1) {
+        my $command=$random?'rnick':'nicklist';
+        for my $context ('implicit','explicit','private') {
+            my $r=run_1417(['Chosen'],key=>lc($target),random=>$random,
+                args=>$context eq 'implicit'?[]:[$target],
+                channel=>$context eq 'private'?undef:$context eq 'implicit'?$target:'#else');
+            my $expected=$random ? [['Caller',"Random nick on $target: Chosen"]]
+                : [['Caller',"Users on $target: 1 result(s)"],['Caller','nicklist[01/01]: Chosen']];
+            is_deeply([$r->{ok},$r->{wire},$r->{cache}],[1,$expected,$r->{before}],
+                "$command $target $context selects only the requested list and preserves all cached lists");
+        }
+        my $missing=run_1417(['Chosen'],key=>lc($target),random=>$random,args=>[$prefix.'Absent'],channel=>'#else');
+        is_deeply($missing->{wire},[['Caller',$random?"No known nicklist for ${prefix}Absent.":"No nicklist known for ${prefix}Absent."]],
+            "$command unknown explicit target never falls back to the populated current channel");
+        for my $guard ('auth','admin') {
+            my $r=run_1417(['Chosen'],key=>lc($target),random=>$random,args=>[$target],channel=>'#else',$guard=>0);
+            ok($r->{ok} && !grep({$_->[1]=~/Chosen|WrongChannel/} @{$r->{wire}}),
+                "$command $target refuses $guard without exposing either channel's nicknames");
+        }
+        my $private=run_1417(['Chosen'],key=>lc($target),random=>$random,channel=>undef);
+        is_deeply($private->{wire},[['Caller',"Syntax: $command #channel"]],
+            "$command private request without explicit channel remains rejected");
+    }
 }
 is_deeply(\@warnings,[],'ASCII, Unicode, raw UTF-8 and rejected requests remain warning-free');
 done_testing;

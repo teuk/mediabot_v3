@@ -3436,17 +3436,17 @@ sub channelNickList_ctx {
     }
 
     # Resolve target channel:
-    # - If first arg is #channel, use it
+    # - If first arg has a supported IRC channel prefix, use it
     # - Else fallback to ctx->channel (only if it's a channel)
     my $target_chan = '';
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && Mediabot::IRC::Target::is_channel($args[0])) {
         $target_chan = shift @args;
     } else {
         my $cc = $ctx->channel // '';
-        $target_chan = ($cc =~ /^#/) ? $cc : '';
+        $target_chan = Mediabot::IRC::Target::is_channel($cc) ? $cc : '';
     }
 
-    unless ($target_chan =~ /^#/) {
+    unless (Mediabot::IRC::Target::is_channel($target_chan)) {
         botNotice($self, $nick, "Syntax: nicklist #channel");
         return;
     }
@@ -3545,17 +3545,17 @@ sub randomChannelNick_ctx {
     }
 
     # Resolve target channel:
-    # - If first arg is #channel, use it
+    # - If first arg has a supported IRC channel prefix, use it
     # - Else fallback to ctx->channel (only if it's a channel)
     my $target_chan = '';
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && Mediabot::IRC::Target::is_channel($args[0])) {
         $target_chan = shift @args;
     } else {
         my $cc = $ctx->channel // '';
-        $target_chan = ($cc =~ /^#/) ? $cc : '';
+        $target_chan = Mediabot::IRC::Target::is_channel($cc) ? $cc : '';
     }
 
-    unless ($target_chan =~ /^#/) {
+    unless (Mediabot::IRC::Target::is_channel($target_chan)) {
         botNotice($self, $nick, "Syntax: rnick #channel");
         return;
     }
