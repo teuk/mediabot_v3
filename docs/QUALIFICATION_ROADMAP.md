@@ -12,7 +12,7 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 | 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | Accepted on MB1296 (`d17bb81f`): fresh Debian full lane passed; source-bound reports and native/module inventory retained. Rebuilds remain observed, not dependency-locked. |
 | 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Bounded MB1297 journeys accepted by complete offline CI on `431c45a6`; full receive-handler/login coverage remains outside scope |
 | 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | Selected MB1298/MB1299 matrix accepted by fresh CI on `e838b9fa`: SQL/diagnostic faults, HTTP 503, native worker timeout and recovery. Wider faults remain outside this bounded matrix. |
-| 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | MB1300 implements a bounded burst/expiry measurement; host acceptance and long endurance remain pending. |
+| 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | MB1300 burst/expiry measurement committed; MB1301 adds two-channel native timer repetition. Long endurance and production fairness remain pending. |
 | 5. Shared command contracts | Reusable matrix over selected representative commands | Private/channel routing, permission revocation, identity, Unicode and storage errors covered; preserve command-specific semantics | Planned |
 
 Each step ends with an explicit pass/fail/unavailable verdict and a bounded list
@@ -448,3 +448,51 @@ native cap to 31 fails and emits a failed JSON verdict. Full local qualification
 is unavailable without DBD::MariaDB; host targeted/full acceptance remains required.
 The delivery records working-tree measurements before the full suite and ends
 with the guarded noninteractive commit.sh commit/push, with no postcommit action.
+
+
+## MB1301 — Repeated recovery through native timers
+
+Base `5c744fb95984aa38b3588c4427395feebd461966` matches every tracked byte of the
+2026-11-14 17:06:43 snapshot. MB1300 is committed; no numerical host acceptance
+transcript accompanied this snapshot. Its fresh CI run is
+https://github.com/teuk/mediabot_v3/actions/runs/43613765147 ; acceptance remains
+pending until the completed source-bound artifact is inspected.
+
+The shared saturation probe adds a distinct timed-recovery phase. Each cycle
+queues two lines on each of two channels while the fixture blocks ordinary
+output. A real PING must still receive its native PONG. Unblocking admission then
+lets native countdown expiry and rearming deliver all four lines, once and in
+per-channel FIFO order. No drain method is called manually and no clock or timer
+is replaced in this phase. An ordinary NOTICE barrier closes exact wire accounting.
+Initial and rearm delays must each be at least 1.8 seconds (tolerance around the
+existing two-second schedule); each drain has a ten-second liveness deadline.
+These are harness bounds, not a new production timing policy or SLO.
+
+After every cycle, payload/timer ownership must be released and native notifier
+counts must equal the connected baseline. On Linux with readable /proc, file
+descriptor counts must also equal that baseline. RSS is sampled without a hard
+leak threshold. Fixture diagnostic/history arrays are cleared between cycles so
+their intentionally retained records do not masquerade as native resource growth.
+The report retains bounded per-cycle samples; it is not a constant-memory harness.
+Final teardown retires both queues and restores the initial notifier count.
+
+The normal native case and full/load JSON use two cycles (about eight seconds).
+The delivery additionally runs thirty cycles (about two minutes, 120 messages)
+before the full host suite. `--timed-cycles` accepts only 1..300, rejects malformed
+or out-of-range input before creating a report, and keeps exclusive output creation.
+Source hashes from the shared probe bind both measurement phases.
+
+Scope remains controlled admission over local AF_UNIX sockets. The two-channel
+exercise does not establish global budget fairness, production network behavior,
+real TTL expiry or hours-long memory stability. Step 4 remains open for sustained
+load and wider workloads. No runtime policy, database or service changes are made.
+
+Local validation: 17 tooling tests and 191 native assertions pass. The standalone
+thirty-cycle run passes 413 assertions in 120.22 seconds of timed recovery and
+delivers 120 messages. Every connected sample records four notifiers and twelve
+file descriptors; RSS is 119,672 KiB throughout this particular run, not a portable
+budget. A negative control removing the native retry delay fails the timing
+assertions and produces a failed JSON verdict. Existing-output and invalid cycle
+argument checks also pass. Full local qualification remains unavailable without
+DBD::MariaDB; the delivery requires targeted tests, the timed run and the full
+host suite before its final noninteractive commit/push.

@@ -150,4 +150,5 @@ do './t/lib/MB1297LocalIRCProbe.pl' or die $@ || $!;
 
 require MB1300SaturationProbe;
 MB1300SaturationProbe::run();
+MB1300SaturationProbe::run_timed(2);
 done_testing;

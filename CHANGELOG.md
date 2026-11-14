@@ -1,3 +1,10 @@
+## MB1301 — Qualify repeated native timer recovery
+
+- Drain two local IRC channels through real countdown expiry and rearming.
+- Check exact FIFO delivery, PING responsiveness, timer ownership and descriptor stability.
+- Retain timed resource samples and allow bounded 1..300-cycle qualification runs.
+- Keep accelerated saturation and real-time recovery evidence explicitly separate.
+
 ## MB1300 — Measure bounded saturation and queue recovery
 
 - Measure repeated local IRC bursts, admission/rejection, FIFO drain, PING latency and expiry.

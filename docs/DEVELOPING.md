@@ -349,3 +349,24 @@ This local socket probe tests three bounded bursts, overflow, FIFO recovery,
 PING responsiveness and virtual expiry. Manual drain and injected time do not
 measure production throughput or long endurance. Resource and latency samples
 are observational; the roadmap lists remaining qualification limits.
+
+
+### Real-time queue recovery (MB1301)
+
+The saturation report now includes `timed_recovery`: two channels, two messages
+per channel, real native two-second countdowns and rearming. The default two
+cycles add about eight seconds to the standalone measurement and native IRC case.
+No drain callback or clock is injected in this phase. The AntiFlood decision
+remains controlled by the fixture; this is not a production traffic benchmark.
+
+For a bounded two-minute repetition on working sources:
+
+```bash
+perl tools/qualification/saturation.pl /tmp/mb-timed-new.json --timed-cycles 30
+```
+
+The output must not already exist. Cycle counts are restricted to 1..300; the
+upper bound takes about twenty minutes. Full/load qualification uses the default
+two cycles and preserves the same JSON. The maintainer delivery runs thirty
+cycles before the full suite and before its final commit/push. On slower hosts,
+allow up to ten seconds per drain; this is a test deadline, not a production SLO.
