@@ -27,6 +27,7 @@ use Mediabot::Channel::FloodRules ();
 use Mediabot::Channel::Registration ();
 use Mediabot::Channel::Flags ();
 use Mediabot::Channel::Badwords ();
+use Mediabot::IRC::Target ();
 use Mediabot::DynamicTemplate qw(normalize_name);
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
@@ -3626,17 +3627,17 @@ sub channelAddBadword_ctx {
     }
 
     # Resolve target channel:
-    # - If first arg is #channel use it
+    # - If first arg has a supported IRC channel prefix, use it
     # - else fallback to ctx->channel
     my $chan;
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && Mediabot::IRC::Target::is_channel($args[0])) {
         $chan = shift @args;
     } else {
         my $cc = $ctx->channel // '';
-        $chan = ($cc =~ /^#/) ? $cc : undef;
+        $chan = Mediabot::IRC::Target::is_channel($cc) ? $cc : undef;
     }
 
-    unless (defined $chan && $chan =~ /^#/) {
+    unless (Mediabot::IRC::Target::is_channel($chan)) {
         botNotice($self, $nick, "Syntax: addbadword <#channel> <badword>");
         return;
     }
@@ -3746,14 +3747,14 @@ sub channelRemBadword_ctx {
 
     # Resolve target channel
     my $chan;
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && Mediabot::IRC::Target::is_channel($args[0])) {
         $chan = shift @args;
     } else {
         my $cc = $ctx->channel // '';
-        $chan = ($cc =~ /^#/) ? $cc : undef;
+        $chan = Mediabot::IRC::Target::is_channel($cc) ? $cc : undef;
     }
 
-    unless (defined $chan && $chan =~ /^#/) {
+    unless (Mediabot::IRC::Target::is_channel($chan)) {
         botNotice($self, $nick, "Syntax: rembadword <#channel> <badword>");
         return;
     }

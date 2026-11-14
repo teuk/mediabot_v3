@@ -224,4 +224,57 @@ sub check_badword_write_contracts {
         }
     }
 }
+package MB1304::Context;
+our @ISA = ('MB1236::Context');
+sub args {$_[0]{args}}
+sub channel {$_[0]{channel}}
+package MB1304::Channel;
+sub get_id {$_[0]{id}}
+sub get_name {$_[0]{name}}
+package MB881OutputFixture;
+sub check_badword_channel_scope {
+    require DBI;
+    for my $prefix ('#', '&', '!', '+') {
+        for my $explicit (0, 1) {
+            my $target=$prefix.'Other';
+            my $dbh=DBI->connect('dbi:SQLite:dbname=:memory:','','',{RaiseError=>1,PrintError=>0,sqlite_unicode=>1});
+            $dbh->do('CREATE TABLE BADWORDS (id_badwords INTEGER PRIMARY KEY, id_channel INTEGER, badword TEXT)');
+            $dbh->do('INSERT INTO BADWORDS (id_channel,badword) VALUES (1,?)',undef,"$target café noir");
+            my $bot=new_bot();$bot->{dbh}=$dbh;
+            $bot->{channels}={
+                '#current'=>bless({id=>1,name=>'#current'},'MB1304::Channel'),
+                lc($target)=>bless({id=>2,name=>$target},'MB1304::Channel')};
+            my $ctx=bless {bot=>$bot,user=>bless({mode=>'success'},'MB1236::User'),
+                channel=>$explicit?'#current':$target,
+                args=>[$explicit?($target):(), 'café','noir']},'MB1304::Context';
+            no warnings 'redefine';
+            local *Mediabot::ChannelCommands::botNotice=sub {};
+            local *Mediabot::ChannelCommands::logBot=sub {};
+            local *Mediabot::ChannelCommands::noticeConsoleChan=sub {};
+            for my $op ('add','remove') {
+                $bot->{_badword_cache}={'#current'=>{ts=>1},lc($target)=>{ts=>2},$target=>{ts=>3}};
+                my $ret=$op eq 'add' ? Mediabot::ChannelCommands::channelAddBadword_ctx($ctx) : Mediabot::ChannelCommands::channelRemBadword_ctx($ctx);
+                Test::More::is($ret,1,"$op $target explicit=$explicit succeeds");
+                Test::More::is_deeply($dbh->selectall_arrayref('SELECT id_channel,badword FROM BADWORDS ORDER BY id_channel'),
+                    [[1,"$target café noir"],$op eq 'add'?([2,'café noir']):()],
+                    "$op $target explicit=$explicit changes only the intended channel and exact Unicode phrase");
+                Test::More::is_deeply($bot->{_badword_cache},{'#current'=>{ts=>1}},"$op $target invalidates only target cache");
+            }
+            for my $guard ('unknown', 'private', 'denied', 'unauthenticated') {
+                $ctx->{user}{mode}=$guard;
+                $ctx->{channel}=$guard eq 'private' ? undef : '#current';
+                $ctx->{args}=$guard eq 'private' ? ['café'] : [$prefix.'Missing','café'];
+                my $before=$dbh->selectall_arrayref('SELECT * FROM BADWORDS ORDER BY id_badwords');
+                $bot->{_badword_cache}={'#current'=>{ts=>1}};
+                Mediabot::ChannelCommands::channelAddBadword_ctx($ctx);
+                Mediabot::ChannelCommands::channelRemBadword_ctx($ctx);
+                Test::More::is_deeply($dbh->selectall_arrayref('SELECT * FROM BADWORDS ORDER BY id_badwords'),$before,
+                    "$target $guard refuses both mutations without falling back to current channel");
+                Test::More::is_deeply($bot->{_badword_cache},{'#current'=>{ts=>1}},"$target $guard preserves cache");
+            }
+            $dbh->disconnect;
+        }
+    }
+}
+
 1;

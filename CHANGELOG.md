@@ -1,3 +1,9 @@
+## MB1304 — Preserve badword command channel scope
+
+- Recognize all shared IRC channel prefixes in addbadword and rembadword.
+- Prevent explicit &, ! and + targets from becoming words on the current channel.
+- Exercise real SQLite writes, Unicode phrases and isolated cache invalidation.
+
 ## MB1303 — Qualify representative command contracts
 
 - Share exact wire, caller identity and persisted-state assertions across twelve command scenarios.
