@@ -1,3 +1,10 @@
+## MB1292 — Record and prepare disposable qualification dependencies
+
+- Add opt-in CPAN provisioning in a fresh temporary module tree with no sudo.
+- Record dependency input hashes, required module versions and loaded Perl file hashes.
+- Remove ambient build overrides and refuse report symlinks without following them.
+- Keep fresh-machine native acceptance explicitly pending before local IRC integration.
+
 ## MB1291 — Establish isolated qualification and its five-step roadmap
 
 - Record the accepted five-step qualification campaign and explicit completion gates.

@@ -9,7 +9,7 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 
 | Step | Deliverable | Exit evidence | Status |
 | --- | --- | --- | --- |
-| 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | In progress: MB1291 supplies the isolated source runner and dependency gate. Dependency provisioning/version capture and fresh-environment acceptance remain open. |
+| 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | In progress: MB1291 provides source isolation; MB1292 adds explicit disposable dependency provisioning and observed module identity. Fresh-environment native acceptance remains open. |
 | 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Planned |
 | 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | Planned |
 | 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | Planned |
@@ -66,3 +66,43 @@ and subsequent environment provisioning acceptance are separate evidence.
 
 Next bounded increment: provision and record the full native dependency environment,
 validate it on a fresh installation, then implement the three local IRC journeys.
+
+## MB1292 — Disposable provisioning and observed dependencies
+
+`--provision` explicitly downloads/builds CPAN dependencies into a fresh temporary
+module tree. It uses the committed `cpanfile`, adds the SQLite test driver, and
+installs the existing Hailo 0.75 fallback distribution. It never invokes sudo or
+configure. CPAN dependency tests are skipped as in the existing developer setup;
+the selected Mediabot lane runs only after all dependency gates pass. The entire
+tree is removed on completion, including failed builds. Console output should be
+retained by the caller for failure diagnosis. Provisioning is never implicit and
+cannot be combined with `--perl-lib`.
+
+Use an ordinary account on a disposable Debian 13 development machine prepared
+with the native build tools from DEVELOPING.md (plus git, python3 and CA roots):
+
+```bash
+python3 tools/qualification/run.py --provision --lane full \
+  --timeout 3600 --output /tmp/mb-fresh-qualification-UNIQUE
+```
+
+The maximum time applies to each stage, not to the whole command. CPAN downloads
+need network access. No IRC connection or application configuration is needed.
+A fresh module tree on an existing host is not proof of a fresh operating-system
+setup; record the machine/image used for that acceptance separately.
+
+`report.json` records the source commit, provisioning choice and SHA-256 of the
+two dependency inputs. After successful runtime/SQLite checks, `environment.json`
+records Perl identity, required module versions and hashes/paths of loaded Perl
+files including transitive loads. Missing modules fail; unknown installer-list
+syntax fails closed. This is an observed inventory, not a lockfile: CPAN resolution,
+XS binaries and system packages are not pinned. Default host PATH/core libraries
+remain trusted. CPAN/Perl installation overrides and shell startup hooks are
+removed from the child environment; this is not a security sandbox.
+
+Local acceptance: 12 tooling tests pass, including actual Perl inventory output,
+missing-module detection and file hashing, malformed inventory rejection, contained
+provisioning command order, early failure, environment cleanup and report-symlink
+refusal. Provisioning orchestration uses test doubles; no successful fresh CPAN
+installation or full native suite is claimed. Target-host and disposable-machine
+acceptance remain required before closing step 1 or starting step 2.

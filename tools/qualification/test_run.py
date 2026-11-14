@@ -22,7 +22,7 @@ class QualificationTests(unittest.TestCase):
         self.git('config', 'user.email', 'test@example.invalid')
         self.git('config', 'user.name', 'Qualification test')
         for name, data in {'.gitignore':'secret.conf\n', 'tracked':'committed',
-                           'install/cpan_install.sh':'exit 0\n'}.items():
+                           'install/cpan_install.sh':'exit 0\n', 'cpanfile':'# fixture\n'}.items():
             p = self.repo / name; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(data)
         self.git('add', '.')
         self.git('commit', '-qm', 'fixture')
@@ -55,7 +55,7 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(json.loads((self.output/'report.json').read_text())['status'],'unavailable')
 
     def test_lanes_environment_and_disposal(self):
-        for lane,expected in [('preflight',2),('fast',3),('full',3)]:
+        for lane,expected in [('preflight',3),('fast',4),('full',4)]:
             output=self.root/lane
             with patch.dict(os.environ,{'PERL5OPT':'bad','PERL5LIB':'secret','PERLLIB':'secret'}):
                 with patch.object(q,'run_stage',return_value={'status':'passed','returncode':0}) as run:
@@ -68,7 +68,7 @@ class QualificationTests(unittest.TestCase):
                 self.assertEqual('--fast' in args[1],lane=='fast');self.assertIn('--progress',args[1])
 
     def test_test_failure_preserved(self):
-        with patch.object(q,'run_stage',side_effect=[{'status':'passed'},{'status':'passed'},{'status':'failed','returncode':7}]):
+        with patch.object(q,'run_stage',side_effect=[{'status':'passed'},{'status':'passed'},{'status':'passed'},{'status':'failed','returncode':7}]):
             self.assertEqual(q.qualify(self.repo,self.output,'full',2),2)
         report=json.loads((self.output/'report.json').read_text())
         self.assertEqual(report['status'],'failed');self.assertEqual(report['stages'][-1]['returncode'],7)
@@ -87,5 +87,69 @@ class QualificationTests(unittest.TestCase):
                                (['/missing/qualification-tool'],'unavailable'),(['sh','-c','sleep 10'],'timeout')]:
             result=q.run_stage('fixture',command,self.repo,os.environ.copy(),0.1)
             self.assertEqual(result['status'],status)
+
+    def test_provision_is_explicit_contained_and_disposable(self):
+        polluted = {key: 'ambient' for key in
+                    ('PERL_MM_OPT', 'PERL_MB_OPT', 'PERL_LOCAL_LIB_ROOT',
+                     'PERL_CPANM_OPT', 'CPAN_HOME', 'BASH_ENV', 'ENV')}
+        with patch.dict(os.environ, polluted):
+            with patch.object(q, 'run_stage', return_value={'status': 'passed'}) as run:
+                self.assertEqual(q.qualify(self.repo, self.output, 'fast', 2, provision=True), 0)
+        calls = [call.args for call in run.call_args_list]
+        self.assertEqual(len(calls), 7)
+        self.assertEqual(calls[0][1][-2:], ['--installdeps', '.'])
+        self.assertEqual(calls[1][1][-1], 'DBD::SQLite')
+        self.assertTrue(calls[2][1][-1].endswith('/Hailo-0.75.tar.gz'))
+        local = Path(calls[0][1][3])
+        self.assertEqual(calls[0][1][:3], ['cpanm', '--notest', '--local-lib-contained'])
+        self.assertFalse(local.parent.exists())
+        for _, _, _, env, _ in calls:
+            self.assertEqual(env['PERL5LIB'], str(local / 'lib/perl5'))
+            self.assertFalse(set(polluted) & set(env))
+        report = json.loads((self.output/'report.json').read_text())
+        self.assertTrue(report['provision'])
+        self.assertEqual(set(report['dependency_inputs']), {'cpanfile', 'install/cpan_install.sh'})
+
+    def test_failed_provision_stops_before_tests(self):
+        with patch.object(q, 'run_stage', return_value={'status': 'failed', 'returncode':1}) as run:
+            self.assertEqual(q.qualify(self.repo,self.output,'full',2,provision=True),3)
+        self.assertEqual(run.call_count,1)
+        with self.assertRaises(ValueError):
+            q.qualify(self.repo,self.root/'another','full',2,self.root,provision=True)
+        self.assertFalse((self.root/'another').exists())
+
+    def test_native_inventory_records_missing_and_loaded_modules(self):
+        script = Path(__file__).with_name('inventory.pl')
+        installer = self.repo/'install/cpan_install.sh'
+        installer.write_text('PERL_MODULES=(\n  "File::Basename"\n  "Missing::MB1292"\n)\n')
+        dest = self.root/'environment.json'
+        env = os.environ.copy()
+        for key in list(env):
+            if key.startswith('PERL'): env.pop(key)
+        result = subprocess.run(['perl',str(script),str(dest)],cwd=self.repo,env=env)
+        self.assertEqual(result.returncode,1)
+        report = json.loads(dest.read_text())
+        modules = {r['module']:r for r in report['required']}
+        self.assertEqual(modules['File::Basename']['status'],'loaded')
+        self.assertTrue(modules['File::Basename']['version'])
+        self.assertEqual(modules['Missing::MB1292']['status'],'unavailable')
+        import hashlib
+        loaded = {r['file']:r for r in report['loaded_files']}
+        entry = loaded['File/Basename.pm']
+        self.assertEqual(entry['sha256'],hashlib.sha256(Path(entry['path']).read_bytes()).hexdigest())
+        dest.unlink()
+        installer.write_text('PERL_MODULES=(\n  dynamic_expression\n)\n')
+        result = subprocess.run(['perl',str(script),str(dest)],cwd=self.repo,env=env,
+                                capture_output=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertFalse(dest.exists())
+
+    def test_cli_refuses_report_symlink_without_following_it(self):
+        target=self.root/'absent'
+        self.output.symlink_to(target)
+        result=subprocess.run(['python3',str(Path(q.__file__)), '--repo', str(self.repo),
+                               '--output',str(self.output)],capture_output=True)
+        self.assertEqual(result.returncode,3)
+        self.assertFalse(target.exists())
 
 if __name__=='__main__':unittest.main()

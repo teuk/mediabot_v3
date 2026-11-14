@@ -307,3 +307,8 @@ Follow [the five-step qualification roadmap](QUALIFICATION_ROADMAP.md).
 checks committed HEAD in a disposable source clone. Use a new report directory
 and pass `--perl-lib "$PWD/local/lib/perl5"` when using local dependencies.
 This does not install modules or replace precommit checks of working changes.
+
+
+For an explicit disposable dependency build, the qualification runner also supports
+`--provision`. See [MB1292](QUALIFICATION_ROADMAP.md#mb1292--disposable-provisioning-and-observed-dependencies)
+for prerequisites, evidence, timeouts and remaining reproducibility limits.

@@ -53,10 +53,13 @@ def run_stage(name, command, cwd, env, timeout):
     return result
 
 
-def qualify(repo, output, lane, timeout, perl_lib=None):
+def qualify(repo, output, lane, timeout, perl_lib=None, provision=False):
+    if provision and perl_lib:
+        raise ValueError('Provisioning cannot reuse an existing dependency tree')
     # mkdir is exclusive: never replace an earlier report or follow its symlink.
     output.mkdir(mode=0o700)
-    report = {'schema': 1, 'lane': lane, 'status': 'unavailable', 'stages': [],
+    report = {'schema': 2, 'lane': lane, 'status': 'unavailable', 'stages': [],
+              'provision': provision,
               'python': platform.python_version(), 'platform': platform.system(),
               'tool_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'scope': 'committed source snapshot; not a live bot or network-isolation proof'}
@@ -69,15 +72,33 @@ def qualify(repo, output, lane, timeout, perl_lib=None):
             # Remove Perl execution injection and ambient module paths. An explicit
             # dependency tree can be supplied without importing runtime config.
             env = os.environ.copy()
-            for key in ('PERL5OPT', 'PERL5LIB', 'PERLLIB'):
-                env.pop(key, None)
+            for key in list(env):
+                if key.startswith(('PERL', 'CPAN')) or key in ('BASH_ENV', 'ENV'):
+                    env.pop(key, None)
             if perl_lib:
                 env['PERL5LIB'] = str(perl_lib.resolve())
             env['HOME'] = tmp
             env['TMPDIR'] = tmp
-            commands = [('runtime_dependencies', ['bash', 'install/cpan_install.sh', '--verify-only']),
+            report['dependency_inputs'] = {
+                name: hashlib.sha256((source / name).read_bytes()).hexdigest()
+                for name in ('cpanfile', 'install/cpan_install.sh')}
+            commands = []
+            if provision:
+                local = str(Path(tmp) / 'dependencies')
+                env['PERL5LIB'] = local + '/lib/perl5'
+                # Contained install, including non-core dependencies already on
+                # the host. Never sudo or invoke the application configure wizard.
+                base = ['cpanm', '--notest', '--local-lib-contained', local]
+                commands.extend([
+                    ('provision_dependencies', base + ['--installdeps', '.']),
+                    ('provision_test_dependencies', base + ['DBD::SQLite']),
+                    ('provision_hailo_dependencies', base + [
+                        'https://cpan.metacpan.org/authors/id/A/AV/AVAR/Hailo-0.75.tar.gz'])])
+            commands.extend([('runtime_dependencies', ['bash', 'install/cpan_install.sh', '--verify-only']),
                         ('test_dependencies', ['perl', '-MDBD::SQLite', '-e',
-                         'print "Perl $^V; SQLite $DBD::SQLite::VERSION\\n";'])]
+                         'print "Perl $^V; SQLite $DBD::SQLite::VERSION\\n";']),
+                        ('inventory_dependencies', ['perl', 'tools/qualification/inventory.pl',
+                         str(output / 'environment.json')])])
             if lane != 'preflight':
                 commands.append(('tests', ['perl', 't/test_commands.pl',
                     *(['--fast'] if lane == 'fast' else []), '--progress']))
@@ -106,13 +127,18 @@ def main():
     parser.add_argument('--lane', choices=['preflight', 'fast', 'full'], default='preflight')
     parser.add_argument('--timeout', type=float, default=1200, help='maximum seconds per stage')
     parser.add_argument('--perl-lib', type=Path, help='explicit installed local/lib/perl5 dependency tree')
+    parser.add_argument('--provision', action='store_true',
+                        help='download/build dependencies in a fresh disposable tree using cpanm')
     args = parser.parse_args()
     if not 0 < args.timeout <= 86400:
         parser.error('--timeout must be positive and at most 86400')
     if args.perl_lib and not args.perl_lib.is_dir():
         parser.error('--perl-lib must be an existing directory')
+    if args.provision and args.perl_lib:
+        parser.error('--provision and --perl-lib are mutually exclusive')
     try:
-        return qualify(args.repo.resolve(), args.output.resolve(), args.lane, args.timeout, args.perl_lib)
+        return qualify(args.repo.resolve(), args.output.absolute(), args.lane, args.timeout,
+                       args.perl_lib, args.provision)
     except OSError as exc:
         parser.exit(3, 'Cannot create report directory: ' + str(exc) + '\n')
 
