@@ -105,6 +105,8 @@ def qualify(repo, output, lane, timeout, perl_lib=None, provision=False):
                         ('inventory_dependencies', ['perl', 'tools/qualification/inventory.pl',
                          str(output / 'environment.json')])])
             if lane != 'preflight':
+                commands.append(('suite_native_dependencies',
+                    ['bash', 'tools/qualification/native-tools.sh']))
                 commands.append(('tests', ['perl', 't/test_commands.pl',
                     *(['--fast'] if lane == 'fast' else []), '--progress']))
             report['status'] = 'passed'

@@ -312,3 +312,10 @@ This does not install modules or replace precommit checks of working changes.
 For an explicit disposable dependency build, the qualification runner also supports
 `--provision`. See [MB1292](QUALIFICATION_ROADMAP.md#mb1292--disposable-provisioning-and-observed-dependencies)
 for prerequisites, evidence, timeouts and remaining reproducibility limits.
+
+The qualification fast/full lanes also require `node`, `tclsh` and `pgrep`
+(Debian packages `nodejs tcl procps`). Dashboard projections, Tcl sidecars and
+the disposable updater rehearsal execute these native tools. The runner checks
+them before starting the suite; a missing tool is `unavailable`, not a test pass.
+The Perl-only preflight lane retains its existing scope. Fresh CI installs these
+packages explicitly and records their versions in its retained evidence.

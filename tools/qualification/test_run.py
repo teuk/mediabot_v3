@@ -55,7 +55,7 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(json.loads((self.output/'report.json').read_text())['status'],'unavailable')
 
     def test_lanes_environment_and_disposal(self):
-        for lane,expected in [('preflight',3),('fast',4),('full',4)]:
+        for lane,expected in [('preflight',3),('fast',5),('full',5)]:
             output=self.root/lane
             with patch.dict(os.environ,{'PERL5OPT':'bad','PERL5LIB':'secret','PERLLIB':'secret'}):
                 with patch.object(q,'run_stage',return_value={'status':'passed','returncode':0}) as run:
@@ -68,7 +68,7 @@ class QualificationTests(unittest.TestCase):
                 self.assertEqual('--fast' in args[1],lane=='fast');self.assertIn('--progress',args[1])
 
     def test_test_failure_preserved(self):
-        with patch.object(q,'run_stage',side_effect=[{'status':'passed'},{'status':'passed'},{'status':'passed'},{'status':'failed','returncode':7}]):
+        with patch.object(q,'run_stage',side_effect=[{'status':'passed'}]*4+[{'status':'failed','returncode':7}]):
             self.assertEqual(q.qualify(self.repo,self.output,'full',2),2)
         report=json.loads((self.output/'report.json').read_text())
         self.assertEqual(report['status'],'failed');self.assertEqual(report['stages'][-1]['returncode'],7)
@@ -77,6 +77,35 @@ class QualificationTests(unittest.TestCase):
         self.output.mkdir();(self.output/'report.json').write_text('keep')
         with self.assertRaises(FileExistsError):q.qualify(self.repo,self.output,'preflight',2)
         self.assertEqual((self.output/'report.json').read_text(),'keep')
+
+    def test_native_suite_gate_reports_missing_tools_before_tests(self):
+        import shutil
+        script = Path(__file__).with_name('native-tools.sh')
+        shell = shutil.which('bash')
+        bin_dir = self.root/'native-bin'; bin_dir.mkdir()
+        # No executable runs until every required name has been resolved.
+        for missing in ('node', 'tclsh', 'pgrep'):
+            for tool in ('node', 'tclsh', 'pgrep'):
+                target = bin_dir/tool
+                if target.exists(): target.unlink()
+                if tool != missing:
+                    target.write_text('#!/bin/sh\nexit 99\n'); target.chmod(0o755)
+            result = subprocess.run([shell, str(script)],
+                env=dict(os.environ, PATH=str(bin_dir)), capture_output=True)
+            self.assertEqual(result.returncode, 3)
+            self.assertIn(('Missing suite prerequisite: '+missing).encode(), result.stderr)
+        native_run = q.run_stage
+        def stage(name, command, cwd, env, timeout):
+            if name == 'suite_native_dependencies':
+                return native_run(name, [shell, str(script)], cwd,
+                                  dict(env, PATH=str(bin_dir)), timeout)
+            self.assertNotEqual(name, 'tests')
+            return {'status':'passed'}
+        with patch.object(q, 'run_stage', side_effect=stage):
+            self.assertEqual(q.qualify(self.repo, self.output, 'full', 2), 3)
+        report = json.loads((self.output/'report.json').read_text())
+        self.assertEqual(report['status'], 'unavailable')
+        self.assertEqual(report['stages'][-1]['name'], 'suite_native_dependencies')
 
     def test_bad_repository_report(self):
         self.assertEqual(q.qualify(self.root,self.output,'preflight',2),3)
@@ -96,7 +125,7 @@ class QualificationTests(unittest.TestCase):
             with patch.object(q, 'run_stage', return_value={'status': 'passed'}) as run:
                 self.assertEqual(q.qualify(self.repo, self.output, 'fast', 2, provision=True), 0)
         calls = [call.args for call in run.call_args_list]
-        self.assertEqual(len(calls), 8)
+        self.assertEqual(len(calls), 9)
         self.assertEqual(calls[0][0], 'provision_transport_dependencies')
         self.assertEqual(calls[0][1], ['curl', '--version'])
         installers = calls[1:4]

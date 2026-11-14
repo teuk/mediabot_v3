@@ -218,3 +218,38 @@ All 15 tooling tests pass, including a real missing-executable gate and installe
 failure after a successful transport gate. Full fresh-container acceptance stays
 pending the next actual CI run; the existing two successful CI jobs do not waive
 it. Maintainer delivery still ends with the guarded noninteractive commit/push.
+
+
+## MB1296 — Complete the native suite prerequisites
+
+MB1295 is committed as `19ba7055f6ebb473ed1e6d35bc7936c3bf079d98` and matches
+the 2026-11-14 11:31:01 snapshot. Fresh qualification run
+https://github.com/teuk/mediabot_v3/actions/runs/43585558086 now installs all Perl
+dependencies, passes the inventory and reaches the entire suite. It fails with
+19 failures out of 42,832 assertions across 12 files (187 seconds); the reduced
+assertion count includes cases interrupted by missing native executables.
+Evidence was retained as artifact 14109867818. This is not fresh acceptance.
+
+Node is required by dashboard/diagnostic projections, including the isolated
+MixCloud case. Tcl is required by real sidecar examples. The updater rehearsal
+uses pgrep to find its disposable process; without procps it misses that process
+and cannot observe its shutdown marker. Locally disabling pgrep reproduces the
+same three updater assertions; restoring it passes that case. No production
+updater, service, configuration or schema is changed by this patch.
+
+The fresh image now installs nodejs, tcl and procps. Fast/full qualification
+checks all three executable names, then their versions, before the suite. A
+missing prerequisite stops with unavailable/exit 3 and never runs tests. The
+Perl dependency preflight keeps its prior scope. Package versions are already
+recorded by fresh.sh; tool versions appear in qualification.log.
+
+Local validation: 16 tooling tests passed, including each missing executable
+and the real shell gate's unavailable result before tests. Seven available
+native cases pass 143 assertions. A broader ten-case attempt also encountered
+three local missing-Perl-dependency errors (JSON and URI::Escape); these are not
+counted as acceptance. Full target-host validation and the next fresh CI result
+remain mandatory. Step 1 stays open; step 2 has not started.
+
+Maintainer order remains apply, tooling checks, targeted --progress, one full
+--progress, then guarded noninteractive commit.sh --skip-preflight and push as
+the final local action. No post-commit command follows.

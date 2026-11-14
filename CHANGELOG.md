@@ -1,3 +1,9 @@
+## MB1296 — Supply native tools required by fresh qualification
+
+- Install Node.js, Tcl and procps in the disposable Debian qualification container.
+- Check node, tclsh and pgrep before fast/full suites and retain unavailable verdicts.
+- Record the first completed fresh suite and its missing-tool failures without closing the gate.
+
 ## MB1295 — Bootstrap HTTPS before installing Perl dependencies
 
 - Install curl in the fresh Debian qualification container alongside CA roots.
