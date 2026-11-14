@@ -88,7 +88,8 @@ def qualify(repo, output, lane, timeout, perl_lib=None, provision=False):
                 env['PERL5LIB'] = local + '/lib/perl5'
                 # Contained install, including non-core dependencies already on
                 # the host. Never sudo or invoke the application configure wizard.
-                base = ['cpanm', '--notest', '--local-lib-contained', local]
+                base = ['cpanm', '--notest', '--local-lib-contained', local,
+                        '--from', 'https://cpan.metacpan.org']
                 commands.extend([
                     ('provision_dependencies', base + ['--installdeps', '.']),
                     ('provision_test_dependencies', base + ['DBD::SQLite']),

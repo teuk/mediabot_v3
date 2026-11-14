@@ -1,3 +1,10 @@
+## MB1294 — Qualify fresh Debian environments and preserve evidence
+
+- Run uncached dependency provisioning and the full native lane in a new Debian 13 CI container.
+- Run qualification as an ordinary user and retain platform, package, module and test evidence.
+- Use an explicit HTTPS CPAN mirror after removing ambient installer overrides.
+- Record MB1293 host acceptance and keep the fresh-container exit gate pending its actual result.
+
 ## MB1293 — Preserve generated Moose packages in dependency inventories
 
 - Recognize Class::MOP's exact in-memory marker instead of opening it as a path.

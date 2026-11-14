@@ -9,7 +9,7 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 
 | Step | Deliverable | Exit evidence | Status |
 | --- | --- | --- | --- |
-| 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | In progress: MB1291 provides source isolation; MB1292 adds explicit disposable dependency provisioning and observed module identity. Fresh-environment native acceptance remains open. |
+| 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | In progress: MB1291 provides source isolation; MB1292 adds explicit disposable dependency provisioning and observed module identity. MB1293 host acceptance passed; MB1294 supplies the fresh Debian CI gate. Its successful run remains required. |
 | 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Planned |
 | 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | Planned |
 | 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | Planned |
@@ -145,3 +145,49 @@ changes. No RSS runtime policy or permissions are changed. Local case 1171
 reproduces the old failure under 077 and passes all 40 assertions under both
 022 and 077 after correction. Resume from the exact applied R1 worktree, rerun
 targeted cases with --progress then one full --progress before commit/push.
+
+
+## MB1294 — Fresh Debian qualification gate
+
+Host acceptance of MB1293 R2 is complete: 13 tooling tests, 70 targeted assertions,
+and all 42,918 full-suite assertions in 1,139 files passed (362 seconds). Commit
+`6571028abd692c28a37d18dfe671b53f0025397f` was pushed; its committed dependency
+preflight and inventory passed on Perl 5.40.1 / DBD::SQLite 1.78. This evidence
+qualifies the existing host, not a newly provisioned environment.
+
+The separate `Fresh qualification` workflow uses a new `debian:13-slim` container,
+installs native build prerequisites, creates an ordinary `qualifier` user, then
+runs `tools/qualification/fresh.sh`. No dependency cache is restored. CPAN uses
+an explicit HTTPS mirror, the committed cpanfile, SQLite and the existing pinned
+Hailo fallback; the runner invokes the full suite with visible progress. There
+is no Mediabot configure, production connection, database service or migration.
+
+The job starts on master pushes affecting qualification tools, its workflow or
+dependency inputs; workflow_dispatch permits a deliberate rerun for any other
+source change. Existing CI gates remain independent. It has a 120-minute job
+limit; the runner retains its 3600-second per-stage limit. Failure stays failure,
+including an installation/network failure. Artifact upload is attempted even on
+failure and retains available evidence for 14 days:
+
+- platform.txt: UTC time, source commit, user, OS, Perl build, cpanm and package versions;
+- qualification.log: visible dependency build/check and full-suite output;
+- result/report.json and result/environment.json when those stages produced them.
+
+The container image and CPAN dependency resolution are not locked. This establishes
+fresh setup evidence and an observed inventory, not bit-identical rebuilds. The
+qualification clone and dependency tree remain disposable. The workflow is not a
+network sandbox; local-only IRC transport enforcement belongs to step 2.
+
+Local validation covers 14 tooling tests, shell pipelines preserving failure
+status, exclusive evidence directories, root refusal, explicit CPAN mirror and
+workflow/shell syntax. The fresh container cannot run in the local delivery
+environment (no Docker/Podman); its first CI result remains pending. Close step 1
+only after a successful complete fresh run and retention of its source-bound
+reports, then start the three local IRC journeys.
+
+Maintainer delivery order: apply, tooling and targeted --progress, full --progress,
+then the existing commit.sh --skip-preflight -m as the final action. The delivery
+wrapper verifies the known helper hash, exact expected files and remote base,
+stages only the reviewed patch, and supplies one final confirmation automatically.
+No post-commit local preflight or extra command follows; CI runs independently
+from the push. No global yes pipe or permanent helper modification is needed.

@@ -1,0 +1,57 @@
+name: Fresh qualification
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/qualification.yml'
+      - 'tools/qualification/**'
+      - 'cpanfile'
+      - 'install/cpan_install.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: debian:13-slim
+    steps:
+      - name: Prepare native build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bash ca-certificates git python3 perl cpanminus build-essential \
+            pkg-config libmariadb-dev libssl-dev zlib1g-dev util-linux passwd
+          useradd --create-home --shell /bin/bash qualifier
+
+      - uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Qualify as an ordinary user without a dependency cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          chown -R qualifier:qualifier "$GITHUB_WORKSPACE"
+          runuser -u qualifier -- python3 -B tools/qualification/test_run.py -v
+          runuser -u qualifier -- bash tools/qualification/fresh.sh \
+            /home/qualifier/evidence
+
+      - name: Preserve qualification evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fresh-qualification-${{ github.sha }}-${{ github.run_attempt }}
+          path: /home/qualifier/evidence/
+          if-no-files-found: warn
+          retention-days: 14

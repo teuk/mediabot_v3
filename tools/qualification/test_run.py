@@ -102,6 +102,7 @@ class QualificationTests(unittest.TestCase):
         self.assertTrue(calls[2][1][-1].endswith('/Hailo-0.75.tar.gz'))
         local = Path(calls[0][1][3])
         self.assertEqual(calls[0][1][:3], ['cpanm', '--notest', '--local-lib-contained'])
+        self.assertEqual(calls[0][1][4:6], ['--from', 'https://cpan.metacpan.org'])
         self.assertFalse(local.parent.exists())
         for _, _, _, env, _ in calls:
             self.assertEqual(env['PERL5LIB'], str(local / 'lib/perl5'))
@@ -182,5 +183,37 @@ class QualificationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0)
         self.assertIn(b'Cannot fingerprint loaded module Gone.pm',result.stderr)
         self.assertFalse(dest.exists())
+
+    def test_fresh_wrapper_evidence_and_pipeline_status(self):
+        script = Path(__file__).with_name('fresh.sh')
+        bin_dir = self.root/'bin'; bin_dir.mkdir()
+        # Exercise the real shell pipeline without installing dependencies or
+        # requiring CPAN access. Only the external installer/runner are fixtures.
+        for name, body in {
+            'id': 'echo 1000',
+            'cpanm': 'echo "fixture cpanm version"',
+            'python3': 'printf "%s\\n" "$@"; exit "$FIXTURE_EXIT"',
+        }.items():
+            p = bin_dir/name; p.write_text('#!/bin/sh\n'+body+'\n'); p.chmod(0o755)
+        env = dict(os.environ, PATH=str(bin_dir)+os.pathsep+os.environ['PATH'])
+        for code in (0, 2, 3):
+            dest=self.root/('fresh-'+str(code))
+            result=subprocess.run(['bash',str(script),str(dest)],env=dict(env,FIXTURE_EXIT=str(code)),
+                                  capture_output=True)
+            self.assertEqual(result.returncode,code,result.stderr.decode())
+            self.assertIn('SOURCE_COMMIT=',(dest/'platform.txt').read_text())
+            log=(dest/'qualification.log').read_text()
+            self.assertIn('--provision\n--lane\nfull\n',log)
+            self.assertIn(str(dest/'result'),log)
+            before=(dest/'qualification.log').read_bytes()
+            again=subprocess.run(['bash',str(script),str(dest)],env=dict(env,FIXTURE_EXIT='0'),
+                                 capture_output=True)
+            self.assertNotEqual(again.returncode,0)
+            self.assertEqual((dest/'qualification.log').read_bytes(),before)
+        (bin_dir/'id').write_text('#!/bin/sh\necho 0\n')
+        root_dest=self.root/'root-refused'
+        result=subprocess.run(['bash',str(script),str(root_dest)],env=env,capture_output=True)
+        self.assertEqual(result.returncode,3)
+        self.assertFalse(root_dest.exists())
 
 if __name__=='__main__':unittest.main()
