@@ -1,3 +1,11 @@
+## MB1293 — Preserve generated Moose packages in dependency inventories
+
+- Recognize Class::MOP's exact in-memory marker instead of opening it as a path.
+- Report generated packages separately without fabricated file fingerprints.
+- Retain hard failures for real unreadable files and missing required modules.
+- Exercise the native inventory in the existing CPAN dependency contract case.
+- Set the RSS FIFO test fixture mode explicitly so restrictive umasks remain supported.
+
 ## MB1292 — Record and prepare disposable qualification dependencies
 
 - Add opt-in CPAN provisioning in a fresh temporary module tree with no sudo.

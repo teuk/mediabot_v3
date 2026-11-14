@@ -86,6 +86,8 @@ return sub {
         $pacing->configure('#test',gap=>5,daily=>1);
         unlink "$state.lock" or die $!;
         POSIX::mkfifo("$state.lock",0640)==0 or die $!;
+        # mkfifo applies the caller umask; establish the mode this test protects.
+        chmod(0640,"$state.lock")==1 or die "chmod FIFO fixture: $!";
         $a->ok(!eval {$pacing->reserve('#test');1},'mb1168: FIFO lock cannot authorize a reservation');
         $a->is((lstat("$state.lock"))[2]&0777,0640,'mb1168: rejected lock permissions remain untouched');
     }

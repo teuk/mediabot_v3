@@ -106,3 +106,42 @@ provisioning command order, early failure, environment cleanup and report-symlin
 refusal. Provisioning orchestration uses test doubles; no successful fresh CPAN
 installation or full native suite is claimed. Target-host and disposable-machine
 acceptance remain required before closing step 1 or starting step 2.
+
+
+## MB1293 — Native Moose inventory repair
+
+MB1292 was committed/pushed as `ae960d4759c5cdd7081cb4f3ed21f1d959f4e3d0`.
+The maintainer's 12 tooling tests passed, as did runtime and SQLite dependency
+checks on Perl 5.40.1 / DBD::SQLite 1.78. Inventory failed on a generated
+Class::MOP immutable package; host preflight was unavailable, not accepted.
+
+Class::MOP::Package::create puts `(set by Moose)` into %INC for packages created
+in memory. MB1293 recognizes that exact marker and records those entries in
+`generated_modules` (inventory schema 2); actual files remain in `loaded_files`
+with SHA-256. Unknown missing/unreadable file paths still fail. Required module
+loading remains mandatory. This does not claim hashes for generated code.
+
+The failure was reproduced before correction using the exact marker in a native
+Perl subprocess. All 13 Python tooling tests pass after correction, including
+retained failure on an unavailable real path. Existing native case 610 also runs
+the inventory with installed dependencies and checks Moose's generated and real
+entries. Local execution of this case is not accepted: 27/30 assertions pass,
+three fail because native dependencies including Moose are absent here. Native
+host acceptance is pending. The maintainer workflow is one block: apply, tooling
+checks, targeted Perl --progress, full suite --progress, commit.sh --skip-preflight
+and push only after success, then committed preflight. The fresh-machine gate for
+step 1 remains open independently of this repair.
+
+
+### MB1293 R2 — Resume after the restrictive-umask fixture failure
+
+Host R1 acceptance: all 13 tooling tests and all 30 case-610 assertions passed.
+The full suite reached 42,918 assertions in 1,139 files; 42,917 passed and the
+case-1171 lock-mode assertion failed under umask 077. Commit/push did not run.
+The FIFO was created as 0600 by mkfifo despite the requested 0640; the runtime
+correctly left it unchanged. R2 explicitly chmods only that temporary test FIFO
+to 0640 before testing rejection, preserving the assertion against runtime mode
+changes. No RSS runtime policy or permissions are changed. Local case 1171
+reproduces the old failure under 077 and passes all 40 assertions under both
+022 and 077 after correction. Resume from the exact applied R1 worktree, rerun
+targeted cases with --progress then one full --progress before commit/push.

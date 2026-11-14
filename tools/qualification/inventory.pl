@@ -38,17 +38,26 @@ for my $module (@modules) {
 # Fingerprint all loaded Perl files, including transitive dependencies. XS shared
 # objects and operating-system packages are outside this inventory's scope.
 my @loaded;
+my @generated;
 for my $name (sort keys %INC) {
     my $path = $INC{$name};
     next unless defined $path && !ref $path;
+    # Class::MOP::Package::create records an in-memory package with this exact
+    # marker. It is not a path; retain it as evidence without inventing a hash.
+    # Do not skip arbitrary missing paths: a real unreadable file remains fatal.
+    if ($path eq '(set by Moose)') {
+        push @generated, {file => $name, origin => $path};
+        next;
+    }
     open my $fh, '<:raw', $path or die "Cannot fingerprint loaded module $name\n";
     my $hash = Digest::SHA->new(256)->addfile($fh)->hexdigest;
     close $fh;
     push @loaded, {file => $name, path => $path, sha256 => $hash};
 }
-my $report = {schema => 1, perl => "$^V", executable => $^X,
+my $report = {schema => 2, perl => "$^V", executable => $^X,
               archname => $Config{archname}, osname => $Config{osname},
               required => \@required, loaded_files => \@loaded,
+              generated_modules => \@generated,
               scope => 'Observed Perl environment, not a dependency lock or XS/system inventory'};
 my $dest = shift @ARGV or die "Usage: inventory.pl OUTPUT\n";
 open my $out, '>', $dest or die "Cannot write inventory: $!\n";

@@ -132,4 +132,29 @@ like(
     'configure guide rejects packaged Perl driver substitutes',
 );
 
+# MB1293: exercise the inventory against native installed dependencies, including
+# the generated Class::MOP packages created while loading Moose/Hailo.
+{
+    require File::Temp;
+    require JSON::PP;
+    my $tmp = File::Temp::tempdir(CLEANUP => 1);
+    my $report_path = File::Spec->catfile($tmp, 'environment.json');
+    my $rc = system($^X, 'tools/qualification/inventory.pl', $report_path);
+    is($rc, 0, 'native qualification inventory accepts Moose generated packages');
+    my $report = {};
+    if (-f $report_path) {
+        open my $fh, '<', $report_path or die "Cannot read inventory: $!";
+        $report = JSON::PP::decode_json(do { local $/; <$fh> });
+        close $fh;
+    }
+    my @generated = @{$report->{generated_modules} || []};
+    ok(scalar(grep { $_->{origin} eq '(set by Moose)' } @generated),
+       'generated Moose packages are retained separately in the inventory');
+    ok(!scalar(grep { exists $_->{sha256} } @generated),
+       'no file digest is invented for in-memory packages');
+    my @files = @{$report->{loaded_files} || []};
+    ok(scalar(grep { $_->{file} eq 'Moose.pm' && $_->{sha256} =~ /^[0-9a-f]{64}$/ } @files),
+       'real Moose module file still receives a SHA-256');
+}
+
 done_testing();

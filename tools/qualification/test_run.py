@@ -152,4 +152,35 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(result.returncode,3)
         self.assertFalse(target.exists())
 
+    def test_native_inventory_moose_marker_and_missing_real_file(self):
+        # Match Class::MOP::Package::create's real %INC marker without requiring
+        # Moose on the Python tooling host. Only the Perl dependencies are fixtures.
+        script = Path(__file__).with_name('inventory.pl')
+        lib = self.root/'lib'
+        for name in ('Module/Build.pm', 'DBD/SQLite.pm'):
+            p=lib/name; p.parent.mkdir(parents=True, exist_ok=True); p.write_text('1;\n')
+        (lib/'Fixture.pm').write_text(
+            "$INC{'Class/MOP/Class/Immutable/Class/MOP/Class.pm'} = '(set by Moose)'; 1;\n")
+        (self.repo/'install/cpan_install.sh').write_text('PERL_MODULES=(\n  "Fixture"\n)\n')
+        env = os.environ.copy()
+        for key in list(env):
+            if key.startswith('PERL'): env.pop(key)
+        dest = self.root/'inventory.json'
+        command=['perl','-I'+str(lib),str(script),str(dest)]
+        result=subprocess.run(command,cwd=self.repo,env=env,capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr.decode())
+        report=json.loads(dest.read_text())
+        self.assertEqual(report['generated_modules'],[{
+            'file':'Class/MOP/Class/Immutable/Class/MOP/Class.pm',
+            'origin':'(set by Moose)'}])
+        self.assertTrue(all(r['sha256'] for r in report['loaded_files']))
+        self.assertNotIn('(set by Moose)',[r['path'] for r in report['loaded_files']])
+        # An actual path that disappeared must still fail, never become generated.
+        dest.unlink()
+        (lib/'Fixture.pm').write_text("$INC{'Gone.pm'} = '/missing/mb1293/Gone.pm'; 1;\n")
+        result=subprocess.run(command,cwd=self.repo,env=env,capture_output=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn(b'Cannot fingerprint loaded module Gone.pm',result.stderr)
+        self.assertFalse(dest.exists())
+
 if __name__=='__main__':unittest.main()
