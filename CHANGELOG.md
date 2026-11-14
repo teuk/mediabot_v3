@@ -1,3 +1,10 @@
+## MB1302 — Fix the bounded endurance acceptance gate
+
+- Define a single 300-cycle, two-channel closing workload for qualification step 4.
+- Assess source-bound counts, timing, descriptors, notifiers and a declared RSS envelope.
+- Reject short or incomplete measurements instead of treating them as endurance passes.
+- Show minute-scale progress and preserve MB1301 fresh CI evidence.
+
 ## MB1301 — Qualify repeated native timer recovery
 
 - Drain two local IRC channels through real countdown expiry and rearming.

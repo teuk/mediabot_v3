@@ -276,4 +276,64 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(result.returncode,3)
         self.assertFalse(root_dest.exists())
 
+    def test_endurance_budgets_and_missing_evidence(self):
+        import copy
+        import hashlib
+        spec = importlib.util.spec_from_file_location('endurance', Path(__file__).with_name('assess_endurance.py'))
+        a = importlib.util.module_from_spec(spec); spec.loader.exec_module(a)
+        for name in a.SOURCE_PATHS:
+            path = self.repo/name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(name)
+        resources = {'notifiers':4,'fds':12,'rss_kib':120000}
+        report = {'schema':1,'status':'passed',
+            'source_sha256':{name:hashlib.sha256((self.repo/name).read_bytes()).hexdigest() for name in a.SOURCE_PATHS},
+            'totals':{'attempted':150,'accepted':120,'delivered':90,'rejected':30,'expired':30,'overflow_diagnostics':30},
+            'timed_recovery':{'cycles':300,'elapsed_s':1201,
+                'resources_connected':resources.copy(), 'resources_before':{'notifiers':0},
+                'resources_after_cleanup':{'notifiers':0},
+                'samples':[{'cycle':i,'elapsed_s':i*4,'drain_s':4,'pong_latency_s':.001,
+                            'delivered':4,'resources':resources.copy()} for i in range(1,301)]}}
+        self.assertEqual(a.assess(report,self.repo)['status'],'passed')
+        for mutation in (
+            lambda r:r['totals'].update(rejected=29),
+            lambda r:r['timed_recovery']['samples'][100]['resources'].update(notifiers=5),
+            lambda r:r['timed_recovery']['samples'][100]['resources'].update(fds=13),
+            lambda r:r['timed_recovery']['samples'][100]['resources'].update(rss_kib=120000+16385),
+            lambda r:r['timed_recovery']['samples'][100].update(delivered=3),
+            lambda r:r['timed_recovery']['samples'][100].update(pong_latency_s=2.1),
+            lambda r:r['timed_recovery']['samples'][100].update(drain_s=0),
+            lambda r:r['timed_recovery']['samples'][100].update(cycle=1),
+            lambda r:r['timed_recovery'].update(elapsed_s=100),
+            lambda r:r['timed_recovery']['resources_after_cleanup'].update(notifiers=1),
+        ):
+            candidate=copy.deepcopy(report);mutation(candidate)
+            self.assertEqual(a.assess(candidate,self.repo)['status'],'failed')
+        for mutation in (
+            lambda r:r['timed_recovery']['samples'].pop(),
+            lambda r:r['timed_recovery']['samples'][50]['resources'].pop('rss_kib'),
+            lambda r:r['timed_recovery']['samples'][50].update(pong_latency_s=float('nan')),
+            lambda r:r['source_sha256'].pop(a.SOURCE_PATHS[0]),
+            lambda r:r['source_sha256'].update({a.SOURCE_PATHS[0]:'0'*64}),
+        ):
+            candidate=copy.deepcopy(report);mutation(candidate)
+            self.assertEqual(a.assess(candidate,self.repo)['status'],'unavailable')
+        boundary=copy.deepcopy(report)
+        boundary['timed_recovery']['samples'][100]['resources']['rss_kib']+=16384
+        self.assertEqual(a.assess(boundary,self.repo)['status'],'passed')
+
+    def test_endurance_cli_preserves_output_and_reports_bad_input(self):
+        import sys
+        script=Path(__file__).with_name('assess_endurance.py')
+        source=self.root/'input.json';source.write_text('{broken')
+        output=self.root/'assessment.json'
+        command=[sys.executable,str(script),str(source),'--repo',str(self.repo),'--output',str(output)]
+        result=subprocess.run(command,capture_output=True)
+        self.assertEqual(result.returncode,3)
+        self.assertEqual(json.loads(output.read_text())['status'],'unavailable')
+        before=output.read_bytes()
+        result=subprocess.run(command,capture_output=True)
+        self.assertNotEqual(result.returncode,0);self.assertEqual(output.read_bytes(),before)
+        link=self.root/'link.json';link.symlink_to(output)
+        result=subprocess.run(command[:-1]+[str(link)],capture_output=True)
+        self.assertNotEqual(result.returncode,0);self.assertEqual(output.read_bytes(),before)
+
 if __name__=='__main__':unittest.main()

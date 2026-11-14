@@ -126,7 +126,7 @@ sub run {
     my $root=dirname(dirname(dirname(abs_path(__FILE__))));
     for my $path (qw(t/lib/MB1300SaturationProbe.pm t/lib/MB881OutputFixture.pm
         Mediabot/Helpers.pm Mediabot/IRC/Sender.pm Mediabot/IRC/DeferredOutput.pm
-        Mediabot/IRC/Transport.pm Mediabot/IRC/Timer.pm)) {
+        Mediabot/IRC/Transport.pm Mediabot/IRC/Timer.pm tools/qualification/saturation.pl)) {
         open my $fh,'<:raw',"$root/$path" or die $!;
         local $/; $report->{source_sha256}{$path}=sha256_hex(<$fh>); close $fh;
     }
@@ -202,6 +202,8 @@ sub run_timed {
             # Fixture logs are retained by arrays, unlike a streaming sink. Do not
             # mistake their deliberate growth for native queue ownership leakage.
             @{$bot->{logger}{rows}}=();@{$bot->{events}}=();
+            print STDERR "[PROGRESS] timed recovery $cycle/$cycles cycles\n"
+                if $cycles>=30 && $cycle % 15 == 0;
         }
     });
     $bot->setIrc(undef);$peer->close_now;$loop->loop_once(0) for 1..3;

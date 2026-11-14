@@ -12,7 +12,7 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 | 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | Accepted on MB1296 (`d17bb81f`): fresh Debian full lane passed; source-bound reports and native/module inventory retained. Rebuilds remain observed, not dependency-locked. |
 | 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Bounded MB1297 journeys accepted by complete offline CI on `431c45a6`; full receive-handler/login coverage remains outside scope |
 | 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | Selected MB1298/MB1299 matrix accepted by fresh CI on `e838b9fa`: SQL/diagnostic faults, HTTP 503, native worker timeout and recovery. Wider faults remain outside this bounded matrix. |
-| 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | MB1300 burst/expiry measurement committed; MB1301 adds two-channel native timer repetition. Long endurance and production fairness remain pending. |
+| 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | MB1301 short timer recovery accepted by fresh CI. MB1302 fixes the closing 300-cycle local envelope; target-host long-run acceptance pending. Production fairness and hours-long stability are residual limits. |
 | 5. Shared command contracts | Reusable matrix over selected representative commands | Private/channel routing, permission revocation, identity, Unicode and storage errors covered; preserve command-specific semantics | Planned |
 
 Each step ends with an explicit pass/fail/unavailable verdict and a bounded list
@@ -496,3 +496,50 @@ assertions and produces a failed JSON verdict. Existing-output and invalid cycle
 argument checks also pass. Full local qualification remains unavailable without
 DBD::MariaDB; the delivery requires targeted tests, the timed run and the full
 host suite before its final noninteractive commit/push.
+
+
+## MB1302 — Fixed closing workload for step 4
+
+Base `141b4a49ea9e520a16a3097d8187cb87cbfad897` matches every tracked byte of the
+2026-11-14 17:29:05 snapshot. All three MB1301 workflows passed. Fresh run
+https://github.com/teuk/mediabot_v3/actions/runs/43615267865 passed 42,991 assertions
+in 247 seconds; its source-bound report and two-cycle saturation JSON both pass.
+Artifact 14121813406 is retained in this delivery, archive SHA-256
+`666b1f4c1cbc42c64ab072e7c76dc89b71382d48743d72a23b67a7e517de527a`.
+This supersedes the pending short-run acceptance notes above. No numerical host
+transcript or 300-cycle result is inferred from that CI artifact.
+
+To bound the remaining campaign, the closing step-4 workload is now fixed:
+300 existing native timer cycles, two channels with two lines per cycle, normally
+about twenty minutes and 1,200 deliveries. There is no additional runtime feature
+or timer mock. Progress appears every fifteen cycles. A dedicated Python assessor
+requires matching source hashes (including the executable Perl wrapper), complete
+ordered samples, exact delivery/burst/expiry accounting, >=3.6 seconds per native
+drain and >=1,080 seconds total observed cycle time, PONG <=2 seconds, stable
+connected notifier/fd counts and final notifier cleanup. The lower time tolerance
+matches the existing 1.8-second per-countdown assertions; this is not a throughput
+benchmark. The native harness retains its own wire deadlines and bounded alarm.
+
+Memory acceptance is declared before the target run: ten warmup cycles, then
+peak RSS no more than 16 MiB above their median. This conservative diagnostic
+envelope accommodates allocator/harness overhead and is not a zero-leak theorem.
+The harness clears retained fixture logs/history but keeps bounded JSON samples.
+Missing /proc measurements, malformed/nonfinite values, a short run or changed
+source produce unavailable, never passed. A measured budget violation fails.
+The assessor records the input and its own hash and creates its output exclusively.
+
+The delivery runs the closing workload once before the full host suite. Only a
+passed assessment and full suite permit the final noninteractive commit/push.
+After reviewing that host result, accept step 4 for this specified local workload
+and move to step 5 (representative command contracts), without another endurance
+increment unless a failure supplies a concrete reason. Hours-long stability,
+production network load, real TTL waiting and global budget fairness remain
+explicit residual limits, not hidden claims of this acceptance gate.
+
+Local validation: 19 tooling tests exercise positive synthetic acceptance and
+negative resource, timing, accounting, source, completeness and output-protection
+cases. These synthetic samples are tests of the assessor, not endurance evidence.
+All 191 native targeted assertions pass; a real two-cycle measurement passes its
+own assertions and is correctly refused as incomplete by the endurance assessor.
+The twenty-minute target run is pending. Local full qualification lacks
+DBD::MariaDB; the host script requires the full suite before committing.

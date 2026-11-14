@@ -370,3 +370,32 @@ upper bound takes about twenty minutes. Full/load qualification uses the default
 two cycles and preserves the same JSON. The maintainer delivery runs thirty
 cycles before the full suite and before its final commit/push. On slower hosts,
 allow up to ten seconds per drain; this is a test deadline, not a production SLO.
+
+
+### Closing the bounded endurance gate (MB1302)
+
+Run this separately from routine full/load lanes, on a prepared development host:
+
+```bash
+report="$(mktemp -d /tmp/mediabot-endurance.XXXXXXXX)"
+perl tools/qualification/saturation.pl "$report/saturation.json" --timed-cycles 300 > "$report/saturation.tap" &&
+python3 tools/qualification/assess_endurance.py "$report/saturation.json" --output "$report/endurance.json"
+```
+
+Allow about twenty minutes. Progress appears on stderr every fifteen cycles
+(about one minute); TAP remains in the report directory. The assessor compares
+source hashes against its repository, requires all 300 samples and 1,200 timed
+messages, unchanged post-drain notifiers/fds, PONG <= 2s, native drain >= 3.6s,
+final notifier cleanup and exact original burst/expiry counts. After ten warmup
+cycles, peak RSS may grow at most 16,384 KiB above the warmup median. That is an
+explicit conservative local test envelope, not an inferred production SLO or
+proof of zero leakage. /proc resource measurements are required for this gate.
+Malformed, short, missing or source-mismatched evidence returns 3 (unavailable);
+violated measured budgets return 2 (failed); only a complete pass returns 0.
+The assessment records its input and assessor hashes and refuses an existing
+output. Do not edit thresholds after a failure just to obtain a green result.
+
+The maintainer delivery runs targeted tests, this single long workload and its
+assessment, then one full suite; existing commit.sh commit/push is last. Routine
+full/load qualification retains its short two-cycle measurement. See the roadmap
+for the bounded closure and excluded hours-long/production fairness claims.
