@@ -6,6 +6,10 @@ on:
     paths:
       - '.github/workflows/qualification.yml'
       - 'tools/qualification/**'
+      - 't/cases/1313_mb883_irc_pacing_native_delivery.t'
+      - 't/lib/MB1269TransportProbe.pl'
+      - 't/lib/MB1297LocalIRCProbe.pl'
+      - 't/lib/MB881OutputFixture.pm'
       - 'cpanfile'
       - 'install/cpan_install.sh'
   workflow_dispatch:

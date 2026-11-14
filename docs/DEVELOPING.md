@@ -325,3 +325,8 @@ qualifies committed HEAD using existing native case 1313, including the local
 socket journeys. The full lane runs the same case. It requires normal native
 Perl dependencies; it never starts mediabot.pl or loads deployment configuration.
 See MB1297 in the qualification roadmap for seams and remaining scope limits.
+
+The IRC lane also exercises a missing-table SQL fault in an in-memory SQLite
+fixture, a throwing diagnostic sink, and recovery. Native rules, dispatch and
+wire output remain active; only the private fixture database is modified. The
+fresh workflow watches the native journey case and its supporting fixtures.

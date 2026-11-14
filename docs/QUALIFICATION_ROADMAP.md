@@ -10,8 +10,8 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 | Step | Deliverable | Exit evidence | Status |
 | --- | --- | --- | --- |
 | 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | Accepted on MB1296 (`d17bb81f`): fresh Debian full lane passed; source-bound reports and native/module inventory retained. Rebuilds remain observed, not dependency-locked. |
-| 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | MB1297 implementation; target-host acceptance pending |
-| 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | Planned |
+| 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Bounded MB1297 journeys accepted by complete offline CI on `431c45a6`; full receive-handler/login coverage remains outside scope |
+| 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | MB1298 implements confirmed-rule SQL refresh and diagnostic-sink faults; target-host acceptance pending. HTTP/worker and wider logging faults remain planned. |
 | 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | Planned |
 | 5. Shared command contracts | Reusable matrix over selected representative commands | Private/channel routing, permission revocation, identity, Unicode and storage errors covered; preserve command-specific semantics | Planned |
 
@@ -308,3 +308,49 @@ including the ten new journey assertions, with real IO::Async/Net::Async::IRC.
 A negative control replacing setIrc with a bare assignment fails the stale-wire
 assertion as expected. The timer check follows the specific deferred notifier,
 not unrelated transport timers. Full host validation still precedes commit/push.
+
+
+## MB1298 — Confirmed-rule SQL fault and diagnostic recovery
+
+MB1297 is committed as `431c45a64c504736327dabb948b44baaa7796667` and matches
+all tracked files in the maintainer's 2026-11-14 12:28:23 snapshot. No numerical
+host test transcript was supplied with that snapshot; local MB1297 validation
+remains recorded separately above. Complete offline CI run
+https://github.com/teuk/mediabot_v3/actions/runs/43590170522 passed 42,893
+assertions in 167 seconds, including native case 1313; the Debian 13 fresh-install
+workflow also passed. Fresh qualification run
+https://github.com/teuk/mediabot_v3/actions/runs/43590170487 passed all stages and
+42,892 assertions in 236 seconds. This accepts the bounded three step-2 journeys.
+The verified evidence archive (artifact 14112286541) is retained in this delivery;
+its SHA-256 is `126cde9e8405e0376dfe1a1fe485d1258875c525e1521e2b343f22a05a7cfd51`.
+Totals remain separate across environments. Step 1 retains its MB1296 evidence.
+
+This first step-3 increment extends the same local IRC harness. DBI/DBD::SQLite
+creates a private in-memory database containing the two tables required by the
+native badword reader. A real public command loads a confirmed blocking rule.
+The cache timestamp is expired explicitly, then only the fixture table is dropped
+to produce a native SQL exception. The runtime reader, Sender, registry dispatch
+and wire transport remain unchanged. No deployment database is opened or migrated.
+
+The wire must show no forbidden public reply and no driver diagnostic. The
+confirmed cache object, rules and age survive, one bounded error diagnostic is
+recorded and the native error counter increments exactly once. A second attempt
+makes just that diagnostic sink throw: confirmed policy still holds, the loop
+continues, and the read failure is still counted. Recreating the empty fixture
+table permits the next command once, refreshes the cache and leaves no active SQL
+statement. Each dispatch is followed by an ordinary NOTICE marker through the
+same transport, avoiding PONG priority as an unreliable ordinary-output barrier.
+
+Scope is a failed refresh with previously confirmed rules, plus failure of its
+specific error diagnostic. First-load fallback policy is unchanged; this is not
+a universal fail-closed storage guarantee. SQLite missing-table exceptions do
+not qualify MariaDB connection loss, lock waits, writes, transactions or timeouts.
+HTTP/worker faults and other logging call sites remain for later increments.
+
+Local validation: all 16 tooling tests and 109 native case-1313 assertions pass,
+including 17 new assertions. A negative control that falsely converts the SQL
+error into an empty successful read fails the wire assertion. Existing two-second
+waits and the 15-second journey alarm remain in force. Fresh CI now also watches
+case 1313 and its three supporting fixtures, so a harness-only change cannot
+silently omit the fresh qualification run. Target-host targeted/full validation
+remains required before the final noninteractive commit/push.

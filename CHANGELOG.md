@@ -1,3 +1,10 @@
+## MB1298 — Qualify SQL failure and diagnostic recovery over local IRC
+
+- Exercise a real in-memory SQL read failure through the native public command path.
+- Verify confirmed filtering rules and cache age survive SQL and diagnostic-sink exceptions.
+- Check one-shot recovery, bounded diagnostics, error accounting and statement cleanup.
+- Trigger fresh qualification when its native IRC cases and fixtures change.
+
 ## MB1297 — Exercise native command journeys over local IRC sockets
 
 - Record successful MB1296 fresh Debian qualification and retain its source-bound evidence.

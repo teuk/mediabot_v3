@@ -105,6 +105,78 @@ use MB881OutputFixture;
         is(scalar @$wire,2,'old peer receives no deferred reply after replacement');
         is(scalar(grep {refaddr($_)==refaddr($retired_timer)} $loop->notifiers),0,
             'reconnection releases the retired deferred countdown');
+        # MB1298: run real SQL against a private in-memory database. An ordinary
+        # NOTICE marker follows each synchronous dispatch, so observing it proves
+        # that every earlier ordinary reply was flushed (PONG can overtake data).
+        my $exchange = sub {
+            my ($tag) = @_;
+            my $start = scalar @$new_wire;
+            my $before = $received;
+            $new_server->write(":Alice!test\@local PRIVMSG #qualification :!spike\r\n");
+            $pump->(sub {$received == $before + 1});
+            $fresh->do_NOTICE(target=>'qualifier', text=>$tag);
+            $pump->(sub {grep {$_ eq "NOTICE qualifier $tag"} @$new_wire});
+            return [@$new_wire[$start .. $#$new_wire]];
+        };
+        my $db = DBI->connect('dbi:SQLite:dbname=:memory:', '', '',
+            {RaiseError=>1, PrintError=>0, AutoCommit=>1});
+        $db->do('CREATE TABLE CHANNEL (id_channel INTEGER, name TEXT)');
+        $db->do('CREATE TABLE BADWORDS (id_channel INTEGER, badword TEXT)');
+        $db->do("INSERT INTO CHANNEL VALUES (1, '#qualification')");
+        $db->do("INSERT INTO BADWORDS VALUES (1, 'in_spike_memory')");
+        my $fixture_db = $bot->{dbh};
+        $bot->{dbh} = $db;
+        delete $bot->{_badword_cache}{'#qualification'};
+        is_deeply($exchange->('sql-warm'), ['NOTICE qualifier sql-warm'],
+            'native SQL loads a confirmed rule that blocks the public reply');
+        my $confirmed = $bot->{_badword_cache}{'#qualification'};
+        is_deeply($confirmed->{words}, ['in_spike_memory'], 'complete SQL read publishes confirmed rules');
+        $confirmed->{ts} = 0; # Force a refresh without wall-clock sleeps.
+        $db->do('DROP TABLE BADWORDS'); # Only this disposable in-memory fixture.
+        my $errors = $bot->{metrics}{counts}{mediabot_db_query_errors_total} // 0;
+        my $diagnosis = 'Outgoing badword lookup failed; last confirmed rules retained';
+        my $diagnostic_count = sub {scalar grep {$_->[1] eq $diagnosis} @{$bot->{logger}{rows}}};
+        my $diagnostics = $diagnostic_count->();
+        is_deeply($exchange->('sql-failed'), ['NOTICE qualifier sql-failed'],
+            'SQL exception retains the confirmed rule and leaks no reply or driver error');
+        is($bot->{metrics}{counts}{mediabot_db_query_errors_total}, $errors+1,
+            'failed read increments the native error counter exactly once');
+        is($diagnostic_count->(), $diagnostics+1, 'failed read records one bounded diagnostic');
+        is(refaddr($bot->{_badword_cache}{'#qualification'}), refaddr($confirmed),
+            'failed refresh preserves the confirmed cache object');
+        is($confirmed->{ts}, 0, 'failed refresh never renews the cache age');
+        my $log = MB881::Logger->can('log');
+        my $log_failures = 0;
+        {
+            local *MB881::Logger::log = sub {
+                if ($_[2] eq $diagnosis) {
+                    ++$log_failures;
+                    die "Injected diagnostic sink failure\n";
+                }
+                return $log->(@_);
+            };
+            is_deeply($exchange->('sql-log-failed'), ['NOTICE qualifier sql-log-failed'],
+                'diagnostic sink exception cannot bypass confirmed rules or stop IRC dispatch');
+        }
+        is($log_failures, 1, 'diagnostic fault was actually exercised');
+        is($bot->{metrics}{counts}{mediabot_db_query_errors_total}, $errors+2,
+            'read failures remain counted even when their diagnostic sink throws');
+        is_deeply($confirmed, {ts=>0, words=>['in_spike_memory']},
+            'combined SQL/logging failures leave confirmed policy and age intact');
+        $db->do('CREATE TABLE BADWORDS (id_channel INTEGER, badword TEXT)');
+        is_deeply($exchange->('sql-recovered'),
+            ['PRIVMSG #qualification https://teuk.org/In_Spike_Memory.jpg',
+             'NOTICE qualifier sql-recovered'],
+            'restored SQL publishes its empty rule set and the next public command succeeds once');
+        is_deeply($bot->{_badword_cache}{'#qualification'}{words}, [],
+            'only successful recovery replaces the confirmed rules');
+        ok($bot->{_badword_cache}{'#qualification'}{ts}>0, 'successful recovery advances cache age');
+        is($bot->{metrics}{counts}{mediabot_db_query_errors_total}, $errors+2,
+            'successful recovery adds no error metric');
+        is($diagnostic_count->(), $diagnostics+1, 'successful recovery adds no error diagnostic');
+        is($db->{ActiveKids}, 0, 'native reader leaves no active SQL statement after recovery');
+        $bot->{dbh} = $fixture_db;
+        $db->disconnect;
         $old->close_now; $fresh->close_now; $server->close_now; $new_server->close_now;
     });
     alarm 0;
