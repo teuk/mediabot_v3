@@ -1,3 +1,10 @@
+## MB1300 — Measure bounded saturation and queue recovery
+
+- Measure repeated local IRC bursts, admission/rejection, FIFO drain, PING latency and expiry.
+- Record source hashes, queue age/depth and resource samples in saturation.json.
+- Add a load qualification lane and preserve measurements in full fresh CI.
+- Accept the selected MB1299 fault matrix; keep long endurance explicitly pending.
+
 ## MB1299 — Qualify HTTP faults and worker recovery over local IRC
 
 - Exercise native version commands with HTTP 503, worker timeout and successful recovery.

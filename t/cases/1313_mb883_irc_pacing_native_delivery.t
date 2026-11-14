@@ -148,4 +148,6 @@ is(IO::Async::Timer::Countdown->can('new'), $original_new,
 do './t/lib/MB1269TransportProbe.pl' or die $@ || $!;
 do './t/lib/MB1297LocalIRCProbe.pl' or die $@ || $!;
 
+require MB1300SaturationProbe;
+MB1300SaturationProbe::run();
 done_testing;

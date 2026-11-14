@@ -10,6 +10,7 @@ on:
       - 't/lib/MB1269TransportProbe.pl'
       - 't/lib/MB1297LocalIRCProbe.pl'
       - 't/lib/MB881OutputFixture.pm'
+      - 't/lib/MB1300SaturationProbe.pm'
       - 'cpanfile'
       - 'install/cpan_install.sh'
   workflow_dispatch:

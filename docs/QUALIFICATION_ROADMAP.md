@@ -11,8 +11,8 @@ extraction or Eggdrop-parity scope. Baseline: MB1290, commit
 | --- | --- | --- | --- |
 | 1. Reproducible validation environment | Disposable checkout, complete native dependencies, recorded environment and one qualification command shared with CI practices | Fresh setup can run native validation; missing dependencies fail explicitly; source/dependency identity is recorded | Accepted on MB1296 (`d17bb81f`): fresh Debian full lane passed; source-bound reports and native/module inventory retained. Rebuilds remain observed, not dependency-locked. |
 | 2. Local IRC integration | Simulated server and native command paths, no production configuration | Public command, private command and deferred reply interrupted by reconnect all pass; old output cannot reach the successor transport | Bounded MB1297 journeys accepted by complete offline CI on `431c45a6`; full receive-handler/login coverage remains outside scope |
-| 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | MB1298 SQL/diagnostic faults accepted by fresh CI on `3e8c98c1`; MB1299 adds HTTP 503, native worker timeout and recovery. Selected matrix implementation complete; MB1299 target-host acceptance pending. Wider faults remain outside this bounded matrix. |
-| 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | Planned |
+| 3. Controlled failure scenarios | Storage, HTTP, worker and logging failures in the local harness | Bounded completion, explicit diagnosis, retained authority and recovery demonstrated for each selected fault | Selected MB1298/MB1299 matrix accepted by fresh CI on `e838b9fa`: SQL/diagnostic faults, HTTP 503, native worker timeout and recovery. Wider faults remain outside this bounded matrix. |
+| 4. Saturation and endurance | Repeatable workload and resource measurements | Report queue depth/age, control response delay, dropped/expired output and post-drain resources; establish budgets before adjusting policy | MB1300 implements a bounded burst/expiry measurement; host acceptance and long endurance remain pending. |
 | 5. Shared command contracts | Reusable matrix over selected representative commands | Private/channel routing, permission revocation, identity, Unicode and storage errors covered; preserve command-specific semantics | Planned |
 
 Each step ends with an explicit pass/fail/unavailable verdict and a bounded list
@@ -402,3 +402,49 @@ the adapter callback; the public version command keeps its existing presentation
 Async completion after connection replacement is separate from the deferred-output
 reconnect journey and is not qualified here. No general fault tolerance claim,
 endurance budget or deployment database change follows from these selected cases.
+
+
+## MB1300 — Bounded saturation measurements
+
+MB1299 is committed as `e838b9fa40f14f7d9b6d45602a22b2cfaea47f5a`; all tracked
+files match the 2026-11-14 13:14:25 snapshot. Fresh run
+https://github.com/teuk/mediabot_v3/actions/runs/43593629107 passed 42,942 assertions
+in 236 seconds, with provisioning and inventory. The ordinary offline workflow
+also passed. This accepts the selected step-3 matrix, not universal fault tolerance.
+No numerical host transcript was supplied with the snapshot. Fresh artifact
+14113707122 is retained in the delivery, archive SHA-256
+`8c216425be3e1cc9311a40d7c84f038d362083a3cc8984de7882aa48af3d5a17`.
+
+The first step-4 increment uses native Sender, DeferredOutput and Transport over
+an AF_UNIX socketpair. Three blocked bursts of forty single-line responses must
+admit thirty and reject ten each, retain FIFO order without duplicates, answer
+PING while blocked, then release every queued payload and timer. An ordinary
+NOTICE barrier confirms all earlier ordinary frames have crossed the socket.
+A separate thirty-response batch exercises native expiry with an injected
+monotonic advance of 121 seconds. Cleanup returns notifier ownership to baseline
+and removes the channel queue registry. Production policy is unchanged.
+
+`saturation.json` records actual admission, delivery, rejection and expiry counts,
+peak queue depth, oldest observed queue age, PONG latency, notifier count and,
+where /proc permits, file descriptors and RSS. Input file SHA-256 values bind the
+working sources; they do not claim that a dirty candidate is its current HEAD.
+The qualification runner additionally binds its committed snapshot in report.json.
+`--lane load` runs dependency gates and this measurement; `--lane full` records
+it before the full suite. Fresh CI consequently retains it in its normal artifact.
+The native IRC case also executes the shared assertions without writing a report.
+
+Budgets distinguish existing policy (30 lines, 120-second TTL) from the harness
+liveness bound (two seconds per wire wait, fifteen seconds for the whole probe).
+Manual draining is accelerated, not a throughput measurement. Injected expiry is
+not a real 120-second wait. RSS/fd samples are observations, not a leak threshold;
+no production latency SLO follows from local timings. Single-channel bursts do
+not establish multichannel fairness, long endurance, memory stability over time
+or operating-system/network failure behavior. Step 4 remains in progress.
+
+Local validation: 17 tooling tests, 163 native case-1313 assertions and the
+standalone 21-assertion measurement pass. The expected 150 attempts reconcile as
+90 deliveries, 30 rejections and 30 expirations. A negative control changing the
+native cap to 31 fails and emits a failed JSON verdict. Full local qualification
+is unavailable without DBD::MariaDB; host targeted/full acceptance remains required.
+The delivery records working-tree measurements before the full suite and ends
+with the guarded noninteractive commit.sh commit/push, with no postcommit action.

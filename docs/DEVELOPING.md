@@ -335,3 +335,17 @@ The same IRC lane now covers public `!version` with injected HTTP 503, a blocked
 HTTP fixture stopped by the real worker watchdog, and recovery. Native child
 processes and pipes are exercised; no external HTTP request is made. The test
 checks callback diagnostics, exact IRC replies and OS child collection.
+
+
+### Bounded saturation measurement (MB1300)
+
+For a committed snapshot on a prepared host, run
+`python3 tools/qualification/run.py --lane load --output /tmp/mb-load-report`
+with a new output path. Both load and full lanes retain `saturation.json` alongside
+report.json. The full lane measures before running the complete suite.
+For an uncommitted candidate, `perl tools/qualification/saturation.pl NEW_REPORT_JSON`
+measures the working files and records their hashes; it refuses an existing file.
+This local socket probe tests three bounded bursts, overflow, FIFO recovery,
+PING responsiveness and virtual expiry. Manual drain and injected time do not
+measure production throughput or long endurance. Resource and latency samples
+are observational; the roadmap lists remaining qualification limits.
