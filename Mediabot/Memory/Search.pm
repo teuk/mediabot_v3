@@ -12,7 +12,18 @@ sub query {
     my ($args) = @_;
     return unless ref($args) eq 'ARRAY' && @$args && @$args <= 6;
     return if grep { !defined($_) || ref($_) || /[\x00-\x1f\x7f]/ } @$args;
-    my $text = join ' ', @$args;
+    # Normalize each argument before joining: a mixed character/byte list
+    # must not upgrade UTF-8 bytes as Latin-1 or count them twice on encode.
+    my @decoded;
+    for my $arg (@$args) {
+        my $value = $arg;
+        unless (utf8::is_utf8($value)) {
+            $value = eval { decode('UTF-8', $value, FB_CROAK | LEAVE_SRC) };
+            return unless defined $value;
+        }
+        push @decoded, $value;
+    }
+    my $text = join ' ', @decoded;
     $text =~ s/^\s+|\s+$//g;
     my @words = grep { length } split /\s+/, $text;
     return unless @words && @words <= 6 && length($text) >= 2;

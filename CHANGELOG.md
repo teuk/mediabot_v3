@@ -1,3 +1,9 @@
+## MB1315 — Normalize memory search UTF-8 before validation and SQL binding
+
+- Decode byte arguments once before joining mixed byte/character search input.
+- Apply the two-character minimum and 160-byte limit to the actual query text.
+- Reject malformed UTF-8 without querying, while retaining scope, policy and literal LIKE escaping.
+
 ## MB1314 — Present YouTube search as one continuous result list
 
 - Join the top yt results with pipe separators instead of numbered per-result replies.

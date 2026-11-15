@@ -125,6 +125,25 @@ my $output = sub { join '\n', map { $_->[1] } @notices };
         is(scalar @{$bot->{dbh}{reads}}, 0, 'invalid or over-budget input cannot start a search');
         like($output->(), qr/Syntax: memory find/, 'invalid search input gets useful syntax');
     }
+    # MB1315: character and UTF-8 byte inputs must bind the same search text.
+    for my $text ('café', '東京', '🎵 musique', 'é' x 80) {
+        for my $input ($text, encode('UTF-8', $text)) {
+            my $saved = $input;
+            $bot = $make->(); $run->($bot, ['find', $input]);
+            is(scalar @{$bot->{dbh}{reads}}, 2, 'valid Unicode query reaches both enabled collections');
+            my @words = split /\s+/, $text;
+            is_deeply($bot->{dbh}{reads}[0]{bind}, [37,map {"%$_%"} @words],
+                'decoded query reaches quote bindings without mojibake');
+            is($input, $saved, 'query normalization leaves caller input unchanged');
+        }
+    }
+    $bot = $make->(); $run->($bot, ['find', encode('UTF-8','café'), '東京']);
+    is_deeply($bot->{dbh}{reads}[0]{bind}, [37,'%café%','%東京%'],
+        'mixed byte and character arguments normalize independently');
+    for my $input (encode('UTF-8','é' x 81), "bad\xfftext", encode('UTF-8','é')) {
+        $bot = $make->(); $run->($bot, ['find',$input]);
+        is(scalar @{$bot->{dbh}{reads}}, 0, 'over-budget, malformed UTF-8 and one-character queries are refused');
+    }
     $bot = $make->(); $run->($bot, ['FIND', 'hello', 'world']);
     is(scalar @{$bot->{dbh}{reads}}, 2, 'find subcommand is case insensitive');
     for my $channel ('Max_', '#other') {
