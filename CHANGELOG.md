@@ -1,3 +1,9 @@
+## MB1331 — Recognize every supported radar channel prefix
+
+- Accept #, &, ! and + channel targets in current and historical radar reports through the shared IRC classifier.
+- Keep private targets rejected before database access and preserve channel-scoped queries and replies.
+- Cover native module, facade and command-registry entry points with real SQLite reports.
+
 ## MB1330 — Bound Unicode help descriptions by wire bytes
 
 - Apply the shared UTF-8 byte budget to category descriptions regardless of character count.

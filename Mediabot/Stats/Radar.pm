@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use DateTime ();
+use Mediabot::IRC::Target qw(is_channel);
 
 our @EXPORT_OK = qw(mbRadar_ctx);
 
@@ -30,7 +31,7 @@ sub mbRadar_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    unless ($channel && $channel =~ /^#/) {
+    unless (is_channel($channel)) {
         botNotice($self, $nick, 'Syntax: !radar  [Nd]  (must be in a channel)'); return;
     }
 

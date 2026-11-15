@@ -100,9 +100,10 @@ sub fixture_1426 {
     return (Mediabot->new({dbh=>$db}),$db);
 }
 sub invoke_1426 {
-    my ($bot,$days,$entry)=@_;
+    my ($bot,$days,$entry,$channel)=@_;
+    $channel = '#test' unless @_ >= 4;
     $entry //='Mediabot';@wire=();
-    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Operator',channel=>'#test',command=>'radar',args=>defined($days)?[$days]:[]);
+    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Operator',channel=>$channel,command=>'radar',args=>defined($days)?[$days]:[]);
     no strict 'refs';
     my $ok=eval {$entry eq 'registry' ? $bot->command_registry->handler_for('radar','public')->($ctx) : &{$entry.'::mbRadar_ctx'}($ctx);1};
     return $ok ? '' : "$@";
@@ -258,6 +259,37 @@ my @kinds=qw(rate silence newcomers ghosts talkers);
         }
     }
     is_deeply(\@actual,\@expected,'cleanup exceptions preserve completely read standard reports and never replace the original fetch failure');
+}
+# MB1331: all supported channel prefixes use the same query and reply scope.
+for my $entry (qw(Mediabot::Stats::Radar Mediabot::UserCommands Mediabot registry)) {
+    for my $days (undef, '7d') {
+        my ($reference,$rh)=standard_1426();
+        invoke_1426($reference,$days,$entry);
+        my $expected=dclone(\@wire);
+        $rh->disconnect;
+        for my $channel ('#test','&test','!ABCDEtest','+test') {
+            my ($b,$h)=standard_1426();
+            $h->do('UPDATE CHANNEL SET name=? WHERE id_channel=1',undef,$channel);
+            $b->{_karma_log}{lc $channel}=delete $b->{_karma_log}{'#test'} unless $channel eq '#test';
+            my $want=dclone($expected);
+            for my $line (@$want) {
+                $line->[1]=$channel;
+                $line->[2] =~ s/\Q#test\E/$channel/g;
+            }
+            my $error=invoke_1426($b,$days,$entry,$channel);
+            is_deeply([$error,\@wire],['',$want],
+                "$entry / " . ($days//'current') . " / $channel: complete report retains channel scope");
+            $h->disconnect;
+        }
+        for my $private (undef,'','Reader') {
+            my ($b,$h)=standard_1426();
+            my $error=invoke_1426($b,$days,$entry,$private);
+            is_deeply([$error,\@wire,$h->{private_mb1053}{prepared}//[]],
+                ['',[['notice','Operator','Syntax: !radar  [Nd]  (must be in a channel)']],[]],
+                "$entry: private target is rejected before database access");
+            $h->disconnect;
+        }
+    }
 }
 is_deeply(\@warnings,[],'native calendar and standard reports, empty data and database failures are warning-free');
 done_testing;
