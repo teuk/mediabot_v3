@@ -192,4 +192,38 @@ for my $entry ('Mediabot::Users::Seen') {
         }
     }
 }
+
+# MB1308: online identity follows the connected server's advertised mapping.
+{
+    package MB1308::IRC;
+    sub isupport { $_[1] eq 'CASEMAPPING' ? $_[0]{mapping} : undef }
+}
+for my $row (
+    ['rfc1459','Te[u]K','te{u}k',1],
+    ['strict-rfc1459','Te[u]K','te{u}k',1],
+    ['ascii','Te[u]K','te{u}k',0],
+    ['rfc1459','Te^K','te~k',1],
+    ['strict-rfc1459','Te^K','te~k',0],
+    ['ascii','Te^K','te~k',0],
+    [undef,'Te[u]K','te{u}k',0],
+) {
+    my ($mapping,$online,$query,$match)=@$row;
+    my ($bot,$db)=setup_1338();
+    $bot->{irc}=bless {mapping=>$mapping},'MB1308::IRC';
+    $bot->{online}={'#test'=>[$online],'#elsewhere'=>[$query]};
+    is(invoke_1338('Mediabot::Users::Seen',$bot,'#test',$query),'','mapped online lookup completes');
+    my $text=join(' ',map {$_->[2]} @wire);
+    is($text =~ /currently online/ ? 1:0,$match,'online nickname equivalence respects server mapping without widening channel scope');
+    is(scalar(grep {/FROM USER_SEEN/} @{$db->{private_mb962_sql}}),$match?0:1,'only a confirmed online identity bypasses stored history');
+}
+for my $mapping ('rfc1459','strict-rfc1459','ascii',undef) {
+    my ($bot,$db)=setup_1338();
+    $bot->{irc}=bless {mapping=>$mapping},'MB1308::IRC';
+    $bot->{online}={'#[Room]'=>['Alice'],'#unrelated'=>['Alice']};
+    is(invoke_1338('Mediabot::Users::Seen',$bot,undef,'ALICE','#{room}'),'','explicit channel lookup completes');
+    my $match=defined($mapping) && $mapping ne 'ascii';
+    is_deeply(\@wire,$match ? [['notice','Operator','Alice is currently online on #[Room].']]
+        : [['notice','Operator','Channel unavailable.']],
+        'channel equivalence uses the same mapping, preserves displayed spelling and keeps private replies private');
+}
 done_testing;

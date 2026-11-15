@@ -1,3 +1,9 @@
+## MB1308 — Respect server casemapping in seen online lookups
+
+- Compare live nicknames and channel scope using the advertised IRC CASEMAPPING.
+- Keep ASCII distinctions when advertised or when mapping is unavailable.
+- Preserve display spelling, private replies and existing persisted-history keys.
+
 ## MB1307 — Keep Hailo typing delays independent of UTF-8 representation
 
 - Count decoded UTF-8 characters when estimating reply typing time.

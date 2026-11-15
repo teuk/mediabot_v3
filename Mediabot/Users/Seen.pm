@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Helpers ();
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 
 our @EXPORT_OK = qw(mbSeen_ctx);
 
@@ -125,11 +126,19 @@ sub mbSeen_ctx {
     {
         my %hChannelsNicks = %{ $self->gethChannelNicks() // {} };
 
+        # Fold only the live lookup, using this connection's advertised rules.
+        # Unknown/unavailable ISUPPORT keeps the conservative lc-only behavior.
+        # Persisted SQL keys and displayed nick/channel spelling stay unchanged.
+        my $mapping = eval { $self->{irc}->isupport('CASEMAPPING') };
+        $mapping = defined($mapping) && !ref($mapping) ? lc($mapping) : 'ascii';
+        my $wanted_nick = fold_irc($targetNick, $mapping);
+        my $wanted_channel = defined($chan_for_part)
+            ? fold_irc($chan_for_part, $mapping) : undef;
         for my $chan (sort keys %hChannelsNicks) {
-            next if defined($chan_for_part) && lc($chan) ne lc($chan_for_part);
+            next if defined($wanted_channel) && fold_irc($chan, $mapping) ne $wanted_channel;
 
             my @nicks = $self->gethChannelsNicksOnChan($chan);
-            my ($online_nick) = grep { lc($_) eq $targetNick } @nicks;
+            my ($online_nick) = grep { defined($_) && fold_irc($_, $mapping) eq $wanted_nick } @nicks;
 
             if (defined($online_nick) && $online_nick ne '') {
                 my $msg = "$online_nick is currently online on $chan.";
