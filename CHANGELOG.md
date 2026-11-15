@@ -1,3 +1,9 @@
+## MB1322 — Recognize UTF-8 temperature unit aliases
+
+- Normalize valid UTF-8 unit bytes before alias lookup, including °C and °F.
+- Preserve decoded text, legacy degree aliases and unknown-unit refusals.
+- Cover conversion results and public/private delivery without changing input arguments.
+
 ## MB1321 — Keep quote-game scores across nickname case changes
 
 - Combine case-variant player scores in the leaderboard and before awarding a point.

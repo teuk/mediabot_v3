@@ -21,6 +21,7 @@ package Mediabot::Convert;
 use strict;
 use warnings;
 use POSIX ();
+use Encode ();
 
 use utf8;   # mb621-B1: les litteraux de ce fichier sont des CARACTERES.
             # Sans cela ils sont des OCTETS, et interpoler une variable
@@ -122,6 +123,13 @@ my %LABEL = (
 sub _canon {
     my ($u) = @_;
     return undef unless defined $u;
+    # Accept either decoded IRC text or valid UTF-8 bytes. Keep legacy
+    # single-byte aliases intact if strict decoding is not possible.
+    if (!utf8::is_utf8($u) && $u =~ /[\x80-\xFF]/) {
+        my $decoded = eval { Encode::decode('UTF-8', $u,
+            Encode::FB_CROAK() | Encode::LEAVE_SRC()) };
+        $u = $decoded if defined $decoded;
+    }
     $u = lc $u;
     $u =~ s/\s+//g;
     return $ALIAS{$u};

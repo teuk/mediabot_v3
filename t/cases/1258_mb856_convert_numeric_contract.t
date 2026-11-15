@@ -4,6 +4,7 @@ use utf8;
 use lib '.', 't/lib';
 use Test::More;
 use POSIX ();
+use Encode qw(encode);
 use Mediabot::Convert;
 
 sub result_number {
@@ -64,4 +65,17 @@ my ($ok,$out)=Mediabot::Convert::convert(1,'m','kg');
 ok(!$ok && $out=~/different families/,'different-family refusal remains');
 ($ok,$out)=Mediabot::Convert::convert(1,'unknown','m');
 ok(!$ok && $out=~/unknown unit/,'unknown-unit refusal remains');
+for my $unit ('°C', encode('UTF-8','°C'), "\xB0C") {
+    my $original=$unit;
+    my ($ok,$text)=Mediabot::Convert::convert(0,$unit,'f');
+    ok($ok && $text eq '0 °C = 32 °F','character, UTF-8 and legacy degree aliases agree');
+    is($unit,$original,'unit normalization does not consume caller input');
+}
+for my $unit ("\xC2", "\xFFc", "\xC0\xAFc") {
+    my @warnings;
+    my ($ok,$text);
+    {local $SIG{__WARN__}=sub {push @warnings,@_};($ok,$text)=Mediabot::Convert::convert(0,$unit,'f')}
+    ok(!$ok && $text =~ /^unknown unit/,'malformed byte unit remains unknown');
+    is(scalar @warnings,0,'malformed byte unit causes no decoding warning');
+}
 done_testing;

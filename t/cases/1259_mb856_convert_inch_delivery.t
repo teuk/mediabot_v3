@@ -3,6 +3,7 @@ use warnings;
 use utf8;
 use lib '.', 't/lib';
 use Test::More;
+use Encode qw(encode);
 use MockBot;
 use Mediabot::Context;
 use Mediabot::DBCommands;
@@ -12,6 +13,10 @@ no warnings qw(redefine once);
 local *Mediabot::DBCommands::logBot=sub {push @logged, [@_]};
 use warnings;
 for my $case (
+    [['0','°C','°F'],qr/0 °C = 32 °F/],
+    [['32',encode('UTF-8','°F'),'°C'],qr/32 °F = 0 °C/],
+    [['100','°C',encode('UTF-8','°F')],qr/100 °C = 212 °F/],
+    [['-40',encode('UTF-8','°C'),encode('UTF-8','°F')],qr/-40 °C = -40 °F/],
     [['12','in','cm'],qr/12 in = 30\.48 cm/],
     [['12','in','to','cm'],qr/12 in = 30\.48 cm/],
     [['1','m','in'],qr/1 m = 39\.370079 in/],
@@ -34,7 +39,7 @@ for my $case (
         is(scalar @replies,1,'valid conversion produces exactly one reply');
         is($replies[0]{type},defined($channel)?'privmsg':'notice','success uses the existing context delivery route');
         is($replies[0]{to},$channel//'alice','success reaches only the intended channel or caller');
-        like($replies[0]{text},$expected,'inch units and optional separators retain their positional meaning');
+        like($replies[0]{text},$expected,'unit aliases, encoding and optional separators preserve the conversion');
         is(scalar @logged,1,'one successful conversion is logged once');
     }
 }
