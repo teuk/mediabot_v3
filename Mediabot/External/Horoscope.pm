@@ -120,6 +120,16 @@ our %ALIAS;
 sub normalize_sign {
     my ($text) = @_;
     return undef unless defined $text && !ref $text && length $text;
+    # Zodiac glyphs may carry a text/emoji presentation selector. Decode a
+    # local copy before matching; folding names would discard these symbols.
+    my $glyph = $text;
+    unless (utf8::is_utf8($glyph)) {
+        $glyph = eval { Encode::decode('UTF-8', $glyph,
+            Encode::FB_CROAK() | Encode::LEAVE_SRC()) };
+    }
+    if (defined($glyph) && $glyph =~ /\A([\x{2648}-\x{2653}])[\x{FE0E}\x{FE0F}]?\z/) {
+        return $ALIAS{$1};
+    }
     return $ALIAS{$text} if exists $ALIAS{$text};   # glyphe brut
     my $key = _fold($text);
     return undef unless length $key;

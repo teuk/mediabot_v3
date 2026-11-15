@@ -107,6 +107,23 @@ for my $slug (@signs) {
     like($result->[0]{text},qr/\Q$glyph\E \x02\Q$label\E\x02/,'explicit sign overrides stored birthday');
     ok(!grep({length(encode('UTF-8',$_->{text}))>400} @$result),'actual sign output respects byte limits');
 }
+# MB1316: copied zodiac emoji must override the stored birthday as glyphs do.
+for my $slug (@signs) {
+    my ($label,$glyph)=$H->can('sign_label')->($slug,'fr');
+    for my $suffix ('', chr(0xFE0E), chr(0xFE0F)) {
+        for my $input ($glyph.$suffix, encode('UTF-8',$glyph.$suffix)) {
+            my $saved=$input; @api=();
+            my $result=$run->('Pablo','#room',$input);
+            like($result->[0]{text},qr/\Q$glyph\E \x02\Q$label\E\x02/,
+                'zodiac text/emoji and byte forms select the requested sign');
+            is(($api[-1] // [])->[1],$slug,'forecast request uses the requested zodiac sign');
+            is($input,$saved,'sign normalization preserves caller input');
+        }
+    }
+}
+for my $input ('♌♈', '♌️♈️', chr(0xFE0F), 'Reader♌️') {
+    ok(!defined($H->can('normalize_sign')->($input)), 'unrelated text and multiple glyphs do not select a sign');
+}
 my $r1=$run->('Pablo','#room','lion');
 my $r2=$run->('Max_','#room','lion');
 my ($f1)=$r1->[0]{text}=~/ — (.*)$/;

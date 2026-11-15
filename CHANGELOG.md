@@ -1,3 +1,9 @@
+## MB1316 — Recognize zodiac emoji presentation in horoscope requests
+
+- Recognize all twelve zodiac glyphs with optional text or emoji presentation selectors.
+- Accept decoded text and UTF-8 bytes without changing the caller's input.
+- Preserve named aliases and reject multiple glyphs or unrelated nickname text.
+
 ## MB1315 — Normalize memory search UTF-8 before validation and SQL binding
 
 - Decode byte arguments once before joining mixed byte/character search input.
