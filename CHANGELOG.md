@@ -1,3 +1,9 @@
+## MB1311 — Preserve complete generic page-title metadata
+
+- Read matching HTML attribute quotes, whitespace around equals and quoted greater-than signs.
+- Ignore data-property/data-content lookalikes and attribute-shaped text inside other quoted values.
+- Preserve metadata order, title cleanup, fallback and existing IRC reply formatting.
+
 ## MB1310 — Recognize all supported channel prefixes in weather
 
 - Allow weather requests in &, ! and + channels using the shared IRC target classifier.

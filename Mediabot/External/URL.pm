@@ -261,15 +261,19 @@ sub _handle_generic_title {
     my $content = _decode_http_content_utf8($self, $res->{content} // '', 'generic');
     my @candidates;
 
-    # Prefer explicit social metadata when available.
-    while ($content =~ /<meta\b([^>]*?)>/sig) {
+    # Consume complete quoted values: apostrophes, opposite quotes and '>'
+    # inside an attribute are data, not attribute or tag terminators.
+    while ($content =~ /<meta\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/sig) {
         my $attrs = $1;
-
-        next unless $attrs =~ /(?:property|name)=["'](?:og:title|twitter:title)["']/i;
-
-        if ($attrs =~ /\bcontent=["']([^"']+)["']/i) {
-            push @candidates, $1;
+        my %attr;
+        while ($attrs =~ /\b([A-Za-z_:][A-Za-z0-9_:.-]*)\s*=\s*(["'])(.*?)\2/sig) {
+            my ($name, $value) = (lc($1), $3);
+            $attr{$name} = $value unless exists $attr{$name};
         }
+        next unless exists($attr{content}) && length($attr{content});
+        my $key = $attr{property} // $attr{name} // '';
+        next unless $key =~ /\A(?:og:title|twitter:title)\z/i;
+        push @candidates, $attr{content};
     }
 
     if ($content =~ /<title[^>]*>(.*?)<\/title>/si) {

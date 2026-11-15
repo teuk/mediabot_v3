@@ -190,4 +190,38 @@ return sub {
         qr/my\s+\$msg\s*=\s*String::IRC->new\(/,
         '_handle_generic_title no longer appends displayed title through a msg object'
     );
+    # MB1311: exercise the real fetch/metadata/cleanup/reply path offline.
+    {
+        package MB1311::HTTP;
+        sub get { return {success=>1,status=>200,headers=>{'content-type'=>'text/html'},content=>$_[0]{html}}; }
+        package MB1311::Log;
+        sub log { 1 }
+    }
+    my $http = bless {}, 'MB1311::HTTP';
+    my @out;
+    no warnings qw(redefine once);
+    local *Mediabot::External::_make_http = sub { $http };
+    local *Mediabot::Helpers::botPrivmsg = sub { push @out, [$_[1],$_[2]]; 1 };
+    for my $row (
+        [q{<meta property="og:title" content="L'amour du code">}, "L'amour du code"],
+        [q{<meta name='twitter:title' content='Rock "Live" tonight'>}, 'Rock "Live" tonight'],
+        [q{<META CONTENT = "Chosen title" PROPERTY = 'OG:TITLE'>}, 'Chosen title'],
+        [q{<meta property="og:title" content="Love > Hate">}, 'Love > Hate'],
+        [q{<meta data-note='ignore content="Wrong"' content="Right" name="twitter:title">}, 'Right'],
+        [q{<meta data-property="og:title" content="Wrong">}, 'Fallback'],
+        [q{<meta property="og:title" data-content="Wrong">}, 'Fallback'],
+        [q{<meta property="og:title" content="First" content="Second">}, 'First'],
+        [q{<meta property="og:title" content="Tom &amp; Jerry">}, 'Tom & Jerry'],
+        [q{<meta property="og:title" content="Just a moment...">}, 'Fallback'],
+        [q{<meta property="og:title" content="">}, 'Fallback'],
+    ) {
+        @out = ();
+        $http->{html} = $row->[0] . '<title>Fallback</title>';
+        Mediabot::External::URL::_handle_generic_title(
+            {logger=>bless({}, 'MB1311::Log')}, undef, 'Reader', '#test', 'https://example.test/page');
+        $assert->is(scalar @out, 1, 'generic metadata produces one reply');
+        $assert->is($out[0][0], '#test', 'generic metadata preserves reply destination');
+        my ($title) = ($out[0][1] // '') =~ /\x0f (.*)\z/s;
+        $assert->is($title, $row->[1], 'complete metadata value or cleaned title fallback: ' . $row->[0]);
+    }
 };
