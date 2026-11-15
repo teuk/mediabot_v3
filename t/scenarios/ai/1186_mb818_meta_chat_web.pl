@@ -113,4 +113,50 @@ is($research->{sources}[0]{kind},'page_excerpt','successful page extraction is d
 is($research->{sources}[1]{kind},'search_excerpt','failed extraction retains its honest evidence type');
 unlike(join(' ',map {$_->{text}} @{$research->{sources}}),qr/Unrequested/,'extractor cannot substitute an unrequested page');
 
+# MB1325: semantic social intent uses the existing labelled conversation.
+for my $prompt ('comment vas-tu ?', "j'ai mal dormi et c'est de ta faute",
+                "j'vais me faire un café parce que j'suis pas réveillé",
+                'my alarm clock has betrayed me again', 'tu te souviens de mon café ?') {
+    my $client=MB818ChatClient->new; my (@done,@events); my $web=0;
+    my @context=({role=>'user',content=>"Alice: je prends mon café sans sucre\nBob: moi je préfère le thé"},
+        {role=>'assistant',content=>'Alice, ton café a au moins le mérite de ne pas discuter.'},
+        {role=>'user',content=>"Alice: $prompt"});
+    my $engine=Mediabot::AI::MetaChat->new(client=>$client,conf=>$conf,settings=>$cfg,
+        on_event=>sub {push @events,shift},web_start=>sub {$web++;die 'unexpected social web request'});
+    $engine->submit(prompt=>$prompt,messages=>\@context,language=>'fr',on_done=>sub {push @done,shift});
+    for my $index (2,0,1) {
+        like($client->{calls}[$index]{request}{system},qr/INTENT ROUTING/,'contributors receive explicit social versus factual task criteria');
+        $client->{calls}[$index]{done}->({ok=>1,answer=>encode_json({answer=>'Ton café attend sa promotion de réveil officiel.',
+            task_type=>'conversation',needs_web=>JSON::PP::false,query=>''})});
+    }
+    is($web,0,'social intent does not launch public research');
+    is(scalar @{$client->{calls}},4,'social route retains three contributors and one synthesis');
+    my $request=$client->{calls}[3]{request};
+    like($request->{system},qr/CHAT INTENT:.*sarcasm/,'social synthesis gets the sarcastic conversation contract');
+    unlike($request->{system},qr/ANSWER QUALITY:|For a CVE/,'research editorial instructions do not compete with chat style');
+    is_deeply($request->{messages},\@context,'both contributors and synthesis retain speaker-labelled history');
+    $client->{calls}[3]{done}->({ok=>1,answer=>encode_json({answer=>'Alice, même ton café sans sucre mérite un collègue plus réveillé.',source_ids=>[]})});
+    is(scalar @done,1,'chat completes exactly once');
+    is($done[0]{intent_route},'chat','completed reply exposes the selected route');
+    is_deeply($done[0]{sources},[],'chat has no source line');
+    ok(!$done[0]{web_used} && !$done[0]{web_attempted},'chat never claims browsing');
+    ok(grep({$_->{kind} eq 'intent' && $_->{route} eq 'chat'} @events),'intent decision is observable');
+}
+my $social=[map {{task_type=>'conversation',needs_web=>0}} 1..3];
+for my $prompt ('salut, quelle est la météo ?', 'je prends un café, avec tes sources explique ses effets sur la santé',
+                'vérifie les faits sur le site officiel', 'latest Debian version?', 'CVE-2026-12345',
+                'quels médicaments pour dormir ?', 'https://example.org/article') {
+    is(Mediabot::AI::MetaPolicy::intent_route(prompt=>$prompt,mode=>'auto',drafts=>$social,minimum=>2),
+        'research','external facts and explicit sources cannot be vetoed by social votes');
+}
+is(Mediabot::AI::MetaPolicy::intent_route(prompt=>'je vais prendre un café',mode=>'auto',
+    drafts=>[{task_type=>'conversation',needs_web=>0},{task_type=>'factual',needs_web=>1}],minimum=>2),
+    'research','mixed or uncertain intent retains research');
+is(Mediabot::AI::MetaPolicy::intent_route(prompt=>'je vais prendre un café',mode=>'auto',drafts=>[$social->[0]],minimum=>2),
+    'research','one social contributor cannot bypass research');
+is(Mediabot::AI::MetaPolicy::intent_route(prompt=>'calcule 2+2',mode=>'auto',
+    drafts=>[{task_type=>'calculation',needs_web=>0}],minimum=>2),'task','calculation does not acquire sarcastic chat persona');
+is(Mediabot::AI::MetaPolicy::intent_route(prompt=>'comment vas-tu ?',mode=>'always',drafts=>$social,minimum=>2),
+    'research','explicit always-web operator setting remains authoritative');
+
 1;

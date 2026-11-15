@@ -173,4 +173,34 @@ is(scalar(@sent),1,'validated regenerated answer starts normal paced delivery');
 $timers[0][1]->();
 is(scalar(@{history($dir)}),1,'only fully delivered regenerated answer enters memory');
 unlike(history($dir)->[0]{answer},qr/PRIVATE_UNGROUNDED_CLAIM/,'rejected first synthesis is not retained');
+# MB1325: delivered social replies feed the same memory used by later turns.
+($bot,$client,$runtime,$dir)=fixture();
+for my $turn (["je prends mon café sans sucre",'Ton café a donc renoncé à toute douceur.'],
+              ['tu te souviens de mon café ?','Sans sucre, comme ton réveil apparemment.']) {
+    my $start=scalar @{$client->{calls}};
+    ok(ask($bot,'Alice','#test',$turn->[0]),'addressed social turn enters MetaAI');
+    if ($start) {
+        my $messages=encode_json($client->{calls}[$start]{request}{messages});
+        like($messages,qr/sans sucre/,'next social turn receives earlier user detail');
+        like($messages,qr/Ton caf/, 'next social turn receives delivered assistant context');
+    }
+    for my $i ($start..$start+2) {
+        $client->{calls}[$i]{done}->({ok=>1,answer=>encode_json({answer=>'Un café héroïque.',
+            task_type=>'conversation',needs_web=>JSON::PP::false,query=>''})});
+    }
+    like($client->{calls}[$start+3]{request}{system},qr/CHAT INTENT/,'runtime selects chat synthesis');
+    final($client,$start+3,$turn->[1]);
+    while (my $timer=shift @timers) {$timer->[1]->()}
+}
+is(scalar @{history($dir)},2,'both fully delivered social exchanges are retained');
+like(join(' ',@{$bot->{logger}{lines}}),qr/META_AI intent=chat/,'route is logged without conversational content');
+my $start=scalar @{$client->{calls}};
+ok(ask($bot,'Alice','#test','quelle est la dernière version de Debian ?'),'factual follow-up after chat is admitted');
+drafts($client,$start,1);
+like($client->{calls}[$start+3]{request}{system},qr/UNTRUSTED SOURCES/,'factual turn returns to evidence synthesis');
+unlike($client->{calls}[$start+3]{request}{system},qr/CHAT INTENT/,'chat style is not sticky across turns');
+final($client,$start+3,'Une réponse vérifiée.',[1]);
+while (my $timer=shift @timers) {$timer->[1]->()}
+is(scalar @{history($dir)},3,'researched reply still commits through normal delivery');
+like(join(' ',@{$bot->{logger}{lines}}),qr/META_AI intent=research/,'research route remains observable');
 done_testing;

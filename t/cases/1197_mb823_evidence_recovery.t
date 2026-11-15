@@ -41,9 +41,10 @@ sub complete {my ($client,$idx,$value,$provider)=@_;
     $client->{calls}[$idx]{done}->({ok=>1,status=>200,provider=>$provider//'openai',answer=>encode_json($value)});}
 my ($client,$out,$events,$searches)=fixture();
 is(scalar(@{$client->{calls}}),4,'three independent contributors then one ordinary synthesis');
-is(scalar(@$events),3,'one observer event per contributor even when one API fails');
-is_deeply([map {$_->{provider}} @$events],[qw(anthropic gemini openai)],'events preserve actual callback identity rather than guessing the failed provider');
-my ($gemini)=grep {$_->{provider} eq 'gemini'} @$events;
+my @provider_events=grep {$_->{kind} eq 'provider'} @$events;
+is(scalar(@provider_events),3,'one observer event per contributor even when one API fails');
+is_deeply([map {$_->{provider}} @provider_events],[qw(anthropic gemini openai)],'events preserve actual callback identity rather than guessing the failed provider');
+my ($gemini)=grep {$_->{provider} eq 'gemini'} @provider_events;
 is($gemini->{outcome},'api_failure','Gemini unavailable is distinct from empty draft');
 is($gemini->{status},503,'actual status retained');
 is($gemini->{failure_category},'service_unavailable','known Gemini category retained');

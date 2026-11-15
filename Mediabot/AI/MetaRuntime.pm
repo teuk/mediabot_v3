@@ -242,6 +242,11 @@ sub _log_event {
             .' error='.$error.' category='.$category.' retries='.$retries
             .' model='.$model.' model_fallback='.$fallback.' recovery_from='.$first;
     }
+    elsif (($event->{kind}//'') eq 'intent') {
+        my $route=defined($event->{route}) && !ref($event->{route})
+            && $event->{route}=~/\A(?:chat|task|research)\z/ ? $event->{route} : 'unknown';
+        $line='META_AI intent='.$route;
+    }
     elsif (($event->{kind}//'') eq 'evidence') {
         my %reasons=map {$_=>1} qw(missing invalid mismatch invalid_ids missing_citations too_many_citations
             unknown_passage source_changed passage_ids);

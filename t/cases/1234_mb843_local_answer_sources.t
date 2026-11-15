@@ -47,9 +47,15 @@ for my $prompt ($weight,"wie geht's",'et si je perds 10 puis reprends 5, combien
     is($s->{searches},0,'self-contained task does not run Tavily despite old sources and unrelated contributor queries');
     is(scalar(@{$s->{calls}}),3,'only the normal synthesis follows the contributors');
     is($s->{calls}[2]{request}{purpose},'meta_synthesis','native web fallback is not launched either');
-    like($s->{calls}[2]{request}{system},qr/do not add sources, citations, source names/,'local synthesis has an explicit source-free contract');
-    like($s->{calls}[2]{request}{system},qr/define a complete cycle/,'arithmetic distinguishes full cycles from intermediate values');
-    like($s->{calls}[2]{request}{system},qr/greeting naturally/,'a greeting is answered as conversation');
+    if ($prompt =~ /geht|plaisir/) {
+        like($s->{calls}[2]{request}{system},qr/CHAT INTENT/,'social tasks select the conversational persona');
+        like($s->{calls}[2]{request}{system},qr/source_ids":\[\]/,'chat retains the source-free response contract');
+        unlike($s->{calls}[2]{request}{system},qr/define a complete cycle/,'social replies are not given arithmetic instructions');
+    } else {
+        like($s->{calls}[2]{request}{system},qr/do not add sources, citations, source names/,'local synthesis has an explicit source-free contract');
+        like($s->{calls}[2]{request}{system},qr/define a complete cycle/,'arithmetic distinguishes full cycles from intermediate values');
+        unlike($s->{calls}[2]{request}{system},qr/CHAT INTENT/,'non-social tasks retain their own editorial contract');
+    }
     $s->{calls}[2]{done}->({ok=>1,answer=>encode_json({answer=>'Une réponse directe.',source_ids=>[1]})});
     my $out=$s->{results}[0];
     ok($out->{ok},'local answer completes');

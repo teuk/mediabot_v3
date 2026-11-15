@@ -5,7 +5,7 @@ use Mediabot::IRC::CaseMapping qw(fold_irc);
 use utf8;
 use Exporter 'import';
 use Mediabot::AI qw(normalize_provider);
-our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind research_needed is_followup is_acknowledgement parse_object);
+our @EXPORT_OK = qw(settings fold clean safe_url wants_web research_kind research_needed intent_route is_followup is_acknowledgement parse_object);
 use JSON::PP ();
 
 sub fold { return fold_irc($_[0]); }
@@ -137,6 +137,20 @@ sub research_needed {
     }
     return 1;
 }
+# One routing decision per turn. Provider agreement selects a social style,
+# never establishes factual truth or bypasses the existing research guards.
+sub intent_route {
+    my (%args)=@_;
+    return 'research' if research_needed(%args);
+    my $prompt=lc clean($args{prompt},2000);
+    return 'chat' if is_acknowledgement($prompt) || _personal_context($prompt);
+    my $drafts=ref($args{drafts}) eq 'ARRAY' ? $args{drafts} : [];
+    my $minimum=$args{minimum}//2; $minimum=2 if $minimum<2;
+    return 'chat' if @$drafts >= $minimum
+        && !grep {($_->{task_type}//'') ne 'conversation' || $_->{needs_web}} @$drafts;
+    return 'task';
+}
+
 sub settings {
     my ($conf) = @_;
     my $get = sub { my $v = eval { $conf->get('meta_ai.'.$_[0]) }; return $_[1] unless defined $v;

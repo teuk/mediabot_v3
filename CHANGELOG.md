@@ -1,3 +1,10 @@
+## MB1325 — Route MetaAI social turns to contextual sarcastic chat
+
+- Distinguish chat, local tasks and researched answers using existing contributor intent decisions.
+- Give social synthesis its own concise, playful persona and the same speaker-labelled history.
+- Preserve factual research, evidence validation, source lines, operator web modes and delivery ownership.
+- Log bounded intent labels and verify social-to-research transitions and delivered memory.
+
 ## MB1324 — Bound Unicode last-seen excerpts consistently
 
 - Apply the shared UTF-8 byte budget to decoded last-seen excerpts as well as raw text.
