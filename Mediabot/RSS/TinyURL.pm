@@ -21,6 +21,7 @@ use File::Spec;
 use File::Temp qw(tempfile);
 use HTTP::Tiny;
 use JSON::PP ();
+use Date::Parse ();
 
 our @EXPORT_OK = qw(
     shorten_url make_shortener state_file_path format_event
@@ -232,17 +233,39 @@ sub _api_error_text {
     return join('; ', @parts);
 }
 
+# Retry-After permits delta seconds or an HTTP date (RFC 9110, 10.2.3).
+# Share parsing with the private shortener; provider-specific circuit policy
+# stays in each caller. Use the injected clock for reproducible persisted state.
+sub _retry_after_seconds {
+    my ($headers, $now) = @_;
+    my $raw = ref($headers) eq 'HASH' ? $headers->{'retry-after'} : undef;
+    my $retry;
+    if (defined($raw) && !ref($raw)) {
+        if ($raw =~ /\A[0-9]+\z/) {
+            $retry = $raw;
+        } elsif (length($raw) <= 128 && $raw =~ /\A(?:
+              [A-Za-z]{3},[ ][0-9]{2}[ ][A-Za-z]{3}[ ][0-9]{4}[ ][0-9]{2}:[0-9]{2}:[0-9]{2}[ ]GMT
+            | [A-Za-z]+,[ ][0-9]{2}-[A-Za-z]{3}-[0-9]{2}[ ][0-9]{2}:[0-9]{2}:[0-9]{2}[ ]GMT
+            | [A-Za-z]{3}[ ][A-Za-z]{3}[ ][ 0-9][0-9][ ][0-9]{2}:[0-9]{2}:[0-9]{2}[ ][0-9]{4}
+        )\z/x) {
+            my $when = eval { Date::Parse::str2time($raw, 'GMT') };
+            $retry = $when - _now($now) if defined $when;
+        }
+    }
+    $retry = 900 unless defined $retry;
+    $retry = 60 if $retry < 60;
+    $retry = 24 * 3600 if $retry > 24 * 3600;
+    # A fractional clock must not schedule a retry before the whole-second date.
+    return int($retry) + ($retry > int($retry) ? 1 : 0);
+}
+
 sub _circuit_seconds {
-    my ($category, $status, $headers) = @_;
+    my ($category, $status, $headers, $now) = @_;
     if ($category eq 'link_limit') {
         return 24 * 3600;
     }
     if ($category eq 'rate_limit') {
-        my $retry = ref($headers) eq 'HASH' ? $headers->{'retry-after'} : undef;
-        $retry = 900 unless defined($retry) && !ref($retry) && $retry =~ /^\d+$/;
-        $retry = 60 if $retry < 60;
-        $retry = 24 * 3600 if $retry > 24 * 3600;
-        return int($retry);
+        return _retry_after_seconds($headers, $now);
     }
     return 6 * 3600 if $category eq 'auth';
     return 3600 if $category =~ /^(?:client|contract|destination_mismatch|invalid_alias)$/;
@@ -441,7 +464,7 @@ sub _stateful_shorten {
         }
 
         my $seconds = _circuit_seconds(
-            $outcome->{category}, $outcome->{status}, $outcome->{headers});
+            $outcome->{category}, $outcome->{status}, $outcome->{headers}, $now);
         $state->{circuit} = {
             category       => $outcome->{category},
             status         => int($outcome->{status} || 0),
@@ -493,7 +516,7 @@ sub shorten_url {
     my $outcome = _request_outcome($http, $url, $api_key);
     if (!$outcome->{ok}) {
         my $seconds = _circuit_seconds(
-            $outcome->{category}, $outcome->{status}, $outcome->{headers});
+            $outcome->{category}, $outcome->{status}, $outcome->{headers}, $opts{now});
         _emit($opts{on_event}, _failure_event($outcome, $seconds));
         return $url;
     }

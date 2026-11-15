@@ -264,13 +264,9 @@ sub _with_locked_state {
 }
 
 sub _circuit_seconds {
-    my ($category, $status, $headers) = @_;
+    my ($category, $status, $headers, $now) = @_;
     if ($category eq 'rate_limit') {
-        my $retry = ref($headers) eq 'HASH' ? $headers->{'retry-after'} : undef;
-        $retry = 900 unless defined($retry) && !ref($retry) && $retry =~ /^\d+$/;
-        $retry = 60 if $retry < 60;
-        $retry = 24 * 3600 if $retry > 24 * 3600;
-        return int($retry);
+        return Mediabot::RSS::TinyURL::_retry_after_seconds($headers, $now);
     }
     return 6 * 3600 if $category eq 'auth';
     return 3600 if $category =~ /^(?:client|contract|destination_mismatch|invalid_alias)$/;
@@ -483,7 +479,7 @@ sub _stateful_shorten {
         }
 
         my $seconds = _circuit_seconds(
-            $outcome->{category}, $outcome->{status}, $outcome->{headers});
+            $outcome->{category}, $outcome->{status}, $outcome->{headers}, $now);
         $state->{circuit} = {
             category       => $outcome->{category},
             status         => int($outcome->{status} || 0),
@@ -540,7 +536,7 @@ sub shorten_url {
         $http, $url, $api_key, $api_url, $public_base);
     if (!$outcome->{ok}) {
         my $seconds = _circuit_seconds(
-            $outcome->{category}, $outcome->{status}, $outcome->{headers});
+            $outcome->{category}, $outcome->{status}, $outcome->{headers}, $opts{now});
         _emit($opts{on_event}, _failure_event($outcome, $seconds));
         return $url;
     }

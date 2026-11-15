@@ -241,4 +241,52 @@ return sub {
         'mb736-1058: partial private configuration performs no request');
     $assert->is($events[0]{kind}, 'configuration_error',
         'mb736-1058: invalid configuration is observable without credentials');
+    # MB1309: both shorteners must honor absolute HTTP Retry-After dates.
+    for my $provider ('private', 'tinyurl') {
+        my $invoke = sub {
+            my ($http, $now, $state, $events) = @_;
+            my %opts=(http=>$http,api_key=>$key,now=>$now,
+                on_event=>sub {push @$events,$_[0]});
+            $opts{state_file}=$state if defined $state;
+            return $provider eq 'private'
+                ? Mediabot::URLShortener::shorten_url($article,%opts,api_url=>$api,public_base=>$base)
+                : Mediabot::RSS::TinyURL::shorten_url($article,%opts);
+        };
+        my $epoch=784108177; # One hour before Sun, 06 Nov 1994 08:49:37 GMT.
+        my $n=0;
+        for my $case (
+            ['Sun, 06 Nov 1994 08:49:37 GMT',3600],
+            ['Sunday, 06-Nov-94 08:49:37 GMT',3600],
+            ['Sun Nov  6 08:49:37 1994',3600],
+            ['Sat, 05 Nov 1994 08:49:37 GMT',60],
+            ['Mon, 06 Nov 1995 08:49:37 GMT',86400],
+            ['120',120], ['0',60], ['999999',86400],
+            ['not a date',900], [undef,900], [{},900],
+        ) {
+            for my $persist (0,1) {
+                my ($header,$expected)=@$case;
+                my @observed;
+                my $http=FakeShortURL1058->new({success=>0,status=>429,headers=>{'retry-after'=>$header},content=>'{}'});
+                my $state=$persist?File::Spec->catfile($tmp,"retry-$provider-".++$n.'.json'):undef;
+                my $got=$invoke->($http,$epoch,$state,\@observed);
+                $assert->is(join("|",$got,$observed[0]{circuit_seconds}),join("|",$article,$expected),
+                    "mb1309 $provider persist=$persist: Retry-After date/seconds, bounds and invalid fallback");
+            }
+        }
+        my $clock=$epoch;my @observed;
+        my $alias=$provider eq 'private' ? $base.'Abcdef23':'https://tinyurl.com/recovery';
+        my $body=$provider eq 'private' ? {protocol=>1,url=>$article,id=>'Abcdef23',short_url=>$alias}
+            : {data=>{url=>$article,tiny_url=>$alias}};
+        my $http=FakeShortURL1058->new(
+            {success=>0,status=>429,headers=>{'retry-after'=>'Sun, 06 Nov 1994 08:49:37 GMT'},content=>'{}'},
+            {success=>1,status=>200,headers=>{},content=>JSON::PP->new->utf8->encode($body)});
+        my $state=File::Spec->catfile($tmp,"retry-$provider-boundary.json");
+        $invoke->($http,sub {$clock},$state,\@observed);
+        $clock+=3599;
+        my $blocked=$invoke->($http,sub {$clock},$state,\@observed);
+        $assert->is(join("|",$blocked,scalar @{$http->{calls}}),join("|",$article,1),"mb1309 $provider: fresh call remains blocked until advertised date");
+        $clock++;
+        $assert->is($invoke->($http,sub {$clock},$state,\@observed),$alias,"mb1309 $provider: recovery at advertised date");
+    }
+
 };

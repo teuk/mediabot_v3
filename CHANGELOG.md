@@ -1,3 +1,9 @@
+## MB1309 — Honor Retry-After dates in URL shorteners
+
+- Accept HTTP dates as well as delay seconds after TinyURL and private ShortURL rate limits.
+- Preserve the 60-second floor, 24-hour ceiling and invalid-header fallback.
+- Verify persisted blocking and recovery at the advertised deadline with injected clocks.
+
 ## MB1308 — Respect server casemapping in seen online lookups
 
 - Compare live nicknames and channel scope using the advertised IRC CASEMAPPING.
