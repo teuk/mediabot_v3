@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::External::URLCodec qw(_uri_escape_bytes);
+use Mediabot::IRC::Target qw(is_channel);
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
 our @EXPORT_OK = qw(displayWeather_ctx);
@@ -35,7 +36,7 @@ sub displayWeather_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     # Require to be used in channel (your original behavior)
-    unless (defined $channel && $channel =~ /^#/) {
+    unless (is_channel($channel)) {
         Mediabot::Helpers::botNotice($self, $nick, "Syntax (in channel): weather <City|City,CC|lat,lon>");
         return;
     }

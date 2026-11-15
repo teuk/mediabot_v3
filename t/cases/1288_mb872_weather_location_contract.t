@@ -113,4 +113,34 @@ like($http->{calls}[0][1]{headers}{'Accept-Language'}, qr/\Afr-FR,/, 'language p
     $enabled = 1;
     ok($weather->(location_ctx_872($bot, [qw(New York)], '#test')), 'enabling permits the previously refused location');
 }
+# MB1310: channel classification must not bypass per-channel Weather permission.
+for my $channel ('#weather', '&weather', '!ABCDEweather', '+weather') {
+    my $bot = location_bot_872();
+    $http->{calls} = [];
+    my @gates;
+    local *Mediabot::External::getIdChannelSet = sub {
+        push @gates, [$_[1], $_[2]];
+        return $enabled ? 8 : undef;
+    };
+    $weather->(location_ctx_872($bot, ['Paris'], $channel));
+    is(scalar @{$http->{calls}}, 1, "$channel fetches when enabled");
+    is_deeply([map { $_->[0] } @{$bot->{out}}], [$channel], "$channel receives its response");
+    is_deeply($bot->{notices}, [], "$channel is not mistaken for private usage");
+    $weather->(location_ctx_872($bot, ['Paris'], $channel));
+    is_deeply([scalar @{$http->{calls}}, scalar @{$bot->{out}}], [1,2], "$channel reuses fresh weather");
+    {
+        local $enabled = 0;
+        $weather->(location_ctx_872($bot, ['Paris'], $channel));
+        $weather->(location_ctx_872($bot, ['Lyon'], $channel));
+    }
+    is_deeply([scalar @{$http->{calls}}, scalar @{$bot->{out}}], [1,2], "$channel disabled gate blocks cached and uncached replies");
+    is_deeply(\@gates, [map {[$channel,7]} 1..4], "$channel permission lookup always uses the exact destination");
+}
+for my $target (undef, '', 'Reader') {
+    my $bot = location_bot_872();
+    $http->{calls} = [];
+    $weather->(location_ctx_872($bot, ['Paris'], $target));
+    is_deeply([scalar @{$http->{calls}}, scalar @{$bot->{out}}, scalar @{$bot->{notices}}],
+        [0,0,1], 'private and nickname targets still receive only a syntax notice');
+}
 done_testing;

@@ -1,3 +1,9 @@
+## MB1310 — Recognize all supported channel prefixes in weather
+
+- Allow weather requests in &, ! and + channels using the shared IRC target classifier.
+- Keep the exact destination for Weather chanset checks and replies, including cache hits.
+- Preserve private-use rejection and disabled-channel blocking before HTTP or cache replies.
+
 ## MB1309 — Honor Retry-After dates in URL shorteners
 
 - Accept HTTP dates as well as delay seconds after TinyURL and private ShortURL rate limits.
