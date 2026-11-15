@@ -190,6 +190,23 @@ my $output = sub { join '\n', map { $_->[1] } @notices };
     like($notices[0][1] // '', qr/été/, 'legacy UTF-8 byte fields are decoded once');
     ok(!grep({ $_->[1] =~ /[\x00-\x1f\x7f]/ } @notices), 'stored formatting, CTCP and line breaks cannot style or split output');
     ok(eval { decode('UTF-8', encode('UTF-8', $notices[0][1]), FB_CROAK); 1 }, 'Unicode truncation stays valid at the wire boundary');
+    # MB1317: a non-empty sanitized zero is content, not missing data.
+    for my $row ([0,'0'], ['0','0'], [" 0 ",'0'], ["\x020\x0f",'0'],
+        ['',undef], [undef,undef], [" \x01 ",undef], [[],undef], ["\xff",undef]) {
+        my ($value,$expected) = @$row;
+        $bot = $make->();
+        for my $kind (qw(quotes factoids)) {
+            $bot->{dbh}{$kind}[0]{text} = $value;
+            $bot->{dbh}{$kind}[0]{author} = $value;
+        }
+        $run->($bot);
+        my $author = defined($expected) ? $expected : 'Unknown';
+        my $excerpt = defined($expected) ? $expected : '[text unavailable]';
+        is($notices[0][1], "!q view 42 | 2024-02-29 | by $author | $excerpt",
+            'quote keeps zero while missing or unusable fields retain their fallback');
+        is($notices[2][1], "!factoid cafe | 2026-10-24 | by $author | $excerpt",
+            'factoid keeps zero while missing or unusable fields retain their fallback');
+    }
     $bot = $make->(); $bot->{dbh}{factoids}[0]{keyword} = "cafe\n!forget other"; $run->($bot);
     like($output->(), qr/Factoids: lookup unavailable/, 'malformed stored keys never create misleading recall commands');
 }

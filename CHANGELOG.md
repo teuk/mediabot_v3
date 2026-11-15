@@ -1,3 +1,9 @@
+## MB1317 — Preserve zero-valued memory search excerpts
+
+- Treat sanitized non-empty zero text and author labels as valid display content.
+- Retain fallback messages for empty, missing, malformed or unusable fields.
+- Cover both quote and factoid search replies through the command path.
+
 ## MB1316 — Recognize zodiac emoji presentation in horoscope requests
 
 - Recognize all twelve zodiac glyphs with optional text or emoji presentation selectors.

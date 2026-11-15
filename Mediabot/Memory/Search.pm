@@ -146,10 +146,12 @@ sub lines {
             my $row = $rows->[$i];
             my $link = $kind eq 'quotes' ? "${prefix}q view $row->{id}"
                 : "${prefix}factoid $row->{keyword}";
-            my $author = _text($row->{author}, 32) || 'Unknown';
+            my $author = _text($row->{author}, 32);
+            $author = 'Unknown' unless length $author;
             my $date = defined($row->{date}) && !ref($row->{date})
                 && $row->{date} =~ /\A[0-9]{4}-[0-9]{2}-[0-9]{2}\z/ ? $row->{date} : '?';
-            my $excerpt = _text($row->{text}, 130) || '[text unavailable]';
+            my $excerpt = _text($row->{text}, 130);
+            $excerpt = '[text unavailable]' unless length $excerpt;
             push @lines, "$link | $date | by $author | $excerpt";
         }
         push @lines, "$label: more matches; refine your search." if @$rows > 3;
