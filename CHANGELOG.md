@@ -1,3 +1,9 @@
+## MB1312 — Recover URL repeat admission after clock rollback
+
+- Discard future-dated URL suppression entries instead of blocking until the old clock catches up.
+- Restart lazy cache cleanup when its last purge lies in the future.
+- Preserve the inclusive five-minute repeat window, channel scope and subsequent repeat blocking.
+
 ## MB1311 — Preserve complete generic page-title metadata
 
 - Read matching HTML attribute quotes, whitespace around equals and quoted greater-than signs.

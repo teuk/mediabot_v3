@@ -353,14 +353,20 @@ sub _url_display_cache_gate {
     my $now       = time();
     my $url_ttl   = 300;  # 5 minutes
 
-    # Purge stale entries at most once per minute.
-    if (($self->{_url_cache_last_purge} // 0) < $now - 60) {
-        my @stale = grep { ($cache->{$_} // 0) < $now - $url_ttl } keys %$cache;
+    # Purge at most once per minute, restarting after a wall-clock rollback.
+    # Future entries cannot represent a valid age in the current clock domain.
+    my $last_purge = $self->{_url_cache_last_purge} // 0;
+    if ($last_purge > $now || $last_purge < $now - 60) {
+        my @stale = grep {
+            !defined($cache->{$_}) || $cache->{$_} > $now
+                || $cache->{$_} < $now - $url_ttl
+        } keys %$cache;
         delete @{$cache}{@stale};
         $self->{_url_cache_last_purge} = $now;
     }
 
-    if (($cache->{$cache_key} // 0) >= $now - $url_ttl) {
+    my $seen = $cache->{$cache_key};
+    if (defined($seen) && $seen <= $now && $seen >= $now - $url_ttl) {
         $self->{logger}->log(4, "displayUrlTitle() skipping repeated URL: $url");
         return 0;
     }

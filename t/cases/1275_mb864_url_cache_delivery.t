@@ -1,6 +1,8 @@
 use strict;
 use warnings;
 use utf8;
+our $NOW;
+BEGIN { $NOW = CORE::time(); *CORE::GLOBAL::time = sub () { $NOW } }
 use Test::More;
 use Encode qw(encode);
 use JSON::PP ();
@@ -123,5 +125,32 @@ my $dispatch=\&Mediabot::External::URL::displayUrlTitle;
     like($lines,qr/Émission AbC123/,'first post survives actual worker transport');
     like($lines,qr/Émission abc123/,'second post survives actual worker transport');
     is_deeply([map {$_->[0]} @{$bot->{out}}],['#test','#test'],'pending coalescing does not redirect original deliveries');
+}
+# MB1312: a wall-clock rollback must not extend URL suppression beyond its TTL.
+{
+    local $NOW = 1_800_000_000;
+    my $url = 'https://example.test/Report';
+    my $key = $url . "\x00#test";
+    for my $row ([0,0], [300,0], [301,1], [-1,1], [-3600,1]) {
+        my ($age,$fetch) = @$row;
+        my $bot = delivery_bot(); $http->{calls} = [];
+        $bot->{_url_display_cache} = {$key => $NOW - $age};
+        $bot->{_url_cache_last_purge} = $NOW;
+        $dispatch->($bot,undef,'Reader','#test',$url);
+        is(scalar @{$http->{calls}}, $fetch, "URL age $age: correct HTTP admission");
+        is(scalar @{$bot->{out}}, $fetch, "URL age $age: correct reply admission");
+        $dispatch->($bot,undef,'Reader','#test',$url);
+        is(scalar @{$http->{calls}}, $fetch, "URL age $age: next repeat remains blocked");
+    }
+    my $bot = delivery_bot(); $http->{calls} = [];
+    $bot->{_url_display_cache} = {
+        future => $NOW + 3600, expired => $NOW - 301,
+        boundary => $NOW - 300, fresh => $NOW - 20,
+    };
+    $bot->{_url_cache_last_purge} = $NOW + 3600;
+    $dispatch->($bot,undef,'Reader','#test',$url);
+    is_deeply([sort keys %{$bot->{_url_display_cache}}], [sort ($key,'boundary','fresh')],
+        'rollback restarts lazy purge and removes future and expired entries only');
+    is($bot->{_url_cache_last_purge}, $NOW, 'purge clock is rebased after rollback');
 }
 done_testing;
