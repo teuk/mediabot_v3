@@ -9,6 +9,7 @@ use warnings;
 use utf8;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use Encode qw(encode);
 use Mediabot::UserCommands;
 
 sub _slurp_845 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; local $/; <$fh> }
@@ -31,6 +32,7 @@ return sub {
     $assert->like($fn, qr/\$attempts = 6 if \$attempts > 6/, 'mb664-845: retry budget is bounded');
 
     my @scopes;
+    my $quote="this old channel line is long enough to become a memory";
     {
         no warnings 'redefine';
         local *Mediabot::Helpers::channel_log_gather = sub {
@@ -58,12 +60,12 @@ return sub {
             }
             elsif ($sql =~ /CHAR_LENGTH\(publictext\) BETWEEN 25 AND 300/) {
                 $cb->({ ts=>'2021-02-01 18:00:00', nick=>'fool', event_type=>'public',
-                    publictext=>'this old channel line is long enough to become a memory' },
+                    publictext=>$quote },
                     'archive.CHANNEL_LOG_ARCHIVE');
             }
             return { live_ok=>1, tainted=>0 };
         };
-        local *Mediabot::Helpers::truncate_utf8 = sub { $_[0] };
+
         use warnings 'redefine';
 
         my $bot = bless { dbh=>bless({},'DBH845'), logger=>bless({},'Log845') }, 'Mediabot';
@@ -77,6 +79,17 @@ return sub {
         $assert->like($joined,
             qr/<fool> this old channel line is long enough to become a memory/,
             'mb664-845: representative quote is rendered');
+        for my $case (['é' x 120,'é' x 100 . '...'],['🌟' x 80,'🌟' x 50 . '...'],
+                      ['é' x 100,'é' x 100],['x' x 201,'x' x 200 . '...']) {
+            for my $bytes (0,1) {
+                $quote=$bytes ? encode('UTF-8',$case->[0]) : $case->[0];
+                my @out=Mediabot::UserCommands::_memory_lines($bot,13,'#miaw',attempts=>1,rand_cb=>sub {0});
+                my ($line)=grep {/<fool>/} @out;
+                my ($excerpt)=$line =~ /<fool> (.*)\z/;
+                $assert->is($excerpt,$bytes ? encode('UTF-8',$case->[1]) : $case->[1],
+                    'memory quote respects the byte budget for characters and raw UTF-8');
+            }
+        }
     }
     $assert->ok(
         @scopes && !grep({ $_ ne 'content' } @scopes),

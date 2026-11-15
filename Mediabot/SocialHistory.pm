@@ -799,7 +799,7 @@ sub _memory_lines {
         my $pick = $quotes[_memory_rand_bounded($rand_cb, scalar @quotes)];
         my $text = $pick->{publictext} // '';
         $text =~ s/[\r\n\0]+/ /g;
-        $text = Mediabot::Helpers::truncate_utf8($text, 200, '...') if length($text) > 200;
+        $text = Mediabot::Helpers::truncate_utf8($text, 200, '...');
         my $speaker = $pick->{nick} // '?';
         my $quote = ($pick->{event_type} // '') eq 'action'
             ? "* $speaker $text"
@@ -2759,7 +2759,7 @@ sub _onthisday_lines {
             my $pick = $cand[int(rand(scalar @cand))];
             my $text = $pick->{publictext} // '';
             $text =~ s/[\r\n\0]+/ /g;
-            $text = Mediabot::Helpers::truncate_utf8($text, 200, '...') if length($text) > 200;
+            $text = Mediabot::Helpers::truncate_utf8($text, 200, '...');
             push @lines, "From $ry — <$pick->{nick}> $text";
         }
     }

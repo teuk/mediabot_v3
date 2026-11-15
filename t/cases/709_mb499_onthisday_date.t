@@ -14,6 +14,8 @@
 
 use strict;
 use warnings;
+use utf8;
+use Encode qw(encode);
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
 
@@ -26,6 +28,7 @@ sub _slurp_709 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     package L709; sub new { bless {}, shift } sub log { }
     package Chan709; sub new { bless { id => $_[1] }, $_[0] } sub get_id { $_[0]->{id} }
     package STH709;
+    our $quote="un message suffisamment long pour depasser vingt-cinq caracteres";
     sub new { my ($c,%a)=@_; bless { %a, i=>0, rows=>[] }, $c }
     sub execute {
         my ($s,@b)=@_; $s->{i}=0;
@@ -33,7 +36,7 @@ sub _slurp_709 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
         my $q = $s->{sql};
         if    ($q =~ /GROUP BY YEAR/) { $s->{rows} = [ {y=>2025,msgs=>10,people=>3}, {y=>2023,msgs=>4,people=>2} ] }
         elsif ($q =~ /GROUP BY nick/) { $s->{rows} = [ {nick=>'alice',c=>5} ] }
-        elsif ($q =~ /CHAR_LENGTH/)   { $s->{rows} = [ {nick=>'alice',publictext=>'un message suffisamment long pour depasser vingt-cinq caracteres'} ] }
+        elsif ($q =~ /CHAR_LENGTH/)   { $s->{rows} = [ {nick=>'alice',publictext=>$quote} ] }
         else                          { $s->{rows} = [] }
         return 1;
     }
@@ -129,5 +132,18 @@ return sub {
         $assert->like($fn, qr/YEAR\(ts\) < YEAR\(CURDATE\(\)\)/, '[4] borne: années passées incluses');
         $assert->like($fn, qr/\? < MONTH\(CURDATE\(\)\)/, '[4] borne: gère la date passée/future dans l\'année');
         $assert->like($fn, qr/event_type IN \('public','action'\)/, 'convention event_type (garde projet)');
+    }
+    for my $case (['é' x 120,'é' x 100 . '...'],['🌟' x 80,'🌟' x 50 . '...'],
+                  ['é' x 100,'é' x 100],['x' x 201,'x' x 200 . '...']) {
+        for my $bytes (0,1) {
+            local $STH709::quote=$bytes ? encode('UTF-8',$case->[0]) : $case->[0];
+            my @cap;
+            my $bot=bless {dbh=>DBH709->new(\@cap),logger=>L709->new},'Mediabot';
+            my @out=Mediabot::UserCommands::_onthisday_lines($bot,42,'#teuk',month=>12,day=>25);
+            my ($line)=grep {/From 2025/} @out;
+            my ($excerpt)=$line =~ /<alice> (.*)\z/;
+            $assert->is($excerpt,$bytes ? encode('UTF-8',$case->[1]) : $case->[1],
+                'onthisday quote respects the byte budget for characters and raw UTF-8');
+        }
     }
 };

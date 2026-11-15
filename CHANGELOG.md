@@ -1,3 +1,9 @@
+## MB1327 — Bound Unicode memory and anniversary quotations
+
+- Apply the shared UTF-8 byte budget to memory and on-this-day quote excerpts unconditionally.
+- Preserve short text, complete characters, raw UTF-8 and the existing truncation suffix.
+- Exercise both real renderers with accents, emoji and exact byte boundaries.
+
 ## MB1326 — Recognize addressed bot nicknames regardless of letter case
 
 - Fold the leading nickname token through the active IRC connection before routing.
