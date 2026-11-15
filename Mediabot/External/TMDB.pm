@@ -39,7 +39,8 @@ sub _repair_utf8_mojibake {
     #   piÃ¨ge        -> piège
     #   Lâ€™Ã©tÃ©      -> L’été
     my $fixed_cp1252 = eval {
-        decode('UTF-8', encode('Windows-1252', $text));
+        decode('UTF-8', encode('Windows-1252', $text, Encode::FB_CROAK | Encode::LEAVE_SRC),
+            Encode::FB_CROAK | Encode::LEAVE_SRC);
     };
 
     if (!$@ && defined($fixed_cp1252) && $score->($fixed_cp1252) < $score->($text)) {
@@ -48,7 +49,8 @@ sub _repair_utf8_mojibake {
 
     # Fallback: mojibake came from UTF-8 bytes decoded as Latin-1.
     my $fixed_latin1 = eval {
-        decode('UTF-8', pack('C*', map { ord($_) & 0xFF } split //, $text));
+        decode('UTF-8', encode('ISO-8859-1', $text, Encode::FB_CROAK | Encode::LEAVE_SRC),
+            Encode::FB_CROAK | Encode::LEAVE_SRC);
     };
 
     if (!$@ && defined($fixed_latin1) && $score->($fixed_latin1) < $score->($text)) {

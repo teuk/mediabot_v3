@@ -1,3 +1,9 @@
+## MB1329 — Keep TMDB mojibake repair lossless
+
+- Reject lossy legacy encoding and invalid UTF-8 during whole-query repair.
+- Preserve mixed Unicode text instead of replacing emoji, truncating code points or inserting replacement characters.
+- Retain successful CP1252/Latin-1 repairs and unchanged caller input.
+
 ## MB1328 — Remove hexadecimal IRC colours from seen excerpts
 
 - Strip complete hexadecimal foreground/background colour sequences before control cleanup.

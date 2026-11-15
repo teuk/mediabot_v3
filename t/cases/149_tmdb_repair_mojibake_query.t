@@ -133,4 +133,15 @@ return sub {
         qr/get_tmdb_info\(\$api_key, \$lang, \$query, \$self->\{logger\}\)/,
         'mbTMDBSearch_ctx sends the repaired query and logger to get_tmdb_info'
     );
+    for my $query ('AmÃ©lie 🌟', 'AmÃ©lie 東京', 'AmÃ©lie et été', "AmÃ©lie \x{1F4A9}",
+                   "AmÃ©lie \x{FFFD}") {
+        my $original=$query;
+        my @warnings;
+        my $result;
+        { local $SIG{__WARN__}=sub {push @warnings,@_};
+          $result=Mediabot::External::TMDB::_repair_utf8_mojibake($query); }
+        $assert->is($result,$original,'mixed Unicode query is preserved when whole-string repair would lose information');
+        $assert->is($query,$original,'repair does not consume caller input');
+        $assert->is(scalar @warnings,0,'unrepairable Unicode produces no uncontrolled warning');
+    }
 };
