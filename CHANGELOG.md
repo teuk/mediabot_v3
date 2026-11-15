@@ -1,3 +1,9 @@
+## MB1319 — Resolve duel targets using the server's IRC casemapping
+
+- Match live target, self and bot nicknames using advertised CASEMAPPING.
+- Use the resolved member spelling for existing lowercase karma and cooldown keys.
+- Preserve ASCII distinctions when mapping is absent and strict-rfc1459 caret distinctions.
+
 ## MB1318 — Preserve word boundaries in dictionary definitions
 
 - Replace HTML line breaks and block boundaries with spaces before removing tags.

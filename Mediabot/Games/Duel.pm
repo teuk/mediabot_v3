@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Helpers ();
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 
 our @EXPORT_OK = qw(
     mbDuel_ctx
@@ -85,7 +86,10 @@ sub mbDuel_ctx {
     }
     $target = lc($target);
 
-    if (lc($nick) eq $target) {
+    my $mapping = eval { $self->{irc}->isupport('CASEMAPPING') };
+    $mapping = 'ascii' unless defined($mapping) && !ref($mapping);
+    my $target_folded = fold_irc($target, $mapping);
+    if (fold_irc($nick, $mapping) eq $target_folded) {
         botPrivmsg($self, $channel, "$nick: you can't duel yourself \x{1F614}");
         return 1;
     }
@@ -93,15 +97,20 @@ sub mbDuel_ctx {
     # Vérifier que le target est sur le canal
     my @nicks_on = eval { $self->gethChannelsNicksOnChan($channel) };
     my $bot_nick = eval { $self->{irc}->nick_folded } // '';
-    unless (grep { lc($_) eq $target } @nicks_on) {
+    my ($member) = grep { defined($_) && fold_irc($_, $mapping) eq $target_folded } @nicks_on;
+    unless (defined $member) {
         botPrivmsg($self, $channel, "$nick: $target is not on $channel");
         return 1;
     }
-    if (lc($target) eq lc($bot_nick)) {
+    if ($target_folded eq fold_irc($bot_nick, $mapping)) {
         botPrivmsg($self, $channel,
             "\x{1F916} I don't duel mortals (I would always roll natural 20)");
         return 1;
     }
+
+    # Keep existing lowercase karma/history keys, using the actual live nick
+    # rather than creating separate state for an equivalent caller spelling.
+    $target = lc($member);
 
     # Cooldown 24h par paire — ordre indépendant
     my $pair_key = join("\x00", sort (lc($nick), $target));

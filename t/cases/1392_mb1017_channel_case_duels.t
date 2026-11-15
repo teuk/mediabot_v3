@@ -79,6 +79,45 @@ sub memory_1392 {
     return dclone({map {$_ => $_[0]{$_} // {}}
         qw(_duel_stats _duel_cooldown _duel_streak _duel_last_result)});
 }
+# MB1319: resolve the live nickname before selecting persistent karma keys.
+{
+    local *MB1017::IRC::isupport = sub { $_[0]{mapping} };
+    for my $row (
+        ['rfc1459','Te[u]K','Te{u}K',1],
+        ['strict-rfc1459','Te[u]K','Te{u}K',1],
+        ['ascii','Te[u]K','Te{u}K',0],
+        [undef,'Te[u]K','Te{u}K',0],
+        ['rfc1459','Hat^','Hat~',1],
+        ['strict-rfc1459','Hat^','Hat~',0],
+    ) {
+        my ($mapping,$member,$target,$allowed)=@$row;
+        my $bot=bot_1392(); $bot->{irc}{mapping}=$mapping;
+        $bot->{hChannelsNicks}{'#Test'}=['Alice',$member,'mediabot'];
+        @main::dice=(18,1);
+        my $out=call_1392($bot,'#Test','Alice',$target);
+        is_deeply(rows_1392($bot),$allowed ? [[1,'alice',1],[1,lc($member),-1]] : [],
+            'server casemapping resolves only equivalent live nicks to their stored spelling');
+        if ($allowed) {
+            like(call_1392($bot,'#Test','Alice',$member),qr/cooldown active/,
+                'alias and actual nickname share the same pair cooldown');
+        } else {
+            like($out,qr/is not on/,'distinct nickname stays absent');
+        }
+    }
+    my $bot=bot_1392(); $bot->{irc}{mapping}='rfc1459';
+    $bot->{hChannelsNicks}{'#Test'}=['Te[u]K','Te{u}K'];
+    like(call_1392($bot,'#Test','Te[u]K','Te{u}K'),qr/can't duel yourself/,
+        'IRC-equivalent self nickname is refused before rolls or writes');
+    is_deeply(rows_1392($bot),[],'self alias does not change karma');
+    {
+        local *MB1017::IRC::nick_folded=sub {'bot{one}'};
+        $bot=bot_1392(); $bot->{irc}{mapping}='rfc1459';
+        $bot->{hChannelsNicks}{'#Test'}=['Alice','Bot[One]'];
+        like(call_1392($bot,'#Test','Alice','Bot[One]'),qr/I don't duel mortals/,
+            'bot protection uses the advertised mapping too');
+        is_deeply(rows_1392($bot),[],'bot alias does not change karma');
+    }
+}
 my $start = $main::now;
 {
     my $bot = bot_1392();
