@@ -1,3 +1,9 @@
+## MB1314 — Present YouTube search as one continuous result list
+
+- Join the top yt results with pipe separators instead of numbered per-result replies.
+- Keep the current YouTube badge once, existing metadata, links and Context routing.
+- Leave byte-safe IRC wrapping to the existing sender.
+
 ## MB1313 — Resolve greet lookups on every supported channel prefix
 
 - Recognize &, ! and + channel arguments and current channels using the shared classifier.

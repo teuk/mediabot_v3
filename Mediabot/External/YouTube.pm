@@ -1126,13 +1126,10 @@ sub youtubeSearch_ctx {
         return 1;
     }
 
-    for my $i (0 .. $#formatted) {
-        my $rank = $i + 1;
-        my $msg  = _yt_label();
-        $msg    .= _yt_sep(' ' . $rank . '/' . scalar(@formatted) . ' ');
-        $msg    .= $formatted[$i];
-        $ctx->reply("($nick) $msg");
-    }
+    # One continuous result list; the IRC sender handles byte-safe wrapping.
+    # Keep the existing badge once, and leave each formatted video intact.
+    my $msg = _yt_label() . join(_yt_sep(' | '), @formatted);
+    $ctx->reply("($nick) $msg");
 
     Mediabot::Helpers::logBot(
         $self,

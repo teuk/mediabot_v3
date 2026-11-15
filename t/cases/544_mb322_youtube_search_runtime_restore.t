@@ -105,4 +105,46 @@ return sub {
         qr/Mediabot::Helpers::logBot\(\s*\$self,\s*\$log_message,\s*\$log_channel,\s*'yt'/s,
         'successful searches keep historical command logging'
     );
+    # MB1314: compact search presentation, using real Context reply routing.
+    require Mediabot::External::YouTube;
+    require Mediabot::Context;
+    require Mediabot::IRC::TextBudget;
+    {
+        package MB1314::Conf;
+        sub get { 'OFFLINE_KEY' }
+        package MB1314::Bot;
+        sub botPrivmsg { push @{$_[0]{wire}}, ['public',$_[1],$_[2]] }
+        sub botNotice { push @{$_[0]{wire}}, ['notice',$_[1],$_[2]] }
+    }
+    my @entries = map {{id=>$_,title=>('Melody ' . chr(0xE9) . chr(0x1F3B5) . ' Nelson ' x 12),channel_title=>'Studio',
+        duration=>'PT2M5S',views=>1234}} qw(abcdefgh123 abcdefgh124 abcdefgh125);
+    no warnings qw(redefine once);
+    my $result;
+    local *Mediabot::External::YouTube::_youtube_search_fetch_sync = sub { $result };
+    my @audit;
+    local *Mediabot::Helpers::logBot = sub { push @audit, [@_[2..$#_]] };
+    for my $count (1..3) {
+        for my $channel ('#test',undef) {
+            @audit=();
+            $result = {ok=>1,entries=>[@entries[0..$count-1]]};
+            my $bot = bless {conf=>bless({},'MB1314::Conf'),wire=>[]},'MB1314::Bot';
+            my $ctx = Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>$channel,args=>['Melody','Nelson']);
+            Mediabot::External::YouTube::youtubeSearch_ctx($ctx);
+            $assert->is(scalar @{$bot->{wire}},1,'search produces one logical result list');
+            my $wire = $bot->{wire}[0];
+            $assert->is(join('|',@$wire[0,1]),defined($channel)?'public|#test':'notice|Reader','Context preserves public/private routing');
+            my $text = join('', map {$_->[2]} @{$bot->{wire}});
+            my $badge = "\x0301,00[You\x0300,04Tube\x0301,00]\x0f";
+            $assert->is(scalar(() = $text =~ /\Q$badge\E/g),1,'current badge appears exactly once');
+            $assert->unlike($text,qr/\b[123]\/[123]\b/,'result ranks are absent');
+            $assert->is(scalar(() = $text =~ /\|/g),$count-1,'results have pipe separators');
+            my @urls = $text =~ m{https://www\.youtube\.com/watch\?v=([A-Za-z0-9_-]{11})}g;
+            $assert->is(join(',',@urls),join(',',map {$_->{id}} @entries[0..$count-1]),'all video links retain their order');
+            my @chunks = Mediabot::IRC::TextBudget::_split_text_for_irc($text,400);
+            $assert->ok(!(grep {Mediabot::IRC::TextBudget::_irc_wire_bytes($_)>400} @chunks),'existing sender wrapping respects the byte budget');
+            my @sent_urls = map { m{https://www\.youtube\.com/watch\?v=([A-Za-z0-9_-]{11})}g } @chunks;
+            $assert->is(join(',',@sent_urls),join(',',@urls),'wrapping long Unicode titles preserves every clickable URL');
+            $assert->is(scalar @audit,1,'search is audited once');
+        }
+    }
 };
