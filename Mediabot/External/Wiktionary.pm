@@ -22,6 +22,9 @@ sub _define_word_text {
 sub _define_plain {
     my ($text) = @_;
     return '' unless defined($text) && !ref($text);
+    # Line breaks and block boundaries separate words; inline emphasis may
+    # legitimately occur inside a word and must remain a simple tag removal.
+    $text =~ s{</?(?:br|hr|p|div|li|dt|dd|ul|ol|dl|blockquote|h[1-6])\b[^>]*>}{ }gi;
     $text =~ s/<[^>]+>//g;
     require HTML::Entities;
     $text = HTML::Entities::decode_entities($text);

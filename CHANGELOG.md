@@ -1,3 +1,9 @@
+## MB1318 — Preserve word boundaries in dictionary definitions
+
+- Replace HTML line breaks and block boundaries with spaces before removing tags.
+- Keep inline emphasis within words intact and decode literal escaped markup only afterward.
+- Verify readable definitions through the native asynchronous command path.
+
 ## MB1317 — Preserve zero-valued memory search excerpts
 
 - Treat sanitized non-empty zero text and author labels as valid display content.

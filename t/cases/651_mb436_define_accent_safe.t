@@ -83,6 +83,30 @@ my $expected = 'restaurant: A café or restaurant.';
 is_deeply([$fallback, _irc_wire_bytes($fallback)], [$expected, length(encode('UTF-8', $expected))],
     'fallback uses visible text from the next edition and encodes entities for IRC');
 
+# MB1318: structural HTML boundaries survive plain-text conversion.
+for my $row (
+    ['première<br>suite', 'première suite'],
+    ['première<BR/>suite', 'première suite'],
+    ['première<br class="break" />suite', 'première suite'],
+    ['<p>première</p><p>suite</p>', 'première suite'],
+    ['<ul><li>première</li><li>suite</li></ul>', 'première suite'],
+    ['<div>première</div><div>suite</div>', 'première suite'],
+    ['première<hr>suite', 'première suite'],
+    ['<dl><dt>mot</dt><dd>sens</dd></dl>', 'mot sens'],
+    ['pré<b>fixe</b> <i>et</i> <a href="/wiki/mot">mot</a>', 'préfixe et mot'],
+    ['&lt;br&gt; écrit', '<br> écrit'],
+) {
+    $body = encode_json({fr => [{definitions => [{definition => $row->[0]}]}]});
+    is(Mediabot::External::Wiktionary::_define_lookup_sync($bot, 'restaurant', 'fr'),
+        "restaurant [fr]: $row->[1]", 'HTML boundaries and inline formatting produce readable definition text');
+}
+$body = encode_json({fr => [{definitions => [{definition => '<p>première</p><p>suite</p>'}]}]});
+$messages = $invoke->('#salon', 'restaurant');
+$deadline = time + 3;
+$loop->loop_once(0.02) while !@$messages && time < $deadline;
+is_deeply($messages, [['channel','#salon','restaurant [fr]: première suite']],
+    'paragraph boundaries survive the actual worker and IRC command path');
+
 for my $word ("caf\xc3", "foo!bar", "é" x 33, "one\ttwo") {
     $messages = $invoke->('#salon', $word);
     is_deeply($messages, [['notice', 'Alice', 'Invalid word.']],
