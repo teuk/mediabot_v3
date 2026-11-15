@@ -1,3 +1,9 @@
+## MB1313 — Resolve greet lookups on every supported channel prefix
+
+- Recognize &, ! and + channel arguments and current channels using the shared classifier.
+- Query the requested channel's greet instead of treating its name as a nickname.
+- Preserve public reply destinations, private notices, default nick and audit behavior.
+
 ## MB1312 — Recover URL repeat admission after clock rollback
 
 - Discard future-dated URL suppression entries instead of blocking until the old clock catches up.

@@ -230,4 +230,45 @@ return sub {
         $func =~ /\$sth->finish;\s*return \$id_user_level;/s,
         'getIdUserLevel finishes statement before final return'
     );
+    # MB1313: exercise greet scope against real offline database rows.
+    require DBI;
+    require Mediabot::Users::Profiles;
+    require Mediabot::Context;
+    my $dbh = DBI->connect('dbi:SQLite:dbname=:memory:', '', '', {RaiseError=>1,PrintError=>0});
+    $dbh->do('CREATE TABLE CHANNEL (id_channel INTEGER, name TEXT)');
+    $dbh->do('CREATE TABLE USER (id_user INTEGER, nickname TEXT)');
+    $dbh->do('CREATE TABLE USER_CHANNEL (id_channel INTEGER, id_user INTEGER, greet TEXT)');
+    $dbh->do("INSERT INTO USER VALUES (1,'alice')");
+    my $id = 0;
+    my (@wire,@audit);
+    no warnings qw(redefine once);
+    local *Mediabot::UserCommands::botNotice = sub {push @wire, ['notice',$_[1],$_[2]]};
+    local *Mediabot::UserCommands::botPrivmsg = sub {push @wire, ['public',$_[1],$_[2]]};
+    local *Mediabot::UserCommands::logBot = sub {push @audit, [@_[2..$#_]]};
+    for my $channel ('#greet','&greet','!ABCDEgreet','+greet') {
+        ++$id;
+        $dbh->do('INSERT INTO CHANNEL VALUES (?,?)',undef,$id,$channel);
+        $dbh->do('INSERT INTO USER_CHANNEL VALUES (?,1,?)',undef,$id,"Hello from $channel");
+        for my $row (
+            [$channel, [], 'public', $channel],
+            ['#caller', [$channel,'alice!ident@host'], 'public', '#caller'],
+            [undef, [$channel,'alice'], 'notice', 'alice'],
+        ) {
+            @wire=(); @audit=();
+            my ($current,$args,$kind,$destination) = @$row;
+            my $ctx = Mediabot::Context->new(bot=>{dbh=>$dbh},nick=>'alice',channel=>$current,args=>$args);
+            Mediabot::Users::Profiles::userGreet_ctx($ctx);
+            $assert->is(join('|',@{$wire[0] // []}),
+                "$kind|$destination|greet on $channel (alice) Hello from $channel",
+                "greet reads exact $channel scope and retains response destination");
+            $assert->is(scalar @audit, 1, 'successful greet lookup retains its audit');
+        }
+    }
+    @wire=(); @audit=();
+    Mediabot::Users::Profiles::userGreet_ctx(Mediabot::Context->new(
+        bot=>{dbh=>$dbh},nick=>'alice',channel=>undef,args=>['alice']));
+    $assert->is(join('|',@{$wire[0]}), 'notice|alice|Syntax (in private): greet #channel <nick>',
+        'private lookup without a channel still returns syntax');
+    $assert->is(scalar @audit, 0, 'invalid private lookup does not audit a database read');
+    $dbh->disconnect;
 };

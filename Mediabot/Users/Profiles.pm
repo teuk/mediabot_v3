@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
+use Mediabot::IRC::Target qw(is_channel);
 
 our @EXPORT_OK = qw(
     userStats_ctx
@@ -232,14 +233,14 @@ sub userGreet_ctx {
     my $dest_chan  = $ctx->channel;  # where to speak if public
 
     # Resolve target channel:
-    # - if first arg is #channel, use it
+    # - if first arg is a supported IRC channel target, use it
     # - else use ctx->channel (only if it's a channel)
     my $target_chan = '';
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && is_channel($args[0])) {
         $target_chan = shift @args;
     } else {
         my $cc = $ctx->channel // '';
-        $target_chan = ($cc =~ /^#/) ? $cc : '';
+        $target_chan = is_channel($cc) ? $cc : '';
     }
 
     if ($is_private && $target_chan eq '') {
@@ -247,7 +248,7 @@ sub userGreet_ctx {
         return;
     }
 
-    unless ($target_chan =~ /^#/) {
+    unless (is_channel($target_chan)) {
         botNotice($self, $nick, "Syntax: greet [#channel] <nick>");
         return;
     }
