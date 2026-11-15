@@ -1,3 +1,9 @@
+## MB1323 — Run quote games on every supported IRC channel prefix
+
+- Use the shared channel classifier for quote-game commands and answers.
+- Preserve Games admission policy, private-context rejection and channel reply targets.
+- Exercise round creation, duplicate prevention, scoring, top, stop and expiry on #, &, ! and + channels.
+
 ## MB1322 — Recognize UTF-8 temperature unit aliases
 
 - Normalize valid UTF-8 unit bytes before alias lookup, including °C and °F.

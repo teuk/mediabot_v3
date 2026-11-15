@@ -76,4 +76,26 @@ return sub {
     $assert->is(scalar keys %{$bot->{_quotegame}{'#test'}{scores}},2,'one score entry per case-insensitive nickname');
     $assert->is($bot->{_quotegame}{'#other'}{scores}{Alice},9,'other channel scores remain untouched');
     $assert->like($wire[-1][1],qr/Correct, .*alice.*score: 8/,'winner announcement uses current spelling and cumulative score');
+    {
+        local *Mediabot::UserCommands::botNotice = sub {push @wire, [$_[1],$_[2]]};
+        local *Mediabot::Helpers::chanset_enabled = sub {0};
+        for my $channel ('#test','&test','!test','+test') {
+            my $blocked={}; @wire=();
+            my $ctx=Mediabot::Context->new(bot=>$blocked,nick=>'Reader',channel=>$channel,args=>[]);
+            Mediabot::UserCommands::mbQuotegame_ctx($ctx);
+            $assert->like($wire[-1][1],qr/Games are disabled/,"$channel retains Games admission policy");
+            $assert->is($wire[-1][0],'Reader','disabled game reports privately');
+            $assert->ok(!exists $blocked->{_quotegame},'disabled game creates no round');
+        }
+        for my $channel (undef,'Reader') {
+            my $blocked={_quotegame=>{reader=>{active=>1,author_lc=>'writer',deadline=>time()+60,scores=>{}}}};
+            @wire=();
+            my $ctx=Mediabot::Context->new(bot=>$blocked,nick=>'Reader',channel=>$channel,args=>['top']);
+            Mediabot::UserCommands::mbQuotegame_ctx($ctx);
+            $assert->like($wire[-1][1],qr/must be in a channel/,'private commands remain rejected');
+            Mediabot::UserCommands::checkQuotegameAnswer($blocked,'Alice',$channel,'Writer');
+            $assert->is($blocked->{_quotegame}{reader}{active},1,'private answer cannot finish a round');
+            $assert->is(scalar keys %{$blocked->{_quotegame}{reader}{scores}},0,'private answer cannot earn points');
+        }
+    }
 };

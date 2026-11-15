@@ -7,6 +7,7 @@ use Exporter 'import';
 use Scalar::Util qw(refaddr weaken);
 use Mediabot::Helpers ();
 use Mediabot::IRC::Timer qw(countdown);
+use Mediabot::IRC::Target qw(is_channel);
 
 our @EXPORT_OK = qw(
     _quotegame_cancel_timer
@@ -128,7 +129,7 @@ sub mbQuotegame_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    unless ($channel && $channel =~ /^#/) {
+    unless (is_channel($channel)) {
         botNotice($self, $nick, 'Syntax: !quotegame  (must be in a channel)'); return;
     }
 
@@ -248,7 +249,7 @@ sub mbQuotegame_ctx {
 # ---------------------------------------------------------------------------
 sub checkQuotegameAnswer {
     my ($self, $sNick, $sChannel, $sMsg) = @_;
-    return unless defined $sChannel && $sChannel =~ /^#/;
+    return unless is_channel($sChannel);
     my $qg = $self->{_quotegame}{lc $sChannel} or return;
     return unless $qg->{active};
 

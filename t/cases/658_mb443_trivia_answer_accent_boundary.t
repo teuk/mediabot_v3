@@ -188,10 +188,10 @@ for my $raise (0, 1) {
   $db->disconnect;
  }
 }
-{
+for my $prefix ('#','&','!','+') {
  my ($b,$s)=fixture('characters');
  my $db=$b->{dbh};
- $db->do(q{UPDATE CHANNEL SET name = '#Test'});
+ $db->do('UPDATE CHANNEL SET name = ?',undef,$prefix.'Test');
  $db->do(q{INSERT INTO USER VALUES(1,'Author')});
  $db->do(q{INSERT INTO QUOTES VALUES(1,1,1,'This is a sufficiently long quote by Author.')});
  my $run=sub {
@@ -199,28 +199,28 @@ for my $raise (0, 1) {
   Mediabot::UserCommands::mbQuotegame_ctx(bless({bot=>$b,channel=>$channel,args=>\@args},'MB920::Ctx'));
  };
  my $view=sub {my $line=$s->{out}[-1]; return [$line->[0],$line->[1]]};
- $run->('#Test');
+ $run->($prefix.'Test');
  my $opened=$view->();
  my $after_open=scalar @{$s->{sql}};
- $run->('#TEST');
+ $run->($prefix.'TEST');
  my $duplicate=$view->();
  my $after_duplicate=scalar @{$s->{sql}};
- Mediabot::UserCommands::checkQuotegameAnswer($b,'Player','#tEsT','Author');
+ Mediabot::UserCommands::checkQuotegameAnswer($b,'Player',$prefix.'tEsT','Author');
  my $answered=$view->();
  my $remaining=scalar($b->{loop}->notifiers);
- $run->('#TEST','top');
+ $run->($prefix.'TEST','top');
  my $top=$view->();
 
- $run->('#Test');
- $run->('#test','stop');
+ $run->($prefix.'Test');
+ $run->($prefix.'test','stop');
  my $stopped=$view->();
  my $after_stop=scalar($b->{loop}->notifiers);
- $run->('#Test');
- my $timed=$b->{_quotegame}{'#test'} // $b->{_quotegame}{'#Test'};
+ $run->($prefix.'Test');
+ my $timed=$b->{_quotegame}{$prefix.'test'} // $b->{_quotegame}{$prefix.'Test'};
  $timed->{timer}{on_expire}->() if $timed && $timed->{timer};
  my $expired=$view->();
  my @keys=sort keys %{$b->{_quotegame}};
- $out{quote_case}={
+ $out{quote_case}{$prefix}={
   opened=>[$opened->[0],$opened->[1]=~/Who said/ ? 1 : 0],
   duplicate=>[$duplicate->[0],$duplicate->[1]=~/already in progress/ ? 1 : 0,
    $after_duplicate-$after_open],
@@ -242,10 +242,12 @@ MB920_NATIVE
     $assert->is($? >> 8, 0, 'native Unicode game probe completes');
     my $r = JSON::PP::decode_json($output);
     my $json = JSON::PP->new->canonical;
-    $assert->is($json->encode($r->{quote_case}), $json->encode({
-        opened=>['#Test',1], duplicate=>['#TEST',1,0], answered=>['#tEsT',1,0],
-        top=>['#TEST',1], stopped=>['#test',1,0], expired=>['#Test',1,0], keys=>['#test'],
-    }), 'quotegame shares a round, timer and score across channel letter case without changing reply targets');
+    for my $prefix ('#','&','!','+') {
+        $assert->is($json->encode($r->{quote_case}{$prefix}), $json->encode({
+            opened=>[$prefix.'Test',1], duplicate=>[$prefix.'TEST',1,0], answered=>[$prefix.'tEsT',1,0],
+            top=>[$prefix.'TEST',1], stopped=>[$prefix.'test',1,0], expired=>[$prefix.'Test',1,0], keys=>[$prefix.'test'],
+        }), "quotegame $prefix channel shares round, timer and score across letter case without changing reply targets");
+    }
     my (%failures, %empty);
     for my $raise (0, 1) {
         for my $fault (qw(missing prepare execute fetch)) {
