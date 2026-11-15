@@ -1,5 +1,6 @@
 use strict;
 use warnings;
+use Protocol::IRC;
 use Test::More;
 use DBI;
 use File::Temp qw(tempdir);
@@ -66,8 +67,9 @@ use Mediabot::Update ();
         return;
     }
     package MB1126::IRC;
-    sub nick {'Mediabot'}
-    sub nick_folded {'mediabot'}
+    our @ISA=('Protocol::IRC');
+    sub nick {$_[0]{test_nick}//'Mediabot'}
+    sub isupport {$_[0]{test_mapping}//'rfc1459'}
     package MB1126::Exclusion;
     sub classify_public_line {
         my (undef,%args)=@_;
@@ -334,5 +336,29 @@ for my $entry ('Mediabot::Karma') {
         [[['bob',1,'Voter'],['carol',-1,'Other'],['te[u]k',1,'Other'],['carol',-1,'New'],['notepad',1,'New'],
           ['carol',1,'AfterJoin']],['Carol'],['Here'],0,0,0],
         'explicit votes still work; shorthand ignores ineligible messages and stale nicklists after PART, QUIT or rejoin');
+    # MB1326: replay the real public ingress, not only a token comparison.
+    my @meta;
+    local *Mediabot::AI::MetaRuntime::handle=sub {push @meta, [@_[2..$#_]];1};
+    local *MB1126::Bot::chatGPT=sub {die 'addressed MetaAI turn must not fall back to legacy GPT'};
+    $irc->{test_nick}='WitchHunter`';
+    for my $nick ('WitchHunter`','witchhunter`','WITCHHUNTER`') {
+        for my $separator (':',',') {
+            $say->('Reader','#test',"$nick$separator what's the 6th noble gas ?");
+            is_deeply($meta[-1],['Reader','#test',"what's",'the','6th','noble','gas','?'],
+                'mixed-case address reaches MetaAI with original question and destination');
+        }
+    }
+    is(scalar @meta,6,'each addressed turn reaches MetaAI exactly once');
+    $say->('Reader','#test','WitchHunter: other nickname');
+    $say->('Reader','#test','WitchHunter`extra: another nickname');
+    is(scalar @meta,6,'missing backtick and longer nicknames do not address this bot');
+    $irc->{test_nick}='[Bot]';
+    $irc->{test_mapping}='rfc1459';
+    $say->('Reader','#test','{BOT}: Keep My CASE');
+    is_deeply($meta[-1],['Reader','#test','Keep','My','CASE'],
+        'server casemapping resolves special nickname characters without altering prompt case');
+    $irc->{test_mapping}='ascii';
+    $say->('Reader','#test','{BOT}: distinct nickname');
+    is(scalar @meta,7,'ASCII mapping preserves distinct bracket nicknames');
 }
 done_testing;

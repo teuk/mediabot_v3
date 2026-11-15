@@ -26,6 +26,14 @@ BEGIN {
 }
 
 use File::Spec;
+use Protocol::IRC;
+{
+    package MB1326::IRC;
+    our @ISA=('Protocol::IRC');
+    sub nick { $_[0]{test_nick} }
+    sub isupport { $_[0]{test_mapping} }
+}
+
 use Mediabot::Hailo::Normalizer qw(normalize_hailo_input);
 
 # match littéral (nouveau comportement).
@@ -90,4 +98,27 @@ return sub {
     # plus aucun usage NON échappé du pseudo comme motif.
     $assert->unlike($main, qr/=~ \/\$sCurrentNick\/i/,   'plus de détection non échappée');
     $assert->unlike($main, qr/s\/\$sCurrentNick\/\/g/,   'plus de retrait non échappé');
+    # Use the real IRC library's folding, including the connection mapping.
+    for my $mapping ('ascii','rfc1459','strict-rfc1459') {
+        my $irc=bless {test_nick=>'WitchHunter`',test_mapping=>$mapping},'MB1326::IRC';
+        for my $nick ('witchhunter`','WitchHunter`','WITCHHUNTER`') {
+            for my $suffix (':',',') {
+                my $token=$nick.$suffix;
+                $assert->is($irc->casefold_name($token),$irc->nick_folded.$suffix,
+                    "$mapping: mixed-case addressed nickname reaches the same comparison");
+                $assert->is($token,$nick.$suffix,'folding never changes original user token');
+            }
+        }
+        for my $other ('Other:', 'WitchHunter:', 'WitchHunter`extra:', 'WitchHunter`:extra') {
+            $assert->ok($irc->casefold_name($other) ne $irc->nick_folded.':',
+                'another nickname or malformed delimiter does not become an address');
+        }
+        $irc->{test_nick}='[Bot]';
+        $assert->is($irc->casefold_name('{BOT}:' ) eq $irc->nick_folded.':' ? 1:0,
+            $mapping eq 'ascii' ? 0:1,'special nickname equivalence follows the connection mapping');
+    }
+    $assert->like($main,qr/my \$sFoldedCommand = \$self->casefold_name\(\$sCommand \/\/ ''\);/,
+        'actual public dispatcher folds only the first token through the IRC connection');
+    $assert->like($main,qr/\$sFoldedCommand eq \$self->nick_folded \. ":"/,
+        'MetaAI colon admission uses folded token');
 };

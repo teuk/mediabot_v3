@@ -4303,6 +4303,9 @@ sub _on_message_PRIVMSG_body {
         }
 
         my ($sCommand,@tArgs) = split(/\s+/,$line);
+        # Compare addressed nicknames with the same CASEMAPPING as nick_folded.
+        # Keep the original token and message intact for command args/AI input.
+        my $sFoldedCommand = $self->casefold_name($sCommand // '');
         if (defined($sCommand) && substr($sCommand, 0, 1) eq $mediabot->{conf}->get('main.MAIN_PROG_CMD_CHAR')){
             $sCommand = substr($sCommand,1);
             $sCommand =~ tr/A-Z/a-z/;
@@ -4318,8 +4321,8 @@ sub _on_message_PRIVMSG_body {
             my $keyword = lc($1);
             $mediabot->mbCommandPublic($message,$where,$who,$BOTNICK_WASNOT_TRIGGERED,'whatis','__quiet__',$keyword);
         }
-        elsif ((($sCommand eq $self->nick_folded) && $bNickTriggerCommand) || (($sCommand eq substr($self->nick_folded, 0, 1)) && (defined($mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER')) && $mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER')))) {
-            my $botNickTriggered = (($sCommand eq $self->nick_folded) ? 1 : 0);
+        elsif ((($sFoldedCommand eq $self->nick_folded) && $bNickTriggerCommand) || (($sFoldedCommand eq substr($self->nick_folded, 0, 1)) && (defined($mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER')) && $mediabot->{conf}->get('main.MAIN_PROG_INITIAL_TRIGGER')))) {
+            my $botNickTriggered = (($sFoldedCommand eq $self->nick_folded) ? 1 : 0);
             $what =~ s/^\S+\s*//;
             ($sCommand,@tArgs) = split(/\s+/,$what);
             if (defined($sCommand) && ($sCommand ne "")) {
@@ -4327,7 +4330,7 @@ sub _on_message_PRIVMSG_body {
                 $mediabot->mbCommandPublic($message,$where,$who,$botNickTriggered,$sCommand,@tArgs);
             }
         }
-        elsif (($sCommand eq $self->nick_folded . ":") || ($sCommand eq $self->nick_folded . ",")) {
+        elsif (($sFoldedCommand eq $self->nick_folded . ":") || ($sFoldedCommand eq $self->nick_folded . ",")) {
             $what =~ s/^\S+\s*//;
             @tArgs = split(/\s+/,$what);
             if (defined($sCommand) && ($sCommand ne "")) {

@@ -1,3 +1,10 @@
+## MB1326 — Recognize addressed bot nicknames regardless of letter case
+
+- Fold the leading nickname token through the active IRC connection before routing.
+- Match colon/comma MetaAI addresses and existing bare/initial command triggers consistently.
+- Preserve original message content, exact nickname boundaries and server CASEMAPPING.
+- Exercise the production PRIVMSG ingress with a protocol-backed test transport, including the WitchHunter regression.
+
 ## MB1325 — Route MetaAI social turns to contextual sarcastic chat
 
 - Distinguish chat, local tasks and researched answers using existing contributor intent decisions.
