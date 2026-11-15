@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Helpers ();
+use Mediabot::IRC::Target qw(is_channel);
 use Mediabot::IRC::CaseMapping qw(fold_irc);
 
 our @EXPORT_OK = qw(
@@ -30,7 +31,7 @@ sub mbDuel_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    unless ($channel && $channel =~ /^#/) {
+    unless (is_channel($channel)) {
         botNotice($self, $nick, 'Syntax: !duel <nick>  (must be in a channel)'); return;
     }
 

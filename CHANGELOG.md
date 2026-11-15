@@ -1,3 +1,9 @@
+## MB1320 — Admit duels on every supported IRC channel prefix
+
+- Use the shared channel classifier for duel, stats and top command admission.
+- Preserve Games policy, channel-scoped karma/cooldown state and reply destinations.
+- Continue rejecting private or nickname contexts before any karma write.
+
 ## MB1319 — Resolve duel targets using the server's IRC casemapping
 
 - Match live target, self and bot nicknames using advertised CASEMAPPING.

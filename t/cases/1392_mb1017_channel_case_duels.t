@@ -118,6 +118,29 @@ sub memory_1392 {
         is_deeply(rows_1392($bot),[],'bot alias does not change karma');
     }
 }
+# MB1320: all project-supported channel prefixes retain game policy and scope.
+for my $channel ('#Arena','&Arena','!ABCDEArena','+Arena') {
+    my $bot=bot_1392();
+    $bot->{channels}{lc $channel}=bless({id=>3},'MB1017::Channel');
+    $bot->{hChannelsNicks}{$channel}=['Alice','Bob','mediabot'];
+    @main::dice=(18,1);
+    call_1392($bot,$channel,'Alice','Bob');
+    is_deeply(rows_1392($bot),[[3,'alice',1],[3,'bob',-1]],
+        'duel applies both karma changes to the actual channel');
+    ok(@{$bot->{wire}} && !grep({$_->[0] ne 'public' || $_->[1] ne $channel} @{$bot->{wire}}),
+        'duel output retains its exact invocation channel');
+    like(call_1392($bot,$channel,'Alice','stats'),qr/1 win/, 'stats are available on the same channel');
+    like(call_1392($bot,$channel,'Alice','Bob'),qr/cooldown active/, 'channel cooldown remains enforced');
+    my $before=rows_1392($bot);
+    $bot->{games_enabled}=0;
+    like(call_1392($bot,$channel,'Alice','Bob'),qr/Games are disabled/, 'disabled Games blocks every channel prefix');
+    is_deeply(rows_1392($bot),$before,'disabled Games makes no karma change');
+}
+for my $target (undef,'','Alice') {
+    my $bot=bot_1392();
+    like(call_1392($bot,$target,'Alice','Bob'),qr/must be in a channel/, 'private/nickname context remains refused');
+    is_deeply(rows_1392($bot),[], 'private/nickname context never writes karma');
+}
 my $start = $main::now;
 {
     my $bot = bot_1392();
