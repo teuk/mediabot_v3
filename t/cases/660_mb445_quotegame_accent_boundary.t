@@ -55,4 +55,25 @@ return sub {
     $assert->ok($n >= 2, 'les 2 définitions de $nick_char sont byte-safe');
     $assert->unlike($src, qr/my \$nick_char = qr\/\[A-Za-z0-9\\\[\\\]\\\\\^_`\{\}\|\\-\]\//,
         'plus de $nick_char ASCII seul');
+    # MB1321: scoring uses one identity across nickname letter-case changes.
+    require Mediabot::UserCommands;
+    require Mediabot::Context;
+    my @wire;
+    no warnings qw(redefine once);
+    local *Mediabot::Helpers::botPrivmsg = sub {push @wire, [$_[1],$_[2]]};
+    local *Mediabot::UserCommands::botPrivmsg = sub {push @wire, [$_[1],$_[2]]};
+    my $bot={_quotegame=>{'#test'=>{scores=>{Alice=>2,ALICE=>3,Bob=>1}},
+        '#other'=>{scores=>{Alice=>9}}}};
+    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>'#test',args=>['top']);
+    Mediabot::UserCommands::mbQuotegame_ctx($ctx);
+    $assert->like($wire[-1][1],qr/alice:5.*bob:1/,'top combines old case-variant score entries');
+    for my $nick ('Alice','ALICE','alice') {
+        my $qg=$bot->{_quotegame}{'#test'};
+        @$qg{qw(active author author_lc started deadline)}=(1,'Writer','writer',time(),time()+60);
+        Mediabot::UserCommands::checkQuotegameAnswer($bot,$nick,'#test','Writer');
+    }
+    $assert->is($bot->{_quotegame}{'#test'}{scores}{alice},8,'case changes preserve cumulative points');
+    $assert->is(scalar keys %{$bot->{_quotegame}{'#test'}{scores}},2,'one score entry per case-insensitive nickname');
+    $assert->is($bot->{_quotegame}{'#other'}{scores}{Alice},9,'other channel scores remain untouched');
+    $assert->like($wire[-1][1],qr/Correct, .*alice.*score: 8/,'winner announcement uses current spelling and cumulative score');
 };

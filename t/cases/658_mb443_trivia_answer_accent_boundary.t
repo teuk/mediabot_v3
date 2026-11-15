@@ -135,7 +135,7 @@ sub run_answer {
  my$method=$game eq 'trivia'?\&Mediabot::UserCommands::checkTriviaAnswer:\&Mediabot::UserCommands::checkQuotegameAnswer;
  $method->($b,'Player','#test',$text);
  my$g=$b->{$kind}{'#test'};
- my$r={active=>$g->{active},score=>$g->{scores}{Player}//0,metrics=>$b->{metrics}{counts},out=>$s->{out},
+ my$r={active=>$g->{active},score=>$g->{scores}{$game eq 'quote' ? 'player' : 'Player'}//0,metrics=>$b->{metrics}{counts},out=>$s->{out},
   stored=>scalar($b->{dbh}->selectrow_array('SELECT COALESCE(SUM(score),0) FROM TRIVIA_SCORES')),
   timer=>$g->{timer}?1:0,sql=>$s->{sql},binds=>$s->{binds}};
  Mediabot::UserCommands::_quotegame_cancel_timer($b,'#test') if$game eq 'quote';
@@ -225,7 +225,7 @@ for my $raise (0, 1) {
   duplicate=>[$duplicate->[0],$duplicate->[1]=~/already in progress/ ? 1 : 0,
    $after_duplicate-$after_open],
   answered=>[$answered->[0],$answered->[1]=~/Correct.*score: 1/s ? 1 : 0,$remaining],
-  top=>[$top->[0],$top->[1]=~/Player:1/ ? 1 : 0],
+  top=>[$top->[0],$top->[1]=~/player:1/ ? 1 : 0],
   stopped=>[$stopped->[0],$stopped->[1]=~/Quotegame stopped/ ? 1 : 0,$after_stop],
   expired=>[$expired->[0],$expired->[1]=~/Time's up/ ? 1 : 0,scalar($b->{loop}->notifiers)],
   keys=>\@keys,

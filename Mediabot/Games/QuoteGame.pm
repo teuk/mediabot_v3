@@ -112,6 +112,15 @@ sub _quotegame_start_timer {
 # Devine qui a dit la quote. État partagé en mémoire par canal.
 # Réponses validées via checkQuotegameAnswer() appelé depuis on_message_PRIVMSG.
 # ---------------------------------------------------------------------------
+# Consolidate transient legacy case variants without losing earned points.
+# Lowercase matches the existing author and channel identity convention.
+sub _quotegame_scores {
+    my ($scores) = @_;
+    my %merged;
+    $merged{lc($_)} += $scores->{$_} for keys %{$scores // {}};
+    return \%merged;
+}
+
 sub mbQuotegame_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -151,7 +160,7 @@ sub mbQuotegame_ctx {
 
     # !quotegame top
     if (@args && lc($args[0]) eq 'top') {
-        my $scores = $qg && $qg->{scores} ? $qg->{scores} : {};
+        my $scores = _quotegame_scores($qg ? $qg->{scores} : undef);
         unless (%$scores) {
             botPrivmsg($self, $channel, 'No quotegame scores yet on this channel.'); return 1;
         }
@@ -265,8 +274,8 @@ sub checkQuotegameAnswer {
     if ($msg_lc =~ /(?<!$nick_char)\Q$qg->{author_lc}\E(?!$nick_char)/) {
         Mediabot::UserCommands::_quotegame_cancel_timer($self, $sChannel);
         $qg->{active} = 0;
-        $qg->{scores}{$sNick}++;
-        my $score = $qg->{scores}{$sNick};
+        $qg->{scores} = _quotegame_scores($qg->{scores});
+        my $score = ++$qg->{scores}{lc $sNick};
         my $elapsed = time() - $qg->{started};
         Mediabot::Helpers::botPrivmsg($self, $sChannel,
             sprintf("\x{1F3AF} Correct, \x02%s\x02! It was \x02%s\x02 (in %ds, score: %d)",

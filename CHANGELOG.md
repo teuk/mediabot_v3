@@ -1,3 +1,10 @@
+## MB1321 — Keep quote-game scores across nickname case changes
+
+- Combine case-variant player scores in the leaderboard and before awarding a point.
+- Preserve previously earned points and isolate each channel's transient scoreboard.
+- Keep current nickname spelling in winner announcements.
+- Align the shared Unicode answer probe with canonical quote-game score keys; retain Trivia spelling and legacy-score failure checks.
+
 ## MB1320 — Admit duels on every supported IRC channel prefix
 
 - Use the shared channel classifier for duel, stats and top command admission.
