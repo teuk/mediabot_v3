@@ -229,7 +229,12 @@ for my $mapping ('rfc1459','strict-rfc1459','ascii',undef) {
 }
 # MB1324: short character strings can still exceed the byte budget.
 for my $source ('USER_SEEN','CHANNEL_LOG','history.CHANNEL_LOG_ARCHIVE') {
-    for my $case (['é' x 120, 'é' x 100 . '...'],
+    for my $case (["\x04FF0000rouge\x04", 'rouge'],
+                  ["\x04aAbBcC,102030Café\x0f", 'Café'],
+                  ["bon\x04A1B2C3jour", 'bonjour'],
+                  ['code A1B2C3,102030', 'code A1B2C3,102030'],
+                  ["avant\x04ABC après", 'avant ABC après'],
+                  ['é' x 120, 'é' x 100 . '...'],
                   ['🌟' x 80, '🌟' x 50 . '...'],
                   ['é' x 100, 'é' x 100], ['0','0'],
                   ['a' x 201, 'a' x 200 . '...']) {

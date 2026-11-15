@@ -167,6 +167,7 @@ sub mbSeen_ctx {
         return '' unless defined $txt && $txt ne '';
         $txt =~ s/[\x02\x0f\x16\x1d\x1f]//g;         # bold/reset/reverse/italic/underline
         $txt =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;       # mIRC colour codes
+        $txt =~ s/\x04[0-9a-f]{6}(?:,[0-9a-f]{6})?//ig; # hexadecimal colours
         $txt =~ s/[\x00-\x1f\x7f]/ /g;               # remaining control chars -> space
         $txt =~ s/\s{2,}/ /g;
         $txt =~ s/^\s+|\s+$//g;

@@ -1,3 +1,9 @@
+## MB1328 — Remove hexadecimal IRC colours from seen excerpts
+
+- Strip complete hexadecimal foreground/background colour sequences before control cleanup.
+- Preserve ordinary hexadecimal text and incomplete colour payloads as visible text.
+- Cover persisted seen rows, live logs and archives without changing query scope or byte budgets.
+
 ## MB1327 — Bound Unicode memory and anniversary quotations
 
 - Apply the shared UTF-8 byte budget to memory and on-this-day quote excerpts unconditionally.
