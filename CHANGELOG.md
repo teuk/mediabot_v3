@@ -1,3 +1,9 @@
+## MB1324 — Bound Unicode last-seen excerpts consistently
+
+- Apply the shared UTF-8 byte budget to decoded last-seen excerpts as well as raw text.
+- Preserve whole characters, short messages and the existing truncation suffix.
+- Cover USER_SEEN, live logs and archived logs with accented and emoji excerpts.
+
 ## MB1323 — Run quote games on every supported IRC channel prefix
 
 - Use the shared channel classifier for quote-game commands and answers.

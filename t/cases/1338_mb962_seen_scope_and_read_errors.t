@@ -3,6 +3,7 @@ use warnings;
 use utf8;
 use Test::More;
 use DBI;
+use Encode qw(encode);
 use Mediabot::Mediabot;
 use Mediabot::Context;
 binmode Test::More->builder->output, ':encoding(UTF-8)';
@@ -225,5 +226,23 @@ for my $mapping ('rfc1459','strict-rfc1459','ascii',undef) {
     is_deeply(\@wire,$match ? [['notice','Operator','Alice is currently online on #[Room].']]
         : [['notice','Operator','Channel unavailable.']],
         'channel equivalence uses the same mapping, preserves displayed spelling and keeps private replies private');
+}
+# MB1324: short character strings can still exceed the byte budget.
+for my $source ('USER_SEEN','CHANNEL_LOG','history.CHANNEL_LOG_ARCHIVE') {
+    for my $case (['é' x 120, 'é' x 100 . '...'],
+                  ['🌟' x 80, '🌟' x 50 . '...'],
+                  ['é' x 100, 'é' x 100], ['0','0'],
+                  ['a' x 201, 'a' x 200 . '...']) {
+        my ($body,$expected)=@$case;
+        my ($bot,$db)=setup_1338(cached=>1);
+        if ($source eq 'USER_SEEN') { stored_1338($db,'alice',$body) }
+        else { $db->do("INSERT INTO $source VALUES(7,'alice',1000,'alice!id\@host',?,'public')",undef,$body) }
+        is(invoke_1338('Mediabot::Users::Seen',$bot,'#test','Alice'),'','Unicode excerpt lookup completes');
+        my ($excerpt)=($wire[-1][2] // '') =~ /saying: (.*?)(?: \[\d+ msg in last 24h\])?\z/;
+        is($excerpt,$expected,"$source preserves whole characters within the excerpt budget");
+        ok(defined($excerpt) && length(encode('UTF-8',$excerpt)) <= 203,
+            'excerpt respects 200-byte content budget plus optional three-byte suffix');
+        is_deeply([@{$wire[-1]}[0,1]],['public','#test'],'excerpt stays on the requested channel');
+    }
 }
 done_testing;

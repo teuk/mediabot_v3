@@ -170,7 +170,9 @@ sub mbSeen_ctx {
         $txt =~ s/[\x00-\x1f\x7f]/ /g;               # remaining control chars -> space
         $txt =~ s/\s{2,}/ /g;
         $txt =~ s/^\s+|\s+$//g;
-        $txt = Mediabot::Helpers::truncate_utf8($txt, 200, '...') if length($txt) > 200;
+        # The shared helper measures wire bytes; Perl length counts characters
+        # for decoded database text and must not bypass that budget.
+        $txt = Mediabot::Helpers::truncate_utf8($txt, 200, '...');
         return $txt;
     };
 
