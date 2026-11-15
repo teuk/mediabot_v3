@@ -108,6 +108,51 @@ return sub {
                 && $out[0][0] eq 'notice' && $out[0][1] eq 'Émilie' && $out[0][2] eq 'Database error.';
             $fail_prepare=0;$empty_history=1;@out=();$call->('mbRadar_ctx','#empty','0d');
             die 'history empty fallback changed' unless @out==1 && $out[0][2]=~/no data in last 1d/;
+            # MB1332: replay both views through native/facade/registry routes.
+            $bot->{command_registry}=Mediabot::CommandRegistry->new();
+            $bot->_register_builtin_command_catalogue();
+            $fail_prepare=0;
+            for my $route (qw(Mediabot::Diagnostics::Commands Mediabot::UserCommands Mediabot registry)) {
+                for my $command (qw(features capabilities caps observatory obs)) {
+                    next if $route ne 'registry' && $command =~ /^(?:capabilities|caps|obs)$/;
+                    my $features=$command =~ /^(?:features|capabilities|caps)$/;
+                    my $name=$features?'mbFeatures_ctx':'mbObservatory_ctx';
+                    for my $channel ('#scope','&scope','!ABCDEscope','+scope',undef,'','Reader') {
+                        @out=();@sql=();@bind=();@chansets=();@metrics=();
+                        my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Émilie',channel=>$channel,
+                            command=>$command,args=>[]);
+                        my $handler=$route eq 'registry'
+                            ? $bot->command_registry->handler_for($command,'public')
+                            : $route->can($name);
+                        die "missing $route $command" unless $handler;
+                        $handler->($ctx);
+                        if (!defined($channel) || $channel eq '' || $channel eq 'Reader') {
+                            die "private view did work: $route $command" if @sql || @chansets || @metrics;
+                            die 'private view response changed' unless @out==1 && $out[0][0] eq 'notice'
+                                && $out[0][1] eq 'Émilie' && $out[0][2]=~/Syntax:/;
+                            next;
+                        }
+                        die "view rejected channel: $route $command $channel" unless @out==($features?8:2);
+                        die 'view target changed' if grep {$_->[0] ne ($features?'notice':'message')
+                            || $_->[1] ne ($features?'Émilie':$channel)} @out;
+                        die 'view heading lost channel' unless index($out[0][2],$channel)>=0;
+                        die 'chanset scope lost' unless @chansets && !grep {$_->[0] ne $channel} @chansets;
+                        if ($features) {
+                            die 'features introduced SQL or metrics' if @sql || @metrics;
+                            die 'features lost legacy games' unless $out[2][2]=~/games: on \(legacy default\)/;
+                        } else {
+                            die 'observatory query scope lost' unless @sql==1 && @bind==1
+                                && @{$bind[0]}==1 && $bind[0][0] eq $channel
+                                && $sql[0]=~/WHERE c.name = \?/;
+                            die 'observatory activity changed' unless $out[1][2]=~/n\(41\) msg\(s\) \/ n\(3\) nick\(s\)/
+                                && $out[1][2]=~/energy lively/;
+                            die 'observatory metric scope lost' unless @metrics==1
+                                && $metrics[0][0] eq 'mediabot_observatory_total'
+                                && $metrics[0][1]{channel} eq $channel;
+                        }
+                    }
+                }
+            }
             print 'checked';
         };
         push @probe_codes, $code;

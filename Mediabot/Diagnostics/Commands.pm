@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Helpers ();
+use Mediabot::IRC::Target qw(is_channel);
 
 our @EXPORT_OK = qw(
     mbFeatures_ctx
@@ -45,7 +46,7 @@ sub mbFeatures_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel // '';
 
-    unless ($channel =~ /^#/) {
+    unless (is_channel($channel)) {
         botNotice($self, $nick, 'Syntax: features  (must be used in a channel)');
         return 1;
     }
@@ -134,7 +135,7 @@ sub mbObservatory_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel // '';
 
-    unless ($channel =~ /^#/) {
+    unless (is_channel($channel)) {
         botNotice($self, $nick, 'Syntax: observatory  (must be used in a channel)');
         return 1;
     }

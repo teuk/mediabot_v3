@@ -1,3 +1,9 @@
+## MB1332 — Recognize supported channels in diagnostic views
+
+- Use the shared IRC target classifier for features and observatory, including their aliases.
+- Accept &, ! and + channels while retaining private-target rejection and channel-specific settings, queries and metrics.
+- Replay native, facade and registry routes in three clean module load orders.
+
 ## MB1331 — Recognize every supported radar channel prefix
 
 - Accept #, &, ! and + channel targets in current and historical radar reports through the shared IRC classifier.
