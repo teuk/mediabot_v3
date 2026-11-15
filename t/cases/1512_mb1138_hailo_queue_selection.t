@@ -1,5 +1,7 @@
 use strict;
 use warnings;
+use utf8;
+use Encode ();
 use Test::More;
 use Mediabot::Hailo::ReplyQueue;
 my @warnings;
@@ -95,5 +97,20 @@ for my $case (
     is($q->typing_delay_seconds(undef),0,'missing output has no typing delay');
 }
 
+
+# MB1307: perceived typing time depends on text, not Perl's UTF-8 flag.
+{
+    my $q=Mediabot::Hailo::ReplyQueue->new;
+    for my $text ('x' x 9, 'é' x 9, '界' x 9, '🙂' x 9) {
+        my $bytes=Encode::encode('UTF-8',$text);
+        my $before=$bytes;
+        is($q->typing_delay_seconds($text),3,'nine characters take three seconds');
+        is($q->typing_delay_seconds($bytes),3,'UTF-8 wire bytes have the same typing delay');
+        is($bytes,$before,'delay calculation preserves caller bytes');
+        ok(!utf8::is_utf8($bytes),'delay calculation preserves caller encoding flag');
+    }
+    is($q->typing_delay_seconds("\xff" x 9),3,'invalid UTF-8 retains the byte-length fallback');
+    is($q->typing_delay_seconds(Encode::encode('UTF-8','🙂' x 400)),15,'long Unicode replies retain the delay cap');
+}
 is_deeply(\@warnings, [], 'queue mutation emits no warnings');
 done_testing;

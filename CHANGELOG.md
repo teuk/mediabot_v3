@@ -1,3 +1,9 @@
+## MB1307 — Keep Hailo typing delays independent of UTF-8 representation
+
+- Count decoded UTF-8 characters when estimating reply typing time.
+- Preserve caller bytes, malformed-input fallback, rounding and the 15-second cap.
+- Cover accented, CJK and emoji replies in both character and byte forms.
+
 ## MB1306 — Refuse malformed flood protection settings
 
 - Validate the entire partyline floodset request before changing overrides or clearing an active silence.

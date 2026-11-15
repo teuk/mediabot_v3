@@ -8,6 +8,7 @@ use Carp qw(croak);
 use Scalar::Util qw(refaddr looks_like_number);
 use POSIX qw(isfinite);
 use Time::HiRes ();
+use Encode ();
 
 our $VERSION = '1.0';
 
@@ -182,7 +183,15 @@ sub dispatch_next {
 sub typing_delay_seconds {
     my ($self, $line) = @_;
     return 0 unless _plain($line) && length("$line");
-    my $delay = $self->{typing_coeff} * sqrt(length("$line")) + $self->{typing_offset};
+    # Native replies may be characters or UTF-8 wire bytes. Count the same
+    # text identically without changing the caller's string or encoding flag.
+    # Preserve the historical byte-length fallback for malformed input.
+    my $text = "$line";
+    unless (utf8::is_utf8($text)) {
+        my $decoded = eval { Encode::decode('UTF-8', $text, Encode::FB_CROAK | Encode::LEAVE_SRC) };
+        $text = $decoded if defined $decoded;
+    }
+    my $delay = $self->{typing_coeff} * sqrt(length($text)) + $self->{typing_offset};
     $delay = 0 if $delay < 0;
     $delay = 15 if $delay > 15;
     return int($delay + 0.5);
