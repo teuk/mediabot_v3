@@ -22,27 +22,26 @@ sub _extract_698 {
     return $1;
 }
 
-# reproduit la logique d'affichage d'une catégorie (mode adaptatif), pour la
-# tester sur les vraies données sans dépendre de l'IRC.
+# Exercise the production renderer, capturing only the outbound notice queue.
+{
+    package MB1330::HelpContext;
+    sub bot { $_[0]{bot} }
+    sub nick { 'help-reader' }
+}
 sub _render_category {
     my ($category) = @_;
     require Mediabot::Mediabot;
-    my %cats = Mediabot::_mbHelpBuildCategories();
-    my %int  = Mediabot::_mbHelpInternalCommands();
-    my @cmds = @{ $cats{$category} || [] };
-    my $DETAILED_MAX = 12;
     my @lines;
-    if (@cmds && @cmds <= $DETAILED_MAX) {
-        my $w = 0; for (@cmds) { $w = length if length > $w; }
-        for my $c (@cmds) {
-            my $d = $int{$c}{desc} // ''; $d =~ s/\s+/ /g; $d =~ s/^\s+|\s+$//g;
-            $d = Mediabot::Helpers::truncate_utf8($d, 90, '...') if length($d) > 90;
-            push @lines, $d ne '' ? sprintf("  %-*s - %s", $w, $c, $d) : "  $c";
-        }
-    }
-    else {
-        push @lines, Mediabot::_mbHelpBuildChunkedList("Commands: ", @cmds);
-    }
+    no warnings 'redefine';
+    local *Mediabot::_mbHelpSendNoticeQueue = sub {
+        my ($self, $nick, @rendered) = @_;
+        @lines = @rendered;
+        return 1;
+    };
+    Mediabot::_mbHelpSendCategoryCommands(
+        bless({bot => {}}, 'MB1330::HelpContext'), $category);
+    shift @lines; # category heading
+    pop @lines;   # navigation footer
     return @lines;
 }
 
@@ -95,4 +94,27 @@ return sub {
     } else {
         $assert->ok(1, '[D] ai_fun skip (taille != 12)');
     }
+    # A Unicode description can exceed 90 UTF-8 bytes with fewer than 90 characters.
+    {
+        no warnings 'redefine';
+        local *Mediabot::_mbHelpBuildCategories = sub { (unicode => ['sample']) };
+        for my $case (
+            ['accent', "\x{e9}" x 60, ("\x{e9}" x 45) . '...'],
+            ['emoji', "\x{1f31f}" x 30, ("\x{1f31f}" x 22) . '...'],
+            ['exact', "\x{e9}" x 45, "\x{e9}" x 45],
+            ['ascii', 'x' x 91, ('x' x 90) . '...'],
+            ['short', 'simple text', 'simple text'],
+        ) {
+            my ($label, $input, $expected) = @$case;
+            utf8::upgrade($input);
+            utf8::upgrade($expected);
+            local *Mediabot::_mbHelpInternalCommands = sub {
+                (sample => {desc => $input})
+            };
+            my @lines = _render_category('unicode');
+            $assert->is(scalar @lines, 1, "$label: one detailed command line");
+            $assert->is($lines[0], "  sample - $expected", "$label: description respects UTF-8 byte budget");
+        }
+    }
+
 };

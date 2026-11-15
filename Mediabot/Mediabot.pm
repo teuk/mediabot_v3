@@ -3484,7 +3484,7 @@ sub _mbHelpSendCategoryCommands {
             $desc =~ s/\s+/ /g;
             $desc =~ s/^\s+|\s+$//g;
             # keep each line comfortably within IRC limits
-            $desc = Mediabot::Helpers::truncate_utf8($desc, 90, '...') if length($desc) > 90;
+            $desc = Mediabot::Helpers::truncate_utf8($desc, 90, '...');
             push @lines, $desc ne ''
                 ? sprintf("  %-*s - %s", $w, $c, $desc)
                 : sprintf("  %s", $c);

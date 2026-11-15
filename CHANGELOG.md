@@ -1,3 +1,9 @@
+## MB1330 — Bound Unicode help descriptions by wire bytes
+
+- Apply the shared UTF-8 byte budget to category descriptions regardless of character count.
+- Preserve short descriptions, exact boundaries and the existing ellipsis contract.
+- Exercise the production category renderer instead of duplicating its implementation in tests.
+
 ## MB1329 — Keep TMDB mojibake repair lossless
 
 - Reject lossy legacy encoding and invalid UTF-8 during whole-query repair.
