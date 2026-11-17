@@ -1,3 +1,10 @@
+## MB1336 — Run audited offline TAP cases in a bounded pair
+
+- Add opt-in --jobs 2 for an explicit allowlist of 72 independent standalone suites; all other cases remain serial and --jobs 1 remains the default.
+- Preserve fresh interpreters, TAP failures, signal/exit diagnostics, actual assertion counts, progress and per-case profiles.
+- Bound hung jobs, isolate output files and terminate owned process groups on timeout/interruption; verify failure propagation through the real runner.
+- Remove two obsolete source-text assertions forbidding any future jobs option; retain classification and fast-lane behavior checks.
+
 ## MB1335 — Reduce repeated contract-test startup again
 
 - Run 30 additional delivery/lifecycle contracts in two isolated suites: 28 fewer Perl starts, preserving all 2,193 assertions.

@@ -472,3 +472,54 @@ catalogue. No assertion count is reduced and no result is cached.
 Host acceptance still requires targeted tests and one full suite, both with
 `--progress`, before the final noninteractive commit/push. MB1335 host timing
 and acceptance remain pending until that run completes.
+
+### MB1336: opt-in bounded execution
+
+MB1335 was accepted as `4d418276`: 44,324 assertions across 1,053 files in
+351 seconds on teuk. MB1336 changes execution scheduling, not application code
+or the regression matrix. Host acceptance for MB1336 remains pending.
+
+```bash
+perl t/test_commands.pl --jobs 2 --progress --profile-top 20
+```
+
+`--jobs 1` remains the default and the serial comparison path. Only the 72 exact
+filenames in `t/lib/BoundedTapBatch.pm` can run concurrently. They retain separate
+fresh Perl interpreters and are still checked for a standalone TAP contract.
+Selection/filter/class/fast options apply first: no unselected case is launched.
+The approved batch finishes before the remaining serial cases begin. Thus no
+legacy closure shares the parent's mutable test state with a running batch.
+Classification tags do **not** authorize concurrency. Do not add cases solely
+because they are tagged PURE, DB or PROCESS.
+
+The resource review covers the following families, including their helpers:
+
+| Family | Isolation basis |
+| --- | --- |
+| Storage, games, rights and reports | SQLite in memory or a unique File::Temp directory; instance-local state and simulated output. |
+| AI, external metadata and command contracts | Injected HTTP/providers and private memory/trace files; no configured credentials or external service requests. |
+| Cold imports, aliases and public-source checks | Separate interpreters and read-only project source; any mutated source/config fixture is copied into a private temporary directory. |
+| Previously consolidated suites | Their fragment catalog stays intact; private fixture files and process-local overrides are not shared across suites. |
+
+Real pacing/timeout thresholds, fixed-endpoint integration, installer checks,
+runner self-tests and unreviewed cases remain sequential. Nested worker probes
+retain their own existing limits: two top-level suites is not a promise of only
+two OS processes. Re-review admission whenever a fixture gains shared files,
+external endpoints or timing-sensitive behavior.
+
+Each child writes stdout/stderr to a private file, avoiding pipe backpressure
+and interleaved TAP. The same TAP parser handles serial and concurrent results,
+including bailouts, incomplete plans, signals, nonzero exits and failed tests.
+A 300-second per-case deadline aborts hung batch jobs; timeout and parent
+interruption kill/reap owned interpreters and signal their process groups.
+The regression fixture also checks an owned descendant's heartbeat stops.
+Progress counts completed files and real assertions. Profiles measure each
+child's elapsed duration; cumulative profile time can exceed wall time because
+approved cases overlap. No result is cached, skipped or treated as successful
+because it is unavailable.
+
+Validation includes a two-child barrier, large stdout/stderr, a third queued
+job, failure/exit/signal/bailout/plan mutations, timeout, callback error, parent
+termination, unchanged selection and serial-versus-concurrent assertion counts.
+The targeted and full maintainer gates use --jobs 2 --progress, then the existing
+noninteractive commit.sh/push is the final action only after full success.

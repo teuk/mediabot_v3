@@ -13,6 +13,11 @@ structural change and update its progress in the same patch as that change.
 Use small reversible deliveries; do not bundle every phase into one migration.
 Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 
+Test-harness follow-up: MB1334/MB1335 are accepted through `4d418276`.
+MB1336 adds a bounded, opt-in offline TAP executor; runtime architecture and
+phase completion are unchanged. See DEVELOPING.md for its admission review
+and pending host acceptance.
+
 ## Progress and sequence
 
 | Phase | Objective and bounded first increment | Status |

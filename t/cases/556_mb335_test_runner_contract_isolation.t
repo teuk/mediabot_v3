@@ -64,4 +64,6 @@ return sub {
         'runner recognizes native return-sub contracts');
     $assert->like($src, qr/standalone TAP contract/,
         'all non-closure files are isolated as standalone TAP');
+    require MB1336BatchFixture;
+    MB1336BatchFixture::run($assert, $root);
 };

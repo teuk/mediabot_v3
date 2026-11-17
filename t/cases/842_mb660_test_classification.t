@@ -199,16 +199,4 @@ return sub {
         'mb660-842: invalid class error lists allowed vocabulary',
     );
 
-    open my $runner_fh, '<', $runner or do {
-        $assert->fail("mb660-842: cannot read $runner");
-        return;
-    };
-    my $runner_src = do { local $/; <$runner_fh> };
-    close $runner_fh;
-
-    $assert->unlike(
-        $runner_src,
-        qr/'(?:jobs|parallel)(?:=i)?'/,
-        'mb660-842: mb660 does not add a parallel/jobs execution option',
-    );
 };

@@ -191,16 +191,4 @@ return sub {
     $assert->like($narrow, qr/PASSED\s*:\s*\d+\/\d+/,
         'mb661-843: narrowed fast lane preserves normal verdict');
 
-    open my $fh, '<', $runner or do {
-        $assert->fail("mb661-843: cannot read $runner");
-        return;
-    };
-    my $runner_src = do { local $/; <$fh> };
-    close $fh;
-
-    $assert->unlike(
-        $runner_src,
-        qr/'(?:jobs|parallel)(?:=i)?'/,
-        'mb661-843: mb661 still adds no jobs/parallel executor',
-    );
 };

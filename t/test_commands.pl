@@ -28,6 +28,7 @@ use POSIX qw(strftime);
 use TAP::Parser;
 use Time::HiRes ();
 use IO::Handle ();
+use BoundedTapBatch qw(approved_case run_batch);
 use TestClassifier qw(classify_test_file allowed_test_classes);
 use FastValidation qw(
     fast_lane_reason
@@ -58,6 +59,7 @@ my $opt_class_summary = 0;
 my $opt_list_selected = 0;
 my $opt_fast = 0;
 my $opt_progress = 0;
+my $opt_jobs = 1; # Opt in; historical default remains serial.
 GetOptions(
     'verbose|v'   => \$opt_verbose,
     'filter|f=s'  => \$opt_filter,
@@ -74,6 +76,7 @@ GetOptions(
     'list-selected' => \$opt_list_selected,
     'fast'          => \$opt_fast,
     'progress'      => \$opt_progress,
+    'jobs=i'        => \$opt_jobs,
 ) or die <<USAGE;
 Usage: $0 [options]
   --verbose, -v          Afficher chaque test [OK]/[FAIL]
@@ -93,8 +96,11 @@ Usage: $0 [options]
                           (ne remplace PAS la suite complete)
   --progress              Barre compacte et ETA approximatif sur une seule ligne
                           (pourcentage par fichiers, compteur d'assertions reel)
+  --jobs <1|2>           Deux processus uniquement pour les suites auditees (defaut: 1)
   Classes: PURE, FILESYSTEM, PROCESS, DB, NETWORK
 USAGE
+
+die "--jobs must be 1 or 2\n" unless $opt_jobs == 1 || $opt_jobs == 2;
 
 if (defined $opt_profile_top) {
     die "--profile-top must be a positive integer\n" if $opt_profile_top < 1;
@@ -337,6 +343,12 @@ sub _run_isolated_tap_case {
     my $closed = close $child;
     my $status = $?;
 
+    return _consume_isolated_tap($name, $assert, $output, $closed, $status);
+}
+
+sub _consume_isolated_tap {
+    my ($name, $assert, $output, $closed, $status) = @_;
+    my $failed_before = $assert->failed;
     print $output if $opt_verbose;
 
     my $parser = TAP::Parser->new({ source => \$output });
@@ -407,7 +419,7 @@ sub _record_profile_case {
     my (%args) = @_;
     return unless $opt_profile;
 
-    my $elapsed = Time::HiRes::time() - $args{started};
+    my $elapsed = $args{elapsed} // (Time::HiRes::time() - $args{started});
     my $assertions = $args{assert}->total - $args{assert_before};
     my $failures   = $args{assert}->failed - $args{failed_before};
 
@@ -844,7 +856,32 @@ _progress_begin();
 my $progress_case_failed_before = 0;
 my $progress_case_name = '';
 
-for my $file (@test_files) {
+# MB1336: an explicit offline allowlist, not classification or global parallelism.
+# Finish the bounded batch before any legacy closure runs in this interpreter.
+my %batched;
+if ($opt_jobs == 2) {
+    my @batch = grep { approved_case($_) && (_case_requires_isolation($_))[0] } @test_files;
+    run_batch(\@batch, jobs=>2, root=>"$FindBin::Bin/..",
+        on_start=>sub {
+            _progress_render(done=>$progress_done, total=>scalar(@test_files),
+                tests=>$assert->total, current=>basename($_[0]).' [jobs=2]');
+        },
+        on_finish=>sub {
+            my ($file, $result) = @_;
+            my $name = basename($file);
+            my $before = $assert->total;
+            my $failed = $assert->failed;
+            $Assert::CURRENT_CASE = $name;
+            print "\n[ $name ]\n" if $opt_verbose;
+            _consume_isolated_tap($name, $assert, @{$result}{qw(output closed status)});
+            _record_profile_case(name=>$name, mode=>'isolated', elapsed=>$result->{elapsed},
+                assert=>$assert, assert_before=>$before, failed_before=>$failed);
+            _progress_after_case(name=>$name, failed_before=>$failed);
+            $batched{$file} = 1;
+        });
+}
+
+for my $file (grep { !$batched{$_} } @test_files) {
     $progress_case_failed_before = $assert->failed;
     $progress_case_name = basename($file);
     my $name = basename($file);
