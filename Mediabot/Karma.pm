@@ -846,7 +846,7 @@ sub mbKarmaDiff_ctx {
             $window_secs  = 2592000 if $window_secs > 2592000;
             $window_label = "${val}${unit}";
         }
-        my $kd_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
+        my $kd_chan = is_channel($channel) ? $channel : undef;
         my @all_entries;
         if ($kd_chan) {
             @all_entries = @{ $self->{_karma_log}{lc $kd_chan} // [] };
@@ -898,7 +898,7 @@ sub mbKarmaDiff_ctx {
     }
 
     # KD1/fix: search across all channels in PM
-    my $kd_chan = (defined $channel && $channel =~ /^#/) ? $channel : undef;
+    my $kd_chan = is_channel($channel) ? $channel : undef;
     my @kd_entries_all;
     if ($kd_chan) {
         push @kd_entries_all, @{ $self->{_karma_log}{lc $kd_chan} // [] };

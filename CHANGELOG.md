@@ -1,3 +1,9 @@
+## MB1338 — Keep karma differences scoped to every IRC channel
+
+- Recognize #, &, ! and + channel targets in both karmadiff report forms.
+- Keep deltas, current scores and replies scoped to the requested channel instead of falling through to the private all-channel view.
+- Preserve private/global queries and cover mixed-case, empty and populated channels through native handlers.
+
 ## MB1337 — Finalize the bounded test runner
 
 - Make the host-accepted two-suite batch the default; keep --jobs 1 for serial diagnosis and retain the exact 72-case admission list.

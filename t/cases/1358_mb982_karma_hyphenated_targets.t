@@ -361,4 +361,37 @@ for my $entry ('Mediabot::Karma') {
     $say->('Reader','#test','{BOT}: distinct nickname');
     is(scalar @meta,7,'ASCII mapping preserves distinct bracket nicknames');
 }
+# MB1338: keep channel reports scoped; retain the private global view.
+{
+    local *Mediabot::UserCommands::logBot=sub {1};
+    for my $channel ('#MiXeD','&MiXeD','!ABCDEMiXeD','+MiXeD') {
+        my $bot=bless {_karma_log=>{
+            lc($channel)=>[{nick=>'bob',delta=>'+1',score=>3,from=>'Local',ts=>time()-10}],
+            '#elsewhere'=>[{nick=>'bob',delta=>'-1',score=>99,from=>'Remote',ts=>time()-5},
+                           {nick=>'secret',delta=>'+1',score=>1,from=>'Remote',ts=>time()-5}],
+        }}, 'MB982::Bot';
+        for my $args (['bob'],['all']) {
+            @wire=();
+            Mediabot::Karma::mbKarmaDiff_ctx(Mediabot::Context->new(bot=>$bot,nick=>'Reader',
+                channel=>$channel,command=>'karmadiff',args=>$args));
+            is(scalar @wire,1,"$channel karmadiff @$args emits one report");
+            is($wire[0][1],$channel,'reply preserves channel spelling');
+            like($wire[0][2],$args->[0] eq 'all' ? qr/bob: \+1$/ : qr/karma \+1 .*1 vote\(s\), score: \+3/,
+                'delta and current score use only this channel');
+            unlike($wire[0][2],qr/Remote|secret|99/,'other channel history stays out');
+        }
+        @wire=();
+        Mediabot::Karma::mbKarmaDiff_ctx(Mediabot::Context->new(bot=>$bot,nick=>'Reader',
+            channel=>substr($channel,0,1).'Empty',args=>['all']));
+        like($wire[0][2],qr/^No karma activity/,'empty channel remains empty');
+        for my $args (['bob'],['all']) {
+            @wire=();
+            Mediabot::Karma::mbKarmaDiff_ctx(Mediabot::Context->new(bot=>$bot,nick=>'Reader',
+                channel=>'Reader',args=>$args));
+            is($wire[0][1],'Reader','private reply goes to requester');
+            like($wire[0][2],$args->[0] eq 'all' ? qr/secret: \+1/ : qr/karma 0 .*2 vote\(s\), score: \+99/,
+                'private report retains global history');
+        }
+    }
+}
 done_testing;
