@@ -693,7 +693,11 @@ sub mbRemindList_ctx {
     botNotice($self, $nick, "$total pending reminder(s) you have set:");
     for my $r (@rows) {
         my $msg = $r->{message} // '';
-        # mb90-B2: strip [daily:HH:MM] et [weekly:DOW:HH:MM] FIRST et noter séparément
+        # Snooze puts [at:] before recurrence. Remove scheduling tags first
+        # so both creation and snooze layouts expose recurrence and urgency.
+        $msg =~ s/\s*\[at:(\d+)\]\s*/ /g;  # strip tous les [at:TS]
+        $msg =~ s/^\s+|\s+$//g;
+        # Render recurrence separately from the user message.
         my $daily_tag = '';
         if ($msg =~ s/^\[daily:(\d{2}:\d{2})\]\s*//) {
             $daily_tag = " [daily $1]";
@@ -703,8 +707,6 @@ sub mbRemindList_ctx {
         }
         # BX-12/fix: strip [at:TS], detect remaining [at:TS] (après daily)
         my $due_str = '';
-        $msg =~ s/\s*\[at:(\d+)\]\s*/ /g;  # strip tous les [at:TS]
-        $msg =~ s/^\s+|\s+$//g;
         # Recalculer due_str depuis le message original si [at:TS] présent
         if ($r->{message} =~ /\[at:(\d+)\]/) {
             my $sl = $1 - time();

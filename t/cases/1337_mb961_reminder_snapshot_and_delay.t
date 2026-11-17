@@ -298,4 +298,31 @@ for my $raise (0,1) {
         is(scalar @warnings,0,'race and recovery emit no warnings');
     }
 }
+# MB1341: snooze moves [at:] before recurrence; listing must decode both orders.
+for my $case (['',''],['[daily:09:00] ',' [daily 09:00]'],['[weekly:1:09:00] ',' [weekly Mon 09:00]']) {
+    my ($prefix,$label)=@$case;
+    for my $urgent ('','[!] ') {
+        my $stored=$prefix.'[at:4600] '.$urgent.'Un café';
+        my ($bot,$db)=setup_1337($stored);
+        $db->do('CREATE TABLE CHANNEL(id_channel INTEGER,name TEXT)');
+        $db->do("INSERT INTO CHANNEL VALUES(7,'#test')");
+        for my $phase ('created','snoozed') {
+            invoke_1337($bot,'Mediabot::CommunityState','mbRemindSnooze_ctx','1','1h') if $phase eq 'snoozed';
+            my $before=$db->selectrow_arrayref('SELECT message,delivered FROM REMINDERS WHERE id_reminder=1');
+            @wire=();
+            invoke_1337($bot,'Mediabot::CommunityState','mbRemindList_ctx');
+            my $line=$wire[1][2] // '';
+            my ($body)=$line=~/: "(.*)"/;
+            is_deeply([scalar @wire,$wire[1][0],$wire[1][1],$body,
+                $line=~/\[in /?1:0,
+                $label eq '' || index($line,$label)>=0 ? 1:0,
+                $line=~/\[URGENT\]/?1:0,
+                $line=~/\[(?:at|daily|weekly):/?1:0],
+                [2,'notice','Sender','Un café',1,1,$urgent?1:0,0],
+                "$phase $prefix $urgent: list retains deadline, recurrence and urgency without raw tags");
+            is_deeply($db->selectrow_arrayref('SELECT message,delivered FROM REMINDERS WHERE id_reminder=1'),
+                $before,'listing does not rewrite or deliver the stored reminder');
+        }
+    }
+}
 done_testing;

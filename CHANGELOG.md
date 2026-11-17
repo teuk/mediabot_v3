@@ -1,3 +1,9 @@
+## MB1341 — Render snoozed recurring reminders correctly
+
+- Remove scheduling tags before reading recurrence in remindlist, supporting both creation and snooze layouts.
+- Preserve daily/weekly labels, urgency, due time and Unicode message text without displaying internal tags.
+- Verify listing leaves stored reminders unchanged for ordinary, daily and weekly reminders before and after snooze.
+
 ## MB1340 — Preserve concurrent reminder text during snooze
 
 - Compare the exact stored message before a snooze update, even under case-insensitive SQL collations.
