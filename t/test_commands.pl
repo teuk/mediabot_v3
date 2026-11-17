@@ -545,7 +545,11 @@ if ($opt_filter) {
         $err =~ s/\s+\z//;
         die "Invalid --filter regex '$opt_filter': $err\n";
     }
-    @test_files = grep { basename($_) =~ $filter_re } @test_files;
+    require ConsolidatedCases;
+    @test_files = grep {
+        my $name=basename($_);
+        $name =~ $filter_re || grep { $_ =~ $filter_re } ConsolidatedCases::case_aliases($name)
+    } @test_files;
 }
 
 # MB869: classification is selection metadata, not an execution prerequisite.

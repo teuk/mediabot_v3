@@ -89,3 +89,6 @@ node_modules/
 
 # Developer-local Perl dependencies; never stage installed module trees.
 /local/
+
+# Public consolidated test-suite catalog.
+!t/scenarios/consolidated.json

@@ -1,3 +1,9 @@
+## MB1334 — Consolidate repeated test startup
+
+- Replace 62 standalone contract files with four isolated scenario suites; preserve all 5,866 assertions and scenario bodies.
+- Keep historical --filter names routed to their owning suite through a checked scenario catalog.
+- Retain cold-import, real timeout and integration isolation; reject missing or failed scenarios.
+
 ## MB1333 — Bound radar newcomer lists by UTF-8 bytes
 
 - Apply the shared UTF-8 limiter to newcomer nick lists, including decoded database values.

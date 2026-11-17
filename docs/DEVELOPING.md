@@ -421,3 +421,29 @@ command scope or force all commands to share one presentation policy.
 The 300-cycle endurance gate is already accepted on teuk for MB1302. This delivery
 requires targeted and full tests only, ending with noninteractive commit/push.
 No new twenty-minute run is needed for the representative contract matrix.
+
+### MB1334: consolidated contract suites
+
+The full suite runs 62 former standalone contracts in four fresh Perl processes
+instead of 62. Scenario bodies live in `t/scenarios/mb1334_*`; each retains its
+assertions, lexical scope and distinct package. The shared TAP plan belongs to
+the suite. No assertions are cached or skipped. Real cold-import probes and
+process/timing integration cases remain separate.
+
+`t/scenarios/consolidated.json` maps suites to their explicit scenario lists.
+Missing fragments, exceptions, false returns and TAP failures remain failures.
+Old filters such as `--filter 1507_mb1133` select the owning suite, so targeted
+validation may run related scenarios too. Direct `perl t/cases/<old-name>.t`
+commands must instead use the runner or the new suite filename.
+
+Run the four groups with:
+
+```bash
+perl t/test_commands.pl --filter '1540_mb1334' --progress --profile-top 10
+```
+
+Measured locally on the same Perl/dependencies: the original 62-case block took
+about 17 seconds; four suites took about 4 seconds with the same 5,866 assertions.
+These are block timings, not a claimed 75% improvement for the complete suite.
+The complete suite remains mandatory before committing; server timing is the
+authoritative acceptance measurement.

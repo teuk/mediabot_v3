@@ -154,4 +154,9 @@ return sub {
         qr/--profile-top must be a positive integer/,
         'mb650-832: invalid profile limit has an explicit error',
     );
+    my ($alias_out,$alias_rc)=_capture_runner('--filter','^1507_mb1133_truncate_unicode_suffix[.]t$', '--list-selected');
+    $assert->is($alias_rc,0,'historical scenario filters remain usable after consolidation');
+    $assert->like($alias_out,qr/1540_mb1334_text_contracts[.]t/,'old filter selects the owning suite');
+    $assert->unlike($alias_out,qr/1540_mb1334_ai_contracts[.]t/,'old filter does not select unrelated suites');
+
 };
