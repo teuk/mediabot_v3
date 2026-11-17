@@ -1,3 +1,9 @@
+## MB1333 — Bound radar newcomer lists by UTF-8 bytes
+
+- Apply the shared UTF-8 limiter to newcomer nick lists, including decoded database values.
+- Preserve complete characters, the existing ellipsis contract and ASCII output.
+- Cover accented and emoji nick lists through the native registry and SQLite report path.
+
 ## MB1332 — Recognize supported channels in diagnostic views
 
 - Use the shared IRC target classifier for features and observatory, including their aliases.

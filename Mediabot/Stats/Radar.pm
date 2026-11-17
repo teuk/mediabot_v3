@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use DateTime ();
+use Mediabot::Helpers ();
 use Mediabot::IRC::Target qw(is_channel);
 
 our @EXPORT_OK = qw(mbRadar_ctx);
@@ -205,7 +206,7 @@ sub mbRadar_ctx {
         my @newbies = map { $_->{nick} } @$new_rows;
         if (@newbies) {
             my $list = join(', ', @newbies);
-            $list = substr($list, 0, 200) . '...' if length($list) > 200;
+            $list = Mediabot::Helpers::truncate_utf8($list, 200, '...');
             push @lines, sprintf("\x{1F195} newcomers (24h): %s", $list);
         }
     }

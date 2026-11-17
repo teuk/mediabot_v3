@@ -291,5 +291,28 @@ for my $entry (qw(Mediabot::Stats::Radar Mediabot::UserCommands Mediabot registr
         }
     }
 }
+# MB1333: database Unicode must obey the newcomers wire-byte budget.
+for my $case (
+    ['accent', 'é', 8],
+    ['emoji', '🌟', 8],
+    ['short ASCII', 'x', 8],
+    ['long ASCII', 'x', 10],
+) {
+    my ($label,$char,$count)=@$case;
+    my @names=map {($char x 19).$_} 0..$count-1;
+    my @rows=map {[sprintf('2026-11-01 08:%02d:00',$_),1,'public',1,$names[$_]]} 0..$#names;
+    # Ensure unrelated channel rows cannot enter the newcomer summary.
+    push @rows,['2026-11-01 08:00:00',1,'public',2,'Outside'];
+    my ($b,$h)=fixture_1426('2026-11-01',\@rows);
+    my $expected=$label eq 'accent' ? join(', ',@names[0..3]).', '.('é'x18).'...'
+        : $label eq 'emoji' ? join(', ',@names[0..1]).', '.('🌟'x10).'...'
+        : $label eq 'long ASCII' ? join(', ',@names[0..8]).', xx...'
+        : join(', ',@names);
+    my $error=invoke_1426($b,undef,'registry');
+    my @newcomers=map {$_->[2]} grep {$_->[2]=~/newcomers \(24h\):/} @wire;
+    is_deeply([$error,\@newcomers],['',["  🆕 newcomers (24h): $expected"]],
+        "$label: newcomer list retains whole UTF-8 characters within 200 prefix bytes plus ellipsis");
+    $h->disconnect;
+}
 is_deeply(\@warnings,[],'native calendar and standard reports, empty data and database failures are warning-free');
 done_testing;
