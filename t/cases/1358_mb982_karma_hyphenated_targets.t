@@ -394,4 +394,46 @@ for my $entry ('Mediabot::Karma') {
         }
     }
 }
+# MB1339: a requested time window applies to given votes as well as received votes.
+{
+    my ($bot,$peer)=setup_1358();
+    $bot->{_karma_log}={
+        '#test'=>[
+            {nick=>'bob',from=>'Alice',delta=>'+1',score=>10,ts=>time()-100},
+            {nick=>'carol',from=>'BoB',delta=>'+1',ts=>time()-100},
+            {nick=>'carol',giver=>'bob',delta=>'-1',ts=>time()-3600},
+            {nick=>'carol',from=>'bob',delta=>'+1',ts=>time()-3601},
+            {nick=>'carol',from=>'bob',delta=>'-1',ts=>time()-86400},
+            {nick=>'carol',from=>'bob',delta=>'+1',ts=>time()-86401},
+        ],
+        '#elsewhere'=>[
+            {nick=>'carol',from=>'bob',delta=>'+1',ts=>time()-100},
+            {nick=>'carol',from=>'bob',delta=>'+1',ts=>time()-90000},
+        ],
+    };
+    for my $route ('native','facade','registry') {
+        for my $scope ('channel','private','all') {
+            next if $route eq 'registry' && $scope eq 'private'; # command registered publicly only
+            for my $window ('1h','1d','') {
+                my @args=('bob',($scope eq 'all' ? ('all') : ()),($window ? ($window) : ()));
+                my $channel=$scope eq 'private' ? 'Reader' : '#TeSt';
+                my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>$channel,
+                    command=>'karmainfo',args=>\@args);
+                $ctx->{_user_fetched}=1;
+                @wire=();
+                if ($route eq 'registry') {
+                    $bot->command_registry->handler_for('karmainfo',$scope eq 'private' ? 'private' : 'public')->($ctx);
+                } elsif ($route eq 'facade') { Mediabot::UserCommands::mbKarmaInfo_ctx($ctx) }
+                else { Mediabot::Karma::mbKarmaInfo_ctx($ctx) }
+                my ($positive,$negative)=$window eq '1h' ? (1,1) : $window eq '1d' ? (2,2) : (3,2);
+                $positive+=($window ? 1 : 2) unless $scope eq 'channel';
+                my ($received)=$wire[0][2]=~/received ([+-]?\d+)/;
+                my ($given)=$wire[0][2]=~/given: (\+\d+\/-\d+)/;
+                is_deeply([scalar(@wire),$wire[0][1],$received,$given],
+                    [1,$scope eq 'channel' ? '#TeSt' : 'Reader','+1',"+$positive/-$negative"],
+                    "$route $scope window '$window': received and given share inclusive cutoff, unbounded queries stay intact");
+            }
+        }
+    }
+}
 done_testing;

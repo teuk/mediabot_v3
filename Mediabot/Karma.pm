@@ -667,7 +667,8 @@ sub mbKarmaInfo_ctx {
             push @all_entries_for_given, @{ $self->{_karma_log}{$ch} // [] };
         }
     }
-    my @given = grep { lc(($_->{from} // $_->{giver} // '')) eq $target } @all_entries_for_given;
+    my @given = grep { lc(($_->{from} // $_->{giver} // '')) eq $target
+        && ($_->{ts} // 0) >= $since } @all_entries_for_given;
     # B23/fix: _karma_log uses 'from' key, not 'giver'
     for my $e (@given) {
         if (($e->{delta} // '') eq '+1') { $given_pos++; }  # B24/fix

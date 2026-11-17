@@ -1,3 +1,9 @@
+## MB1339 — Apply karma information windows to given votes
+
+- Apply the requested karmainfo time cutoff to given votes as well as received votes.
+- Preserve channel/global scope, legacy giver records and unbounded queries.
+- Cover inclusive hour/day boundaries through native, facade and registered command handlers.
+
 ## MB1338 — Keep karma differences scoped to every IRC channel
 
 - Recognize #, &, ! and + channel targets in both karmadiff report forms.
