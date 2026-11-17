@@ -436,4 +436,41 @@ for my $entry ('Mediabot::Karma') {
         }
     }
 }
+# MB1344: every IRC channel prefix keeps karmainfo scoped and publicly routed.
+for my $prefix ('#','&','!','+') {
+    my ($bot,$peer)=setup_1358();
+    my $channel=$prefix.'TeSt';
+    $bot->{_karma_log}={
+        lc($channel)=>[
+            {nick=>'bob',from=>'Local',delta=>'+1',score=>7,ts=>time()-100},
+            {nick=>'carol',from=>'bob',delta=>'+1',ts=>time()-50},
+        ],
+        '#elsewhere'=>[
+            {nick=>'bob',from=>'Remote',delta=>'-1',score=>99,ts=>time()-20},
+            {nick=>'carol',from=>'bob',delta=>'-1',ts=>time()-10},
+        ],
+    };
+    for my $route ('native','facade','registry') {
+        my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>$channel,
+            command=>'karmainfo',args=>['bob','1h']);
+        $ctx->{_user_fetched}=1;
+        @wire=();
+        if ($route eq 'registry') { $bot->command_registry->handler_for('karmainfo','public')->($ctx) }
+        elsif ($route eq 'facade') { Mediabot::UserCommands::mbKarmaInfo_ctx($ctx) }
+        else { Mediabot::Karma::mbKarmaInfo_ctx($ctx) }
+        my $text=$wire[0][2] // '';
+        my ($score)=$text=~/\[score: ([+-]?\d+)\]/;
+        my ($received)=$text=~/received ([+-]?\d+)/;
+        my ($given)=$text=~/given: (\+\d+\/-\d+)/;
+        my ($voter)=$text=~/top voter: (\S+)/;
+        is_deeply([scalar(@wire),$wire[0][1],$score,$received,$given,$voter],
+            [1,$channel,'+7','+1','+1/-0','Local'],
+            "$route $prefix: current channel owns scores, votes, top voter and reply");
+    }
+    @wire=();
+    Mediabot::Karma::mbKarmaInfo_ctx(Mediabot::Context->new(bot=>$bot,nick=>'Reader',
+        channel=>$prefix.'Empty',args=>['bob']));
+    is_deeply(\@wire,[['public',$prefix.'Empty','bob: no karma activity in log.']],
+        "$prefix: empty channel never falls back to another channel's activity");
+}
 done_testing;

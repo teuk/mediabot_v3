@@ -633,7 +633,7 @@ sub mbKarmaInfo_ctx {
 
     # KI1/fix: karmainfo works in PM — use $channel if public, else nick-scoped log
     # mb113-IMP1: mode 'all' force la recherche cross-canal
-    my $klog_chan = (!$all_chans && defined $channel && $channel =~ /^#/) ? $channel : undef;
+    my $klog_chan = (!$all_chans && is_channel($channel)) ? $channel : undef;
     my @entries;
     if ($klog_chan) {
         my $klog = $self->{_karma_log}{lc $klog_chan} // [];

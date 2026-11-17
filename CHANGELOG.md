@@ -1,3 +1,9 @@
+## MB1344 — Keep karma information scoped on every IRC channel type
+
+- Use the shared IRC channel classifier for karmainfo, including &, ! and + prefixes.
+- Keep received/given votes, score and top voter scoped to the current channel, with replies sent there.
+- Preserve explicit all-channel and private queries; an empty channel never borrows unrelated history.
+
 ## MB1343 — Preserve Unicode digits in seen excerpts
 
 - Restrict mIRC colour parameters to ASCII digits so cleanup never consumes Unicode numbers from message text.
