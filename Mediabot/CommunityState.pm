@@ -795,7 +795,8 @@ sub mbRemindSnooze_ctx {
     my ($sth2, $rows);
     my $update_ok = eval {
         $sth2 = $self->{dbh}->prepare(
-            'UPDATE REMINDERS SET message = ? WHERE id_reminder = ? AND from_nick = ? AND delivered = 0 AND message = ?'
+            # Match the exact snapshot even under a case-insensitive SQL collation.
+            'UPDATE REMINDERS SET message = ? WHERE id_reminder = ? AND from_nick = ? AND delivered = 0 AND HEX(message) = HEX(?)'
         ) or die 'reminder update prepare failed';
         $sth2->execute($new_msg, $id, lc($nick), $stored_message) or die 'reminder update execute failed';
         $rows = $sth2->rows;

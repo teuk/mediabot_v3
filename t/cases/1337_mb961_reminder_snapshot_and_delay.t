@@ -271,4 +271,31 @@ MB881OutputFixture::with_policy(sub {
             'requeue SQL failures stay bounded and nonthrowing; conditional release cannot overwrite cancellation, a changed body or deletion');
     }
 });
+# MB1340: a case-insensitive SQL collation must not let a stale snooze
+# overwrite another connection's message, even when only its case changed.
+for my $raise (0,1) {
+    for my $prefix ('','[daily:09:00] ','[weekly:1:09:00] ') {
+        my $original=$prefix.'[at:100] Un café';
+        my $changed=$prefix.'[at:100] UN café';
+        my ($bot,$db,undef,$peer)=setup_1337($original);
+        $db->{RaiseError}=$raise;
+        $db->{private_mb961_snooze}=sub {
+            $peer->do('UPDATE REMINDERS SET message=? WHERE id_reminder=1',undef,$changed);
+        };
+        invoke_1337($bot,'Mediabot::CommunityState','mbRemindSnooze_ctx','1','1h');
+        is_deeply($peer->selectrow_arrayref('SELECT message,delivered FROM REMINDERS WHERE id_reminder=1'),
+            [$changed,0],"case-only concurrent edit survives stale snooze (RaiseError=$raise, $prefix)");
+        like($wire[-1][2],qr/changed or is no longer pending/,'conflict is reported without a false success');
+        @wire=();
+        invoke_1337($bot,'Mediabot::CommunityState','mbRemindSnooze_ctx','1','1h');
+        my $expected='[at:4600] '.$prefix.'UN café';
+        is($peer->selectrow_array('SELECT message FROM REMINDERS WHERE id_reminder=1'),$expected,
+            'fresh snooze retains the changed text and recurrence');
+        like($wire[-1][2],qr/snoozed for/,'fresh snooze is acknowledged');
+        invoke_1337($bot,'Mediabot::CommunityState','mbRemindSnooze_ctx','1','1h');
+        is($peer->selectrow_array('SELECT message FROM REMINDERS WHERE id_reminder=1'),$expected,
+            'identical repeat remains idempotent');
+        is(scalar @warnings,0,'race and recovery emit no warnings');
+    }
+}
 done_testing;

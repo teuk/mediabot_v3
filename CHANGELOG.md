@@ -1,3 +1,9 @@
+## MB1340 — Preserve concurrent reminder text during snooze
+
+- Compare the exact stored message before a snooze update, even under case-insensitive SQL collations.
+- Reject stale case-only snapshots without overwriting another writer or falsely acknowledging success.
+- Cover two-connection races, fresh recovery and repeated snoozes for ordinary, daily and weekly reminders with RaiseError on/off.
+
 ## MB1339 — Apply karma information windows to given votes
 
 - Apply the requested karmainfo time cutoff to given votes as well as received votes.
