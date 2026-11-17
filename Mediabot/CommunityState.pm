@@ -1031,7 +1031,7 @@ sub mbPollExtend_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    my $extra   = ($args[0] // 0) =~ /^(\d+)$/ ? int($args[0]) : 60;
+    my $extra   = defined($args[0]) && $args[0] =~ /^(\d+)$/ ? int($args[0]) : 60;
     $extra = 10 if $extra < 10; $extra = 600 if $extra > 600;
     my $poll = $self->{_polls}{lc($channel // '')};
     unless ($poll && $poll->{active}) {

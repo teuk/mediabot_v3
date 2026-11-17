@@ -68,4 +68,28 @@ invoke_1407('poll','#Room{one}','Brace? | A | B');
 is(scalar(matching_1407('#room[one]'))+scalar(matching_1407('#room{one}')),2,
     'existing punctuation-distinct channel cache keys are not merged by an unnegotiated mapping');
 is_deeply(\@warnings,[],'case-varying poll commands are warning-free');
+# MB1345: omitted seconds follow the fallback, rather than int(undef) -> 10.
+for my $route ('native','facade','registry') {
+    for my $deadline (1900,2100) {
+        for my $case ([[],60], [['0'],10], [['30'],30], [['900'],600], [['bad'],60]) {
+            my ($args,$extra)=@$case;
+            my $state={active=>1,question=>'Keep ballots?',options=>['Yes','No'],
+                votes=>{alice=>0,bob=>1},started=>1800,deadline=>$deadline};
+            $bot->{_polls}{'#test'}=dclone($state);
+            my $expected=dclone($bot->{_polls});
+            $expected->{'#test'}{deadline}=($deadline>2000?$deadline:2000)+$extra;
+            $bot->{wire}=[]; @warnings=();
+            my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Creator',channel=>'#TeSt',
+                command=>'pollextend',args=>$args);
+            $ctx->{user}=$master;$ctx->{_user_fetched}=1;
+            if ($route eq 'registry') { $bot->command_registry->handler_for('pollextend','public')->($ctx) }
+            elsif ($route eq 'facade') { Mediabot::UserCommands::mbPollExtend_ctx($ctx) }
+            else { Mediabot::CommunityState::mbPollExtend_ctx($ctx) }
+            my $remaining=$expected->{'#test'}{deadline}-2000;
+            is_deeply([$bot->{_polls},$bot->{wire},\@warnings],
+                [$expected,[['public','#TeSt',"Poll extended by ${extra}s (${remaining}s remaining)."]],[]],
+                "$route deadline=$deadline args='@$args': correct extension without warnings or ballot changes");
+        }
+    }
+}
 done_testing;

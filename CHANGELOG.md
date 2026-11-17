@@ -1,3 +1,9 @@
+## MB1345 — Restore the omitted poll-extension duration
+
+- Use the existing 60-second fallback when pollextend receives no duration, avoiding int(undef) and an unintended 10-second extension.
+- Preserve explicit zero/minimum, ordinary durations, the 600-second cap and invalid-input fallback.
+- Cover future and overdue deadlines through native, facade and registered handlers without changing ballots or other channels.
+
 ## MB1344 — Keep karma information scoped on every IRC channel type
 
 - Use the shared IRC channel classifier for karmainfo, including &, ! and + prefixes.
