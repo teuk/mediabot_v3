@@ -1,0 +1,556 @@
+package MB1335::Case1031;
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use utf8;
+use Test::More;
+use lib '.';
+
+use Mediabot::Fullop;
+
+{
+    package Local::Fullop::ChannelBan;
+
+    sub new {
+        my ($class, %args) = @_;
+        return bless {
+            added         => [],
+            error         => $args{error},
+            existing_mask => $args{existing_mask},
+        }, $class;
+    }
+    sub mask_from_hostmask {
+        my ($self, $prefix) = @_;
+        my (undef, $ident, $host) = $prefix =~ /^([^!]+)!([^@]+)\@(.+)$/;
+        return defined($host) ? "*!*$ident\@$host" : undef;
+    }
+    sub add_ban {
+        my ($self, %args) = @_;
+        push @{ $self->{added} }, { %args };
+        return (undef, $self->{error}) if defined $self->{error};
+        return (scalar(@{ $self->{added} }), undef);
+    }
+    sub active_ban_for_mask {
+        my ($self) = @_;
+        return undef unless defined $self->{existing_mask};
+        return { id_channel_ban => 9, mask => $self->{existing_mask} };
+    }
+}
+
+sub build_guard {
+    my (%opts) = @_;
+    my (@sent, @announced);
+    my $bans = Local::Fullop::ChannelBan->new(
+        error         => $opts{ban_error},
+        existing_mask => $opts{existing_mask},
+    );
+    my $guard = Mediabot::Fullop->new(
+        network       => ($opts{network} // 'UnknownNet'),
+        channel_ban   => $bans,
+        enabled_cb    => sub { $opts{enabled} // 1 },
+        privileged_cb => sub { $opts{privileged} // 0 },
+        channel_id_cb => sub { 42 },
+        nicklist_cb   => sub { @{ $opts{nicks} || [] } },
+        send_cb       => sub { push @sent, [@_]; return 1 },
+        announce_cb   => sub { push @announced, [@_]; return 1 },
+        now_cb        => $opts{now_cb},
+        delegated_service_masks => $opts{delegated_service_masks},
+    );
+    return ($guard, \@sent, \@announced, $bans);
+}
+
+my ($libera, $libera_sent, $libera_announced, $libera_bans) =
+    build_guard(network => 'Libera.Chat');
+$libera->update_isupport(
+    'NETWORK=Libera.Chat',
+    'PREFIX=(qaohv)~&@%+',
+    'CHANMODES=beI,k,l,imnpst',
+    'MODES=3',
+    'CASEMAPPING=rfc1459',
+);
+
+is_deeply(
+    [ $libera->names_from_blob('~Owner @+Alice Bob') ],
+    [ qw(Owner Alice Bob) ],
+    'NAMES tokens are normalized with live multi-prefix semantics',
+);
+
+my @q = $libera->parse_mode_changes('+q', 'Alice');
+is($q[0]{category}, 'status', 'Libera +q is parsed as an owner status, not a quiet list');
+
+my @mixed = $libera->parse_mode_changes('+b-o', '*!*@victim.example', 'Victim');
+is_deeply(
+    [ map { [ @{$_}{qw(sign mode category arg)} ] } @mixed ],
+    [
+        [ '+', 'b', 'A',      '*!*@victim.example' ],
+        [ '-', 'o', 'status', 'Victim' ],
+    ],
+    'ISUPPORT drives mixed MODE argument consumption',
+);
+
+my $result = $libera->handle_mode(
+    channel     => '#open',
+    prefix      => 'BadOp!ident@users.example',
+    mode_string => '+b-o',
+    mode_args   => [ '*!*@victim.example', 'Victim' ],
+);
+is($result->{protected}, 2, 'ban and deop are both protected');
+is($result->{sanctioned}, 1, 'one sanction is issued for the MODE line');
+is(scalar(@{ $libera_bans->{added} }), 1, 'one persistent ban is stored');
+is($libera_bans->{added}[0]{expires_seconds}, 600, 'sanction lasts ten minutes');
+is($libera_bans->{added}[0]{source}, 'fullop', 'sanction source is auditable');
+is($libera_bans->{added}[0]{reason}, q{hey ho, c'est pas le genre de la maison},
+    'required French reason is preserved exactly');
+is_deeply(
+    $libera_announced,
+    [[ '#open', q{BadOp: hey ho, c'est pas le genre de la maison} ]],
+    'the fixed response is visible once on channel',
+);
+is_deeply(
+    $libera_sent,
+    [
+        [ 'MODE', undef, '#open', '-b', '*!*@victim.example' ],
+        [ 'MODE', undef, '#open', '+o', 'Victim' ],
+        [ 'MODE', undef, '#open', '+b', '*!*ident@users.example' ],
+        [ 'KICK', undef, '#open', 'BadOp', q{hey ho, c'est pas le genre de la maison} ],
+    ],
+    'restriction is reversed before the ten-minute kickban',
+);
+
+my ($trusted, $trusted_sent, $trusted_announced, $trusted_bans) =
+    build_guard(network => 'Libera.Chat', privileged => 1);
+$trusted->update_isupport('PREFIX=(qaohv)~&@%+', 'CHANMODES=beI,k,l,imnpst');
+my $trusted_result = $trusted->handle_mode(
+    channel     => '#open',
+    prefix      => 'Admin!ident@users.example',
+    mode_string => '+b',
+    mode_args   => [ '*!*@blocked.example' ],
+);
+is($trusted_result->{privileged}, 1, 'authenticated privileged actor is exempt');
+is_deeply($trusted_sent, [], 'privileged restriction is not reversed');
+is_deeply($trusted_announced, [], 'privileged actor is not admonished');
+is(scalar(@{ $trusted_bans->{added} }), 0, 'privileged actor is not sanctioned');
+
+my ($quiet, $quiet_sent, $quiet_announced, $quiet_bans) =
+    build_guard(network => 'GenericNet');
+$quiet->update_isupport('PREFIX=(ohv)@%+', 'CHANMODES=bqeI,k,l,imnpst');
+my @quiet_change = $quiet->parse_mode_changes('+q', '*!*@talker.example');
+is($quiet_change[0]{category}, 'A', 'generic +q is a quiet list when CHANMODES says so');
+$quiet->handle_mode(
+    channel     => '#open',
+    prefix      => 'BadOp!ident@users.example',
+    mode_string => '+q',
+    mode_args   => [ '*!*@talker.example' ],
+);
+is_deeply($quiet_sent->[0], [ 'MODE', undef, '#open', '-q', '*!*@talker.example' ],
+    'quiet is immediately removed');
+
+my ($epik, $epik_sent, $epik_announced, $epik_bans) =
+    build_guard(network => 'EpiKnet');
+$epik->update_isupport('PREFIX=(qaohv)~&@%+', 'CHANMODES=beI,kLM,l,imnpst');
+$epik->handle_mode(
+    channel     => '#open',
+    prefix      => 'BadOp!ident@users.example',
+    mode_string => '+M',
+    mode_args   => [ 'account-only' ],
+);
+is_deeply($epik_sent->[0], [ 'MODE', undef, '#open', '-M', 'account-only' ],
+    'network profile protects an EpiK/InspIRCd restriction');
+
+my $delegation_now = 1_000;
+my ($delegated, $delegated_sent, $delegated_announced, $delegated_bans) =
+    build_guard(
+        network => 'ExampleNet',
+        delegated_service_masks => ['Mirror!service@services.example'],
+        now_cb  => sub { $delegation_now },
+    );
+$delegated->update_isupport(
+    'NETWORK=ExampleNet',
+    'PREFIX=(qaohv)~&@%+',
+    'CHANMODES=beI,k,l,imnpst',
+);
+is(
+    $delegated->authorize_delegated_ban(
+        channel => '#open',
+        mask    => '*!*victim@users.example',
+        ban_id  => 17,
+    ),
+    1,
+    'an authorized stored ban arms one configured relay delegation',
+);
+my $delegated_result = $delegated->handle_mode(
+    channel     => '#open',
+    prefix      => 'Mirror!service@services.example',
+    mode_string => '+b',
+    mode_args   => [ '*!*@users.example' ],
+);
+is($delegated_result->{delegated}, 1,
+    'configured mirror for the same literal host consumes the delegation');
+is($delegated_result->{sanctioned}, 0,
+    'the correlated service mirror is not sanctioned');
+is_deeply($delegated_sent, [],
+    'the correlated service mirror is neither reversed nor answered');
+is_deeply($delegated_announced, [],
+    'the fixed warning is not emitted for a correlated mirror');
+is(scalar(@{ $delegated_bans->{added} }), 0,
+    'the correlated mirror creates no Fullop actor sanction');
+
+my $replayed_result = $delegated->handle_mode(
+    channel     => '#open',
+    prefix      => 'Mirror!service@services.example',
+    mode_string => '+b',
+    mode_args   => [ '*!*other@users.example' ],
+);
+is($replayed_result->{delegated}, 0,
+    'the consumed delegation cannot authorize a second service ban');
+is($replayed_result->{sanctioned}, 1,
+    'a second service ban follows the normal Fullop sanction path');
+
+my $expiry_now = 2_000;
+my ($expired, $expired_sent, undef, $expired_bans) = build_guard(
+    network => 'ExampleNet',
+    delegated_service_masks => ['Mirror!service@services.example'],
+    now_cb  => sub { $expiry_now },
+);
+$expired->update_isupport('PREFIX=(qaohv)~&@%+', 'CHANMODES=beI,k,l,imnpst');
+is($expired->authorize_delegated_ban(
+    channel => '#open', mask => '*!*victim@expiry.example'), 1,
+    'a literal target host can arm a short delegation');
+$expiry_now += 6;
+my $expired_result = $expired->handle_mode(
+    channel     => '#open',
+    prefix      => 'Mirror!service@services.example',
+    mode_string => '+b',
+    mode_args   => [ '*!*@expiry.example' ],
+);
+is($expired_result->{sanctioned}, 1,
+    'an expired service delegation cannot authorize a late ban');
+is_deeply($expired_sent->[0], [ 'MODE', undef, '#open', '-b', '*!*@expiry.example' ],
+    'the late ban is reversed normally');
+is(scalar(@{ $expired_bans->{added} }), 1,
+    'the late service actor receives the normal durable sanction');
+
+my ($wrong_network) = build_guard(network => 'Radiocapsule');
+is($wrong_network->authorize_delegated_ban(
+    channel => '#open', mask => '*!*victim@users.example'), 0,
+    'a network without a configured relay cannot arm delegation');
+
+my ($wildcard_target) = build_guard(network => 'ExampleNet',
+    delegated_service_masks => ['Mirror!service@services.example']);
+is($wildcard_target->authorize_delegated_ban(
+    channel => '#open', mask => '*!*victim@*.example'), 0,
+    'a wildcard target host cannot arm delegation');
+
+my ($wrong_target, $wrong_target_sent, undef, $wrong_target_bans) =
+    build_guard(network => 'ExampleNet',
+        delegated_service_masks => ['Mirror!service@services.example']);
+$wrong_target->update_isupport('PREFIX=(qaohv)~&@%+', 'CHANMODES=beI,k,l,imnpst');
+is($wrong_target->authorize_delegated_ban(
+    channel => '#open', mask => '*!*victim@expected.example'), 1,
+    'the expected literal host is recorded');
+my $wrong_target_result = $wrong_target->handle_mode(
+    channel     => '#open',
+    prefix      => 'Mirror!service@services.example',
+    mode_string => '+b',
+    mode_args   => [ '*!*@other.example' ],
+);
+is($wrong_target_result->{sanctioned}, 1,
+    'a service ban for another host cannot consume the delegation');
+is_deeply($wrong_target_sent->[0],
+    [ 'MODE', undef, '#open', '-b', '*!*@other.example' ],
+    'the wrong-target service ban is reversed');
+is(scalar(@{ $wrong_target_bans->{added} }), 1,
+    'the wrong-target service actor follows the durable sanction path');
+
+my ($stateful, $stateful_sent) = build_guard(network => 'GenericNet');
+$stateful->update_isupport('PREFIX=(ov)@+', 'CHANMODES=beI,k,l,imnpst');
+$stateful->remember_channel_modes('#open', '+mk', 'old-secret');
+$stateful->handle_mode(
+    channel     => '#open',
+    prefix      => 'BadOp!ident@users.example',
+    mode_string => '+k',
+    mode_args   => [ 'new-secret' ],
+);
+is_deeply(
+    [ @$stateful_sent[0, 1] ],
+    [
+        [ 'MODE', undef, '#open', '-k', 'new-secret' ],
+        [ 'MODE', undef, '#open', '+k', 'old-secret' ],
+    ],
+    'a replaced channel key is removed and the prior key is restored',
+);
+
+my ($key_remove, $key_remove_sent) = build_guard(network => 'GenericNet');
+$key_remove->update_isupport('PREFIX=(ov)@+', 'CHANMODES=beI,k,l,imnpst');
+$key_remove->remember_channel_modes('#open', '+k', 'old-secret');
+$key_remove->handle_mode(
+    channel     => '#open',
+    prefix      => 'BadOp!ident@users.example',
+    mode_string => '-k',
+    mode_args   => [ '*' ],
+);
+is_deeply($key_remove_sent->[0], [ 'MODE', undef, '#open', '+k', 'old-secret' ],
+    'a hidden -k argument is repaired from the numeric 324 state');
+
+my ($duplicate, $duplicate_sent) = build_guard(network => 'GenericNet');
+$duplicate->update_isupport('PREFIX=(ov)@+', 'CHANMODES=beI,k,l,imnpst');
+$duplicate->remember_channel_modes('#open', '+m');
+$duplicate->handle_mode(
+    channel     => '#open',
+    prefix      => 'BadOp!ident@users.example',
+    mode_string => '+m',
+    mode_args   => [],
+);
+is_deeply($duplicate_sent->[0],
+    [ 'MODE', undef, '#open', '+b', '*!*ident@users.example' ],
+    'a duplicate restrictive mode never removes a pre-existing trusted mode');
+
+my ($persist_fail, $persist_fail_sent, $persist_fail_announced) = build_guard(
+    network   => 'GenericNet',
+    ban_error => 'database execute error',
+);
+$persist_fail->update_isupport('PREFIX=(ov)@+', 'CHANMODES=beI,k,l,imnpst');
+my $persist_fail_result = $persist_fail->handle_mode(
+    channel     => '#open',
+    prefix      => 'BadOp!ident@users.example',
+    mode_string => '+m',
+    mode_args   => [],
+);
+is($persist_fail_result->{corrected}, 1,
+    'restriction is still reversed when persistent sanction storage fails');
+is($persist_fail_result->{sanctioned}, 0,
+    'failed persistent storage is not reported as a ten-minute sanction');
+is_deeply(
+    $persist_fail_sent,
+    [
+        [ 'MODE', undef, '#open', '-m' ],
+        [ 'KICK', undef, '#open', 'BadOp', q{hey ho, c'est pas le genre de la maison} ],
+    ],
+    'storage failure kicks the actor but never creates an unmanaged IRC ban',
+);
+is_deeply(
+    $persist_fail_announced,
+    [[ '#open', q{BadOp: hey ho, c'est pas le genre de la maison} ]],
+    'storage failure keeps the required visible warning',
+);
+
+my ($existing_ban, $existing_ban_sent) = build_guard(
+    network       => 'GenericNet',
+    ban_error     => 'an active ban already exists for *!*ident@users.example (id 9)',
+    existing_mask => '*!*@users.example',
+);
+$existing_ban->update_isupport('PREFIX=(ov)@+', 'CHANMODES=beI,k,l,imnpst');
+my $existing_ban_result = $existing_ban->handle_mode(
+    channel     => '#open',
+    prefix      => 'BadOp!ident@users.example',
+    mode_string => '+m',
+    mode_args   => [],
+);
+is($existing_ban_result->{sanctioned}, 1,
+    'an already active durable ban remains safe to enforce');
+is_deeply(
+    $existing_ban_sent,
+    [
+        [ 'MODE', undef, '#open', '-m' ],
+        [ 'MODE', undef, '#open', '+b', '*!*@users.example' ],
+        [ 'KICK', undef, '#open', 'BadOp', q{hey ho, c'est pas le genre de la maison} ],
+    ],
+    'an existing durable ban reuses the exact mask the expiry worker will remove',
+);
+
+my ($topic, $topic_sent, $topic_announced, $topic_bans) =
+    build_guard(network => 'GenericNet');
+$topic->update_isupport('PREFIX=(ov)@+', 'CHANMODES=beI,k,l,imnpst');
+my $topic_result = $topic->handle_mode(
+    channel     => '#open',
+    prefix      => 'FriendlyOp!ident@users.example',
+    mode_string => '+t',
+    mode_args   => [],
+);
+is($topic_result->{sanctioned}, 0, 'non-restrictive topic protection is left alone');
+is_deeply($topic_sent, [], 'ordinary harmless MODE is untouched');
+is(scalar(@{ $topic_bans->{added} }), 0, 'harmless MODE causes no ban');
+
+my ($joins, $join_sent) = build_guard(
+    network => 'GenericNet',
+    nicks   => [qw(Alice Bob Carol Dave)],
+);
+$joins->update_isupport('MODES=3');
+is($joins->sweep_channel('#open'), 4, 'current users are swept immediately');
+is_deeply(
+    $join_sent,
+    [
+        [ 'MODE', undef, '#open', '+ooo', qw(Alice Bob Carol) ],
+        [ 'MODE', undef, '#open', '+o', 'Dave' ],
+    ],
+    'op sweep respects the server-advertised MODES limit',
+);
+
+my ($casemap, $casemap_sent) = build_guard(network => 'GenericNet');
+$casemap->update_isupport('MODES=4', 'CASEMAPPING=rfc1459');
+is($casemap->sweep_channel('#open', '[Alice', '{Alice'), 1,
+    'RFC1459-equivalent nick spellings are deduplicated');
+is_deeply($casemap_sent->[0], [ 'MODE', undef, '#open', '+o', '[Alice' ],
+    'op sweep keeps the first server spelling after casemap deduplication');
+
+my ($disabled, $disabled_sent) = build_guard(enabled => 0);
+is($disabled->handle_join('#closed', 'Alice'), 0, 'feature fails closed without +Fullop');
+is_deeply($disabled_sent, [], 'disabled channel receives no IRC mutation');
+
+# MB1257: withdrawn server rules must stop affecting actual policy operations.
+my ($withdrawn, $withdrawn_sent) = build_guard(network => 'GenericNet');
+$withdrawn->update_isupport('CASEMAPPING=ascii', 'PREFIX=(ohv)@%+',
+    'CHANMODES=beI,k,x,imnpst', 'MODES=1', 'NETWORK=EpikNet');
+is($withdrawn->sweep_channel('#open', '[Alice', '{Alice'), 2,
+    'withdrawal fixture starts with distinct ASCII nicknames');
+is(scalar @$withdrawn_sent, 2, 'advertised MODES=1 emits separate batches');
+is_deeply([$withdrawn->names_from_blob('%Half @Op')], ['Half','Op'],
+    'advertised halfop prefix is consumed');
+my @before_modes = $withdrawn->parse_mode_changes('+x', '12');
+is($before_modes[0]{category}, 'C', 'advertised mode grammar is active');
+$withdrawn->remember_channel_modes('#open', '+k', 'old-key');
+$withdrawn->{pending_delegated_bans} = [{ channel => '#open' }];
+$withdrawn->update_isupport('-CASEMAPPING', '-PREFIX', '-CHANMODES', '-MODES', '-NETWORK');
+is_deeply($withdrawn->{isupport}, {}, 'withdrawn rules disappear from raw announcements');
+is_deeply($withdrawn->{channel_state}, {}, 'old mode snapshot is not reinterpreted');
+is_deeply($withdrawn->{pending_delegated_bans}, [], 'old correlations are retired');
+is($withdrawn->network_name, 'GenericNet', 'withdrawal restores configured network');
+@$withdrawn_sent = ();
+is($withdrawn->sweep_channel('#open', '[Alice', '{Alice', 'Bob'), 2,
+    'withdrawal restores historical RFC1459 deduplication');
+is_deeply($withdrawn_sent, [['MODE', undef, '#open', '+oo', '[Alice', 'Bob']],
+    'withdrawal restores batching instead of retaining MODES=1');
+is_deeply([$withdrawn->names_from_blob('%Half @Op +Voice')], ['%Half','Op','Voice'],
+    'withdrawn prefix no longer strips a nickname character');
+my @after_modes = $withdrawn->parse_mode_changes('+xl', '23');
+is_deeply([map { [$_->{category}, $_->{arg}] } @after_modes],
+    [['unknown', undef], ['C', '23']], 'withdrawn grammar no longer consumes the limit argument');
+$withdrawn->remember_channel_modes('#fresh', '+k', 'fresh-key');
+$withdrawn->update_isupport('-CASEMAPPING','-PREFIX','-CHANMODES','-MODES','-NETWORK','-UNSEEN');
+is($withdrawn->_prior_scalar_arg('#fresh','k'), 'fresh-key',
+    'repeated withdrawals do not destroy newly observed state');
+$withdrawn->update_isupport('MODES=1','CASEMAPPING=ascii','PREFIX=(ohv)@%+');
+@$withdrawn_sent = ();
+is($withdrawn->sweep_channel('#open', '[Alice', '{Alice'), 2,
+    'a later announcement becomes authoritative again');
+is(scalar @$withdrawn_sent, 2, 'reannounced batching is used');
+is_deeply([$withdrawn->names_from_blob('%Half')], ['Half'], 'reannounced prefix is used');
+
+# Every withdrawal independently clears its derived value, not just a batch.
+for my $case (
+    ['CASEMAPPING', 'ascii', 'casemapping', 'rfc1459'],
+    ['MODES', '1', 'max_modes', 4],
+    ['PREFIX', '(ohv)@%+', 'prefix_order', 'ov'],
+    ['CHANMODES', 'beI,k,x,imnpst', 'chanmode_groups', ['beI','k','l','imnpst']],
+    ['NETWORK', 'EpikNet', 'network', 'GenericNet'],
+) {
+    my ($key,$value,$field,$expected) = @$case;
+    my ($guard) = build_guard(network => 'GenericNet');
+    $guard->update_isupport("$key=$value", 'CUSTOM=keep');
+    $guard->update_isupport(':-' . lc($key));
+    is_deeply($guard->{$field}, $expected, "$key withdrawal restores its own baseline");
+    is($guard->{isupport}{CUSTOM}, 'keep', "$key withdrawal preserves unrelated announcements");
+}
+my ($unknown) = build_guard;
+$unknown->remember_channel_modes('#open', '+k', 'kept');
+$unknown->update_isupport('CUSTOM=one', '-CUSTOM');
+is($unknown->_prior_scalar_arg('#open','k'), 'kept', 'unknown capability removal preserves mode state');
+
+# MB1258: model a transport replacement without reconstructing Fullop policy.
+my ($transport, $transport_sent, $transport_announced, $transport_bans) =
+    build_guard(network => 'GenericNet');
+$transport->update_isupport('NETWORK=EpikNet', 'CASEMAPPING=ascii',
+    'PREFIX=(ohv)@%+', 'CHANMODES=beI,k,x,imnpst', 'MODES=1', 'CUSTOM=old');
+$transport->remember_channel_modes('#open', '+k', 'previous-server-key');
+$transport->{pending_delegated_bans} = [{ channel => '#open', mask => '*!*@old' }];
+my $reset = $transport->can('reset_connection');
+ok($reset, 'Fullop owns an explicit connection reset');
+$reset->($transport) if $reset;
+is($transport->{channel_ban}, $transport_bans, 'connection reset retains the durable ban service');
+is_deeply($transport->{channel_state}, {}, 'connection reset discards prior channel modes');
+is_deeply($transport->{pending_delegated_bans}, [], 'connection reset retires delegated correlations');
+is_deeply($transport->{isupport}, {}, 'connection reset removes custom and known announcements');
+is($transport->network_name, 'GenericNet', 'connection reset restores configured network');
+is_deeply($transport_sent, [], 'reset emits no IRC commands');
+is_deeply($transport_announced, [], 'reset emits no channel announcements');
+is_deeply($transport_bans->{added}, [], 'reset writes no persistent ban');
+is_deeply([$transport->names_from_blob('%Half @Op +Voice')], ['%Half','Op','Voice'],
+    'old server prefix cannot strip the new server names');
+my @grammar = $transport->parse_mode_changes('+xl','42');
+is_deeply([map { [$_->{category}, $_->{arg}] } @grammar],
+    [['unknown',undef],['C','42']], 'old server grammar cannot consume a new limit');
+is($transport->sweep_channel('#open','[Alice','{Alice','Bob'), 2,
+    'new connection uses the baseline folding rule');
+is_deeply($transport_sent, [['MODE',undef,'#open','+oo','[Alice','Bob']],
+    'new connection uses baseline batching');
+@$transport_sent = ();
+$transport->handle_mode(channel=>'#open', prefix=>'Bad!ident@host',
+    mode_string=>'-k', mode_args=>['*']);
+ok(!grep({ join(' ', map { defined($_) ? $_ : '' } @$_) =~ /previous-server-key/ } @$transport_sent),
+    'a new-server removal cannot restore the previous-server channel key');
+$reset->($transport) if $reset;
+$reset->($transport) if $reset;
+is_deeply($transport->{channel_state}, {}, 'repeated reset leaves empty connection state');
+$transport->update_isupport('CASEMAPPING=ascii','PREFIX=(ohv)@%+','MODES=1');
+@$transport_sent = ();
+is($transport->sweep_channel('#open','[Alice','{Alice'), 2,
+    'new server can announce a different mapping');
+is(scalar @$transport_sent, 2, 'new server batching becomes effective');
+is_deeply([$transport->names_from_blob('%Half')], ['Half'], 'new server prefixes become effective');
+$transport->remember_channel_modes('#open', '+k', 'new-server-key');
+is($transport->_prior_scalar_arg('#open','k'), 'new-server-key', 'new channel observations rebuild state');
+my ($privileged_reset, $privileged_sent) = build_guard(privileged=>1, network=>'EpikNet');
+$privileged_reset->update_isupport('NETWORK=OtherNet');
+$reset->($privileged_reset) if $reset;
+is($privileged_reset->network_name, 'EpikNet', 'configured service network survives reset');
+$privileged_reset->handle_mode(channel=>'#open',prefix=>'Owner!i@h',mode_string=>'+m',mode_args=>[]);
+is_deeply($privileged_sent, [], 'privileged actor callback remains authoritative');
+my ($disabled_reset, $disabled_wire) = build_guard(enabled=>0);
+$reset->($disabled_reset) if $reset;
+is($disabled_reset->handle_join('#closed','Alice'),0,'disabled policy remains disabled after reset');
+is_deeply($disabled_wire, [], 'reset cannot enable moderation');
+
+
+# MB1266: a channel-mode snapshot is not a replacement ban/member-status list.
+{
+    my ($guard,$sent)=build_guard(privileged=>1);
+    $guard->handle_mode(channel=>'#open',prefix=>'Admin!i@host',
+        mode_string=>'+bo',mode_args=>['*!*@kept.example','Alice']);
+    $guard->remember_channel_modes('#other','+k','other-key');
+    is($guard->remember_channel_modes('#open','+mkl','first-key',12),3,
+        'channel snapshot retains its parsed-change count');
+    is_deeply($guard->{channel_state}{'#open'}{list},{b=>{'*!*@kept.example'=>1}},
+        '324 does not erase a separately observed ban');
+    is_deeply($guard->{channel_state}{'#open'}{status},{o=>{alice=>'Alice'}},
+        '324 does not erase a separately observed member status');
+    $guard->remember_channel_modes('#open','+nt');
+    is_deeply($guard->{channel_state}{'#open'}{simple},{n=>1,t=>1},
+        'a new snapshot still replaces absent simple modes');
+    is_deeply($guard->{channel_state}{'#open'}{scalar},{},
+        'a new snapshot still removes absent key and limit');
+    is_deeply($guard->{channel_state}{'#other'}{scalar},{k=>'other-key'},
+        'snapshot does not alter another channel');
+    $guard->{privileged_cb}=sub {0};
+    my $r=$guard->handle_mode(channel=>'#open',prefix=>'User!i@host',
+        mode_string=>'+b',mode_args=>['*!*@kept.example']);
+    is($r->{corrected},0,'duplicate ban is not inverted after a channel snapshot');
+    ok(!grep({$_->[0] eq 'MODE' && $_->[3] eq '-b' && $_->[4] eq '*!*@kept.example'} @$sent),
+        'existing ban is not removed by an erroneous correction');
+    $guard->{privileged_cb}=sub {1};
+    $guard->handle_mode(channel=>'#open',prefix=>'Admin!i@host',
+        mode_string=>'-bo',mode_args=>['*!*@kept.example','Alice']);
+    $guard->remember_channel_modes('#open','+s');
+    ok(!exists $guard->{channel_state}{'#open'}{list}{b}{'*!*@kept.example'},
+        'explicit ban removal remains removed after a snapshot');
+    ok(!exists $guard->{channel_state}{'#open'}{status}{o}{alice},
+        'explicit status removal remains removed after a snapshot');
+    $guard->reset_connection;
+    is_deeply($guard->{channel_state},{},'transport reset still discards all observed state');
+    $guard->remember_channel_modes('#fresh','+k','fresh-key');
+    is_deeply($guard->{channel_state}{'#fresh'},
+        {simple=>{},scalar=>{k=>'fresh-key'},list=>{},status=>{}},
+        'first snapshot on a new transport starts with empty independent lists');
+}
+
+1;

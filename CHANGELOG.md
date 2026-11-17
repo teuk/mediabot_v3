@@ -1,3 +1,9 @@
+## MB1335 — Reduce repeated contract-test startup again
+
+- Run 30 additional delivery/lifecycle contracts in two isolated suites: 28 fewer Perl starts, preserving all 2,193 assertions.
+- Preserve original scenario bodies and historical filter aliases; validate forward, reverse and shuffled execution orders.
+- Keep global timer-hook fixtures and cold-load alias checks in their own processes; leave native timeout and socket coverage intact.
+
 ## MB1334 — Consolidate repeated test startup
 
 - Replace 62 standalone contract files with four isolated scenario suites; preserve all 5,866 assertions and scenario bodies.

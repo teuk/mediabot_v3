@@ -68,5 +68,39 @@
     "mb1334_native/1417_mb1044_nicklist_complete_pages.pl",
     "mb1334_native/1509_mb1135_calc_unary_chain.pl",
     "mb1334_native/1525_mb1151_spark_input_colour_digits.pl"
+  ],
+  "1541_mb1335_delivery_contracts.t": [
+    "mb1335_delivery/1183_mb817_horoscope_compact.pl",
+    "mb1335_delivery/1190_mb818_web_citations.pl",
+    "mb1335_delivery/1197_mb823_evidence_recovery.pl",
+    "mb1335_delivery/1234_mb843_local_answer_sources.pl",
+    "mb1335_delivery/1246_mb850_rss_unicode_identity.pl",
+    "mb1335_delivery/1256_mb855_icecast_snapshot_consistency.pl",
+    "mb1335_delivery/1258_mb856_convert_numeric_contract.pl",
+    "mb1335_delivery/1259_mb856_convert_inch_delivery.pl",
+    "mb1335_delivery/1265_mb859_calc_literal_delivery.pl",
+    "mb1335_delivery/1276_mb865_spotify_pending_identity.pl",
+    "mb1335_delivery/1362_mb987_calc_round_boundaries.pl",
+    "mb1335_delivery/1427_mb1054_url_message_boundaries.pl",
+    "mb1335_delivery/576_mb359_script_action_utf8_wire_encoding.pl"
+  ],
+  "1541_mb1335_lifecycle_contracts.t": [
+    "mb1335_lifecycle/1031_fullop_policy_engine.pl",
+    "mb1335_lifecycle/1214_mb834_config_save_admin_failures.pl",
+    "mb1335_lifecycle/1224_mb839_calendar_arm_ownership.pl",
+    "mb1335_lifecycle/1252_mb853_scheduler_registration_recovery.pl",
+    "mb1335_lifecycle/1267_mb860_calendar_arm_replacement.pl",
+    "mb1335_lifecycle/1323_mb949_spark_replay_runtime_fidelity.pl",
+    "mb1335_lifecycle/1328_mb959_dictionary_native_runtime.pl",
+    "mb1335_lifecycle/1331_mb959_weekly_score_accounting.pl",
+    "mb1335_lifecycle/1334_mb959_strict_round_record.pl",
+    "mb1335_lifecycle/1523_mb1149_finite_state_clocks.pl",
+    "mb1335_lifecycle/465_mb252_scriptrunner_ok_field_contract.pl",
+    "mb1335_lifecycle/466_mb253_scriptrunner_protocol_field_contract.pl",
+    "mb1335_lifecycle/471_mb259_script_action_runner_ok_flag_contract.pl",
+    "mb1335_lifecycle/490_mb276_plugin_manager_scalar_identifiers.pl",
+    "mb1335_lifecycle/491_mb277_event_bus_listener_error_scalar.pl",
+    "mb1335_lifecycle/500_mb286_script_runner_constructor_limits_scalar.pl",
+    "mb1335_lifecycle/596_mb377_auth_nick_session_rekey.pl"
   ]
 }

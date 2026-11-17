@@ -447,3 +447,28 @@ about 17 seconds; four suites took about 4 seconds with the same 5,866 assertion
 These are block timings, not a claimed 75% improvement for the complete suite.
 The complete suite remains mandatory before committing; server timing is the
 authoritative acceptance measurement.
+
+### MB1335: second bounded consolidation
+
+MB1334 was accepted on teuk at `e14e6fd7`: 44,324 assertions across 1,081
+files in 359 seconds (previous host run: 382 seconds). Those are measured host
+results, not an estimate for subsequent changes.
+
+MB1335 moves another 30 contract scenarios into two isolated suites under
+`t/scenarios/mb1335_delivery` and `t/scenarios/mb1335_lifecycle`, preserving
+all 2,193 assertions. The catalogue drops from 1,081 to 1,053 runnable files.
+The existing checked catalog also routes all 30 historical filters to their
+new suite. Run them with `--filter 1541_mb1335 --progress`.
+
+Each fragment keeps its original body, with only a distinct package and a true
+return replacing its standalone TAP plan. Forward, reverse and deterministic
+shuffled orders must pass. Fixture helpers must also be audited: a locally
+innocuous `install()` can replace process-wide methods. In particular the
+MB858 news timer fixture remains standalone, as do the cold alias inventory
+and real timer/worker/socket integration probes. A successful grouped run is
+not certification for arbitrary reordering or parallel execution of the full
+catalogue. No assertion count is reduced and no result is cached.
+
+Host acceptance still requires targeted tests and one full suite, both with
+`--progress`, before the final noninteractive commit/push. MB1335 host timing
+and acceptance remain pending until that run completes.

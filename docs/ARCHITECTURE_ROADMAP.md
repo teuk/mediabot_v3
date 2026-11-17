@@ -1472,7 +1472,7 @@ clock, DB, Auth/User and bot callbacks, not reconstruct its body into a fake
 package. Extend [case 194](../t/cases/194_get_user_from_message_no_password_select.t)
 or its shared fixture. Retain
 [session lifecycle](../t/cases/591_mb372_auth_session_lifecycle.t) and
-[nick rekey](../t/cases/596_mb377_auth_nick_session_rekey.t) integration coverage.
+[nick rekey](../t/scenarios/mb1335_lifecycle/596_mb377_auth_nick_session_rekey.pl) integration coverage.
 
 Required characterization matrix:
 
