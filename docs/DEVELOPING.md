@@ -473,17 +473,19 @@ Host acceptance still requires targeted tests and one full suite, both with
 `--progress`, before the final noninteractive commit/push. MB1335 host timing
 and acceptance remain pending until that run completes.
 
-### MB1336: opt-in bounded execution
+### MB1336/MB1337: bounded execution
 
 MB1335 was accepted as `4d418276`: 44,324 assertions across 1,053 files in
 351 seconds on teuk. MB1336 changes execution scheduling, not application code
-or the regression matrix. Host acceptance for MB1336 remains pending.
+or the regression matrix. MB1336 was accepted as `9d6f9e4a`: 44,354 assertions
+in 301 seconds on teuk, versus 351 seconds before this scheduling change.
 
 ```bash
 perl t/test_commands.pl --jobs 2 --progress --profile-top 20
 ```
 
-`--jobs 1` remains the default and the serial comparison path. Only the 72 exact
+After that acceptance, MB1337 makes `--jobs 2` the default, including existing
+commands that omit the option. Use `--jobs 1` for serial diagnosis. Only the 72 exact
 filenames in `t/lib/BoundedTapBatch.pm` can run concurrently. They retain separate
 fresh Perl interpreters and are still checked for a standalone TAP contract.
 Selection/filter/class/fast options apply first: no unselected case is launched.
@@ -512,6 +514,10 @@ and interleaved TAP. The same TAP parser handles serial and concurrent results,
 including bailouts, incomplete plans, signals, nonzero exits and failed tests.
 A 300-second per-case deadline aborts hung batch jobs; timeout and parent
 interruption kill/reap owned interpreters and signal their process groups.
+Completed leaders also have their remaining process group terminated before
+TAP collection: a successful exit must not leave a background worker running.
+This cleanup preserves the leader exit status, including failure. Descendants
+that explicitly leave the owned process group are outside this cleanup scope.
 The regression fixture also checks an owned descendant's heartbeat stops.
 Progress counts completed files and real assertions. Profiles measure each
 child's elapsed duration; cumulative profile time can exceed wall time because
@@ -523,3 +529,10 @@ job, failure/exit/signal/bailout/plan mutations, timeout, callback error, parent
 termination, unchanged selection and serial-versus-concurrent assertion counts.
 The targeted and full maintainer gates use --jobs 2 --progress, then the existing
 noninteractive commit.sh/push is the final action only after full success.
+
+MB1337 closes this test-runner optimization pass. The 72-case admission list,
+application assertions, native pacing thresholds and qualification endurance
+budgets are unchanged. No further host speedup beyond the accepted MB1336
+measurement is claimed: this makes that mode ordinary and closes a reproduced
+process-cleanup gap. Targeted tests cover both default and explicit serial
+commands; full host acceptance of MB1337 remains required before commit/push.

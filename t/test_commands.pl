@@ -59,7 +59,7 @@ my $opt_class_summary = 0;
 my $opt_list_selected = 0;
 my $opt_fast = 0;
 my $opt_progress = 0;
-my $opt_jobs = 1; # Opt in; historical default remains serial.
+my $opt_jobs = 2; # Host-accepted bounded batch; --jobs 1 preserves serial execution.
 GetOptions(
     'verbose|v'   => \$opt_verbose,
     'filter|f=s'  => \$opt_filter,
@@ -96,7 +96,7 @@ Usage: $0 [options]
                           (ne remplace PAS la suite complete)
   --progress              Barre compacte et ETA approximatif sur une seule ligne
                           (pourcentage par fichiers, compteur d'assertions reel)
-  --jobs <1|2>           Deux processus uniquement pour les suites auditees (defaut: 1)
+  --jobs <1|2>           Deux processus uniquement pour les suites auditees (defaut: 2)
   Classes: PURE, FILESYSTEM, PROCESS, DB, NETWORK
 USAGE
 

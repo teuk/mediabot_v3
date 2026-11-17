@@ -75,6 +75,33 @@ sub run {
     $a->like($interrupted//'',qr/TAP batch terminated/,'parent termination interrupts and cleans the batch');
     $a->is(waitpid(-1, POSIX::WNOHANG()),-1,'timeout, callback error and interruption leave no direct child to reap');
 
+    # MB1337: a completed leader must not leave an owned worker behind.
+    for my $exit (0,2) {
+        my $beat="$dir/finished-$exit.beat";
+        my $pidfile="$dir/finished-$exit.pid";
+        my $finished=$write->("finished-$exit.t", qq{
+            use Time::HiRes qw(sleep time);use POSIX ();
+            my \$pid=fork();die \$! unless defined \$pid;
+            if (!\$pid) {
+                for (1..200) {open my \$f,'>>','$beat' or die \$!;print {\$f} 'x';close \$f;sleep(.01)}
+                POSIX::_exit(0);
+            }
+            open my \$f,'>','$pidfile' or die \$!;print {\$f} \$pid;close \$f;
+            my \$end=time()+2;sleep(.005) while !-s '$beat' && time()<\$end;
+            die 'worker never started' unless -s '$beat';
+            print "ok 1 - completed leader\\n1..1\\n";exit $exit;
+        });
+        my $result;
+        run_batch([$finished],root=>$root,on_finish=>sub {$result=$_[1]});
+        my $before=-s $beat;sleep(.06);my $after=-s $beat;
+        # Bound the regression fixture even when run against the old executor.
+        open my $pidfh,'<',$pidfile or die $!;my $pid=<$pidfh>;close $pidfh;kill 'KILL',$pid;
+        $a->is($result->{status},$exit<<8,"leader exit $exit is preserved after descendant cleanup");
+        $a->ok(defined($before) && $before==$after,
+            "leader exit $exit leaves no active heartbeat descendant");
+        $a->like($result->{output},qr/ok 1 - completed leader/,"leader exit $exit retains its TAP output");
+    }
+
     # Exercise the actual runner/parser with temporary cases, never edit live cases.
     my $mini="$dir/repo";make_path("$mini/t/cases");
     copy("$root/t/test_commands.pl","$mini/t/test_commands.pl") or die $!;
@@ -86,7 +113,7 @@ sub run {
     my $capture=sub {
         my ($jobs,@extra)=@_;
         local $ENV{PERL5LIB}=join(':',$root,$ENV{PERL5LIB}//'');
-        open my $p,'-|',$^X,"$mini/t/test_commands.pl",'--jobs',$jobs,'--progress',@extra or die $!;
+        open my $p,'-|',$^X,"$mini/t/test_commands.pl",(defined($jobs)?('--jobs',$jobs):()),'--progress',@extra or die $!;
         local $/;my $out=<$p>//'';close $p;return ($out,$?>>8);
     };
     for my $row (
@@ -106,6 +133,10 @@ sub run {
     my ($serial,$src)=$capture->(1);my ($parallel,$prc)=$capture->(2,'--profile-top',3);
     $a->ok(!$src && !$prc && $serial=~/PASSED\s*:\s*3\/3/ && $parallel=~/PASSED\s*:\s*3\/3/,
         'serial and bounded-parallel runs count identical selected assertions');
+    my ($default,$drc)=$capture->(undef);
+    $a->ok(!$drc && $default=~/PASSED\s*:\s*3\/3/ && $default=~/\[jobs=2\]/,
+        'ordinary runner command uses the host-accepted bounded batch by default');
+    $a->unlike($serial,qr/\[jobs=2\]/,'explicit --jobs 1 retains sequential execution');
     $a->like($parallel,qr/Profiled 3 test file/,'batch and serial cases each contribute one profile row');
     for my $jobs (0,3) {my (undef,$rc)=$capture->($jobs);$a->ok($rc!=0,"runner CLI rejects jobs=$jobs")}
     my ($narrow,$nrc)=$capture->(2,'--filter','99999');

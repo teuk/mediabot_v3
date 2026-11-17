@@ -13,10 +13,11 @@ structural change and update its progress in the same patch as that change.
 Use small reversible deliveries; do not bundle every phase into one migration.
 Existing plugin architecture and API v2/v3 compatibility remain authoritative.
 
-Test-harness follow-up: MB1334/MB1335 are accepted through `4d418276`.
-MB1336 adds a bounded, opt-in offline TAP executor; runtime architecture and
-phase completion are unchanged. See DEVELOPING.md for its admission review
-and pending host acceptance.
+Test-harness follow-up: MB1336 is accepted through `9d6f9e4a`, with 44,354
+assertions passing in 301 seconds on teuk (351 seconds before bounded execution).
+MB1337 makes that reviewed mode the default and cleans up descendants after
+completed suite leaders; its host acceptance is pending. Runtime architecture
+and phase completion are unchanged. See DEVELOPING.md for the admission review.
 
 ## Progress and sequence
 

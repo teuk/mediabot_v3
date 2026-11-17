@@ -143,6 +143,10 @@ sub run_batch {
                 my $expired = !$waited && $elapsed >= $timeout;
                 if ($expired) { $status = $stop->($pid); $waited = $pid }
                 next unless $waited;
+                # A leader can exit before its descendants. Retire only its own
+                # session group before reading TAP or admitting another suite.
+                # Keep the saved leader status: cleanup must not mask failure.
+                kill 'KILL', -$pid;
                 delete $running{$pid};
                 my $output = '';
                 if (open my $fh, '<:raw', $row->{path}) { local $/; $output = <$fh> // '' }

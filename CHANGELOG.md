@@ -1,3 +1,9 @@
+## MB1337 — Finalize the bounded test runner
+
+- Make the host-accepted two-suite batch the default; keep --jobs 1 for serial diagnosis and retain the exact 72-case admission list.
+- Stop surviving descendants in a completed suite's process group before collecting TAP or launching another suite, including nonzero leader exits.
+- Preserve the original exit status and diagnostics; cover successful/failed leader cleanup and default/explicit scheduling behavior.
+
 ## MB1336 — Run audited offline TAP cases in a bounded pair
 
 - Add opt-in --jobs 2 for an explicit allowlist of 72 independent standalone suites; all other cases remain serial and --jobs 1 remains the default.
