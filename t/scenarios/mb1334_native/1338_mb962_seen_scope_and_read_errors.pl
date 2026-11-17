@@ -230,7 +230,13 @@ for my $mapping ('rfc1459','strict-rfc1459','ascii',undef) {
 }
 # MB1324: short character strings can still exceed the byte budget.
 for my $source ('USER_SEEN','CHANNEL_LOG','history.CHANNEL_LOG_ARCHIVE') {
-    for my $case (["\x04FF0000rouge\x04", 'rouge'],
+    # MB1343: IRC colour parameters are ASCII digits, never Unicode numbers.
+    for my $case (["\x03١٢ euros", '١٢ euros'],
+                  ["\x03１２ euros", '１２ euros'],
+                  ["\x0304,١٢ euros", ',١٢ euros'],
+                  ["\x031٢ euros", '٢ euros'],
+                  ["\x0304,00rouge\x03", 'rouge'],
+                  ["\x04FF0000rouge\x04", 'rouge'],
                   ["\x04aAbBcC,102030Café\x0f", 'Café'],
                   ["bon\x04A1B2C3jour", 'bonjour'],
                   ['code A1B2C3,102030', 'code A1B2C3,102030'],

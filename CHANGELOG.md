@@ -1,3 +1,9 @@
+## MB1343 — Preserve Unicode digits in seen excerpts
+
+- Restrict mIRC colour parameters to ASCII digits so cleanup never consumes Unicode numbers from message text.
+- Cover persisted, live-log and archived excerpts, including mixed colour/text digits and ordinary ASCII colours.
+- Preserve excerpt byte limits, channel routing and existing formatting cleanup.
+
 ## MB1342 — Allow choice labels beginning with history or last
 
 - Recognize choose history/last only as standalone read commands in the native handler and Playful plugin.

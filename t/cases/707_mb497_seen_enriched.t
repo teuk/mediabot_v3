@@ -41,7 +41,7 @@ return sub {
 
     # --- [1] helper de nettoyage du last_msg --------------------------------
     $assert->like($body, qr/my \$fmt_last = sub \{/, '[1] helper fmt_last défini');
-    $assert->like($body, qr/\\x03\\d\{0,2\}/, '[1] retire les codes couleur mIRC');
+    $assert->like($body, qr/\\x03\[0-9\]\{0,2\}/, '[1] retire les codes couleur mIRC');
     $assert->like($body, qr/truncate_utf8\(\$txt, 200/, '[1] longueur bornée (200)');
     # appliqué aux branches d'affichage (message/part/quit)
     my $applied = () = $body =~ /\$fmt_last->\(\$seen_row->\{last_msg\}\)/g;
@@ -73,7 +73,7 @@ return sub {
         my ($txt) = @_;
         return '' unless defined $txt && $txt ne '';
         $txt =~ s/[\x02\x0f\x16\x1d\x1f]//g;
-        $txt =~ s/\x03\d{0,2}(?:,\d{1,2})?//g;
+        $txt =~ s/\x03[0-9]{0,2}(?:,[0-9]{1,2})?//g;
         $txt =~ s/[\x00-\x08\x0a-\x1f]/ /g;
         $txt =~ s/\s{2,}/ /g;
         $txt =~ s/^\s+|\s+$//g;
