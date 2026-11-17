@@ -324,7 +324,7 @@ sub mbChoose_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $raw = join(' ', @args);
     # Y8: !choose history — show last 5 choices
-    if (@args && lc($args[0]) eq 'history') {
+    if (@args == 1 && lc($args[0]) eq 'history') {
         my $hist = $self->{_choose_history}{$channel_key} // [];
         unless (@$hist) {
             botPrivmsg($self, $channel, "$nick: no choice history on $channel."); return 1;
@@ -334,7 +334,7 @@ sub mbChoose_ctx {
     }
 
     # X4: !choose last — recall the last choice made on this channel
-    if (@args && lc($args[0]) eq 'last') {
+    if (@args == 1 && lc($args[0]) eq 'last') {
         my $last = $self->{_choose_last}{$channel_key};
         # Zero is a valid option label; only undef means no prior choice.
         if (defined $last) {

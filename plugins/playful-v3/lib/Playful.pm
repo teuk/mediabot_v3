@@ -188,13 +188,13 @@ sub command_choose {
     my @args = @{ $invocation->args };
     my ($channel, $nick) = ($invocation->channel, $invocation->nick);
     my $channel_key = lc($channel // '');
-    if (@args && lc($args[0]) eq 'history') {
+    if (@args == 1 && lc($args[0]) eq 'history') {
         my $history = $self->{choose_history}{$channel_key} || [];
         return $context->reply($invocation,
             @$history ? 'Last choices: ' . join(' | ', reverse @$history)
                      : "$nick: no choice history on $channel.");
     }
-    if (@args && lc($args[0]) eq 'last') {
+    if (@args == 1 && lc($args[0]) eq 'last') {
         my $last = $self->{choose_last}{$channel_key};
         return $context->reply($invocation, defined($last)
             ? "$nick: last choice was: $last"

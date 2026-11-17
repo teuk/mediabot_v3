@@ -1,3 +1,9 @@
+## MB1342 — Allow choice labels beginning with history or last
+
+- Recognize choose history/last only as standalone read commands in the native handler and Playful plugin.
+- Draw normally when these words begin an option list or a multiword label, using either supported separator.
+- Preserve standalone case-insensitive reads, weighted draws, history, audit and channel isolation.
+
 ## MB1341 — Render snoozed recurring reminders correctly
 
 - Remove scheduling tags before reading recurrence in remindlist, supporting both creation and snooze layouts.

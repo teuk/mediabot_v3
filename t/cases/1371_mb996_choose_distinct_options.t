@@ -79,13 +79,18 @@ for my $case (
         'no distinct alternative: private refusal before draw, history or audit: ' . join(' ', @$args));
 }
 for my $case (
+    [['history','|','geography'], 0, 'history', 2],
+    [['HiStOrY','|','geography'], .999, 'geography', 2],
+    [['last','ou','first'], 0, 'last', 2],
+    [['last','train','|','bus'], 0, 'last train', 2],
+    [['history','of','magic','ou','math'], 0, 'history of magic', 2],
     [['0:2','|','café'], 0, '0', 3],
     [['0:2','|','café'], .999, 'café', 3],
     [['tea:2','|','TEA:3','|','café'], .4, 'TEA', 6],
 ) {
     my ($args,$fraction,$choice,$size) = @$case;
     setup_1371();
-    my $expected = {wire=>[['public','#test',"Alice: I choose... $choice! (1 of $size options)"]],
+    my $expected = {wire=>[['public','#test',"Alice: I choose... $choice!" . ($size > 2 ? " (1 of $size options)" : "")]],
         limits=>[$size],remaining=>[],args=>$args};
     my @actual = map { run_1371($_,$args,'#test',$fraction) } qw(native plugin);
     my $last = {'#test'=>$choice,'#other'=>'water'};
@@ -94,6 +99,16 @@ for my $case (
         [$last,$history,$last,$history,
          [['#test','choose','café'],['#other','choose','water'],['#test','choose',$choice]]]],
         'valid alternatives retain weighted pool positions, labels, histories and channel scope');
+}
+# MB1342: standalone read commands still avoid draws and state changes.
+for my $command ('HiStOrY','LAST') {
+    setup_1371();
+    my $before=state_1371();
+    my $text=lc($command) eq 'history' ? 'Last choices: café' : 'Alice: last choice was: café';
+    my $expected={wire=>[['public','#test',$text]],limits=>[],remaining=>[0],args=>[$command]};
+    my @actual=map {run_1371($_,[$command],'#test',0)} qw(native plugin);
+    is_deeply([\@actual,state_1371()],[[$expected,$expected],$before],
+        'standalone '.$command.' keeps native/plugin read-only behavior');
 }
 is_deeply(\@warnings, [], 'distinct-option validation emits no warnings');
 done_testing;
