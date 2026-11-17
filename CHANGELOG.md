@@ -1,3 +1,9 @@
+## MB1346 — Reject incomplete monthly statistics
+
+- Collect complete monthstats query results before rendering individual or comparison charts.
+- Contain prepare/execute/fetch exceptions and distinguish failed or partial reads from genuinely empty history.
+- Finish statements after read failures and verify recovery, existing chart output and read-only behavior through the public command route.
+
 ## MB1345 — Restore the omitted poll-extension duration
 
 - Use the existing 60-second fallback when pollextend receives no duration, avoiding int(undef) and an unintended 10-second extension.

@@ -755,6 +755,22 @@ sub mbHeatmap_ctx {
 # mbMonthStats_ctx --- !monthstats [nick]
 # Activity count per month for the last 12 months.
 # ---------------------------------------------------------------------------
+# Collect a complete monthly result before publishing a chart. Preserve the
+# failure before finish(), which may clear the DBI error, including RaiseError.
+sub _monthstats_rows {
+    my ($dbh, $sql, @bind) = @_;
+    my ($sth, @rows);
+    my $ok = eval {
+        $sth = $dbh->prepare($sql) or die "monthstats_prepare\n";
+        $sth->execute(@bind) or die "monthstats_execute\n";
+        while (my $row = $sth->fetchrow_hashref) { push @rows, {%$row} }
+        die "monthstats_fetch\n" if $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    return $ok ? \@rows : undef;
+}
+
 sub mbMonthStats_ctx {
     my ($ctx) = @_;
     my $self    = $ctx->bot;
@@ -770,24 +786,23 @@ sub mbMonthStats_ctx {
 
     if (defined $t1 && defined $t2) {
         # Fetch counts for both nicks per month
-        my $sth = $self->{dbh}->prepare(
+        my $rows = _monthstats_rows($self->{dbh},
             "SELECT DATE_FORMAT(cl.ts, '%Y-%m') AS ym, cl.nick, COUNT(*) AS cnt"
             . ' FROM CHANNEL_LOG cl'
             . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
             . ' WHERE cl.nick IN (?,?) AND c.name = ?'
             . '   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)'
-            . ' GROUP BY ym, cl.nick ORDER BY ym'
+            . ' GROUP BY ym, cl.nick ORDER BY ym', $t1, $t2, $channel
         );
-        unless ($sth && $sth->execute($t1, $t2, $channel)) {
-            botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+        unless ($rows) {
+            botNotice($self, $nick, 'Database error.'); return;
         }
         my %by_month;
-        while (my $r = $sth->fetchrow_hashref) {
+        for my $r (@$rows) {
             # SQL may return a group's original display case. Use the same
             # identity key as the requested nicks, merging any case variants.
             $by_month{$r->{ym}}{lc $r->{nick}} += $r->{cnt};
         }
-        $sth->finish;
         unless (%by_month) {
             botPrivmsg($self, $channel, "No data found for $t1 or $t2 on $channel."); return 1;
         }
@@ -817,20 +832,18 @@ sub mbMonthStats_ctx {
 
     # Mode normal — un seul nick
     my $target  = @args ? lc($args[0]) : lc($nick);
-    my $sth = $self->{dbh}->prepare(
+    my $rows = _monthstats_rows($self->{dbh},
         "SELECT DATE_FORMAT(cl.ts, '%Y-%m') AS ym, COUNT(*) AS cnt"
         . ' FROM CHANNEL_LOG cl'
         . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
         . ' WHERE cl.nick = ? AND c.name = ?'
         . "   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)"
-        . ' GROUP BY ym ORDER BY ym'
+        . ' GROUP BY ym ORDER BY ym', $target, $channel
     );
-    unless ($sth && $sth->execute($target, $channel)) {
-        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+    unless ($rows) {
+        botNotice($self, $nick, 'Database error.'); return;
     }
-    my @rows;
-    while (my $r = $sth->fetchrow_hashref) { push @rows, $r; }
-    $sth->finish;
+    my @rows = @$rows;
     unless (@rows) {
         botPrivmsg($self, $channel, "$target: no data in last 12 months on $channel.");
         return 1;

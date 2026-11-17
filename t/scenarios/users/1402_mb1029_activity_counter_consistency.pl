@@ -18,9 +18,38 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         # Only adapt MySQL's date spelling to a fixed SQLite test calendar.
         # WHERE, bindings, grouping, counts and ordering run in the real DBI engine.
         $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 12 MONTH\)/'2025-10-30 12:00:00'/g;
-        return $db->SUPER::prepare($sql, @rest);
+        my $monthly = $sql =~ /SELECT DATE_FORMAT/;
+        $sql = 'SELECT * FROM mb1346_missing_table'
+            if $monthly && ($db->{private_monthstats_fault} // '') eq 'prepare';
+        my $sth = $db->SUPER::prepare($sql, @rest);
+        if ($sth && $monthly) {
+            $sth->{private_monthstats} = 1;
+            $sth->{private_fetched} = 0;
+        }
+        return $sth;
     }
     package MB1029::DBI::st; our @ISA = ('DBI::st');
+    sub execute {
+        my ($sth, @bind) = @_;
+        return $sth->set_err(1, 'private monthly execute failure')
+            if $sth->{private_monthstats} && ($sth->{Database}{private_monthstats_fault} // '') eq 'execute';
+        return $sth->SUPER::execute(@bind);
+    }
+    sub fetchrow_hashref {
+        my ($sth) = @_;
+        if ($sth->{private_monthstats}) {
+            my $fault = $sth->{Database}{private_monthstats_fault} // '';
+            my $fetched = $sth->{private_fetched}++;
+            return $sth->set_err(1, 'private monthly fetch failure')
+                if $fault eq 'fetch' || ($fault eq 'partial' && $fetched > 0);
+        }
+        return $sth->SUPER::fetchrow_hashref;
+    }
+    sub finish {
+        my ($sth) = @_;
+        $sth->{Database}{private_monthstats_finished}++ if $sth->{private_monthstats};
+        return $sth->SUPER::finish;
+    }
     package MB1029::Channel;
     sub get_id {1}
     sub get_timezone {'UTC'}
@@ -146,6 +175,30 @@ sub bars_1402 {chr(0x2588) x $_[0] . chr(0x2591) x (4-$_[0])}
     }
     is_deeply(\@ranks, [2,2,1],
         'ties, actions, NULL text and ordinary words beginning with stats retain their existing counts');
+}
+# MB1346: failed reads must not masquerade as empty or partial monthly charts.
+for my $raise (0, 1) {
+    for my $compare (0, 1) {
+        for my $stage (qw(prepare execute fetch partial)) {
+            my ($bot, $db) = setup_1402();
+            add_1402($db, 'Alice', 3, 'hi', '2026-09');
+            add_1402($db, 'Bob', 2, 'hi', '2026-10');
+            add_1402($db, 'Alice', 1, 'hi', '2026-10');
+            $db->{RaiseError} = $raise;
+            $db->{private_monthstats_fault} = $stage;
+            $db->{private_monthstats_finished} = 0;
+            $db->do('PRAGMA query_only = ON');
+            my @args = $compare ? ('Alice', 'vs', 'Bob') : ('Alice');
+            my $ok = eval { invoke_1402($bot, 'monthstats', 'Caller', @args); 1 };
+            is_deeply([$ok ? '' : $@, \@wire, $db->{private_monthstats_finished}],
+                ['', [['notice', 'Caller', 'Database error.']], $stage eq 'prepare' ? 0 : 1],
+                "RaiseError=$raise comparison=$compare $stage: contain failure, discard chart and finish statement");
+            $db->{private_monthstats_fault} = '';
+            my $recovered = invoke_1402($bot, 'monthstats', 'Caller', @args);
+            is(scalar(grep { $_->[0] eq 'public' && $_->[2] =~ /2026-09.*2026-10/ } @$recovered), 1,
+                'next successful read publishes both months after a transient failure');
+        }
+    }
 }
 is_deeply(\@warnings, [], 'native activity handlers emit no warnings');
 1;
