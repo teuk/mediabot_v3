@@ -54,4 +54,54 @@ for my $case (['2.5e+2', '250'], ['0xFF+1', '256'], ['2**-2', '0.25']) {
         is(scalar @logged, 1, 'supported calculation is audited once');
     }
 }
+# MB1348: IRC nickname letter case must not split the same user's history.
+{
+    require Mediabot::UserCommands;
+    my $bot = MockBot->new;
+    my $invoke = sub {
+        my ($command, $nick, $channel, @args) = @_;
+        $bot->reset_replies;
+        my $ctx = Mediabot::Context->new(bot=>$bot, nick=>$nick,
+            channel=>$channel, command=>$command, args=>\@args);
+        if ($command eq 'calc') { Mediabot::DBCommands::mbCalc_ctx($ctx) }
+        else { Mediabot::UserCommands::mbCalcLast_ctx($ctx) }
+        return [map { [@{$_}{qw(type to text)}] } $bot->replies];
+    };
+    $invoke->('calc', 'Alice', '#first', '6*7');
+    is_deeply($invoke->('calclast', 'aLICE', undef), [
+        ['notice', 'aLICE', 'Last 1 calc(s) for aLICE:'],
+        ['notice', 'aLICE', '  6*7 = 42'],
+    ], 'changing nickname letter case retains calc history and the private reply spelling');
+    $invoke->('calc', 'ALICE', '#second', '10+2');
+    $invoke->('calc', 'aLiCe', undef, '7-3');
+    $invoke->('calc', 'alice', '#first', 'sqrt(81)');
+    is_deeply($invoke->('calclast', 'Alice', '#history'), [
+        ['privmsg', '#history', 'Last 3 calc(s) for Alice:'],
+        ['privmsg', '#history', '  sqrt(81) = 9'],
+        ['privmsg', '#history', '  7-3 = 4'],
+        ['privmsg', '#history', '  10+2 = 12'],
+    ], 'mixed-case calculations share one newest-first history capped at three across reply contexts');
+    is_deeply($invoke->('calclast', 'ALIce', undef, '2'), [
+        ['notice', 'ALIce', 'Last 2 calc(s) for ALIce:'],
+        ['notice', 'ALIce', '  sqrt(81) = 9'],
+        ['notice', 'ALIce', '  7-3 = 4'],
+    ], 'optional history count still applies after a case change');
+    my @before = @{$bot->{_calc_history}{alice} // []};
+    @logged = ();
+    $invoke->('calc', 'aLICE', '#first', '1/0');
+    is_deeply([$bot->{_calc_history}{alice}, scalar @logged], [\@before, 0],
+        'a refused calculation under another casing neither changes history nor creates an audit');
+    is_deeply($invoke->('calclast', 'Alice_', undef),
+        [['notice', 'Alice_', 'No calc history yet.']],
+        'a distinct nickname cannot read Alice history');
+    $invoke->('calc', 'Alice_', '#first', '3*3');
+    is_deeply([$bot->{_calc_history}{alice}, $bot->{_calc_history}{alice_},
+        [sort keys %{$bot->{_calc_history}}]], [\@before, ['3*3 = 9'], ['alice', 'alice_']],
+        'separate users retain separate histories and case variants create no extra cache keys');
+    is_deeply($invoke->('calclast', 'ALICE', '#history', '4'),
+        [['notice', 'ALICE', 'Syntax: calclast [1-3]']],
+        'invalid history count is still refused privately');
+    is_deeply($bot->{_calc_history}{alice}, \@before,
+        'history reads and count refusals leave the shared history unchanged');
+}
 1;

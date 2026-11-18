@@ -3290,9 +3290,11 @@ sub mbCalc_ctx {
     # Preserve the expression exactly as the user typed it. The previous
     # implementation substituted pi/tau/e with long decimal literals before
     # displaying and storing history, making otherwise simple results noisy.
-    $self->{_calc_history}{$nick} //= [];
-    unshift @{ $self->{_calc_history}{$nick} }, "$expr = $formatted";
-    splice @{ $self->{_calc_history}{$nick} }, 3;
+    # Nickname letter case must not split this transient per-user history.
+    # Keep original spelling in replies and audit, as for other nick caches.
+    my $history = $self->{_calc_history}{lc $nick} //= [];
+    unshift @$history, "$expr = $formatted";
+    splice @$history, 3;
 
     # mb331-B2: Context routes public results to the channel and private
     # commands back to the requesting nick instead of dropping an undef target.

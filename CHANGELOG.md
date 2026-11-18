@@ -1,3 +1,9 @@
+## MB1348 — Keep calculator history across nickname letter-case changes
+
+- Store and read calc history using the same lowercase nickname key, so calclast survives a case-only nick change.
+- Keep the newest three successful calculations together while preserving original expression text, reply spelling and public/private routing.
+- Extend the existing delivery scenario to cover case changes, history limits, distinct users and rejected expressions without adding a test file.
+
 ## MB1347 — Separate online silence from the activity display cap
 
 - Keep active-now speakers below the displayed top 30 out of the silent-nick list.

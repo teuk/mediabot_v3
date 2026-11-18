@@ -1569,7 +1569,7 @@ sub mbCalcLast_ctx {
         $limit = int($args[0]);
     }
 
-    my $history = $self->{_calc_history}{$nick} // [];
+    my $history = $self->{_calc_history}{lc $nick} // [];
     unless (@$history) {
         $ctx->reply_private('No calc history yet.');
         return 1;
