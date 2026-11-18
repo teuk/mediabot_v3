@@ -1,3 +1,9 @@
+## MB1360 — Accept every supported channel type for compatibility reports
+
+- Use the shared IRC channel classifier in compat so &, ! and + channels reach the same compatibility calculation as # channels instead of receiving the private-context syntax error.
+- Keep the Games flag, history queries, reply spelling, success accounting and private-context refusal unchanged.
+- Extend the existing native compatibility case with all four prefixes, disabled Games and private targets, including scoped co-presence reads; reuse its four existing child processes without adding a test file.
+
 ## MB1359 — Include given-only activity in karma reports
 
 - Keep karmainfo's report when the requested user has given votes but received none, instead of incorrectly claiming no karma activity.

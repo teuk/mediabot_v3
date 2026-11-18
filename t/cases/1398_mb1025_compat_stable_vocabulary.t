@@ -14,8 +14,10 @@ use DBI;
 use Encode qw(encode);
 use JSON::PP;
 use Mediabot::Stats::Affinity;
-my (@public,@notices,@audit,@flags);
+my (@public,@notices,@audit,@flags,@gates,@gathers);
 my ($mode,$encoding);
+my $expected_channel='#test';
+my $games=1;
 my $history=DBI->connect('dbi:SQLite:dbname=:memory:','','',
  {RaiseError=>1,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
 $history->do('CREATE TABLE history(nick TEXT,publictext TEXT,ts TEXT)');
@@ -28,10 +30,11 @@ $history->do('CREATE TABLE proximity(channel TEXT,nick TEXT,u INTEGER)');
  sub logBot {push @audit,[$_[2],$_[3],$_[4]]}
  package Mediabot::Helpers;
  no warnings 'redefine';
- sub chanset_enabled {1}
+ sub chanset_enabled {push @gates,[$_[1],$_[2]]; $games}
  sub channel_log_gather {
   my ($self,$dbh,$sql,$bind,$callback,$scope)=@_;
-  die 'wrong channel/scope' unless $bind->[0] eq '#test' && $scope eq 'content';
+  push @gathers,[$bind->[0],$scope];
+  die 'wrong channel/scope' unless $bind->[0] eq $expected_channel && $scope eq 'content';
   if ($sql=~/HOUR/) {$callback->({nick=>$_,h=>12,c=>100},'CHANNEL_LOG') for qw(alice bob)}
   else {
    # Exercise the real driver boundary, with the same stored TEXT rows read
@@ -81,7 +84,7 @@ $history->do('CREATE TABLE proximity(channel TEXT,nick TEXT,u INTEGER)');
  package MB1025Context;
  sub bot {$_[0]{bot}}
  sub nick {'Observer'}
- sub channel {'#test'}
+ sub channel {exists($_[0]{channel}) ? $_[0]{channel} : '#test'}
  sub args {['Alice','Bob']}
  sub message {'!compat Alice Bob'}
 }
@@ -159,6 +162,42 @@ if ($ENV{PERL_HASH_SEED} eq '0') {
   $out{proximity}{$fault}=[$ok?1:0,scalar(@public),$score,[@notices],[@audit],
     $bot->{_compat_count}{Observer}//0,[@$metrics],$db->{finished}];
  }
+ # MB1360: every supported channel type follows the same Games and SQL scope.
+ $history->do('DELETE FROM proximity');
+ for my $n (0..100) {
+  $history->do('INSERT INTO proximity VALUES(?,?,?)',undef,'#elsewhere',($n%2?'bob':'alice'),60*$n);
+ }
+ for my $channel ('#MiXeD','&MiXeD','!ABCDEMiXeD','+MiXeD') {
+  for my $n (0..6) {
+   $history->do('INSERT INTO proximity VALUES(?,?,?)',undef,$channel,($n%2?'bob':'alice'),60*$n);
+  }
+  $expected_channel=$channel;
+  for my $enabled (1,0) {
+   $games=$enabled;
+   @public=();@notices=();@audit=();@gates=();@gathers=();
+   my $db=bless {finished=>0},'MB1025DB';
+   my $metrics=bless [],'MB1025Metrics';
+   my $bot={dbh=>$db,metrics=>$metrics};
+   my $ctx=bless {bot=>$bot,channel=>$channel},'MB1025Context';
+   my @warnings;
+   my $ok;
+   {local $SIG{__WARN__}=sub {push @warnings,@_}; $ok=eval {Mediabot::Stats::Affinity::mbCompat_ctx($ctx);1}}
+   my ($score)=map {$_->[1]=~/co-presence ([0-9]+)\/20/ ? 0+$1 : ()} @public;
+   $out{channel_types}{$channel}{$enabled}=[$ok?1:0,"$@",\@warnings,
+    [map {$_->[0]} @public],$score,[@notices],[@audit],[@gates],[@gathers],
+    $bot->{_compat_count}{Observer}//0,[@$metrics],$db->{finished}];
+  }
+ }
+ $games=1;
+ for my $channel (undef,'','Observer') {
+  @public=();@notices=();@audit=();@gates=();@gathers=();
+  my $db=bless {finished=>0},'MB1025DB';
+  my $bot={dbh=>$db};
+  my $ctx=bless {bot=>$bot,channel=>$channel},'MB1025Context';
+  my $ok=eval {Mediabot::Stats::Affinity::mbCompat_ctx($ctx);1};
+  push @{$out{private_targets}},[$ok?1:0,"$@",[@public],[@notices],[@audit],[@gates],[@gathers],
+    $bot->{_compat_count}{Observer}//0,$db->{finished}];
+ }
 }
 $insert->finish;$history->disconnect;
 print JSON::PP->new->canonical->utf8->encode(\%out);
@@ -223,4 +262,17 @@ my %failures=map {
 } qw(prepare execute fetch_partial fetch_throw);
 is_deeply({map {$_=>$proximity->{$_}} keys %failures}, \%failures,
  'failed and partial co-presence reads produce one private error, clean up and account for no success');
+my %channel_types;
+for my $channel ('#MiXeD','&MiXeD','!ABCDEMiXeD','+MiXeD') {
+ $channel_types{$channel}{1}=[1,'',[],[($channel)x4],1,[],
+  [[$channel,'compat','alice vs bob = 61%']],[[$channel,'Games']],
+  [(map {[$channel,'content']} 1..3)],1,['mediabot_compat_total'],1];
+ $channel_types{$channel}{0}=[1,'',[],[],undef,
+  [['Observer',"Games are disabled on $channel (chanset -Games)"]],[],[[$channel,'Games']],[],0,[],0];
+}
+is_deeply($runs[0]{channel_types},\%channel_types,
+ 'MB1360 all channel prefixes retain the Games gate, exact SQL scope, reply spelling and successful-command accounting');
+is_deeply($runs[0]{private_targets},[(map {[1,'',[],
+ [['Observer','Syntax: !compat <nick1> [nick2]  (must be in a channel)']],[],[],[],0,0]} 1..3)],
+ 'MB1360 private targets stay rejected before any channel flag, history read or accounting');
 done_testing;
