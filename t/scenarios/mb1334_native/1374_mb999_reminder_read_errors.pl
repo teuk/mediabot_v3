@@ -16,12 +16,15 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         my ($db, $sql, @rest) = @_;
         my $read = $sql =~ /SELECT\s+r\.id_reminder\b/i;
         my $cancel = $sql =~ /\A\s*(?:UPDATE|DELETE FROM)\s+REMINDERS\b/i;
+        my $quota = $sql =~ /SELECT\s+COUNT\(\*\) AS cnt FROM REMINDERS/i;
         return $db->set_err(1,'private reminder prepare detail')
             if ($read && ($db->{private_fault}//'') eq 'prepare')
+                || ($quota && ($db->{private_fault}//'') eq 'quota_prepare')
                 || ($cancel && ($db->{private_fault}//'') eq 'cancel_prepare');
         my $sth = $db->SUPER::prepare($sql, @rest);
         if ($sth) {
             $sth->{private_read} = $read ? 1 : 0;
+            $sth->{private_quota} = $quota ? 1 : 0;
             $sth->{private_cancel} = $cancel ? 1 : 0;
         }
         return $sth;
@@ -32,12 +35,18 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         $sth->{private_fetched} = 0;
         return $sth->set_err(1,'private reminder execute detail')
             if ($sth->{private_read} && ($sth->{Database}{private_fault}//'') eq 'execute')
+                || ($sth->{private_quota} && ($sth->{Database}{private_fault}//'') eq 'quota_execute')
                 || ($sth->{private_cancel} && ($sth->{Database}{private_fault}//'') eq 'cancel_execute');
         return $sth->SUPER::execute(@bind);
     }
     sub fetchrow_hashref {
         my ($sth, @rest) = @_;
         my $fault = $sth->{Database}{private_fault}//'';
+        if ($sth->{private_quota}) {
+            return $sth->set_err(1,'private reminder quota detail') if $fault eq 'quota_fetch';
+            return undef if $fault eq 'quota_missing';
+            return {cnt=>undef} if $fault eq 'quota_null';
+        }
         return $sth->set_err(1,'private reminder fetch detail')
             if $sth->{private_read} && ($fault eq 'fetch_first'
                 || ($fault eq 'fetch_after_one' && $sth->{private_fetched}));
@@ -47,6 +56,11 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
     }
     sub finish {
         my ($sth) = @_;
+        if ($sth->{private_quota}) {
+            $sth->{Database}{private_quota_finished}++;
+            $sth->set_err(undef,undef);
+            die "private quota cleanup detail\n" if $sth->{Database}{private_quota_cleanup_failure};
+        }
         if ($sth->{private_read}) {
             $sth->{Database}{private_finished}++;
             $sth->set_err(undef,undef); # cleanup must not erase a failed-read decision
@@ -275,5 +289,53 @@ for my $cmd (qw(remind tell)) {
     }}
     is_deeply(\@actual,\@expected,'DBI errors stay private, statements finish, and a cleanup exception cannot undo a confirmed cancellation');
 }
-is_deeply(\@warnings,[],'reminder reads and cancellations emit no warnings');
+# MB1357: a failed quota read is not an empty quota and must never insert.
+for my $raise (0,1) {
+    my (@actual,@expected);
+    for my $fault (qw(quota_prepare quota_execute quota_fetch quota_missing quota_null quota_fetch_cleanup healthy_cleanup)) {
+        my ($bot,$db)=setup_1374($raise); my $before=rows_1374($db);
+        $bot->{hChannelsNicks}={'#test'=>['Caller','Friend']};
+        $db->{private_fault}=$fault eq 'quota_fetch_cleanup' ? 'quota_fetch' : $fault;
+        $db->{private_quota_cleanup_failure}=1 if $fault =~ /cleanup/;
+        $bot->{logger}{fail}=1 if $fault eq 'quota_fetch_cleanup';
+        my $command=$raise ? 'tell' : 'remind';
+        my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Caller',channel=>'#test',
+            command=>$command,args=>['Friend','Un café']);
+        @wire=(); @audit=();
+        my $ok=eval {$bot->command_registry->handler_for($command,'public')->($ctx);1};
+        my $error=$ok?'':"$@";
+        $db->{private_fault}='';
+        my $saved=$fault eq 'healthy_cleanup';
+        push @actual,[$fault,$error,dclone(\@wire),dclone(\@audit),rows_1374($db),$db->{private_quota_finished}//0];
+        push @expected,[$fault,'',[['notice','Caller',$saved ? 'Reminder set for Friend.' : 'Database error.']],
+            $saved ? [['#test','remind','Friend: Un café']] : [],
+            $saved ? [@$before,[9,7,'caller','friend','Un café','created',0]] : $before,
+            $fault eq 'quota_prepare' ? 0 : 1];
+    }
+    is_deeply(\@actual,\@expected,"quota RaiseError=$raise: failed reads stop writes; cleanup cannot erase their outcome");
+}
+for my $command (qw(remind tell)) {
+    my (@actual,@expected);
+    for my $pending (0,9,10) {
+        my ($bot,$db)=setup_1374(1);
+        $db->do("DELETE FROM REMINDERS WHERE from_nick='caller' AND delivered=0");
+        $db->do('INSERT INTO REMINDERS VALUES(?,?,?,?,?,?,?)',undef,100+$_,
+            $_%2 ? 7 : 8,'caller','friend','Queued','created',0) for 1..$pending;
+        $db->do("INSERT INTO REMINDERS VALUES(500,7,'caller','friend','Cancelled','created',2)");
+        my $before=rows_1374($db);
+        $bot->{hChannelsNicks}={'#test'=>['Caller','Friend']};
+        my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Caller',channel=>'#test',
+            command=>$command,args=>['Friend','Un café']);
+        @wire=(); @audit=();
+        my $ok=eval {$bot->command_registry->handler_for($command,'public')->($ctx);1};
+        my $saved=$pending<10;
+        push @actual,[$pending,$ok?'':"$@",dclone(\@wire),dclone(\@audit),rows_1374($db)];
+        push @expected,[$pending,'',[['notice','Caller',$saved ? 'Reminder set for Friend.'
+            : 'You already have 10 pending reminders. Cancel some before adding more.']],
+            $saved ? [['#test','remind','Friend: Un café']] : [],
+            $saved ? [@$before,[501,7,'caller','friend','Un café','created',0]] : $before];
+    }
+    is_deeply(\@actual,\@expected,"$command: quota counts pending reminders across channels, excluding other senders and completed rows");
+}
+is_deeply(\@warnings,[],'reminder reads, quotas and cancellations emit no warnings');
 1;

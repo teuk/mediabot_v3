@@ -294,18 +294,31 @@ sub mbRemind_ctx {
 
     # IMP8: limit pending reminders per sender (max 10) to prevent spam
     {
-        my $sth_cnt = $self->{dbh}->prepare(q{
-            SELECT COUNT(*) AS cnt FROM REMINDERS
-            WHERE from_nick = ? AND delivered = 0
-        });
-        if ($sth_cnt && $sth_cnt->execute(lc($nick))) {
+        my ($sth_cnt, $pending);
+        my $read_ok = eval {
+            $sth_cnt = $self->{dbh}->prepare(q{
+                SELECT COUNT(*) AS cnt FROM REMINDERS
+                WHERE from_nick = ? AND delivered = 0
+            }) or die "quota prepare failed\n";
+            $sth_cnt->execute(lc($nick)) or die "quota execute failed\n";
             my $r = $sth_cnt->fetchrow_hashref;
-            $sth_cnt->finish;
-            if (($r->{cnt} // 0) >= 10) {
-                botNotice($self, $nick,
-                    "You already have 10 pending reminders. Cancel some before adding more.");
-                return 1;
-            }
+            die "quota fetch failed\n" if $sth_cnt->err;
+            $pending = $r ? $r->{cnt} : undef;
+            die "quota count unavailable\n" unless defined($pending) && $pending =~ /\A[0-9]+\z/;
+            1;
+        };
+        # Capture the read outcome before cleanup can clear the DBI error.
+        eval { $sth_cnt->finish } if $sth_cnt;
+        unless ($read_ok) {
+            eval { $self->{logger}->log(1, 'mbRemind_ctx() reminder quota read failed.') }
+                if $self->{logger};
+            botNotice($self, $nick, 'Database error.');
+            return;
+        }
+        if ($pending >= 10) {
+            botNotice($self, $nick,
+                "You already have 10 pending reminders. Cancel some before adding more.");
+            return 1;
         }
     }
 

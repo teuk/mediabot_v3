@@ -1,3 +1,9 @@
+## MB1357 — Require a confirmed reminder quota before creation
+
+- Stop remind and tell creation when the pending-reminder count cannot be read, instead of bypassing the ten-reminder limit or leaking a DBI exception.
+- Preserve the read outcome before statement cleanup, reject missing counts, contain cleanup/logger exceptions and report a private database error without insertion or success audit.
+- Extend the existing native reminder scenario with prepare/execute/fetch failures under both DBI error modes and the zero/nine/ten pending boundaries across channels, retaining exclusions for other senders and delivered/cancelled reminders.
+
 ## MB1356 — Keep reminders scoped on every IRC channel type
 
 - Use the shared IRC channel classifier for remind show, remind list and remindlist so &, ! and + channels retain their SQL scope instead of displaying reminders from every channel.
