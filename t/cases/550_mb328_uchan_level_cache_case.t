@@ -112,6 +112,14 @@ for my $case (
     ['delete positive',        'del',100,  450,0,0,  1,'deleted'],
     ['add new zero',           'add',undef,450,0,0,  1,'added'],
     ['add new positive',       'add',undef,450,0,100,1,'added'],
+    # MB1355: administrator authority does not extend the channel-level range.
+    ['admin add maximum',      'add',undef,0,  1,500,1,'added'],
+    ['admin add over maximum', 'add',undef,0,  1,501,1,'range'],
+    ['admin add high level',   'add',undef,0,  1,1000,1,'range'],
+    ['admin add huge integer', 'add',undef,0,  1,'9'x400,1,'range'],
+    ['owner add below own',    'add',undef,500,0,499,1,'added'],
+    ['owner add own level',    'add',undef,500,0,500,1,'grant_peer'],
+    ['owner add over maximum', 'add',undef,500,0,501,1,'range'],
     ['delete missing',         'del',undef,450,0,0,  1,'missing'],
     ['delete peer refused',    'del',450,  450,0,0,  1,'peer'],
     ['admin delete peer',      'del',450,  450,1,0,  1,'deleted'],
@@ -161,6 +169,8 @@ for my $case (
             deleted=>'User target removed from #TeSt', added=>"Added target to #TeSt at level $grant",
             missing=>'User target does not appear to have access on #TeSt',
             peer=>"You can't del a user with a level equal or greater than yours",
+            range=>'Cannot set user access higher than 500.',
+            grant_peer=>"You can't assign a level equal or higher than yours.",
             denied=>'Your level does not allow you to use this command.',
             login=>'You must be logged to use this command - /msg bot login username password');
         my $expected_audit=$outcome eq 'added'?[['#TeSt','add','#TeSt','target',$grant]]

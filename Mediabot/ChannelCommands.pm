@@ -1278,6 +1278,11 @@ sub channelAddUser_ctx {
         botNotice($self, $nick, "Syntax: add <#channel> <handle> <level>");
         return;
     }
+    # Match modinfo's absolute ceiling, including administrator grants.
+    if ($target_level > 500) {
+        botNotice($self, $nick, "Cannot set user access higher than 500.");
+        return;
+    }
     $target_level = int($target_level);
 
     # Ensure the bot knows the channel BEFORE doing any DB access checks

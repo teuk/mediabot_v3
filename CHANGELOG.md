@@ -1,3 +1,9 @@
+## MB1355 — Bound channel add grants at level 500
+
+- Reject channel add levels above 500 before integer conversion or database access, matching modinfo's absolute ceiling even for global administrators.
+- Preserve level-zero behavior, administrator grants at 500, lower channel-owner grants and the existing prohibition on assigning one's own level without global administrator authority.
+- Extend the existing native channel-access case with public/private boundary and oversized-integer scenarios, checking rejected requests preserve stored rows, metadata, authorization caches and success audits.
+
 ## MB1354 — Preserve zero-level channel membership semantics
 
 - Distinguish absent USER_CHANNEL rows from existing level-zero memberships in channel add and del.
