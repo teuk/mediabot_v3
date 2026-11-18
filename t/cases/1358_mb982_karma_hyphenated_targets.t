@@ -473,4 +473,55 @@ for my $prefix ('#','&','!','+') {
     is_deeply(\@wire,[['public',$prefix.'Empty','bob: no karma activity in log.']],
         "$prefix: empty channel never falls back to another channel's activity");
 }
+# MB1358: global karmainfo scores follow vote time, never hash iteration order.
+{
+    my ($bot,$peer)=setup_1358();
+    for my $route ('native','facade','registry') {
+        for my $scope ('all','private') {
+            next if $route eq 'registry' && $scope eq 'private';
+            my @observed;
+            for my $scenario ('newest','tie','negative') {
+                # Assign the newest vote to the first iterated channel so the
+                # old last-array-entry implementation fails under every hash seed.
+                $bot->{_karma_log}={'#a'=>[], '#z'=>[]};
+                my ($first,$last)=keys %{$bot->{_karma_log}};
+                if ($scenario eq 'newest') {
+                    $bot->{_karma_log}{$first}=[
+                        {nick=>'BoB',from=>'Alice',delta=>'+1',score=>17,ts=>time()-10},
+                        {nick=>'other',from=>'Alice',delta=>'+1',score=>999,ts=>time()-1},
+                    ];
+                    $bot->{_karma_log}{$last}=[
+                        {nick=>'bob',from=>'Alice',delta=>'-1',score=>400,ts=>time()-20},
+                    ];
+                } else {
+                    $bot->{_karma_log}{'#a'}=[
+                        {nick=>'bob',from=>'Alice',delta=>'+1',score=>99,ts=>time()-10},
+                    ];
+                    $bot->{_karma_log}{'#z'}=[
+                        {nick=>'bob',from=>'Alice',delta=>'-1',score=>-1,ts=>time()-10},
+                        {nick=>'BOB',from=>'Alice',delta=>'+1',score=>0,ts=>time()-10},
+                    ];
+                    push @{$bot->{_karma_log}{'#a'}},
+                        {nick=>'bob',from=>'Alice',delta=>'-1',score=>-3,ts=>time()-5}
+                        if $scenario eq 'negative';
+                }
+                my @args=('BoB',($scope eq 'all' ? ('all') : ()),'1h');
+                my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Reader',
+                    channel=>$scope eq 'all' ? '#TeSt' : 'Reader',
+                    command=>'karmainfo',args=>\@args);
+                $ctx->{_user_fetched}=1;
+                @wire=();
+                if ($route eq 'registry') {
+                    $bot->command_registry->handler_for('karmainfo','public')->($ctx);
+                } elsif ($route eq 'facade') { Mediabot::UserCommands::mbKarmaInfo_ctx($ctx) }
+                else { Mediabot::Karma::mbKarmaInfo_ctx($ctx) }
+                my ($score)=($wire[0][2] // '')=~/\[score: ([+-]?\d+)\]/;
+                my ($received)=($wire[0][2] // '')=~/received ([+-]?\d+)/;
+                push @observed,[scalar(@wire),$wire[0][1],$score,$received];
+            }
+            is_deeply(\@observed,[[1,'Reader','+17','+0'],[1,'Reader','+0','+1'],[1,'Reader','-3','+0']],
+                "$route $scope: latest karma score, deterministic ties and zero/negative scores retain vote totals and reply target");
+        }
+    }
+}
 done_testing;

@@ -1,3 +1,9 @@
+## MB1358 — Select the latest known score in global karma reports
+
+- Use the shared current-score helper in karmainfo instead of the last entry collected in arbitrary channel hash order, keeping channel reports scoped and global reports consistent with karmadiff and karmawatch.
+- Preserve deterministic timestamp ties, zero and negative scores, nickname case handling, vote totals, time windows and reply destinations.
+- Extend the existing native karma case across command, facade and registry routes; retain the existing channel-prefix scenarios without adding a test file.
+
 ## MB1357 — Require a confirmed reminder quota before creation
 
 - Stop remind and tell creation when the pending-reminder count cannot be read, instead of bypassing the ten-reminder limit or leaking a DBI exception.

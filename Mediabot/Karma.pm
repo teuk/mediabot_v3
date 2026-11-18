@@ -687,8 +687,9 @@ sub mbKarmaInfo_ctx {
     }
     my $net_received = $received_pos - $received_neg;
     my $sign = $net_received >= 0 ? '+' : '';
-    # IMP6: show current score from last known log entry
-    my $last_score = @entries ? $entries[-1]{score} : undef;
+    # MB1358: the latest vote owns the score, including global reports where
+    # entries from different channels arrive in arbitrary hash order.
+    my $last_score = _karma_current_score($self, $target, $klog_chan);
     # II15: find oldest entry for 'since' info
     my $oldest_ts = @entries ? (sort { $a->{ts} <=> $b->{ts} } @entries)[0]{ts} : 0;
     my $since_str = '';

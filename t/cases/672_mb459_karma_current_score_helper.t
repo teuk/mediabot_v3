@@ -3,7 +3,7 @@
 # mb459/mb464 — helper unique de score karma courant.
 #
 # Le helper accepte désormais un canal optionnel et départage explicitement les
-# timestamps égaux. Les deux commandes continuent de déléguer à une seule source
+# timestamps égaux. Les trois commandes délèguent à une seule source
 # de vérité.
 # =============================================================================
 
@@ -39,7 +39,7 @@ return sub {
     $assert->like($src, qr/_karma_current_score\(\$self, \$target, \$kd_chan\)/,
         '!karmadiff transmet son canal');
     my $calls = () = $src =~ /= _karma_current_score\(\$self,/g;
-    $assert->is($calls, 2, 'exactement deux appelants réels du helper');
+    $assert->is($calls, 3, 'karmawatch, karmadiff et karmainfo partagent le helper');
 
     my $bad = () = $src =~ /grep \{ lc\(\$_->\{nick\}\) eq lc\(\$\w+\) \} reverse \@\$k?log\b[^;]*;\s*\n\s*if \([^)]*\{score\}[^)]*\) \{\s*\n[^\n]*; last;/g;
     $assert->is($bad, 0, 'ancien anti-pattern absent');
