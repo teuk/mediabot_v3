@@ -52,10 +52,14 @@ ok($ch =~ /delete \$self->\{_ignore_cache\}; # mb131-B4: purge may remove channe
     }
     package MB1352::DBI::st; our @ISA = ('DBI::st');
     package MB1352::Channel;
-    sub get_id { 42 }
+    sub get_id { $_[0]{id} }
     package MB1352::User;
-    sub is_authenticated { 1 }
-    sub has_level { 1 }
+    sub is_authenticated { $_[0]{auth} // 1 }
+    sub has_level { $_[0]{master} // 1 }
+    sub nickname { 'Master' }
+    sub level_description { 'User' }
+    package MB1353::IRC;
+    sub nick_folded { 'bot' }
     package MB1352::Message;
     sub prefix { $_[0]{prefix} }
     package MB1352::Logger;
@@ -80,7 +84,8 @@ sub fixture {
     my $bot = Mediabot->new({});
     $bot->{dbh} = $dbh;
     $bot->{logger} = bless {lines=>[]}, 'MB1352::Logger';
-    $bot->{channels} = {lc($target)=>bless({}, 'MB1352::Channel')};
+    $bot->{channels} = {lc($target)=>bless({id=>42}, 'MB1352::Channel')};
+    $bot->{irc} = bless {}, 'MB1353::IRC';
     return $bot;
 }
 sub ignored {
@@ -120,30 +125,89 @@ for my $kind (qw(global channel)) {
     }
 }
 
-# Real add/delete commands must immediately refresh a primed native filter.
-for my $kind (qw(global channel)) {
+# MB1353: exercise writes, reads and deletion through both registered routes.
+my (@wire, @audit);
+sub invoke {
+    my ($bot, $scope, $command, $args, $user) = @_;
+    @wire = (); @audit = ();
+    my $ctx = Mediabot::Context->new(bot=>$bot, nick=>'Issuer', command=>$command,
+        channel=>$scope eq 'public'?'#Origin':undef, args=>$args);
+    $ctx->{user} = $user || bless({}, 'MB1352::User'); $ctx->{_user_fetched} = 1;
+    no warnings qw(redefine once);
+    local *Mediabot::DBCommands::botNotice = sub { push @wire, [@_[1,2]]; 1 };
+    local *Mediabot::DBCommands::logBot = sub { push @audit, [@_[2..$#_]]; 1 };
+    local *Mediabot::DBCommands::noticeConsoleChan = sub { 1 };
+    return $bot->command_registry->handler_for($command, $scope)->($ctx);
+}
+sub stored {
+    return $_[0]{dbh}->selectall_arrayref('SELECT * FROM IGNORES ORDER BY id_ignores');
+}
+for my $chantype ('#', '&', '!', '+', '') {
     for my $scope (qw(public private)) {
-        my $bot = fixture('#MiXeD');
-        my @channel_arg = $kind eq 'channel' ? ('#MiXeD') : ();
-        my $invoke = sub {
-            my ($command) = @_;
-            my $ctx = Mediabot::Context->new(bot=>$bot, nick=>'Issuer', command=>$command,
-                channel=>$scope eq 'public'?'#Origin':undef, args=>[@channel_arg,$mask]);
-            $ctx->{user} = bless {}, 'MB1352::User'; $ctx->{_user_fetched} = 1;
-            no warnings qw(redefine once);
-            local *Mediabot::DBCommands::botNotice = sub { 1 };
-            local *Mediabot::DBCommands::logBot = sub { 1 };
-            return $bot->command_registry->handler_for($command, $scope)->($ctx);
-        };
-        my @states = (ignored($bot, '#MiXeD', $prefix));
-        $invoke->('ignore');
-        push @states, ignored($bot, '#MiXeD', $prefix), ignored($bot, undef, $prefix);
-        $invoke->('unignore');
-        push @states, ignored($bot, '#MiXeD', $prefix), ignored($bot, undef, $prefix);
-        is_deeply([\@states, $bot->{dbh}->selectall_arrayref('SELECT * FROM IGNORES'), account_queries($bot)],
-            [[0,1,$kind eq 'global'?1:0,0,0], [], []],
-            "$scope $kind: add/remove invalidates cached results and changes native matching immediately");
+        my $target = ($chantype || '#') . 'MiXeD';
+        my $bot = fixture($target);
+        $bot->{dbh}->do('INSERT INTO IGNORES VALUES(1,0,?), (2,43,?)', undef, 'Global!*@else.invalid', $mask);
+        my $initial = stored($bot);
+        my @channel_arg = $chantype ? ($target) : ();
+        my $id = $chantype ? 42 : 0;
+        my $label = $chantype ? $target : '(allchans/private)';
+        my $log_channel = $chantype ? $target : undef;
+        my $name = "$scope " . ($chantype || 'global');
+        my @states = (ignored($bot, $target, $prefix));
+        my $add = invoke($bot, $scope, 'ignore', [@channel_arg,$mask]);
+        my $rows = stored($bot);
+        my $added_audit = [@audit];
+        my $notice_ok = @wire == 1 && $wire[0][0] eq 'Issuer'
+            && $wire[0][1] =~ /Added ignore ID .*\Q$mask on $label\E/ ? 1 : 0;
+        push @states, ignored($bot, $target, $prefix), ignored($bot, undef, $prefix);
+
+        my $cache = $bot->{_ignore_cache};
+        invoke($bot, $scope, 'ignore', [@channel_arg,$mask]);
+        my $duplicate = [stored($bot), $bot->{_ignore_cache} == $cache ? 1 : 0, [@wire], [@audit]];
+        invoke($bot, $scope, 'ignores', [@channel_arg]);
+        my $list_label = $chantype ? $target : 'allchans/private';
+        my @list = $chantype ? (['Issuer', "Ignores ($list_label): 1 entry found"])
+            : (['Issuer', "Ignores ($list_label): 2 entries found"], ['Issuer', 'ID: 1 : Global!*@else.invalid']);
+        is_deeply([$duplicate, [@wire], [@audit]],
+            [[[ @$initial, [3,$id,$mask]], 1, [['Issuer', "$mask is already ignored on $label (ID 3)"]],
+                [[$log_channel,'ignore',"exists $label $mask"]]],
+             [@list, ['Issuer', "ID: 3 : $mask"]], [[$log_channel,'ignores',$list_label]]],
+            "$name: duplicate detection and listing preserve exact scope, rows, cache and private notices");
+
+        my $removed = invoke($bot, $scope, 'unignore', [@channel_arg,$mask]);
+        push @states, ignored($bot, $target, $prefix), ignored($bot, undef, $prefix), ignored($bot, '#Other', $prefix);
+        is_deeply([$add, $rows, $notice_ok, $added_audit, $removed, \@states, stored($bot), account_queries($bot), [@wire], [@audit]],
+            [1, [@$initial, [3,$id,$mask]], 1, [[$log_channel,'ignore',"add $label $mask"]],
+             1, [0,1,$chantype?0:1,0,0,1], $initial, [],
+             [['Issuer', "Deleted ignore ID 3 $mask on $label"]], [[$log_channel,'unignore',"del $label $mask"]]],
+            "$name: add/remove takes effect immediately and leaves other scopes intact");
     }
+}
+for my $kind (qw(unregistered missing_id unauthenticated insufficient_level)) {
+    my (@got, @want);
+    for my $chantype ('#', '&', '!', '+') {
+        for my $scope (qw(public private)) {
+            for my $command (qw(ignore ignores unignore)) {
+                my $target = $chantype . 'Missing';
+                my $bot = fixture('#Registered');
+                $bot->{channels}{lc $target} = bless({}, 'MB1352::Channel') if $kind eq 'missing_id';
+                $bot->{dbh}->do('INSERT INTO IGNORES VALUES(1,0,?)', undef, $mask);
+                my $initial = stored($bot);
+                my $cache = $bot->{_ignore_cache} = {sentinel=>1};
+                my $user = bless {auth=>$kind ne 'unauthenticated', master=>$kind ne 'insufficient_level'}, 'MB1352::User';
+                my $before = scalar @{$bot->{dbh}{private_queries}};
+                invoke($bot, $scope, $command, [$target, $command eq 'ignores'?():($mask)], $user);
+                my $queries = scalar(@{$bot->{dbh}{private_queries}}) - $before;
+                push @got, [stored($bot), $bot->{_ignore_cache} == $cache ? 1 : 0, [@audit], [@wire], $queries];
+                my $text = $kind eq 'unauthenticated'
+                    ? 'You must be logged to use this command - /msg bot login username password'
+                    : $kind eq 'insufficient_level' ? 'Your level does not allow you to use this command.'
+                    : "Channel $target is " . ($command eq 'unignore'?'undefined':'not registered');
+                push @want, [$initial, 1, [], [['Issuer', $text]], 0];
+            }
+        }
+    }
+    is_deeply(\@got, \@want, "$kind: all commands stop without SQL, global fallback or cache mutation");
 }
 is_deeply(\@warnings, [], 'native ignore workflows emit no warnings');
 done_testing();

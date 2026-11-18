@@ -1,3 +1,9 @@
+## MB1353 — Keep ignore commands scoped on every IRC channel type
+
+- Recognize explicit #, &, ! and + channel arguments consistently in ignore, ignores and unignore using the shared IRC target classifier.
+- Keep channel names out of stored hostmasks and preserve the selected channel for reads, writes, deletion and audit output; reject unknown channels without falling back to global scope.
+- Extend the existing native ignore case with real SQL public/private workflows, duplicate/list checks, cross-channel preservation and authentication/registration guards without adding a test file.
+
 ## MB1352 — Restore native ignore-mask matching
 
 - Pass standalone ignore masks to Auth as resolved user-like records, avoiding a spurious account lookup that prevented global and channel ignores from matching.

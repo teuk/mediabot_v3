@@ -16,6 +16,7 @@ use POSIX qw(strftime);
 use List::Util qw(min);
 use Scalar::Util qw(refaddr weaken);
 use IO::Async::Timer::Countdown;
+use Mediabot::IRC::Target ();
 use Mediabot::IRC::DeliveryContext qw(capture_delivery_context delivery_context_current);
 use Exporter 'import';
 use Mediabot::Helpers;
@@ -2736,7 +2737,7 @@ sub IgnoresList_ctx {
     my $label      = "allchans/private";
     my $log_chan   = undef;
 
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && Mediabot::IRC::Target::is_channel($args[0])) {
         my $target = shift @args;
 
         my $chan_obj = $self->{channels}{lc $target} || $self->{channels}{lc($target)};
@@ -2827,7 +2828,7 @@ sub addIgnore_ctx {
     my $label      = "(allchans/private)";
     my $log_chan   = undef;
 
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && Mediabot::IRC::Target::is_channel($args[0])) {
         my $chan_name = shift @args;
 
         my $chan_obj = $self->{channels}{lc $chan_name} || $self->{channels}{lc($chan_name)};
@@ -2927,7 +2928,7 @@ sub delIgnore_ctx {
     my $label      = "(allchans/private)";
     my $log_chan   = undef;
 
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && Mediabot::IRC::Target::is_channel($args[0])) {
         my $chan_name = shift @args;
 
         my $chan_obj = $self->{channels}{lc $chan_name} || $self->{channels}{lc($chan_name)};
