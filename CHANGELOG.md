@@ -1,3 +1,9 @@
+## MB1347 — Separate online silence from the activity display cap
+
+- Keep active-now speakers below the displayed top 30 out of the silent-nick list.
+- Stream the complete hourly comparison when online nicks are available, retaining only the top 30 rows and the online membership set in memory.
+- Preserve channel/time scope and reply layout; failed or partial reads produce a private database error instead of a false silence report.
+
 ## MB1346 — Reject incomplete monthly statistics
 
 - Collect complete monthstats query results before rendering individual or comparison charts.

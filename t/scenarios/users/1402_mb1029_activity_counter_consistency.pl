@@ -18,12 +18,21 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         # Only adapt MySQL's date spelling to a fixed SQLite test calendar.
         # WHERE, bindings, grouping, counts and ordering run in the real DBI engine.
         $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 12 MONTH\)/'2025-10-30 12:00:00'/g;
+        $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 60 MINUTE\)/'2026-10-01 11:00:00'/g;
+        $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 24 HOUR\)/'2026-09-30 12:00:00'/g;
         my $monthly = $sql =~ /SELECT DATE_FORMAT/;
+        my $active = $sql =~ /SELECT cl\.nick, COUNT\(\*\) AS mc/;
         $sql = 'SELECT * FROM mb1346_missing_table'
             if $monthly && ($db->{private_monthstats_fault} // '') eq 'prepare';
+        $sql = 'SELECT * FROM mb1347_missing_table'
+            if $active && ($db->{private_active_fault} // '') eq 'prepare';
         my $sth = $db->SUPER::prepare($sql, @rest);
         if ($sth && $monthly) {
             $sth->{private_monthstats} = 1;
+            $sth->{private_fetched} = 0;
+        }
+        if ($sth && $active) {
+            $sth->{private_active} = 1;
             $sth->{private_fetched} = 0;
         }
         return $sth;
@@ -33,6 +42,8 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         my ($sth, @bind) = @_;
         return $sth->set_err(1, 'private monthly execute failure')
             if $sth->{private_monthstats} && ($sth->{Database}{private_monthstats_fault} // '') eq 'execute';
+        return $sth->set_err(1, 'private active execute failure')
+            if $sth->{private_active} && ($sth->{Database}{private_active_fault} // '') eq 'execute';
         return $sth->SUPER::execute(@bind);
     }
     sub fetchrow_hashref {
@@ -48,7 +59,20 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
     sub finish {
         my ($sth) = @_;
         $sth->{Database}{private_monthstats_finished}++ if $sth->{private_monthstats};
+        $sth->{Database}{private_active_finished}++ if $sth->{private_active};
         return $sth->SUPER::finish;
+    }
+    sub fetchrow_array {
+        my ($sth) = @_;
+        if ($sth->{private_active}) {
+            my $fault = $sth->{Database}{private_active_fault} // '';
+            my $fetched = $sth->{private_fetched}++;
+            if ($fault eq 'fetch' || ($fault eq 'partial' && $fetched >= 30)) {
+                $sth->set_err(1, 'private active fetch failure');
+                return; # DBI array fetch errors return an empty list.
+            }
+        }
+        return $sth->SUPER::fetchrow_array;
     }
     package MB1029::Channel;
     sub get_id {1}
@@ -199,6 +223,53 @@ for my $raise (0, 1) {
                 'next successful read publishes both months after a transient failure');
         }
     }
+}
+# MB1347: the displayed top 30 is not the complete set of active nicks.
+{
+    my ($bot, $db) = setup_1402();
+    add_1402($db, "Speaker$_", 33 - $_) for 1..31;
+    add_1402($db, 'Old', 1);
+    $db->do("UPDATE CHANNEL_LOG SET ts = '2026-10-01 10:00:00' WHERE nick = 'Old'");
+    add_1402($db, 'Elsewhere', 50, 'other channel', '2026-10', 2);
+    my @online = ('sPEAKER31', 'Quiet', 'Old', 'Elsewhere');
+    local *Mediabot::gethChannelsNicksOnChan = sub { @online };
+    $db->do('PRAGMA query_only = ON');
+    my $out = invoke_1402($bot, 'active', 'Caller', 'now');
+    is_deeply($out->[1], ['public', '#test',
+        'Present but silent in last 60min: Elsewhere, Old, Quiet (3 nick(s))'],
+        'online speaker beyond the top 30 is not silent; channel, time and nick case still apply');
+    like($out->[0][2], qr/\AActive in last 60min on #test: .* \(30 nick\(s\)\)\z/,
+        'now still displays at most 30 ranked nicks');
+    @online = ('sPEAKER31');
+    is(scalar(@{invoke_1402($bot, 'active', 'Caller', 'now')}), 1,
+        'no silent line when the only online nick is an active speaker beyond the display cap');
+    $out = invoke_1402($bot, 'active', 'Caller');
+    is_deeply([scalar(@$out), $out->[0][2] =~ /\AActive in last 24h.* \(30 nick\(s\)\)\z/ ? 1 : 0],
+        [1, 1], 'ordinary active queries retain their top-30 display without an online comparison');
+    for my $raise (0, 1) {
+        for my $stage (qw(prepare execute fetch partial)) {
+            $db->{RaiseError} = $raise;
+            $db->{private_active_fault} = $stage;
+            $db->{private_active_finished} = 0;
+            my $ok = eval { invoke_1402($bot, 'active', 'Caller', 'now'); 1 };
+            is_deeply([$ok ? '' : $@, \@wire, $db->{private_active_finished}],
+                ['', [['notice', 'Caller', 'Database error.']], $stage eq 'prepare' ? 0 : 1],
+                "active RaiseError=$raise $stage: incomplete reads never classify an unread speaker as silent");
+        }
+    }
+    $db->{private_active_fault} = '';
+    @online = ();
+    $out = invoke_1402($bot, 'active', 'Caller', 'now');
+    is_deeply([scalar(@$out), $out->[0][2] =~ /\AActive in last 60min.* \(30 nick\(s\)\)\z/ ? 1 : 0],
+        [1, 1], 'a successful read recovers after faults and retains the cap with no online nicklist');
+}
+{
+    my ($bot, $db) = setup_1402();
+    local *Mediabot::gethChannelsNicksOnChan = sub { ('Quiet') };
+    is_deeply(invoke_1402($bot, 'active', 'Caller', 'now'), [
+        ['public', '#test', 'No activity in last 60min on #test.'],
+        ['public', '#test', 'Present but silent in last 60min: Quiet (1 nick(s))'],
+    ], 'a confirmed empty hourly result still reports genuine silence');
 }
 is_deeply(\@warnings, [], 'native activity handlers emit no warnings');
 1;

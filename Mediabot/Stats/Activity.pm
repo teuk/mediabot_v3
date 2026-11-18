@@ -489,18 +489,32 @@ sub mbActive_ctx {
         ? "c.name = ? AND $date_filter"
         : "c.name = ? AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)";
 
-    my $sth = $self->{dbh}->prepare(
-        "SELECT cl.nick, COUNT(*) AS mc FROM CHANNEL_LOG cl"
-        . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
-        . " WHERE $where_clause"
-        . " GROUP BY cl.nick ORDER BY mc DESC LIMIT 30"
-    );
-    unless ($sth && $sth->execute($channel)) {
-        botNotice($self, $nick, 'Database error.'); $sth->finish if $sth; return;
+    my @online = $label eq 'last 60min'
+        ? eval { $self->gethChannelsNicksOnChan($channel) } : ();
+    my %silent = map { lc($_) => 1 } @online;
+    my ($sth, @nicks);
+    my $read_ok = eval {
+        $sth = $self->{dbh}->prepare(
+            "SELECT cl.nick, COUNT(*) AS mc FROM CHANNEL_LOG cl"
+            . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
+            . " WHERE $where_clause"
+            . " GROUP BY cl.nick ORDER BY mc DESC"
+            # An online nick below rank 30 may still have spoken. Stream the
+            # full hourly result for this comparison; retain only 30 for display.
+            . (@online ? '' : ' LIMIT 30')
+        ) or die 'active read prepare failed';
+        $sth->execute($channel) or die 'active read execute failed';
+        while (my ($n, $mc) = $sth->fetchrow_array) {
+            push @nicks, [$n, $mc] if @nicks < 30;
+            delete $silent{lc($n)};
+        }
+        die 'active read fetch failed' if $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
+        botNotice($self, $nick, 'Database error.'); return;
     }
-    my @nicks;
-    while (my ($n, $mc) = $sth->fetchrow_array) { push @nicks, [$n, $mc]; }
-    $sth->finish;
 
     if (@nicks) {
         # EE9: format as 'nick(msg_count)' pairs
@@ -518,10 +532,8 @@ sub mbActive_ctx {
 
     # mb105-IMP1: pour le mode 'now', ajouter aussi les nicks présents en ce moment (nicklist mémoire)
     if ($label eq 'last 60min') {
-        my @online = eval { $self->gethChannelsNicksOnChan($channel) };
         if (@online) {
-            my $active_set = { map { lc($_->[0]) => 1 } @nicks };
-            my @online_only = grep { !$active_set->{lc($_)} } @online;
+            my @online_only = grep { $silent{lc($_)} } @online;
             if (@online_only) {
                 my $silent = join(', ', sort @online_only);
                 $silent = substr($silent, 0, 350) . '...' if length($silent) > 350;
