@@ -1,3 +1,9 @@
+## MB1359 — Include given-only activity in karma reports
+
+- Keep karmainfo's report when the requested user has given votes but received none, instead of incorrectly claiming no karma activity.
+- Determine empty activity after filtering both received and given votes to the selected channel and time window; preserve the global view, zero received totals and the absence of an unknown score.
+- Extend the existing native karma case with given-only reports, all four channel prefixes, cutoff boundaries, mixed-case senders, legacy giver fields and empty-history checks without adding a test file.
+
 ## MB1358 — Select the latest known score in global karma reports
 
 - Use the shared current-score helper in karmainfo instead of the last entry collected in arbitrary channel hash order, keeping channel reports scoped and global reports consistent with karmadiff and karmawatch.

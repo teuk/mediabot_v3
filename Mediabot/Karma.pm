@@ -647,9 +647,6 @@ sub mbKarmaInfo_ctx {
     }
     my $all_label  = $all_chans ? ' (all channels)' : '';
     my $reply_to   = $klog_chan // $nick;
-    unless (@entries) {
-        botPrivmsg($self, $reply_to, "$target: no karma activity in log$window_label$all_label."); return 1;
-    }
     my ($received_pos, $received_neg, $given_pos, $given_neg) = (0,0,0,0);
     my %givers;
     for my $e (@entries) {
@@ -669,6 +666,11 @@ sub mbKarmaInfo_ctx {
     }
     my @given = grep { lc(($_->{from} // $_->{giver} // '')) eq $target
         && ($_->{ts} // 0) >= $since } @all_entries_for_given;
+    # MB1359: a giver can be active without receiving any votes. Decide only
+    # after both sides have been filtered to the requested scope and window.
+    unless (@entries || @given) {
+        botPrivmsg($self, $reply_to, "$target: no karma activity in log$window_label$all_label."); return 1;
+    }
     # B23/fix: _karma_log uses 'from' key, not 'giver'
     for my $e (@given) {
         if (($e->{delta} // '') eq '+1') { $given_pos++; }  # B24/fix

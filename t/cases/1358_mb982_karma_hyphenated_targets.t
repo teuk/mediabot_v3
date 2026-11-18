@@ -524,4 +524,56 @@ for my $prefix ('#','&','!','+') {
         }
     }
 }
+# MB1359: giving votes is activity even without a received vote in the window.
+{
+    my ($bot,$peer)=setup_1358();
+    for my $route ('native','facade','registry') {
+        for my $channel ('#TeSt','&TeSt','!ABCDETeSt','+TeSt') {
+            $bot->{_karma_log}={
+                lc($channel)=>[
+                    {nick=>'carol',from=>'BoB',delta=>'+1',score=>99,ts=>time()-100},
+                    {nick=>'dave',giver=>'bOb',delta=>'-1',score=>88,ts=>time()-3600},
+                    {nick=>'carol',from=>'bob',delta=>'+1',score=>100,ts=>time()-3601},
+                    {nick=>'dave',from=>'Bob2',delta=>'+1',score=>89,ts=>time()-1},
+                ],
+                '#elsewhere'=>[
+                    {nick=>'carol',from=>'bob',delta=>'-1',score=>300,ts=>time()-10},
+                ],
+            };
+            my @observed;
+            for my $case (
+                [$channel,['BoB','1h']], [$channel,['bob']],
+                [$channel,['bob','all','1h']], [$channel,['bob','all']],
+                [$channel,['ghost','1h']], [$channel.'Empty',['bob','1h']],
+                ($route ne 'registry' ? (['Reader',['bob','1h']]) : ())
+            ) {
+                my ($where,$args)=@$case;
+                my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>$where,
+                    command=>'karmainfo',args=>$args);
+                $ctx->{_user_fetched}=1;
+                @wire=();
+                if ($route eq 'registry') {
+                    $bot->command_registry->handler_for('karmainfo','public')->($ctx);
+                } elsif ($route eq 'facade') { Mediabot::UserCommands::mbKarmaInfo_ctx($ctx) }
+                else { Mediabot::Karma::mbKarmaInfo_ctx($ctx) }
+                push @observed, [map {[@$_]} @wire];
+            }
+            my $report=sub {
+                my ($where,$window,$all,$positive,$negative)=@_;
+                return [['public',$where,"karmainfo bob [memory]$window$all: received +0 (+0/-0)"
+                    . " | given: +$positive/-$negative | top voter: nobody"]];
+            };
+            my @expected=(
+                $report->($channel,' (last 1h)','',1,1), $report->($channel,'','',2,1),
+                $report->('Reader',' (last 1h)',' (all channels)',1,2),
+                $report->('Reader','',' (all channels)',2,2),
+                [['public',$channel,'ghost: no karma activity in log (last 1h).']],
+                [['public',$channel.'Empty','bob: no karma activity in log (last 1h).']],
+                ($route ne 'registry' ? ($report->('Reader',' (last 1h)','',1,2)) : ())
+            );
+            is_deeply(\@observed,\@expected,
+                "$route $channel: given-only activity retains scope, inclusive window, identity and empty-history behavior without inventing a received score");
+        }
+    }
+}
 done_testing;
