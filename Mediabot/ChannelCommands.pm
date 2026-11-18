@@ -29,7 +29,7 @@ use Mediabot::Channel::Flags ();
 use Mediabot::Channel::Badwords ();
 use Mediabot::IRC::Target ();
 use Mediabot::DynamicTemplate qw(normalize_name);
-use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
+use Mediabot::IRC::TextBudget qw(_irc_wire_bytes _split_text_for_irc);
 
 our @EXPORT = qw(
     getChannel
@@ -232,18 +232,39 @@ sub channelList_ctx {
     my $count = scalar(@items);
     botNotice($self, $nick, "Registered channels: $count result(s)");
 
-    my $per_line    = 8;
-    my $total_pages = int(($count + $per_line - 1) / $per_line);
-    my $page        = 1;
-
-    while (@items) {
-        my @chunk = splice(@items, 0, $per_line);
-        my $line  = sprintf("chanlist[%02d/%02d]: %s", $page, $total_pages, join(' ', @chunk));
-
-        if (length($line) > 360) {
-            $line = truncate_utf8($line, 357);
+    my $per_line = 8;
+    # Pack entries before numbering: truncating a fixed eight-channel slice
+    # discarded its tail. Measure wire bytes for both decoded and raw UTF-8.
+    my $page_bound = $count;
+    my @pages;
+    while (1) {
+        my $label_bytes = length(sprintf('chanlist[%02d/%02d]: ', $page_bound, $page_bound));
+        my $body_budget = 360 - $label_bytes;
+        @pages = ();
+        my @chunk;
+        for my $entry (@items) {
+            if (@chunk && (@chunk >= $per_line
+                    || _irc_wire_bytes(join(' ', @chunk, $entry)) > $body_budget)) {
+                push @pages, join(' ', @chunk);
+                @chunk = ();
+            }
+            if (_irc_wire_bytes($entry) > $body_budget) {
+                # Preserve even a single channel with a long chanset list.
+                push @pages, _split_text_for_irc($entry, $body_budget);
+            } else {
+                push @chunk, $entry;
+            }
         }
-
+        push @pages, join(' ', @chunk) if @chunk;
+        # Continuations can outnumber channels. Repack only when their page
+        # count needs more digits than the label space already reserved.
+        $page_bound = scalar @pages;
+        last if length(sprintf('chanlist[%02d/%02d]: ', $page_bound, $page_bound)) <= $label_bytes;
+    }
+    my $total_pages = scalar @pages;
+    my $page = 1;
+    for my $body (@pages) {
+        my $line = sprintf("chanlist[%02d/%02d]: %s", $page, $total_pages, $body);
         botNotice($self, $nick, $line);
         $page++;
     }

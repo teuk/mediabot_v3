@@ -58,11 +58,12 @@ return sub {
 
     # --- 3. Comptes par module (mb455) ---------------------------------------
     # MB1044: nicklist packs whole names within a wire-byte budget instead of
-    # truncating a ten-name slice. Only the other two ChannelCommands listings
-    # still need these truncation guards. Keep the repo-wide raw-substr ban and
-    # every assertion; case 1417 checks complete, bounded native nicklist output.
+    # truncating a ten-name slice. MB1350 does the same for chanlist, including
+    # continuation pages for oversized metadata. Only checkhostchan still needs
+    # a truncation guard. Keep the repo-wide raw-substr ban and every assertion;
+    # cases 27 and 1417 check complete, bounded native pagination output.
     my %expect = (
-        'ChannelCommands.pm' => 2,
+        'ChannelCommands.pm' => 1,
         'Helpers.pm'         => 3,
         'LoginCommands.pm'   => 1,
         'Partyline.pm'       => 1,

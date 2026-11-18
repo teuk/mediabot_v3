@@ -1,3 +1,9 @@
+## MB1350 — Keep every registered channel visible in paginated lists
+
+- Pack chanlist entries by their IRC wire-byte size before numbering pages, keeping the eight-entry maximum without truncating away later channels.
+- Preserve long chanset lists across continuation pages and reserve space for page counters beyond 99.
+- Replace the existing pagination source checks with native command tests covering ASCII, Unicode/raw UTF-8, aliases, permissions, empty results and complete ordered delivery.
+
 ## MB1349 — Preserve greetings containing the removal keyword
 
 - Remove a greeting only for the complete standalone `none` keyword, regardless of letter case.
