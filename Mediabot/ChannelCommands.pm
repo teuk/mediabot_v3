@@ -1306,7 +1306,7 @@ sub channelAddUser_ctx {
 
     # Channel-level checks WITHOUT ambiguous SQL (query USER_CHANNEL only)
     my $caller_chan_level = 0;
-    my $target_chan_level = 0;
+    my $target_chan_level; # undef means no row; zero is a registered membership.
 
     eval {
         my $sth = $self->{dbh}->prepare(q{
@@ -1335,7 +1335,6 @@ sub channelAddUser_ctx {
             die "execute USER_CHANNEL target level lookup failed: $err";
         }
         ($target_chan_level) = $sth->fetchrow_array;
-        $target_chan_level ||= 0;
 
         $sth->finish;
         1;
@@ -1361,7 +1360,7 @@ sub channelAddUser_ctx {
     }
 
     # Already registered on this channel?
-    if ($target_chan_level != 0) {
+    if (defined $target_chan_level) {
         botNotice($self, $nick, "User $target_handle is already on $channel with level $target_chan_level");
         return;
     }
@@ -1461,7 +1460,7 @@ sub channelDelUser_ctx {
 
     # Channel-level checks WITHOUT ambiguous SQL (query USER_CHANNEL only)
     my $issuer_level = 0;
-    my $target_level = 0;
+    my $target_level; # Preserve a stored zero separately from a missing row.
 
     eval {
         my $sth = $self->{dbh}->prepare(q{
@@ -1490,7 +1489,6 @@ sub channelDelUser_ctx {
             die "execute USER_CHANNEL target level lookup failed: $err";
         }
         ($target_level) = $sth->fetchrow_array;
-        $target_level ||= 0;
 
         $sth->finish;
         1;
@@ -1513,7 +1511,7 @@ sub channelDelUser_ctx {
     }
 
     # Target must actually be on the channel
-    unless ($target_level) {
+    unless (defined $target_level) {
         botNotice($self, $nick, "User $target_handle does not appear to have access on $channel");
         return;
     }

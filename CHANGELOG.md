@@ -1,3 +1,9 @@
+## MB1354 — Preserve zero-level channel membership semantics
+
+- Distinguish absent USER_CHANNEL rows from existing level-zero memberships in channel add and del.
+- Report an existing zero-level entry without attempting a duplicate insert, and allow authorized removal while preserving permission checks, scoped deletion and cache invalidation.
+- Extend the existing channel-access cache case with native public/private commands and real SQL uniqueness constraints, covering zero/positive/absent entries, administrator overrides and denied operations without adding a test file.
+
 ## MB1353 — Keep ignore commands scoped on every IRC channel type
 
 - Recognize explicit #, &, ! and + channel arguments consistently in ignore, ignores and unignore using the shared IRC target classifier.
