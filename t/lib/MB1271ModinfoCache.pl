@@ -2,6 +2,10 @@ use strict;
 use warnings;
 use Mediabot::UserCommands ();
 use Mediabot::Helpers ();
+use Mediabot::Mediabot ();
+use Mediabot::Context ();
+use DBI ();
+use JSON::PP ();
 
 {
     package MB1271::IRC;
@@ -103,4 +107,66 @@ return sub {
         $a->is($bot->{_uchan_level_cache}{"42\0#other"},$other_channel,"$name: other channel retained");
         $a->is($bot->{_uchan_level_cache}{"43\0#test"},$other_user,"$name: other user retained");
     }
+
+    # MB1351: apply the channel grant ceiling through both registered routes,
+    # with real SQL rows. A lower target must not make an excessive grant legal.
+    my $json=JSON::PP->new->canonical;
+    my @warnings;
+    local $SIG{__WARN__}=sub {push @warnings,@_};
+    for my $case (
+        ['equal grant',400,100,400,0,'ceiling'],
+        ['higher grant',450,100,500,0,'ceiling'],
+        ['zero-padded equal grant',450,100,'0450',0,'ceiling'],
+        ['owner equal grant',500,100,500,0,'ceiling'],
+        ['lower grant',450,100,449,0,'ok'],
+        ['demotion to zero',400,100,0,0,'ok'],
+        ['owner lower grant',500,100,499,0,'ok'],
+        ['administrator grant',0,100,500,1,'ok'],
+        ['administrator peer edit',450,500,450,1,'ok'],
+        ['administrator absolute cap',450,100,501,1,'range'],
+        ['existing peer guard',450,450,100,0,'peer'],
+        ['existing minimum guard',399,100,300,0,'access'],
+    ) {
+        my ($name,$issuer,$initial,$grant,$admin,$outcome)=@$case;
+        my (@actual,@expected);
+        for my $scope (qw(public private)) {
+            my $db=DBI->connect('dbi:SQLite:dbname=:memory:','','',
+                {RaiseError=>1,PrintError=>0,AutoCommit=>1});
+            $db->do('CREATE TABLE USER(id_user INTEGER PRIMARY KEY,nickname TEXT)');
+            $db->do('CREATE TABLE USER_CHANNEL(id_channel INTEGER,id_user INTEGER,level INTEGER)');
+            $db->do("INSERT INTO USER VALUES(41,'issuer'),(42,'target'),(43,'other')");
+            $db->do('INSERT INTO USER_CHANNEL VALUES(?,?,?)',undef,@$_) for
+                [77,41,$issuer],[77,42,$initial],[78,42,450],[77,43,100];
+            my $bot=Mediabot->new({});$bot->{dbh}=$db;
+            $bot->{channels}={'#test'=>bless({},'MB1271::Channel')};
+            $bot->{_uchan_level_cache}={"42\0#test"=>{ts=>time,val=>$initial},
+                "42\0#other"=>{ts=>time,val=>450},"43\0#test"=>{ts=>time,val=>100}};
+            my $expected_cache=$json->decode($json->encode($bot->{_uchan_level_cache}));
+            delete $expected_cache->{"42\0#test"} if $outcome eq 'ok';
+            my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Issuer',command=>'modinfo',
+                channel=>$scope eq 'public'?'#TeSt':undef,
+                args=>[$scope eq 'private'?('#TeSt'):(), 'level','target',$grant]);
+            $ctx->{user}=bless {auth=>1,admin=>$admin},'MB1271::User';$ctx->{_user_fetched}=1;
+            my (@wire,@audit);
+            no warnings qw(redefine once);
+            local *Mediabot::UserCommands::botNotice=sub {push @wire,[@_[1,2]];1};
+            local *Mediabot::UserCommands::noticeConsoleChan=sub {1};
+            local *Mediabot::UserCommands::logBot=sub {push @audit,[@_[2..$#_]];1};
+            my $result=$bot->command_registry->handler_for('modinfo',$scope)->($ctx);
+            push @actual,[$result,$db->selectall_arrayref('SELECT * FROM USER_CHANNEL ORDER BY id_channel,id_user'),
+                $bot->{_uchan_level_cache},\@wire,\@audit];
+            my %notice=(ceiling=>"You can't assign a level equal or higher than yours.",
+                range=>'Cannot set user access higher than 500.',
+                peer=>'Cannot modify a user with equal or higher access than your own.',
+                access=>'Your level does not allow you to use this command.',
+                ok=>"Set level $grant on #TeSt for target");
+            push @expected,[$outcome eq 'ok'?77:undef,
+                [[77,41,$issuer],[77,42,$outcome eq 'ok'?0+$grant:$initial],[77,43,100],[78,42,450]],
+                $expected_cache,[['Issuer',$notice{$outcome}]],
+                $outcome eq 'ok'?[['#TeSt','modinfo','level','target',$grant]]:[]];
+        }
+        $a->is($json->encode(\@actual),$json->encode(\@expected),
+            "$name: public/private grants preserve SQL scope, cache and audit according to authority");
+    }
+    $a->is($json->encode(\@warnings),'[]','channel grant boundaries emit no warnings');
 };

@@ -1,3 +1,9 @@
+## MB1351 — Enforce the channel grant ceiling in modinfo
+
+- Reject non-administrator modinfo level requests that assign access equal to or higher than the issuer's channel level, matching channel add.
+- Preserve lower grants, demotions, global administrator authority and the absolute level-500 limit.
+- Extend the existing modinfo tests with real SQL public/private scenarios verifying rejected grants leave stored levels, authorization caches and success audits untouched.
+
 ## MB1350 — Keep every registered channel visible in paginated lists
 
 - Pack chanlist entries by their IRC wire-byte size before numbering pages, keeping the eight-entry maximum without truncating away later channels.

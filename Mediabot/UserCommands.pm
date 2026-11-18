@@ -1086,6 +1086,13 @@ sub userModinfo_ctx {
             return;
         }
 
+        # Match channelAddUser: authority bounds the requested grant as well
+        # as the target's current access. Only global administrators bypass it.
+        if (!$is_admin && $new_level >= $issuer_level) {
+            botNotice($self, $nick, "You can't assign a level equal or higher than yours.");
+            return;
+        }
+
         my $query = "UPDATE USER_CHANNEL SET level=? WHERE id_user=? AND id_channel=?";
         unless ($run_update->($query, $new_level, $id_user_target, $id_channel)) {
             botNotice($self, $nick, "Internal error (DB update failed).");
