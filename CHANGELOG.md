@@ -1,3 +1,9 @@
+## MB1352 — Restore native ignore-mask matching
+
+- Pass standalone ignore masks to Auth as resolved user-like records, avoiding a spurious account lookup that prevented global and channel ignores from matching.
+- Preserve wildcard matching, channel/private scope and the existing cache; ignore checks no longer query USER or USER_HOSTMASK for anonymous masks.
+- Extend the existing ignore-cache case with native Auth and real SQL coverage of all four channel prefixes, unregistered senders and immediate add/remove effects through public/private command routes.
+
 ## MB1351 — Enforce the channel grant ceiling in modinfo
 
 - Reject non-administrator modinfo level requests that assign access equal to or higher than the issuer's channel level, matching channel add.

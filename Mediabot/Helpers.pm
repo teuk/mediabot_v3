@@ -2749,8 +2749,10 @@ sub isIgnored {
         'SELECT hostmask FROM IGNORES WHERE id_channel = 0'
     );
 
+    # Auth expects a resolved user-like hash. Ignore masks have no account:
+    # the sentinel ID prevents a hash-string lookup in USER for each message.
     for my $stored (@global_masks) {
-        my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ hostmasks => $stored }, $message->prefix);
+        my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ id_user => 0, hostmasks => $stored }, $message->prefix);
 
         if ($ok) {
             $self->{logger}->log(4,"isIgnored() (allchans/private) $matched_mask matches " . $message->prefix);
@@ -2773,7 +2775,7 @@ sub isIgnored {
     );
 
     for my $stored (@channel_masks) {
-        my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ hostmasks => $stored }, $message->prefix);
+        my ($ok, $matched_mask) = $self->{auth}->hostmask_matches({ id_user => 0, hostmasks => $stored }, $message->prefix);
 
         if ($ok) {
             $self->{logger}->log(4,"isIgnored() $matched_mask matches " . $message->prefix);
