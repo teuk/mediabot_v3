@@ -1,3 +1,9 @@
+## MB1356 — Keep reminders scoped on every IRC channel type
+
+- Use the shared IRC channel classifier for remind show, remind list and remindlist so &, ! and + channels retain their SQL scope instead of displaying reminders from every channel.
+- Use the same classification for reminder creation's live nicklist lookup, allowing a present recipient without a USER or USER_SEEN entry while preserving private listing behavior and unknown-recipient checks.
+- Extend the existing native reminder scenario with all four channel prefixes, unknown channels, the tell alias and real SQL creation, preserving read-error, ownership and cancellation coverage without adding a test file.
+
 ## MB1355 — Bound channel add grants at level 500
 
 - Reject channel add levels above 500 before integer conversion or database access, matching modinfo's absolute ceiling even for global administrators.

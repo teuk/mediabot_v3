@@ -82,7 +82,7 @@ sub setup_1374 {
     $db->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT)');
     $db->do('INSERT INTO CHANNEL VALUES(7,\'#test\'),(8,\'#else\')');
     $db->do('CREATE TABLE REMINDERS(id_reminder INTEGER PRIMARY KEY,id_channel INTEGER,
-        from_nick TEXT,to_nick TEXT,message TEXT,created_at TEXT,delivered INTEGER)');
+        from_nick TEXT,to_nick TEXT,message TEXT,created_at TEXT DEFAULT "created",delivered INTEGER DEFAULT 0)');
     my @rows = (
         [1,7,'alice','caller','Incoming A','2026-10-28 10:01',0],
         [2,7,'bob','caller','Incoming Bêta','2026-10-28 10:02',0],
@@ -130,10 +130,13 @@ for my $kind (qw(show list remindlist)) {
 for my $kind (qw(show list remindlist)) {
     my ($bot,$db) = setup_1374(1); my $before = rows_1374($db);
     my (@actual,@expected);
-    for my $channel ('#test',undef) {
+    # MB1356: every IRC channel prefix must retain the same SQL scope.
+    for my $channel ('#test','&test','!ABCDEtest','+test',undef,'') {
+        $db->do('UPDATE CHANNEL SET name=? WHERE id_channel=7',undef,$channel)
+            if defined($channel) && length($channel);
         my $error = invoke_1374($bot,$kind,$channel);
         my @ids = $kind eq 'show' ? (1,2) : (4,5);
-        push @ids, $kind eq 'show' ? 3 : 6 unless defined $channel;
+        push @ids, $kind eq 'show' ? 3 : 6 unless defined($channel) && length($channel);
         my @rows = map { $before->[$_-1] } @ids;
         my @lines = $kind eq 'show' ? ('Reminders set for you:')
             : $kind eq 'list' ? ('Pending reminders:')
@@ -145,6 +148,46 @@ for my $kind (qw(show list remindlist)) {
         push @expected, ['', [map { ['notice','Caller',$_] } @lines], [],$before];
     }
     is_deeply(\@actual,\@expected,"$kind: healthy channel and private reads preserve scope, order, text and data");
+}
+# A valid but unknown channel must not silently become a private/global read.
+{
+    my ($bot,$db)=setup_1374(1); my $before=rows_1374($db);
+    my (@actual,@expected);
+    for my $channel ('#missing','&missing','!ABCDEmissing','+missing') {
+        for my $kind (qw(show list remindlist)) {
+            my $error=invoke_1374($bot,$kind,$channel,undef,$kind eq 'remindlist' ? undef : 'tell');
+            push @actual,[$error,dclone(\@wire),dclone(\@audit)];
+            push @expected,['',[['notice','Caller',$kind eq 'show'
+                ? 'No pending reminders set for you.' : 'No pending reminders.']],[]];
+        }
+    }
+    is_deeply([\@actual,rows_1374($db)],[\@expected,$before],
+        'unknown channels remain scoped, including tell, without exposing other-channel reminders');
+}
+# Native nicklist lookup must accept an online nick without USER/USER_SEEN rows.
+for my $command (qw(remind tell)) {
+    for my $channel ('#TeSt','&TeSt','!ABCDEtest','+TeSt') {
+        my ($bot,$db)=setup_1374(1); my $before=rows_1374($db);
+        $db->do('UPDATE CHANNEL SET name=? WHERE id_channel=7',undef,$channel);
+        $db->do('CREATE TABLE USER_SEEN(nick TEXT)');
+        $db->do('CREATE TABLE USER(nickname TEXT)');
+        $bot->{hChannelsNicks}={lc($channel)=>['Caller','Friend'],'#else'=>['Elsewhere']};
+        my (@actual,@expected);
+        for my $target ('Friend','Elsewhere','Unknown') {
+            @wire=(); @audit=();
+            my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Caller',channel=>$channel,
+                command=>$command,args=>[$target,'Un café']);
+            my $ok=eval {$bot->command_registry->handler_for($command,'public')->($ctx);1};
+            push @actual,[$ok?'':"$@",dclone(\@wire),dclone(\@audit)];
+            push @expected,$target eq 'Friend'
+                ? ['',[['notice','Caller','Reminder set for Friend.']],
+                    [[$channel,'remind','Friend: Un café']]]
+                : ['',[['notice','Caller',"Unknown nick '$target'. The remind was not created."]],[]];
+        }
+        is_deeply([\@actual,rows_1374($db)],
+            [\@expected,[@$before,[9,7,'caller','friend','Un café','created',0]]],
+            "$command on $channel: native local nicklist creates only the intended pending reminder");
+    }
 }
 {
     my ($bot,$db) = setup_1374(1);

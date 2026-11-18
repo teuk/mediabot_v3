@@ -102,7 +102,7 @@ sub mbRemind_ctx {
         my ($sth_s, @bind_s);
         my @rows;
         my $read_ok = eval {
-            if (defined $channel && $channel =~ /^#/) {
+            if (isIrcChannelTarget($channel)) {
                 $sth_s = $self->{dbh}->prepare(q{
                     SELECT r.id_reminder, r.from_nick, r.message, r.created_at
                     FROM REMINDERS r
@@ -151,7 +151,7 @@ sub mbRemind_ctx {
         my ($sth_l, @bind_l);
         my @rows;
         my $read_ok = eval {
-            if (defined $channel && $channel =~ /^#/) {
+            if (isIrcChannelTarget($channel)) {
                 $sth_l = $self->{dbh}->prepare(q{
                     SELECT r.id_reminder, r.to_nick, r.message, r.created_at
                     FROM REMINDERS r
@@ -324,7 +324,7 @@ sub mbRemind_ctx {
     {
         my $target_known = 0;
         # 1. Vérifier la nicklist en mémoire (le plus rapide)
-        if (defined $channel && $channel =~ /^#/) {
+        if (isIrcChannelTarget($channel)) {
             my @chan_nicks = eval { $self->gethChannelsNicksOnChan($channel) };
             $target_known = 1 if grep { defined($_) && lc($_) eq lc($target) } @chan_nicks;
         }
@@ -649,7 +649,7 @@ sub mbRemindList_ctx {
     my ($sth, @bind_rl);
     my @rows;
     my $read_ok = eval {
-        if (defined $channel && $channel =~ /^#/) {
+        if (isIrcChannelTarget($channel)) {
             $sth = $self->{dbh}->prepare(q{
                 SELECT r.id_reminder, r.to_nick, r.message, r.created_at
                 FROM REMINDERS r
