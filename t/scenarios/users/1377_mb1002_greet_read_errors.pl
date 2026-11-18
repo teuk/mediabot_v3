@@ -53,6 +53,11 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         return 1;
     }
     package MB1002::Message; sub prefix {'Caller!ident@fixture.invalid'}
+    package MB1349::Channel; sub get_id { $_[0]{id} }
+    package MB1349::User;
+    sub is_authenticated { 1 }
+    sub has_level { 0 }
+    sub handle { 'Caller' }
 }
 $INC{'MB1002/DBI.pm'}=__FILE__;
 my (@wire,@audit,@warnings);
@@ -169,5 +174,45 @@ for my $raise (0,1) {
         ['', [['notice','Caller','Syntax: greet [#channel] <nick>']],[]],
     ],0,$before],'invalid channel scope retains syntax notices and never opens a greet query');
 }
-is_deeply(\@warnings,[],'greet reads emit no warnings');
+{
+    # Exercise the real modinfo write and greet read with a normal member's
+    # own greeting. Only the complete standalone keyword may delete it.
+    my ($bot,$db)=setup_1377(1);
+    $db->do('PRAGMA query_only = OFF');
+    $db->do('ALTER TABLE USER_CHANNEL ADD COLUMN level INTEGER DEFAULT 100');
+    $bot->{channels}={'#test'=>bless({id=>7},'MB1349::Channel'),
+        '#else'=>bless({id=>8},'MB1349::Channel')};
+    for my $case (
+        [['nonetheless'],'nonetheless'], [['NONENTITY'],'NONENTITY'],
+        [['none!'],'none!'], [['none','shall','pass'],'none shall pass'],
+        [['none'],undef], [['NoNe'],undef], [['0'],'0'],
+        [['Bienvenue','élève'],'Bienvenue élève'],
+    ) {
+        my ($parts,$expected)=@$case;
+        my (@actual,@expected);
+        for my $scope (qw(public private)) {
+            $db->do('UPDATE USER_CHANNEL SET greet=? WHERE id_channel=7 AND id_user=5',
+                undef,'Previous greeting');
+            my $before=rows_1377($db);
+            @wire=();@audit=();
+            my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Caller',
+                channel=>$scope eq 'public'?'#test':undef,command=>'modinfo',
+                args=>[$scope eq 'private'?('#test'):(), 'greet','Caller',@$parts],
+                message=>bless({},'MB1002::Message'));
+            $ctx->{user}=bless {},'MB1349::User'; $ctx->{_user_fetched}=1;
+            my $result=$bot->command_registry->handler_for('modinfo',$scope)->($ctx);
+            my $after=rows_1377($db);
+            $_->[2]=$expected for grep {$_->[0]==7 && $_->[1]==5} @$before;
+            push @actual,[$result,dclone(\@wire),dclone(\@audit),$after,
+                invoke_1377($bot,['Caller'],'#test'),dclone(\@wire)];
+            my $text=defined($expected)?"greet on #test (Caller) $expected"
+                :'No greet for Caller on #test';
+            push @expected,[7,[['notice','Caller','Set greet ('.($expected//'none').') on #test for Caller']],
+                [['#test','modinfo','greet','Caller',@$parts]],$before,'',[['public','#test',$text]]];
+        }
+        is_deeply(\@actual,\@expected,'modinfo public/private: '.join(' ',@$parts)
+            .' preserves literal text or removes only the exact keyword, without changing other rows');
+    }
+}
+is_deeply(\@warnings,[],'greet reads and writes emit no warnings');
 1;

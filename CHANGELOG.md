@@ -1,3 +1,9 @@
+## MB1349 — Preserve greetings containing the removal keyword
+
+- Remove a greeting only for the complete standalone `none` keyword, regardless of letter case.
+- Preserve literal greetings such as `nonetheless`, `NONENTITY` and `none!` instead of silently storing NULL.
+- Extend the existing user scenario with real database writes and reads through public/private modinfo routes, preserving channel/user scope and audit output.
+
 ## MB1348 — Keep calculator history across nickname letter-case changes
 
 - Store and read calc history using the same lowercase nickname key, so calclast survives a case-only nick change.

@@ -1064,7 +1064,7 @@ sub userModinfo_ctx {
         }
 
         my @greet_parts = @args[ 2 .. $#args ];
-        my $greet_msg = (scalar(@greet_parts) == 1 && defined($greet_parts[0]) && $greet_parts[0] =~ /none/i)
+        my $greet_msg = (scalar(@greet_parts) == 1 && defined($greet_parts[0]) && $greet_parts[0] =~ /\Anone\z/i)
             ? undef
             : join(" ", @greet_parts);
 
