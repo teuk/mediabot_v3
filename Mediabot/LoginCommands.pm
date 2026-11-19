@@ -28,6 +28,7 @@ use Mediabot::Auth ();   # mb465-B4: format-aware password_matches in userPass
 use Exporter 'import';
 use List::Util qw(min);
 use Mediabot::Helpers;
+use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 use Mediabot::ChannelCommands;
 
 our @EXPORT = qw(
@@ -931,15 +932,24 @@ sub userWhoAmI_ctx {
         my $mask_count = scalar(@hostmasks);
         botNotice($self, $nick, "Masks: $mask_count shown, max 20");
 
-        my $per_line    = 2;
-        my $total_pages = int((scalar(@hostmasks) + $per_line - 1) / $per_line);
-        my $page        = 1;
-
+        # Reserve the widest possible page prefix before consuming another mask.
+        # An oversized single mask keeps its own page and the existing truncation.
+        my $body_budget = 360 - _irc_wire_bytes(
+            sprintf("whoami-masks[%02d/%02d]: ", $mask_count, $mask_count));
+        my @pages;
         while (@hostmasks) {
-            my @chunk = splice(@hostmasks, 0, $per_line);
-            my $line  = sprintf("whoami-masks[%02d/%02d]: %s", $page, $total_pages, join(' | ', @chunk));
+            my $body = shift @hostmasks;
+            if (@hostmasks && _irc_wire_bytes($body . ' | ' . $hostmasks[0]) <= $body_budget) {
+                $body .= ' | ' . shift @hostmasks;
+            }
+            push @pages, $body;
+        }
 
-            if (length($line) > 360) {
+        my $total_pages = scalar @pages;
+        my $page = 1;
+        for my $body (@pages) {
+            my $line = sprintf("whoami-masks[%02d/%02d]: %s", $page, $total_pages, $body);
+            if (_irc_wire_bytes($line) > 360) {
                 $line = truncate_utf8($line, 357);
             }
 

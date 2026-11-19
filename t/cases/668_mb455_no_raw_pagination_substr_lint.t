@@ -87,10 +87,12 @@ return sub {
         my $conv = () = $src =~ /truncate_utf8\(\$line, 357\)/g;
         $assert->ok($conv >= $expect{$mod},
             "$mod: >= $expect{$mod} conversion(s) truncate_utf8(\$line,357) (vu: $conv)");
-        # la garde de longueur reste présente (on ne tronque que le trop-long)
-        my $guard = () = $src =~ /if \(length\(\$line\) > 360\) \{/g;
+        # MB1364: userinfo measures wire bytes, including decoded Unicode.
+        # Keep the same guard count and threshold, plus the raw-substr ban;
+        # the native userinfo scenario checks 360/361 bytes and both encodings.
+        my $guard = () = $src =~ /if \((?:length|_irc_wire_bytes)\(\$line\) > 360\) \{/g;
         $assert->ok($guard >= $expect{$mod},
-            "$mod: garde `length(\$line) > 360` conservée (vu: $guard)");
+            "$mod: garde de longueur > 360 conservée (vu: $guard)");
     }
 
     # --- 4. DBCommands (mb454) reste converti : non-régression ----------------

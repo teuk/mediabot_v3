@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::IRC::Target qw(is_channel);
+use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
 our @EXPORT_OK = qw(
     userStats_ctx
@@ -199,10 +200,17 @@ sub userInfo_ctx {
             my $page     = 1;
 
             while (@hostmasks) {
-                my @chunk = splice(@hostmasks, 0, $per_line);
-                my $line  = sprintf("userinfo-masks[%02d]: %s", $page, join(' | ', @chunk));
+                my $label = sprintf("userinfo-masks[%02d]: ", $page);
+                my @chunk;
+                while (@hostmasks && @chunk < $per_line) {
+                    # Never consume a second mask that truncation would hide.
+                    # Include the label/separator and measure actual wire bytes.
+                    last if @chunk && _irc_wire_bytes($label . join(' | ', @chunk, $hostmasks[0])) > 360;
+                    push @chunk, shift @hostmasks;
+                }
+                my $line = $label . join(' | ', @chunk);
 
-                if (length($line) > 360) {
+                if (_irc_wire_bytes($line) > 360) {
                     $line = truncate_utf8($line, 357);
                 }
 

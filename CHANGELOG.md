@@ -1,3 +1,15 @@
+## MB1365 — Preserve whoami hostmasks and accurate page totals
+
+- Pack whoami hostmasks within the 360-byte reply budget before consuming a second entry, so long pairs receive separate pages instead of losing part of a mask.
+- Calculate the page total after packing and measure decoded/raw UTF-8 by wire bytes; retain private notices, the 20-mask query cap, short-pair layout and truncation of an individually oversized mask.
+- Extend the existing native user-read scenario with exact byte boundaries, Unicode, empty/full lists and authentication guards on public/private routes; verify read-only queries and unchanged account details without adding a test file or interpreter.
+
+## MB1364 — Keep userinfo hostmasks visible across page boundaries
+
+- Pack userinfo hostmasks within the 360-byte reply budget before consuming the next entry; truncating a fixed pair could hide or cut the second mask while claiming it was shown.
+- Measure decoded and raw UTF-8 by wire bytes, retaining at most two masks per numbered line, the 20-mask query cap and the existing truncation of an individually oversized mask.
+- Extend the existing native userinfo scenario with exact byte boundaries, long pairs and Unicode under public/private routes; retain authorization, private replies, database-error handling and read-only queries. Accept the byte-based guard in the existing pagination lint without reducing its checks or adding a test file.
+
 ## MB1363 — Rank wordcount activity using complete message totals
 
 - Compare complete per-nickname message totals in wordcount's optional activity rank, instead of ranking other users against the target's capped 50,000-message text sample.

@@ -4,7 +4,7 @@ use utf8;
 use Test::More;
 use DBI;
 use Storable qw(dclone);
-use Encode qw(encode);
+use Encode qw(encode decode FB_CROAK);
 use Mediabot::Mediabot;
 use Mediabot::Context;
 binmode Test::More->builder->output, ':encoding(UTF-8)';
@@ -151,9 +151,44 @@ for my $kind (qw(profile masks)) {
     is_deeply([$error,$wire[2],scalar(@detail),
         scalar(grep {length(encode('UTF-8',$_->[2]))>360} @detail),
         scalar(grep {$_->[2]=~/host21/} @detail),$detail[-1],rows_1380($db)],
-        ['',['notice','Caller','Hostmasks: 20 shown, max 20'],10,0,0,
-         ['notice','Caller','userinfo-masks[10]: *!user@host19 | *!user@host20'],$before],
-        'the existing 20-mask limit, two per line, numbering and long-line truncation remain');
+        ['',['notice','Caller','Hostmasks: 20 shown, max 20'],11,0,0,
+         ['notice','Caller','userinfo-masks[11]: *!user@host20'],$before],
+        'an oversized single mask keeps its existing truncation but cannot consume the next mask; the 20-mask cap remains');
+}
+for my $raw (0,1) {
+    my (@actual,@expected);
+    my $a='*!u@'.('a'x162); my $b='*!v@'.('b'x167);
+    my $long='*!first@'.('a'x200); my $next='*!second@'.('b'x200);
+    my $unicode='*!élève@'.('界'x100);
+    # The first pair fits exactly in 360 bytes; one more byte needs a new
+    # page. The final Unicode mask fits the schema but exceeds one wire line.
+    my @cases=(
+        [[$a,$b],["$a | $b"]],
+        [[$a,$b.'x'],[$a,$b.'x']],
+        [[$long,$next,'*!short@three'],[$long,"$next | *!short\@three"]],
+        [[$unicode,$unicode,'*!short@three'],[$unicode,$unicode.' | *!short@three']],
+        [['*!u@'.('界'x200),'*!short@three'],['*!u@'.('界'x111).'...','*!short@three']],
+    );
+    for my $case (@cases) {
+        for my $channel ('#test',undef) {
+            my ($input,$bodies)=@$case;
+            my ($bot,$db)=setup_1380(1,$input);
+            $db->{sqlite_unicode}=0 if $raw;
+            my $before=rows_1380($db);
+            my $error=invoke_1380($bot,$channel);
+            my @detail=@wire[3..$#wire];
+            my $over=grep {length(utf8::is_utf8($_->[2])?encode('UTF-8',$_->[2]):$_->[2])>360} @detail;
+            my @decoded=map {my @row=@$_; $row[2]=decode('UTF-8',$row[2],FB_CROAK) if $raw; \@row} @detail;
+            push @actual,[$error,$wire[2],\@decoded,$over,$db->{private_prepares},rows_1380($db)];
+            my $page=0;
+            push @expected,['',['notice','Caller','Hostmasks: '.@$input.' shown, max 20'],
+                [map {['notice','Caller',sprintf('userinfo-masks[%02d]: %s',++$page,$_)]} @$bodies],
+                0,2,$before];
+            $db->disconnect;
+        }
+    }
+    is_deeply(\@actual,\@expected,
+        "raw UTF-8=$raw: public/private userinfo preserves mask order, exact byte boundaries, single-mask truncation and read-only query count");
 }
 {
     my ($bot,$db)=setup_1380(1); my $before=rows_1380($db); my @actual;
@@ -183,5 +218,80 @@ for my $kind (qw(profile masks)) {
         ['',[@profile,['notice','Caller','Hostmasks: unavailable (database error).']],2,$before],
         'cleanup and logger failures cannot hide an interrupted mask read or expose its first row');
 }
-is_deeply(\@warnings,[],'userinfo reads emit no warnings');
+{
+    # MB1365: exercise the real whoami handler with the same SQL fixtures.
+    # Its page total must be computed after packing, not from two masks/page.
+    package MB1365::User;
+    sub id {1}
+    sub nickname {'Zoé'}
+    sub is_authenticated {$_[0]{auth}}
+    sub level_description {'User'}
+    sub info1 {'équipe'}
+    sub info2 {'0'}
+    package MB1365::IRC;
+    sub nick_folded {'mediabot'}
+}
+{
+    my @audit;
+    local *Mediabot::LoginCommands::botNotice=sub {push @wire,['notice',$_[1],$_[2]];1};
+    local *Mediabot::LoginCommands::logBot=sub {push @audit,[@_[2..$#_]];1};
+    my $invoke=sub {
+        my ($bot,$channel,$user)=@_; @wire=(); @audit=();
+        $bot->{irc}=bless {},'MB1365::IRC';
+        my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Caller',channel=>$channel,command=>'whoami',args=>[]);
+        $ctx->{_user_fetched}=1; $ctx->{user}=$user;
+        my $ok=eval {$bot->command_registry->handler_for('whoami',defined($channel)?'public':'private')->($ctx);1};
+        return $ok?'':"$@";
+    };
+    my $a='*!u@'.('a'x162); my $b='*!v@'.('b'x166);
+    my $unicode='*!élève@'.('界'x100);
+    my @many=map {'*!u@'.('a'x180).sprintf('%02d',$_)} 1..21;
+    my @cases=(
+        [[],[]],
+        [['*!a@one','*!b@two','*!c@three'],['*!a@one | *!b@two','*!c@three']],
+        [[$a,$b],["$a | $b"]],
+        [[$a,$b.'x'],[$a,$b.'x']],
+        [[$unicode,$unicode,'*!short@three'],[$unicode,$unicode.' | *!short@three']],
+        [['*!u@'.('界'x200),'*!short@three'],['*!u@'.('界'x110).'...','*!short@three']],
+        [\@many,[@many[0..19]]],
+    );
+    for my $raw (0,1) {
+        my (@actual,@expected);
+        for my $case (@cases) {
+            for my $channel ('#test',undef) {
+                my ($input,$bodies)=@$case;
+                my ($bot,$db)=setup_1380(1,$input); $db->{sqlite_unicode}=0 if $raw;
+                my $before=rows_1380($db);
+                my $error=$invoke->($bot,$channel,bless({auth=>1},'MB1365::User'));
+                my $over=grep {$_->[2]=~/^whoami-masks/ && length(utf8::is_utf8($_->[2])?encode('UTF-8',$_->[2]):$_->[2])>360} @wire;
+                my @decoded=map {my @row=@$_; $row[2]=decode('UTF-8',$row[2],FB_CROAK) if $raw && !utf8::is_utf8($row[2]); \@row} @wire;
+                push @actual,[$error,\@decoded,$over,$db->{private_prepares},dclone(\@audit),rows_1380($db)];
+                my $count=@$input>20?20:scalar @$input; my $page=0;
+                my @text=('User: Zoé (Id: 1 - User)',
+                    'Password set | Status: logged in | AUTOLOGIN: OFF',
+                    $count?"Masks: $count shown, max 20":'Masks: N/A',
+                    (map {sprintf('whoami-masks[%02d/%02d]: %s',++$page,scalar(@$bodies),$_)} @$bodies),
+                    'Created: 2026-10-01 | Last: never | équipe | 0');
+                push @expected,['',[map {['notice','Caller',$_]} @text],0,2,[[undef,'whoami']],$before];
+                $db->disconnect;
+            }
+        }
+        is_deeply(\@actual,\@expected,
+            "whoami raw UTF-8=$raw: complete ordered mask pages, exact byte limits, accurate totals and private read-only public/private replies");
+    }
+    my (@actual,@expected);
+    for my $channel ('#test',undef) {
+        for my $user (undef,bless({auth=>0},'MB1365::User')) {
+            my ($bot,$db)=setup_1380(1); my $before=rows_1380($db);
+            my $error=$invoke->($bot,$channel,$user);
+            push @actual,[$error,dclone(\@wire),$db->{private_prepares}//0,dclone(\@audit),rows_1380($db)];
+            push @expected,['',[['notice','Caller',$user
+                ?'You must be logged in: /msg mediabot login <username> <password>'
+                :'User not found with this hostmask']],0,[],$before];
+            $db->disconnect;
+        }
+    }
+    is_deeply(\@actual,\@expected,'whoami refuses unknown and unauthenticated identities before reading account details or masks');
+}
+is_deeply(\@warnings,[],'userinfo and whoami reads emit no warnings');
 1;
