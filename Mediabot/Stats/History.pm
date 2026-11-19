@@ -170,17 +170,19 @@ sub mbWordCount_ctx {
             FROM __CLSRC__ cl2
             JOIN CHANNEL c2 ON c2.id_channel = cl2.id_channel
             WHERE c2.name = ?
-              AND cl2.nick != ?
               AND cl2.event_type IN ('public','action')
             GROUP BY cl2.nick
-        }, [ $channel, $target ], sub {
+        }, [ $channel ], sub {
             $wc_rank_counts{ lc $_[0]->{nick} } += $_[0]->{cnt} // 0;
         }, 'content');
+        # Rank complete message totals on both sides. rows_read is capped at
+        # 50k for tokenization and can understate the target's actual activity.
+        my $target_messages = delete($wc_rank_counts{$target}) // 0;
         # mb578-B1: suffixe OPTIONNEL documente — sans live_ok, pas de
         # « activity rank » (un rang sur l'archive seule serait faux) ;
         # le comptage principal deja calcule reste affiche. Teste.
         if ($wc_rank_g->{live_ok} && %wc_rank_counts) {
-            my $rank_pos = 1 + scalar grep { $wc_rank_counts{$_} > $rows_read }
+            my $rank_pos = 1 + scalar grep { $wc_rank_counts{$_} > $target_messages }
                 keys %wc_rank_counts;
             $rank_str = "  | activity rank: #" . $rank_pos;
         }

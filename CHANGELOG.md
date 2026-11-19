@@ -1,3 +1,9 @@
+## MB1363 — Rank wordcount activity using complete message totals
+
+- Compare complete per-nickname message totals in wordcount's optional activity rank, instead of ranking other users against the target's capped 50,000-message text sample.
+- Reuse the existing grouped query for the target's live/archive total; preserve the word-analysis cap, channel and speech-event scope, tied ranks, period/all behavior and database-error fallback without another query.
+- Extend the existing native wordcount scenario with real SQL above the cap, archived messages, lower/equal/higher competitors and unrelated events; keep the existing test file and interpreter.
+
 ## MB1362 — Rank historical speakers after combining archive counts
 
 - Merge all per-nickname counts before choosing the most active speaker in memory and onthisday, including the shared daily digest; per-table top-ten/top-three limits could discard the global winner.

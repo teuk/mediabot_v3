@@ -8,7 +8,7 @@ use Mediabot::Mediabot;
 use Mediabot::Context;
 
 {
-    package WordFixture::Conf; sub get {undef}
+    package WordFixture::Conf; sub get {$_[0]{$_[1]}}
     package WordFixture::Log; sub log {1}
     package WordFixture::Achievements;
     sub check_wordcount {push @{$_[0]{calls}},[@_[1..3]];1}
@@ -103,6 +103,47 @@ finish_words($raw_db,$raw_before);finish_words($char_db,$char_before);
         scalar(grep {$_->[0] eq 'notice' || $_->[2]=~/top words:/} @$out),$bot->{achievements}{calls}],
         [1,0,[['alice','#test',0]]],'empty and symbol-only messages yield a genuine zero and no invented top word');
     finish_words($db,$before);
+}
+{
+    # MB1363: the 50k tokenization cap must not become the target's activity
+    # count. Execute the real grouping and cap against live/archive tables.
+    my ($bot,$db)=fixture_words(1,[]);
+    $db->do('DELETE FROM CHANNEL_LOG');
+    $db->do("ATTACH DATABASE ':memory:' AS archive");
+    $db->do('CREATE TABLE archive.CHANNEL_LOG_ARCHIVE AS SELECT * FROM CHANNEL_LOG WHERE 0');
+    $db->do('CREATE TEMP TABLE numbers(x INTEGER)');
+    $db->do(q{INSERT INTO numbers
+        WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<50003)
+        SELECT x FROM n});
+    $db->do(q{INSERT INTO CHANNEL_LOG
+        SELECT x+25001,1,'alice','currentword','public' FROM numbers WHERE x<=25001});
+    $db->do(q{INSERT INTO archive.CHANNEL_LOG_ARCHIVE
+        SELECT x,1,'alice','archiveword','action' FROM numbers WHERE x<=25001});
+    for my $entry (['bob',50001],['charlie',50002],['dana',50003]) {
+        my ($nick,$count)=@$entry;
+        $db->do(q{INSERT INTO CHANNEL_LOG(id_channel,id_channel_log,nick,publictext,event_type)
+            SELECT 1,NULL,?,'otherword','public' FROM numbers WHERE x<=?},undef,$nick,$count);
+    }
+    # Two unrelated messages or one presence event must not alter ties or
+    # make the target overtake Dana; the competition is channel speech only.
+    $db->do(q{INSERT INTO CHANNEL_LOG(id_channel,nick,publictext,event_type) VALUES
+        (2,'alice','elsewhere','public'),(2,'alice','elsewhere','action'),
+        (2,'bob','elsewhere','public'),(2,'bob','elsewhere','action'),
+        (1,'alice','joined','join')});
+    $bot->{conf}=bless {'mysql.CHANNEL_LOG_ARCHIVE_DBNAME'=>'archive',
+        'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS'=>30},'WordFixture::Conf';
+    my $fingerprint=sub { [map {$db->selectall_arrayref(
+        "SELECT COUNT(*),SUM(id_channel_log),SUM(LENGTH(publictext)) FROM $_")}
+        ('CHANNEL_LOG','archive.CHANNEL_LOG_ARCHIVE')] };
+    my $before=$fingerprint->();
+    my $out=invoke_words($bot,0);
+    is_deeply($out,[['public','#test','alice: 2 distinct word(s) on #test [last 50k msgs]'
+        .'  | activity rank: #2  | top words: currentword (25001), archiveword (24999)']],
+        '50,002 messages outrank 50,001 and tie 50,002 after archive merging; only 50,003 ranks ahead, while words remain capped');
+    is_deeply([$fingerprint->(),$bot->{achievements}{calls}],
+        [$before,[['alice','#test',2]]],
+        'ranking preserves both history tables and the capped distinct-word achievement count');
+    $db->disconnect;
 }
 is_deeply([\@warnings,[map {$_->[1]} @snapshots]],
     [[],[map {$_->[0]} @snapshots]],'counting leaves all stored source rows intact and emits no warning');
