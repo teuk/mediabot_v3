@@ -189,6 +189,10 @@ use Mediabot::DB;
 use Mediabot::ChannelBan;
 use Mediabot::Channel;
 use Mediabot::Mediabot;
+use Mediabot::ChannelCommands ();
+use Mediabot::Context;
+use MockUser;
+use MockMessage;
 {
     package MB922::DBI; our @ISA = ('DBI');
     package MB922::DBI::db; our @ISA = ('DBI::db');
@@ -196,6 +200,10 @@ use Mediabot::Mediabot;
         my ($self, $sql, @rest) = @_;
         my $state = $self->{private_mb922};
         push @{$state->{sql}}, $sql if $state;
+        if ($state && $state->{target_fault} && $sql =~ /SELECT\s+u\.id_user,/s
+                && $state->{target_fault} eq 'prepare') {
+            return $self->set_err(1, 'target permission prepare interrupted');
+        }
         # Only this MariaDB interval expression needs a private dialect bridge.
         my $sqlite = $sql;
         $sqlite =~ s/\(NOW\(\) \+ INTERVAL \? SECOND\)/datetime(NOW(), ? || ' seconds')/g;
@@ -208,7 +216,30 @@ use Mediabot::Mediabot;
         my ($self, @bind) = @_;
         my $p = $self->{private_mb922};
         push @{$p->{state}{binds}}, [$p->{sql}, @bind] if $p;
+        if ($p && $p->{sql} =~ /SELECT\s+u\.id_user,/s
+                && ($p->{state}{target_fault} // '') eq 'execute') {
+            return $self->set_err(1, 'target permission execute interrupted');
+        }
         return $self->SUPER::execute(@bind);
+    }
+    sub fetchrow_hashref {
+        my ($self, @args) = @_;
+        my $p = $self->{private_mb922};
+        if ($p && $p->{sql} =~ /SELECT\s+u\.id_user,/s
+                && ($p->{state}{target_fault} // '') eq 'fetch') {
+            return $self->set_err(1, 'target permission fetch interrupted');
+        }
+        return $self->SUPER::fetchrow_hashref(@args);
+    }
+    sub finish {
+        my ($self) = @_;
+        my $p = $self->{private_mb922};
+        if ($p && $p->{sql} =~ /SELECT\s+u\.id_user,/s) {
+            $p->{state}{target_finishes}++;
+            $self->set_err(undef, undef); # cleanup must not erase a fetch failure
+            die 'target permission finish interrupted' if ($p->{state}{target_fault} // '') eq 'finish';
+        }
+        return $self->SUPER::finish;
     }
     package MB922::Log; sub log {1}
     package MB922::DB; our @ISA = ('Mediabot::DB');
@@ -223,9 +254,14 @@ use Mediabot::Mediabot;
         $dbh->{private_mb922} = $self->{trace} if $self->{trace};
         return $self->{dbh} = $dbh;
     }
+    package MB1368::Bot; our @ISA = ('MB922::Bot');
+    sub get_user_from_message {$_[0]{actor}}
+    package MB1368::Fullop;
+    sub authorize_delegated_ban {my ($self, %args) = @_; push @{$self->{calls}}, \%args; 1}
     package MB922::IRC;
     sub nick_folded {'mediabot'}
     sub is_connected {1}
+    sub do_NOTICE {my ($self, %args) = @_; push @{$self->{notices}}, \%args; 1}
     sub send_message {my ($s, @args) = @_; push @{$s->{sent}}, \@args; 1}
     package MB922::Bot; our @ISA = ('Mediabot');
     sub gethChannelsNicksOnChan {'mediabot'}
@@ -355,6 +391,70 @@ for my $raise (0,1) {
         $b->{dbh}->disconnect;delete $b->{channel_ban};delete $cb->{bot};
     }
 }
+# MB1368: the real command, hierarchy SELECT and persistent ban writes.
+# Fail only the target-level query; actor permission/history/storage stay live.
+for my $raise (0, 1) {
+    for my $command (qw(ban kickban kb)) {
+        for my $private (0, 1) {
+            for my $state (qw(higher equal lower zero no_membership unknown other_channel mask
+                             prepare execute fetch finish unauthenticated actor_low)) {
+                my ($b, $cb, $trace, $dir) = fixture();
+                bless $b, 'MB1368::Bot';
+                my $h = $b->{dbh};
+                $h->do('CREATE TABLE USER(id_user INTEGER, nickname TEXT)');
+                $h->do('CREATE TABLE CHANNEL(id_channel INTEGER, name TEXT)');
+                $h->do('CREATE TABLE USER_CHANNEL(id_user INTEGER, id_channel INTEGER, level INTEGER)');
+                $h->do('CREATE TABLE CHANNEL_LOG(id_channel_log INTEGER, id_channel INTEGER, nick TEXT, userhost TEXT, ts TEXT)');
+                $h->do('CREATE TABLE ACTIONS_LOG(ts TEXT, id_user INTEGER, id_channel INTEGER, hostmask TEXT, action TEXT, args TEXT)');
+                $h->do("INSERT INTO USER VALUES(1,'Alice')");
+                $h->do("INSERT INTO USER VALUES(2,'Target')") unless $state eq 'unknown';
+                $h->do("INSERT INTO CHANNEL VALUES(1,'#test'),(2,'#other')");
+                $h->do('INSERT INTO USER_CHANNEL VALUES(1,1,?)', undef, $state eq 'actor_low' ? 74 : 100);
+                unless ($state eq 'unknown' || $state eq 'no_membership') {
+                    my $level = $state eq 'equal' ? 100 : $state eq 'lower' ? 50 : $state eq 'zero' ? 0 : 150;
+                    $h->do('INSERT INTO USER_CHANNEL VALUES(2,?,?)', undef, $state eq 'other_channel' ? 2 : 1, $level);
+                }
+                $h->do("INSERT INTO CHANNEL_LOG VALUES(1,1,'Target','Target!ident\@target.example','2026-10-23 12:00:00')");
+                $b->{actor} = MockUser->new(id => 1, nick => 'Alice', level => 'User', auth => $state ne 'unauthenticated');
+                $b->{fullop} = bless {calls => []}, 'MB1368::Fullop';
+                $h->{RaiseError} = $raise;
+                $trace->{target_fault} = $state if $state =~ /^(?:prepare|execute|fetch|finish)$/;
+                $trace->{target_fault} = 'prepare' if $state eq 'mask'; # explicit masks do not query nick levels
+                $trace->{sql} = []; $trace->{binds} = [];
+                my $target = $state eq 'mask' ? '*!ident@target.example' : 'Target';
+                my @args = ($private ? '#test' : (), $target, '10m', '75', 'fixture');
+                my $ctx = Mediabot::Context->new(bot => $b, nick => 'Alice',
+                    channel => $private ? 'mediabot' : '#test', command => $command, args => \@args,
+                    message => MockMessage->new(prefix => 'Alice!u@actor.example'));
+                my $call = sub {
+                    my @warnings; local $SIG{__WARN__} = sub {push @warnings, @_};
+                    my $ok = eval {
+                        $command eq 'ban' ? Mediabot::ChannelCommands::channelBan_ctx($ctx)
+                                         : Mediabot::ChannelCommands::channelKickBan_ctx($ctx);
+                        1;
+                    };
+                    my @level_reads = map {[@{$_}[1..$#$_]]}
+                        grep {$_->[0] =~ /SELECT\s+u\.id_user,/s} @{$trace->{binds}};
+                    return {ok => $ok ? 1 : 0, warnings => \@warnings,
+                        notices => $b->{irc}{notices} || [], sent => $b->{irc}{sent},
+                        stored => $h->selectall_arrayref('SELECT id_channel,mask,ban_level,expires_at FROM CHANNEL_BAN WHERE id_channel_ban>77'),
+                        audit => $h->selectcol_arrayref('SELECT action FROM ACTIONS_LOG'),
+                        delegated => scalar(@{$b->{fullop}{calls}}), level_reads => \@level_reads};
+                };
+                my $result = $call->();
+                push @{$out{target_guard}}, [$raise, $command, $private, $state, $result];
+                if ($state =~ /^(?:prepare|execute|fetch|finish)$/) {
+                    # Same helper and DB handle: recovery must restore hierarchy refusal.
+                    $trace->{target_fault} = '';
+                    $b->{irc}{notices} = []; $b->{irc}{sent} = [];
+                    my $recovered = $call->();
+                    push @{$out{target_recovery}}, $recovered;
+                }
+                $h->disconnect; delete $b->{channel_ban}; delete $cb->{bot};
+            }
+        }
+    }
+}
 print JSON::PP->new->canonical->utf8->encode(\%out);
 MB922_NATIVE
     open my $native, '-|', $^X, '-I.', '-It/lib', '-e', $probe
@@ -410,6 +510,40 @@ MB922_NATIVE
             ['mediabot_channel_bans_expired_total'],
             [[10,0,'system','expired'],[21,1,undef,undef],[35,1,undef,undef],[77,0,undef,undef]]]),
         'the same helper recovers after outage and the real expiry pipeline removes only the due ban');
+    # One assertion per boundary, preserving exact native SQL/wire evidence.
+    my (%guard, %wanted_guard);
+    for my $entry (@{$r->{target_guard}}) {
+        my ($raise, $command, $private, $state, $v) = @$entry;
+        my $fault = $state =~ /^(?:prepare|execute|fetch|finish)$/;
+        my $allowed = $state =~ /^(?:lower|zero|no_membership|unknown|other_channel|mask)$/;
+        my $mask = $state eq 'mask' ? '*!ident@target.example' : '*!*ident@target.example';
+        my @wire = $allowed ? (['MODE',undef,'#test','+b',$mask]) : ();
+        push @wire, ['KICK',undef,'#test','Target','(Alice) fixture']
+            if $allowed && $command ne 'ban' && $state ne 'mask';
+        my @notices = $fault ? ('Cannot verify target channel level; ban cancelled.')
+            : $state eq 'unauthenticated' ? ('You must be logged to use this command.')
+            : $state eq 'actor_low' ? ('Your channel level on #test must be at least 75 to use ban commands.')
+            : !$allowed ? ('Refusing to ban Target: target channel level (' . ($state eq 'equal' ? 100 : 150) . ') is >= your level (100).')
+            : ("Ban #78 added on #test: $mask level=75 duration=10m reason=fixture");
+        push @notices, 'Kick skipped: target is a mask, not a nick.' if $allowed && $state eq 'mask' && $command ne 'ban';
+        my @audit = $allowed ? ('ban') : ();
+        push @audit, 'kickban' if $allowed && $command ne 'ban' && $state ne 'mask';
+        my $skip_read = $state =~ /^(?:mask|unauthenticated|actor_low|prepare)$/;
+        push @{$guard{$state}}, $v;
+        push @{$wanted_guard{$state}}, {ok => 1, warnings => [],
+            notices => [map {{target=>'Alice', text=>$_}} @notices], sent => \@wire,
+            stored => $allowed ? [[1,$mask,75,'2026-10-23 12:10:00']] : [],
+            audit => \@audit, delegated => $allowed ? 1 : 0,
+            level_reads => $skip_read ? [] : [['#test','Target']]};
+    }
+    for my $state (sort keys %guard) {
+        $assert->is($json->encode($guard{$state}), $json->encode($wanted_guard{$state}),
+            "native ban/kickban/kb target hierarchy: $state on public/private routes with RaiseError off/on");
+    }
+    my @recovery = map {[@{$_}{qw(ok warnings notices sent stored audit delegated)}]} @{$r->{target_recovery}};
+    $assert->is($json->encode(\@recovery), $json->encode([map {[1,[],
+        [{target=>'Alice',text=>'Refusing to ban Target: target channel level (150) is >= your level (100).'}],
+        [],[],[],0]} @recovery]), 'target permission recovery on the same DB handle preserves the higher-level ban refusal');
     my $limit_error='duration exceeds maximum of 2147483647 seconds; use perm for a permanent ban';
     $assert->is($json->encode($r->{duration_parse}),$json->encode([
         ['600','10m',undef],['7200','2h',undef],['2147483640','35791394m',undef],

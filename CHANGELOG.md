@@ -1,3 +1,9 @@
+## MB1368 — Cancel nick bans when target-level verification fails
+
+- Stop ban, kickban and kb when the target channel-level query fails during prepare, execute, fetch or cleanup; a database error must not be mistaken for an unprivileged target and allow a higher-level user to be banned.
+- Keep successful empty lookups at implicit level 0 without requiring a USER or USER_CHANNEL entry; retain lower-level targets, explicit masks, actor authentication, channel scope and normal replies.
+- Extend the existing native ban probe with real SQLite reads/writes, RaiseError on/off, public/private routes and recovery; verify no stored ban, MODE, KICK, Fullop delegation or success audit on lookup failure without adding a test file or interpreter.
+
 ## MB1367 — Apply antiflood changes across cached channel spellings
 
 - Invalidate every letter-case variant of the updated channel in antiflood parameter and override caches; clearing only the stored and typed names could leave lowercase or other cached spellings using stale limits until expiry.

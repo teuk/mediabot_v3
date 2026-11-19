@@ -2146,7 +2146,10 @@ sub _channelban_known_target_level {
     return unless defined $target && $target ne '';
     return if $target =~ /[!@*?]/;
 
-    my $sth = $self->{dbh}->prepare(q{
+    # Returns (row, error); a successful empty lookup retains implicit level 0.
+    my ($sth, $row);
+    my $ok = eval {
+        $sth = $self->{dbh}->prepare(q{
         SELECT
             u.id_user,
             u.nickname,
@@ -2157,17 +2160,27 @@ sub _channelban_known_target_level {
         WHERE c.name = ?
           AND u.nickname = ?
         LIMIT 1
-    });
-
-    unless ($sth && $sth->execute($channel, $target)) {
-        $sth->finish if $sth;
-        return;
+        }) or die "target level prepare failed: $DBI::errstr";
+        $sth->execute($channel, $target)
+            or die "target level execute failed: $DBI::errstr";
+        $row = $sth->fetchrow_hashref;
+        # An empty result means no channel level; a failed read does not.
+        # Capture DBI's diagnostic before finish() can clear it.
+        die "target level fetch failed: " . ($sth->errstr // 'unknown error')
+            if $sth->can('err') && $sth->err;
+        $sth->finish;
+        1;
+    };
+    unless ($ok) {
+        my $error = $@ || 'unknown database error';
+        eval { $sth->finish } if $sth;
+        $error =~ s/\s+/ /g;
+        $self->{logger}->log(1, "channelban: target level lookup failed on $channel: $error")
+            if $self->{logger};
+        return (undef, 'Cannot verify target channel level; ban cancelled.');
     }
 
-    my $row = $sth->fetchrow_hashref;
-    $sth->finish;
-
-    return $row;
+    return ($row, undef);
 }
 
 sub _channelban_latest_hostmask_for_nick {
@@ -2303,7 +2316,12 @@ sub _channelban_apply {
         return;
     }
 
-    my $target_level_row = _channelban_known_target_level($self, $target_chan, $target);
+    my ($target_level_row, $target_level_error) =
+        _channelban_known_target_level($self, $target_chan, $target);
+    if ($target_level_error) {
+        _channelban_reply($ctx, $target_level_error);
+        return;
+    }
     if ($target_level_row && defined $target_level_row->{level}) {
         my $target_level = int($target_level_row->{level});
         if ($target_level >= $actor_level) {
