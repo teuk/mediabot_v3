@@ -1,3 +1,9 @@
+## MB1366 — Keep antiflood fetch failures out of the configuration cache
+
+- Distinguish a reported DBI fetch error from an absent CHANNEL_FLOOD row before statement cleanup can clear its diagnostic; an interrupted read could otherwise disable channel output limits for the entire configuration-cache lifetime.
+- Reuse the existing read-error policy: preserve confirmed cache values and age, retain global admission limits and retry on the next message; genuine empty results still use the normal negative cache.
+- Extend the existing antiflood case with native SQLite/DBI failures, cold/configured/negative caches, immediate recovery and enforcement of recovered limits, without extra queries, test files or interpreters.
+
 ## MB1365 — Preserve whoami hostmasks and accurate page totals
 
 - Pack whoami hostmasks within the 360-byte reply budget before consuming a second entry, so long pairs receive separate pages instead of losing part of a mask.

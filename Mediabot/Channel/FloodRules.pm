@@ -4,7 +4,7 @@ use warnings;
 
 # CHANNEL_FLOOD boundary. Receives only a DBI-compatible handle and
 # channel identity/values; owns no bot, cache, clock, logger or transport.
-# Distinguish an absent row from a false prepare/execute result. DBI exceptions
+# Distinguish an absent row from reported prepare/execute/fetch errors. DBI exceptions
 # propagate unchanged. Preserve the existing statement call order and failure
 # semantics; the admission policy owns defaults, caching and fail-open choices.
 sub read {
@@ -14,7 +14,12 @@ sub read {
     );
     if ($sth && $sth->execute($id_channel)) {
         my $row = $sth->fetchrow_hashref;
+        # finish() may clear DBI's error state. A failed fetch is not evidence
+        # that this channel is unconfigured and must not seed the negative cache.
+        my $failed = $sth->err;
+        my $error = $failed ? ($sth->errstr // 'database fetch error') : undef;
         $sth->finish;
+        return { status => 'error', error => $error } if $failed;
         return $row ? { status => 'found', row => $row } : { status => 'missing' };
     }
     no warnings 'once';

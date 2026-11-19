@@ -24,6 +24,7 @@ use JSON::PP ();
   sub prepare { my ($s,$sql)=@_; $s->{selects}++; $s->{sql}=$sql; return $s }
   sub execute { $_[0]{bound}=$_[1]; 1 }
   sub fetchrow_hashref { undef }
+  sub err { undef }
   sub finish { $_[0]{finished}++; 1 }
 }
 {
@@ -37,8 +38,43 @@ use JSON::PP ();
   sub prepare {my($s,$sql)=@_;$s->step('prepare',$sql) ? $s : undef}
   sub execute {my($s,@args)=@_;$s->step('execute',@args)}
   sub fetchrow_hashref {my($s)=@_;$s->step('fetch');$s->{row}}
+  sub err { undef }
   sub finish {my($s)=@_;$s->step('finish')}
 }
+{
+  # MB1366: real DBI errors, including finish() clearing the diagnostic.
+  package MB1366::DBI; our @ISA=('DBI');
+  package MB1366::DBI::db; our @ISA=('DBI::db');
+  sub prepare {
+    my ($db,$sql,@args)=@_;
+    my $sth=$db->SUPER::prepare($sql,@args);
+    $sth->{private_flood_read}=1 if $sth && $sql=~/^SELECT nbmsg_max, duration, timetowait /;
+    return $sth;
+  }
+  package MB1366::DBI::st; our @ISA=('DBI::st');
+  sub execute {
+    my ($sth,@args)=@_;
+    push @{$sth->{Database}{private_reads}},[@args] if $sth->{private_flood_read};
+    return $sth->SUPER::execute(@args);
+  }
+  sub fetchrow_hashref {
+    my ($sth,@args)=@_;
+    return $sth->set_err(1,'flood fetch interrupted')
+      if $sth->{private_flood_read} && $sth->{Database}{private_fetch_fault};
+    return $sth->SUPER::fetchrow_hashref(@args);
+  }
+  sub finish {
+    my ($sth)=@_;
+    if ($sth->{private_flood_read}) {
+      $sth->{Database}{private_finishes}++;
+      $sth->set_err(undef,undef);
+    }
+    return $sth->SUPER::finish;
+  }
+  package MB1366::Log;
+  sub log {push @{$_[0]{entries}},[@_[1..$#_]];1}
+}
+$INC{'MB1366/DBI.pm'}=__FILE__;
 return sub {
     my ($assert) = @_;
     my $json=JSON::PP->new->canonical;
@@ -114,5 +150,61 @@ return sub {
         Mediabot::IRC::OutputPolicy::checkAntiFlood($subject,'#teuk',1,$hooks);
         $deep->($handle->{calls},[],'fresh confirmed rules avoid another SQL read');
     }
-
+    # An interrupted fetch must never create/refresh an "unconfigured" cache.
+    require DBI;
+    require Mediabot::IRC::OutputBudget;
+    no warnings 'redefine';
+    local *Mediabot::IRC::OutputBudget::now=sub {$now};
+    my $fixture=sub {
+        my $h=DBI->connect('dbi:SQLite:dbname=:memory:','','',
+          {RootClass=>'MB1366::DBI',RaiseError=>0,PrintError=>0,AutoCommit=>1});
+        $h->do('CREATE TABLE CHANNEL_FLOOD(id_channel INTEGER PRIMARY KEY, nbmsg_max INTEGER, duration INTEGER, timetowait INTEGER)');
+        $h->do('INSERT INTO CHANNEL_FLOOD VALUES(42,1,30,15),(7,9,90,45)');
+        $h->do('PRAGMA query_only=ON');
+        $h->{private_reads}=[];
+        return $h;
+    };
+    my (@read_actual,@read_expected);
+    for my $id (42,99) {
+        for my $fault (0,1) {
+            my $h=$fixture->(); $h->{private_fetch_fault}=$fault;
+            my $result=Mediabot::Channel::FloodRules::read($h,$id);
+            push @read_actual,[$result,$h->{private_reads},$h->{private_finishes}];
+            my $expected=$fault ? {status=>'error',error=>'flood fetch interrupted'}
+              : $id==42 ? {status=>'found',row=>{nbmsg_max=>1,duration=>30,timetowait=>15}}
+              : {status=>'missing'};
+            push @read_expected,[$expected,[[$id]],1];
+            $h->disconnect;
+        }
+    }
+    $deep->(\@read_actual,\@read_expected,'native DBI distinguishes fetch failure from real empty results before finish clears errors');
+    for my $old (undef,{ts=>1000,nbmsg_max=>2,duration=>60,timetowait=>30},
+                     {ts=>1000,unconfigured=>1}) {
+        my $h=$fixture->(); my @notices;
+        my $snapshot=$h->selectall_arrayref('SELECT * FROM CHANNEL_FLOOD ORDER BY id_channel');
+        my $cache={'#other'=>{ts=>1900,unconfigured=>1}};
+        $cache->{'#teuk'}=dclone($old) if $old;
+        my $subject={dbh=>$h,logger=>bless({entries=>[]},'MB1366::Log'),
+          channels=>{'#teuk'=>bless({},'MB1209::Channel')},_af_params=>dclone($cache)};
+        my $native_hooks={%$hooks,reply=>sub {push @notices,'reply'},console=>sub {push @notices,'console'}};
+        my $call=sub {Mediabot::IRC::OutputPolicy::checkAntiFlood($subject,'#teuk',1,$native_hooks)};
+        $h->{private_fetch_fault}=1; $now=2000;
+        my @actual;
+        for (1..2) {
+            push @actual,[$call->(),dclone($subject->{_af_params}),scalar @{$h->{private_reads}},
+              $h->{private_finishes},scalar @{$subject->{_global_af}{hits}}];
+            $now++;
+        }
+        $h->{private_fetch_fault}=0;
+        push @actual,[$call->(),dclone($subject->{_af_params}),scalar @{$h->{private_reads}},
+          $h->{private_finishes},scalar @{$subject->{_global_af}{hits}}];
+        push @actual,[$call->(),scalar @{$h->{private_reads}},scalar @{$subject->{_global_af}{hits}},\@notices];
+        my @errors=grep {$_->[0]==1 && $_->[1]=~/DB error:/} @{$subject->{logger}{entries}};
+        my $recovered={%$cache,'#teuk'=>{ts=>2002,nbmsg_max=>1,duration=>30,timetowait=>15,id_channel=>42}};
+        $deep->([\@actual,\@errors,$h->{private_reads},$h->selectall_arrayref('SELECT * FROM CHANNEL_FLOOD ORDER BY id_channel')],
+          [[[0,$cache,1,1,1],[0,$cache,2,2,2],[0,$recovered,3,3,3],[1,3,3,['console']]],
+           [(map {[1,'checkAntiFlood() DB error: flood fetch interrupted']} 1..2)],[[42],[42],[42]],$snapshot],
+          'native fetch outage preserves '.(!$old?'cold':$old->{unconfigured}?'negative':'configured').' cache, retries immediately, then enforces recovered limits without writes');
+        $h->disconnect;
+    }
 };
