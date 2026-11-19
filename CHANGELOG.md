@@ -1,3 +1,9 @@
+## MB1377 — Reject ambiguous numeric reminder schedules
+
+- Require ASCII digits before converting reminder times and relative durations; Unicode digits could previously become zero or a truncated ASCII prefix, silently scheduling midnight, the wrong minute or a shorter delay.
+- Reject malformed numeric schedules privately before INSERT for remind/tell, including urgent, daily, weekly and at forms; preserve valid zero-padded/uppercase delays, local-calendar and DST rules, Unicode message bodies and literal non-leading scheduling text.
+- Extend the existing native reminder case through both registry commands and real SQLite storage; no new test file, interpreter, database schema or runtime configuration.
+
 ## MB1376 — Reject invalid factoid filters before listing
 
 - Stop treating malformed or overlong factoids filters as an unfiltered request in both the historical handler and factoids-v3; return one private syntax notice before reading factoids.

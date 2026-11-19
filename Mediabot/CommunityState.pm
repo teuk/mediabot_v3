@@ -209,7 +209,7 @@ sub mbRemind_ctx {
     my $daily_hhmm   = '';
     if (@args && lc($args[0]) eq 'daily') {
         shift @args;
-        if (@args && $args[0] =~ /^(\d{1,2}):(\d{2})$/) {
+        if (@args && $args[0] =~ /\A([0-9]{1,2}):([0-9]{2})\z/) {
             my ($hh, $mm) = (int($1), int($2));
             if ($hh < 24 && $mm < 60) {
                 $daily_hhmm  = sprintf('%02d:%02d', $hh, $mm);
@@ -236,7 +236,7 @@ sub mbRemind_ctx {
                         lun=>1, mar=>2, mer=>3, jeu=>4, ven=>5, sam=>6, dim=>0 );
         if (@args && exists $dow_map{lc($args[0])}) {
             $weekly_dow = $dow_map{lc(shift @args)};
-            if (@args && $args[0] =~ /^(\d{1,2}):(\d{2})$/) {
+            if (@args && $args[0] =~ /\A([0-9]{1,2}):([0-9]{2})\z/) {
                 my ($hh, $mm) = (int($1), int($2));
                 if ($hh < 24 && $mm < 60) {
                     $weekly_hhmm  = sprintf('%02d:%02d', $hh, $mm);
@@ -377,22 +377,30 @@ sub mbRemind_ctx {
     my $delay_secs = 0;
     my $delay_requested = 1;
     my $delay_now = time();
+    # Recognize Unicode digit lookalikes so they are rejected as schedules,
+    # then require ASCII before arithmetic; Perl otherwise coerces them to 0
+    # or to an ASCII prefix, silently storing a different delivery time.
     if ($message =~ s/^(?:dans|in)\s+(\d+)h(?:(\d+)m)?\s+//i) {
-        $delay_secs = $1 * 3600 + ($2 // 0) * 60;
+        my ($hours, $minutes) = ($1, $2 // 0);
+        $delay_secs = $hours * 3600 + $minutes * 60
+            if "$hours:$minutes" =~ /\A[0-9]+:[0-9]+\z/;
     } elsif ($message =~ s/^(?:dans|in)\s+(\d+)m\s+//i) {
-        $delay_secs = $1 * 60;
+        my $minutes = $1;
+        $delay_secs = $minutes * 60 if $minutes =~ /\A[0-9]+\z/;
     } elsif ($message =~ s/^(?:dans|in)\s+(\d+)d\s+//i) {
         # mb87-B1: support 'in Nd' (jours)
-        $delay_secs = $1 * 86400;
+        my $days = $1;
+        $delay_secs = $days * 86400 if $days =~ /\A[0-9]+\z/;
     } elsif ($message =~ s/^(?:dans|in)\s+(\d+)w\s+//i) {
         # mb87-B1: support 'in Nw' (semaines)
-        $delay_secs = $1 * 7 * 86400;
+        my $weeks = $1;
+        $delay_secs = $weeks * 7 * 86400 if $weeks =~ /\A[0-9]+\z/;
     } elsif ($message =~ s/^tomorrow\s+//i) {
         $delay_secs = 86400;
     } elsif ($message =~ s/^at\s+(\d{1,2}):(\d{2})\s+//i) {
         # mb87-B1: 'at HH:MM' — prochaine occurrence de l'heure (aujourd'hui ou demain)
-        my ($hh, $mm) = (int($1), int($2));
-        if ($hh < 24 && $mm < 60) {
+        my ($hh, $mm) = ($1, $2);
+        if ("$hh:$mm" =~ /\A[0-9]+:[0-9]+\z/ && $hh < 24 && $mm < 60) {
             $delay_secs = _reminder_next_epoch($delay_now, $hh, $mm) - $delay_now;
         } else {
             botNotice($self, $nick, "Invalid time. Use: at HH:MM (00:00-23:59)");

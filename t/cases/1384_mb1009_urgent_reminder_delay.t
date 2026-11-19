@@ -109,6 +109,10 @@ for my $case (
         [['Friend','in','2h','Un café'],'[at:8200] Un café','Reminder set for Friend (due in 2h 0m).'],
         [['!','Friend','Un café'],'[!] Un café','Reminder set for Friend.'],
         [['!','Friend','literal','in','2h','Un café'],'[!] literal in 2h Un café','Reminder set for Friend.'],
+        [['Friend','in','00h030m','Café ١٢'],'[at:2800] Café ١٢','Reminder set for Friend (due in 30m 0s).'],
+        [['Friend','IN','02H03M','Café １２'],'[at:8380] Café １２','Reminder set for Friend (due in 2h 3m).'],
+        [['Friend','at','01:30','Café 𝟡'],'[at:5400] Café 𝟡','Reminder set for Friend (due in 1h 13m).'],
+        [['!','Friend','literal','in','1٢h','Un café'],'[!] literal in 1٢h Un café','Reminder set for Friend.'],
     ) {
         my ($args,$message,$notice)=@$case;my ($bot,$db)=setup_1384();
         my ($error,$remaining)=invoke_1384($bot,'remind',$args);
@@ -146,4 +150,36 @@ for my $case (
     is_deeply(\@actual,\@expected,'urgency and scheduling metadata share the 512-character budget, including its exact Unicode boundary');
 }
 is_deeply(\@warnings,[],'urgent scheduling emits no warnings');
+# MB1377: numeric Unicode lookalikes must not be silently coerced to zero
+# or to their ASCII prefix; exercise the public registry and real storage.
+my $numeric_case = 0;
+for my $case (
+    ['daily', '٠٩:٣٠'], ['daily', '09:3０'],
+    ['weekly', '０９:３０'], ['weekly', '09:3٠'],
+    ['at', '٠٩:٣٠'], ['at', '09:3０'], ['at', '𝟡:30'],
+    ['in', '1٢h'], ['in', '2h٣0m'], ['in', '１h30m'],
+    ['in', '3٠m'], ['in', '1٢d'], ['dans', '1２w'],
+) {
+    my ($kind,$token)=@$case;my (@actual,@expected);
+    for my $command (qw(remind tell)) {
+        for my $urgent (0,1) {
+            my ($bot,$db)=setup_1384();@warnings=();
+            my $args=[($urgent?'!':()),
+                $kind eq 'daily'?('daily',$token,'Friend')
+                :$kind eq 'weekly'?('weekly','mon',$token,'Friend')
+                :('Friend',$kind,$token),'Un café'];
+            my $before=rows_1384($db);
+            my ($error,$remaining)=invoke_1384($bot,$command,$args);
+            push @actual,[$error,$remaining,rows_1384($db),dclone(\@wire),dclone(\@audit),scalar @warnings];
+            my $notice=$kind eq 'daily'?'Syntax: remind daily HH:MM <nick> <message>'
+                :$kind eq 'weekly'?'Syntax: remind weekly <day> HH:MM <nick> <msg>  (day: mon, tue, wed...)'
+                :$kind eq 'at'?'Invalid time. Use: at HH:MM (00:00-23:59)'
+                :'Invalid delay. Use a positive, representable delay.';
+            push @expected,['',$args,$before,[['notice','Sender',$notice]],[],0];
+        }
+    }
+    $numeric_case++;
+    diag('Unexpected stored reminder: '.$actual[0][2][1][3]) if @{$actual[0][2]} > 1;
+    is_deeply(\@actual,\@expected,"numeric case $numeric_case ($kind): both commands reject Unicode digits without storing a reminder, altering arguments or warning");
+}
 done_testing;
