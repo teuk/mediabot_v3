@@ -1,3 +1,9 @@
+## MB1362 — Rank historical speakers after combining archive counts
+
+- Merge all per-nickname counts before choosing the most active speaker in memory and onthisday, including the shared daily digest; per-table top-ten/top-three limits could discard the global winner.
+- Preserve channel/day/event scope, indexed day ranges, archive fallback, excerpt limits and reply layout; equal totals use the existing nickname tie-break across the complete result.
+- Extend the existing archive case with native SQLite queries covering a winner below both local top tens, unrelated history and absent/unavailable archives, without adding a test file or interpreter.
+
 ## MB1361 — Count speech rather than presence in active reports
 
 - Count only public messages and actions in active rankings, excluding joins, parts and other channel-state events from message totals.

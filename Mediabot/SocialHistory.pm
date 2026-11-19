@@ -732,6 +732,8 @@ sub _memory_lines {
 
     my $day = $best->{day};
     my %nick_counts;
+    # Merge every speaker's count before choosing the winner: a global leader
+    # can fall below the per-table top ten in both live and archived history.
     my $top_g = Mediabot::Helpers::channel_log_gather($self, $dbh, q{
         SELECT nick, COUNT(*) AS c
         FROM __CLSRC__
@@ -741,7 +743,6 @@ sub _memory_lines {
           AND ts < DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY nick
         ORDER BY c DESC
-        LIMIT 10
     }, [ $id_channel, $day, $day ], sub {
         my ($r) = @_;
         $nick_counts{ $r->{nick} } += $r->{c} // 0
@@ -2699,7 +2700,8 @@ sub _onthisday_lines {
     for my $r (@years) {
         last if $shown >= 5;
         # mb570-B1: le top nick vient de la table ou vit l'annee ; annee a
-        # cheval -> les deux, sommees en Perl.
+        # cheval -> les deux, sommees en Perl. Ne pas limiter chaque source :
+        # cela eliminerait un gagnant global absent des podiums locaux.
         my %nick_counts;
         my @tables_for_year;
         push @tables_for_year, 'CHANNEL_LOG'  if $r->{src}{live};
@@ -2711,7 +2713,7 @@ sub _onthisday_lines {
                 WHERE id_channel = ?
                   AND event_type IN ('public','action')
                   AND $day_range_sql
-                GROUP BY nick ORDER BY c DESC LIMIT 3
+                GROUP BY nick ORDER BY c DESC
             }) };
             next unless $tq && eval { $tq->execute($id_channel,
                 $day_range_binds->($r->{y}), $day_range_binds->($r->{y})) };

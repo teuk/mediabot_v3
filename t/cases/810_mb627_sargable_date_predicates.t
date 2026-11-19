@@ -123,7 +123,7 @@ return sub {
     for my $keep (
         [ qr/AND CHAR_LENGTH\(publictext\) BETWEEN 25 AND 300/, 'filtre de longueur des citations' ],
         [ qr/AND event_type IN \('public','action'\)/,          'filtre de type d evenement' ],
-        [ qr/GROUP BY nick ORDER BY c DESC LIMIT 3/,            'podium par annee' ],
+        [ qr/GROUP BY nick ORDER BY c DESC\s*\n/,              'comptes par annee avant classement global' ],
     ) {
         $assert->like($src, $keep->[0], "mb627-810: $keep->[1] conserve");
     }

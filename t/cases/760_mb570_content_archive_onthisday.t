@@ -18,11 +18,31 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use DBI ();
 
 use Mediabot::Mediabot;
 use Mediabot::Helpers;
 
 sub _slurp_760 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!"; local $/; <$fh> }
+
+{
+    package MB1362::DBI; our @ISA = ('DBI');
+    package MB1362::DBI::db; our @ISA = ('DBI::db');
+    sub prepare {
+        my ($db, $sql, @rest) = @_;
+        # Translate only calendar syntax. Native WHERE/GROUP/ORDER/LIMIT
+        # clauses and bindings execute in SQLite, including any premature cap.
+        $sql =~ s/CURDATE\(\)/'2026-11-19'/g;
+        $sql =~ s/'2026-11-19' - INTERVAL 30 DAY/datetime('2026-11-19', '-30 days')/g;
+        $sql =~ s/DATE_ADD\(\?, INTERVAL 1 DAY\)/datetime(?, '+1 day')/g;
+        my $day = q{STR_TO_DATE(CONCAT(?, '-', ?, '-', ?), '%Y-%m-%d')};
+        $sql =~ s/\Q$day\E \+ INTERVAL 1 DAY/datetime($day, '+1 day')/g;
+        $sql =~ s/FROM_UNIXTIME\(UNIX_TIMESTAMP\(\?\) \+ \?\)/datetime(?, printf('+%d seconds', ?))/g;
+        return $db->SUPER::prepare($sql, @rest);
+    }
+    package MB1362::DBI::st; our @ISA = ('DBI::st');
+}
+$INC{'MB1362/DBI.pm'} = __FILE__;
 
 {
     package L760;
@@ -179,6 +199,60 @@ return sub {
             'sans archive: comportement historique');
         my @arch_q = grep { $_->[0] =~ /CHANNEL_LOG_ARCHIVE/ } @{ $dbh_solo->{done} };
         $assert->ok(!@arch_q, 'sans archive: aucune requete vers l\'archive');
+    }
+
+    # MB1362: a global winner can lie below BOTH per-table top-ten lists.
+    {
+        my $db = DBI->connect('dbi:SQLite:dbname=:memory:', '', '', {
+            RootClass=>'MB1362::DBI', RaiseError=>1, PrintError=>0, AutoCommit=>1,
+            sqlite_see_if_its_a_number=>1,
+        });
+        $db->sqlite_create_function('YEAR', 1, sub { 0 + substr($_[0], 0, 4) });
+        $db->sqlite_create_function('MONTH', 1, sub { 0 + substr($_[0], 5, 2) });
+        $db->sqlite_create_function('DAY', 1, sub { 0 + substr($_[0], 8, 2) });
+        $db->sqlite_create_function('CONCAT', -1, sub { join('', @_) });
+        $db->sqlite_create_function('STR_TO_DATE', 2, sub {
+            my ($y,$m,$d) = split /-/, $_[0]; sprintf('%04d-%02d-%02d', $y,$m,$d)
+        });
+        $db->sqlite_create_function('CHAR_LENGTH', 1, sub { length($_[0] // '') });
+        $db->do("ATTACH DATABASE ':memory:' AS archive");
+        for my $table ('CHANNEL_LOG', 'archive.CHANNEL_LOG_ARCHIVE') {
+            $db->do("CREATE TABLE $table (id_channel INTEGER, ts TEXT, nick TEXT, event_type TEXT, publictext TEXT)");
+            my $ins = $db->prepare("INSERT INTO $table VALUES (?, ?, ?, ?, ?)");
+            my $prefix = $table eq 'CHANNEL_LOG' ? 'L' : 'R';
+            for my $i (1..10) {
+                $ins->execute(5, '2024-02-29 12:00:00', sprintf('%s%02d', $prefix, $i), 'public', 'hi') for 1..4;
+            }
+            $ins->execute(5, '2024-02-29 12:00:00', 'Shared', 'action', 'waves') for 1..3;
+            # These rows would dominate if channel, date or event scope leaked.
+            $ins->execute(6, '2024-02-29 12:00:00', 'Elsewhere', 'public', 'hi') for 1..20;
+            $ins->execute(5, '2024-03-01 00:00:00', 'Tomorrow', 'public', 'hi') for 1..20;
+            $ins->execute(5, '2024-02-29 12:00:00', 'Presence', 'join', 'hi') for 1..20;
+            $ins->finish;
+        }
+        my $conf = Conf760->new(
+            'mysql.CHANNEL_LOG_ARCHIVE_DBNAME'=>'archive',
+            'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS'=>1,
+        );
+        my $bot = bless {dbh=>$db, conf=>$conf, logger=>L760->new}, 'Mediabot';
+        for my $mode ('merged', 'live-only', 'missing-archive') {
+            delete $conf->{'mysql.CHANNEL_LOG_ARCHIVE_DBNAME'} if $mode eq 'live-only';
+            if ($mode eq 'missing-archive') {
+                $conf->{'mysql.CHANNEL_LOG_ARCHIVE_DBNAME'} = 'archive';
+                $db->do('DROP TABLE archive.CHANNEL_LOG_ARCHIVE');
+            }
+            my $winner = $mode eq 'merged' ? 'Shared' : 'L01';
+            my $count = $mode eq 'merged' ? 86 : 43;
+            my @memory = Mediabot::UserCommands::_memory_lines(
+                $bot, 5, '#quebec', day=>'2024-02-29', rand_cb=>sub {0});
+            $assert->like($memory[0] // '', qr/: $count messages, .*most active: $winner\./,
+                "$mode memory: merge all speaker counts before selecting the winner, with scoped reads and stable ties");
+            my @anniversary = Mediabot::UserCommands::_onthisday_lines(
+                $bot, 5, '#quebec', month=>2, day=>29);
+            $assert->like(join('\n', @anniversary), qr/2024: $count msg, .*most active: $winner/,
+                "$mode onthisday: native SQL returns the same global winner and retains best-effort archives");
+        }
+        $db->disconnect;
     }
 
     # ------------------------------------------------------------------
