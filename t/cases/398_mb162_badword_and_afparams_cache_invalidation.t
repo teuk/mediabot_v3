@@ -4,6 +4,7 @@ use warnings;
 use Mediabot::ChannelCommands ();
 use JSON::PP ();
 use Scalar::Util qw(refaddr);
+use Storable qw(dclone);
 
 {
     package MB1232Context;
@@ -50,6 +51,24 @@ use Scalar::Util qw(refaddr);
     package MB1232Logger;
     sub log { my ($s,@a)=@_; push @{$s->{events}}, ['log',@a] }
 }
+{
+    package MB1367::DBI; our @ISA=('DBI');
+    package MB1367::DBI::db; our @ISA=('DBI::db');
+    sub prepare {
+        my ($db,$sql,@rest)=@_;
+        my $sth=$db->SUPER::prepare($sql,@rest);
+        $sth->{private_kind}=$sql=~/^SELECT nbmsg_max, duration, timetowait /?'read'
+            :$sql=~/UPDATE CHANNEL_FLOOD/?'write':'' if $sth;
+        return $sth;
+    }
+    package MB1367::DBI::st; our @ISA=('DBI::st');
+    sub execute {
+        my ($sth,@args)=@_;
+        push @{$sth->{Database}{private_calls}},[$sth->{private_kind},@args] if $sth->{private_kind};
+        return $sth->SUPER::execute(@args);
+    }
+}
+$INC{'MB1367/DBI.pm'}=__FILE__;
 
 return sub {
     my ($assert)=@_;
@@ -74,8 +93,10 @@ return sub {
         my $db=bless {events=>\@events,mode=>$mode,exception=>$exception},'MB1232DB';
         my $bot={dbh=>$db,events=>\@events,logger=>bless({events=>\@events},'MB1232Logger'),
             channels=>{'#mixed'=>bless({},'MB1232Channel')},
-            _af_params=>{'#Mixed'=>{ts=>10},'#MIXED'=>{ts=>11},'#other'=>{ts=>12}},
-            _chan_flood_conf=>{'#Mixed'=>{x=>1},'#MIXED'=>{x=>2},'#other'=>{x=>3}}};
+            _af_params=>{'#Mixed'=>{ts=>10},'#MIXED'=>{ts=>11},'#other'=>{ts=>12},
+                '#mixed'=>{ts=>13},'#mIxEd'=>{ts=>14},'#mixed-more'=>{ts=>15}},
+            _chan_flood_conf=>{'#Mixed'=>{x=>1},'#MIXED'=>{x=>2},'#other'=>{x=>3},
+                '#mixed'=>{x=>4},'#mIxEd'=>{x=>5},'#mixed-more'=>{x=>6}}};
         my $before=$json->encode([$bot->{_af_params},$bot->{_chan_flood_conf}]);
         my $ctx=bless {bot=>$bot,channel=>'#MIXED',args=>[5,30,1],allowed=>($mode ne 'denied')},'MB1232Context';
         $ctx->{args}=['bad',30,1] if $mode eq 'invalid';
@@ -109,7 +130,9 @@ return sub {
             : ('prepare','execute','finish');
         $assert->($equal->(\@ops,\@expected),"$mode: exact statement operation order");
         if ($success) {
-            $assert->($equal->([$bot->{_af_params},$bot->{_chan_flood_conf}],[{'#other'=>{ts=>12}},{'#other'=>{x=>3}}]),"$mode: invalidate both spellings and preserve unrelated channel");
+            $assert->($equal->([$bot->{_af_params},$bot->{_chan_flood_conf}],
+                [{'#other'=>{ts=>12},'#mixed-more'=>{ts=>15}},{'#other'=>{x=>3},'#mixed-more'=>{x=>6}}]),
+                "$mode: invalidate every letter-case spelling and preserve distinct channels");
             $assert->(defined($ret) && $ret==0,"$mode: historical successful return");
             $assert->($equal->($events[-1],['notice','Operator','Antiflood parameters set for #MIXED: 5 lines burst, full refill over 30 sec, wait 1 sec']),"$mode: exact success reply");
         } else {
@@ -193,5 +216,57 @@ return sub {
             $assert->(defined($ret) && $ret==0,"display $mode: historical return");
         }
     }
-
+    # MB1367: fill actual admission caches, update through the real command,
+    # then enforce the new SQL limits without waiting for cache expiry.
+    require DBI;
+    require Mediabot::IRC::OutputPolicy;
+    require Mediabot::IRC::OutputBudget;
+    no warnings 'redefine';
+    my $now=2000;
+    local *Mediabot::IRC::OutputBudget::now=sub {$now};
+    for my $negative (0,1) {
+        for my $private (0,1) {
+            my $db=DBI->connect('dbi:SQLite:dbname=:memory:','','',
+                {RootClass=>'MB1367::DBI',RaiseError=>0,PrintError=>0,AutoCommit=>1});
+            $db->do('CREATE TABLE CHANNEL_FLOOD(id_channel INTEGER PRIMARY KEY,nbmsg_max INTEGER,duration INTEGER,timetowait INTEGER)');
+            $db->do('INSERT INTO CHANNEL_FLOOD VALUES(99,9,90,45)');
+            $db->do('INSERT INTO CHANNEL_FLOOD VALUES(42,5,30,15)') unless $negative;
+            $db->{private_calls}=[];
+            my (@events,@notices,@console);
+            my @names=('#Mixed','#MIXED','#mixed','#mIxEd');
+            my $other={'#other'=>{ts=>2000,unconfigured=>1},'#mixed-more'=>{ts=>2000,unconfigured=>1}};
+            my $bot={dbh=>$db,events=>\@events,logger=>bless({events=>\@events},'MB1232Logger'),
+                channels=>{'#mixed'=>bless({},'MB1232Channel')},_af_params=>dclone($other),
+                _chan_flood_conf=>{map {$_=>{max=>5}} (@names,'#other','#mixed-more')},
+                _flood_outq=>{'#mixed'=>{items=>[['privmsg','queued line']]}}};
+            my $hooks={clock=>sub {$now},config_int=>sub {$_[2]},
+                reply=>sub {push @console,'reply'},console=>sub {push @console,'console'}};
+            my $check=sub {Mediabot::IRC::OutputPolicy::checkAntiFlood($bot,$_[0],1,$hooks)};
+            my @warm=map {$check->($_)} @names;
+            $db->do('INSERT INTO CHANNEL_FLOOD VALUES(42,5,30,15)') if $negative;
+            my $state=dclone([$bot->{_af},$bot->{_global_af},$bot->{_flood_outq}]);
+            my $ctx=bless {bot=>$bot,channel=>$private?undef:'#MiXeD',
+                args=>$private?['#MiXeD',1,30,15]:[1,30,15],allowed=>1},'MB1232Context';
+            my ($ret,$error);
+            {
+                local *Mediabot::ChannelCommands::botNotice=sub {push @notices,[@_[1,2]];1};
+                local *Mediabot::ChannelCommands::getIdChansetList=sub {7};
+                local *Mediabot::ChannelCommands::getIdChannelSet=sub {8};
+                eval {$ret=Mediabot::ChannelCommands::setChannelAntiFloodParams_ctx($ctx);1} or $error=$@;
+            }
+            my $invalidated=dclone([$bot->{_af_params},$bot->{_chan_flood_conf}]);
+            my $untouched=dclone([$bot->{_af},$bot->{_global_af},$bot->{_flood_outq}]);
+            my @admission=map {[$check->($_),$check->($_)]} @names;
+            my $actual=[\@warm,$error//$ret,\@notices,$invalidated,$untouched,\@admission,
+                $db->{private_calls},scalar @{$bot->{_global_af}{hits}},scalar @console,
+                $db->selectall_arrayref('SELECT * FROM CHANNEL_FLOOD ORDER BY id_channel')];
+            my $expected=[[(0)x4],0,[['Operator','Antiflood parameters set for #MiXeD: 1 lines burst, full refill over 30 sec, wait 15 sec']],
+                [$other,{'#other'=>{max=>5},'#mixed-more'=>{max=>5}}],$state,[(map {[0,1]} 1..4)],
+                [(map {['read',42]} 1..4),['write',1,30,15,42],(map {['read',42]} 1..4)],8,4,
+                [[42,1,30,15],[99,9,90,45]]];
+            $assert->is($json->encode($actual),$json->encode($expected),
+                "native SQL negative=$negative private=$private: every cached spelling adopts new limits immediately, without resetting budgets or queues");
+            $db->disconnect;
+        }
+    }
 };

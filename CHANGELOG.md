@@ -1,3 +1,9 @@
+## MB1367 — Apply antiflood changes across cached channel spellings
+
+- Invalidate every letter-case variant of the updated channel in antiflood parameter and override caches; clearing only the stored and typed names could leave lowercase or other cached spellings using stale limits until expiry.
+- Keep invalidation after the successful write and statement cleanup, preserve unrelated channels and retain active budgets, silence and queued messages; public/private confirmation still uses the caller's spelling.
+- Extend the existing command case with native SQLite updates and actual output admission for configured/negative caches, plus failure-path cache preservation, without a new test file or interpreter.
+
 ## MB1366 — Keep antiflood fetch failures out of the configuration cache
 
 - Distinguish a reported DBI fetch error from an absent CHANNEL_FLOOD row before statement cleanup can clear its diagnostic; an interrupted read could otherwise disable channel output limits for the entire configuration-cache lifetime.

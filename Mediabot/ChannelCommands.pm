@@ -3980,12 +3980,15 @@ sub setChannelAntiFloodParams_ctx {
         # les nouveaux parametres ne prenaient effet qu'a l'expiration du
         # TTL du cache _af_params (OUTPUT_PARAMS_CACHE_TTL, 60s par defaut
         # mais configurable jusqu'a 24h) — silencieusement. On invalide la
-        # cle canonique ET la casse tapee, plus _chan_flood_conf (overrides
+        # toutes les casses du meme canal, plus _chan_flood_conf (overrides
         # per-channel de checkChanFlood) par coherence.
         my $canon_chan = eval { $channel_obj->get_name } || $target_channel;
-        for my $k ($canon_chan, $target_channel) {
-            delete $self->{_af_params}{$k}       if $self->{_af_params};
-            delete $self->{_chan_flood_conf}{$k} if $self->{_chan_flood_conf};
+        my %channel_keys = map { lc($_) => 1 } ($canon_chan, $target_channel);
+        for my $cache (qw(_af_params _chan_flood_conf)) {
+            next unless $self->{$cache};
+            for my $key (keys %{ $self->{$cache} }) {
+                delete $self->{$cache}{$key} if $channel_keys{lc $key};
+            }
         }
 
         botNotice(
