@@ -596,15 +596,26 @@ sub deliverReminders {
         # mb87-IMP1 / mb88-R1: si le remind est daily, le re-créer pour le lendemain
         # mb90-IMP1: si le remind est weekly, le re-créer pour la semaine suivante
         # Guard: ne réinsérer que si delivered=1 (livré normalement), pas delivered=2 (annulé)
-        my $was_cancelled = 0;
-        {
-            my $sth_chk = $dbh->prepare('SELECT delivered FROM REMINDERS WHERE id_reminder = ?');
-            if ($sth_chk && $sth_chk->execute($r->{id_reminder})) {
-                my $chk = $sth_chk->fetchrow_hashref; $sth_chk->finish;
-                $was_cancelled = 1 if $chk && ($chk->{delivered} // 0) == 2;
-            }
+        my ($sth_chk, $check);
+        my $checked = eval {
+            $sth_chk = $dbh->prepare('SELECT delivered FROM REMINDERS WHERE id_reminder = ?')
+                or die "reminder recurrence prepare failed\n";
+            $sth_chk->execute($r->{id_reminder}) or die "reminder recurrence execute failed\n";
+            $check = $sth_chk->fetchrow_hashref;
+            die "reminder recurrence fetch failed\n" if $sth_chk->err;
+            1;
+        };
+        # MB1371: finish may clear a fetch diagnostic. A failed read must not
+        # authorize recurrence or abort delivery of the other pending reminders.
+        eval { $sth_chk->finish } if $sth_chk;
+        unless ($checked) {
+            eval { $self->{logger}->log(1,
+                "deliverReminders: recurrence state unavailable id=$r->{id_reminder}") }
+                if $self->{logger};
+            next;
         }
-        if (!$was_cancelled && $r->{message} =~ /^\[daily:(\d{2}:\d{2})\]\s*(.*)/) {
+        next unless $check && defined($check->{delivered}) && $check->{delivered} == 1;
+        if ($r->{message} =~ /^\[daily:(\d{2}:\d{2})\]\s*(.*)/) {
             my ($hhmm, $real_msg) = ($1, $2);
             my ($hh, $mm) = split /:/, $hhmm;
             my $next_ts = eval { _reminder_next_epoch(time(), $hh, $mm) };
@@ -624,7 +635,7 @@ sub deliverReminders {
             };
             $self->{logger}->log(3, "daily remind re-scheduled for $nick at $hhmm (next: $next_ts)")
                 unless $@;
-        } elsif (!$was_cancelled && $r->{message} =~ /^\[weekly:(\d):(\d{2}:\d{2})\]\s*(.*)/) {
+        } elsif ($r->{message} =~ /^\[weekly:(\d):(\d{2}:\d{2})\]\s*(.*)/) {
             # mb90-IMP1: réinsertion hebdomadaire — calcul du prochain occurrence du DOW+HH:MM
             my ($target_dow, $hhmm, $real_msg) = ($1, $2, $3);
             my ($hh, $mm) = split /:/, $hhmm;

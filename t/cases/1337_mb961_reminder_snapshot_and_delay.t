@@ -17,6 +17,11 @@ use MB881OutputFixture;
     package MB961::DBI::db; our @ISA = ('DBI::db');
     sub prepare {
         my ($db, $sql, @rest) = @_;
+        my $recurrence = $sql =~ /SELECT delivered FROM REMINDERS WHERE id_reminder = \?/;
+        my $fault = $recurrence ? delete($db->{private_mb1371_fault}) : undef;
+        $db->{private_mb1371_inserts}++ if $db->{private_mb1371_trace} && $sql =~ /INSERT INTO REMINDERS/;
+        return $db->set_err(1911, 'private recurrence prepare detail')
+            if defined($fault) && $fault eq 'prepare';
         my $release = $sql =~ /UPDATE REMINDERS SET delivered = 0/;
         my $hook = $release ? 'private_mb1100_release'
             : $sql =~ /UPDATE REMINDERS SET delivered = 1/ ? 'private_mb961_claim'
@@ -26,24 +31,36 @@ use MB881OutputFixture;
             if $release && ($db->{private_mb1100_fault}//'') eq 'prepare';
         my $sth=$db->SUPER::prepare($sql, @rest);
         $sth->{private_release}=$release?1:0 if $sth;
+        $sth->{private_mb1371_fault}=$fault if $sth && defined($fault);
         return $sth;
     }
     package MB961::DBI::st; our @ISA = ('DBI::st');
     sub execute {
         my ($sth,@bind)=@_;
+        return $sth->set_err(1912, 'private recurrence execute detail')
+            if ($sth->{private_mb1371_fault}//'') eq 'execute';
         return $sth->set_err(1902,'private release execute detail')
             if $sth->{private_release} && ($sth->{Database}{private_mb1100_fault}//'') eq 'execute';
         return $sth->SUPER::execute(@bind);
     }
+    sub fetchrow_hashref {
+        my ($sth)=@_;
+        my $fault=$sth->{private_mb1371_fault}//'';
+        return $sth->set_err(1913, 'private recurrence fetch detail') if $fault eq 'fetch';
+        my $row=$sth->SUPER::fetchrow_hashref;
+        $sth->set_err(1914, 'private recurrence row diagnostic') if $fault eq 'fetch_row';
+        return $row;
+    }
     sub finish {
         my ($sth)=@_;
+        $sth->set_err(undef,undef) if defined($sth->{private_mb1371_fault});
         if ($sth->{private_release}) {
             $sth->{Database}{private_mb1100_finishes}++;
             $sth->set_err(undef,undef);
         }
         return $sth->SUPER::finish;
     }
-    package MB961::Log; sub log { 1 }
+    package MB961::Log; sub log { push @{$_[0]{rows}}, [@_[1..$#_]]; 1 }
     package MB961::Channel; sub get_id { 7 }
     package MB961::Bot; our @ISA = ('Mediabot');
     sub gethChannelsNicksOnChan { ('Friend', 'Sender') }
@@ -322,6 +339,65 @@ for my $case (['',''],['[daily:09:00] ',' [daily 09:00]'],['[weekly:1:09:00] ','
                 "$phase $prefix $urgent: list retains deadline, recurrence and urgency without raw tags");
             is_deeply($db->selectrow_arrayref('SELECT message,delivered FROM REMINDERS WHERE id_reminder=1'),
                 $before,'listing does not rewrite or deliver the stored reminder');
+        }
+    }
+}
+# MB1371: a post-send read failure or absent/non-delivered row cannot authorize
+# another occurrence. Drive the real DBI query and retain two-connection changes.
+for my $prefix ('[daily:09:00] ', '[weekly:1:09:00] ') {
+    for my $raise (0,1) {
+        for my $case (qw(prepare execute fetch fetch_row cancelled deleted pending confirmed)) {
+            my $stored=$prefix.'[at:100] Un café';
+            my ($bot,$db,undef,$peer)=setup_1337($stored);
+            $db->{RaiseError}=$raise;
+            $peer->do(q{INSERT INTO REMINDERS(id_channel,from_nick,to_nick,message)
+                VALUES(7,'sender','friend','Next reminder'),(8,'sender','friend','Other channel')});
+            my $fault=$case=~/\A(?:prepare|execute|fetch|fetch_row)\z/ ? 1:0;
+            $db->{private_mb1371_fault}=$case if $fault;
+            $db->{private_mb1371_trace}=1;
+            local *Mediabot::UserCommands::botPrivmsg=sub {
+                push @wire, ['public', @_[1,2]];
+                if (@wire==1) {
+                    $peer->do('DELETE FROM REMINDERS WHERE id_reminder=1') if $case eq 'deleted';
+                    $peer->do('UPDATE REMINDERS SET delivered=? WHERE id_reminder=1',undef,
+                        $case eq 'cancelled'?2:0) if $case eq 'cancelled' || $case eq 'pending';
+                }
+                return 1;
+            };
+            my $ok=eval { deliver_1337($bot,'Mediabot::CommunityState'); 1 };
+            my $error=$@;
+            my $rows=states_1100($peer);
+            my $next=$case eq 'confirmed' ? pop @$rows : undef;
+            my ($due)=$next ? $next->[2]=~/\[at:([0-9]+)\]/ : ();
+            my @expected=($case eq 'deleted'?():([1,7,$stored,$case eq 'cancelled'?2:$case eq 'pending'?0:1]),
+                [2,7,'Next reminder',1],[3,8,'Other channel',0]);
+            my @errors=map {$_->[1]} grep {$_->[0]==1} @{$bot->{logger}{rows}//[]};
+            my $tag=$prefix=~/daily/?' [daily 09:00]':' [weekly Mon 09:00]';
+            is_deeply([$ok?1:0,$error,$rows,[@wire],[@warnings],
+                $db->{private_mb1371_inserts}//0,\@errors,
+                $case ne 'confirmed' || ($next && $next->[0]==4 && $next->[1]==7 && $next->[3]==0
+                    && defined($due) && $due>time() && $next->[2] eq $prefix."[at:$due] Un café") ? 1:0],
+                [1,'',\@expected,
+                 [['public','#test',"Friend: reminder from sender (stored)$tag: Un café"],
+                  ['public','#test','Friend: reminder from sender (stored): Next reminder']],[],
+                 $case eq 'confirmed'?1:0,
+                 $fault?['deliverReminders: recurrence state unavailable id=1']:[],1],
+                "$prefix RaiseError=$raise $case: only a confirmed delivered occurrence recurs, and the next reminder is still delivered");
+            if ($fault) {
+                # A new occurrence on the same handle can recur after recovery;
+                # the already-sent occurrence remains claimed, never resent.
+                $peer->do(q{INSERT INTO REMINDERS(id_channel,from_nick,to_nick,message)
+                    VALUES(7,'sender','friend',?)},undef,$stored);
+                @wire=(); $bot->{logger}{rows}=[];
+                deliver_1337($bot,'Mediabot::CommunityState');
+                deliver_1337($bot,'Mediabot::CommunityState');
+                is_deeply([scalar @wire,$db->{private_mb1371_inserts}//0,
+                    $peer->selectcol_arrayref('SELECT delivered FROM REMINDERS WHERE id_channel=7 ORDER BY id_reminder'),
+                    [grep {$_->[0]==1} @{$bot->{logger}{rows}//[]}],[@warnings]],
+                    [1,1,[1,1,1,0],[],[]],
+                    'same-handle recovery schedules a new reminder once without replaying the uncertain occurrence');
+            }
+            $db->disconnect; $peer->disconnect;
         }
     }
 }

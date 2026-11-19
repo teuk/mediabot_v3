@@ -1,3 +1,9 @@
+## MB1371 — Require confirmed delivery state before recurring reminders
+
+- Require a successful post-delivery state read and delivered=1 before creating the next daily or weekly reminder; failed reads, deleted rows and pending rows could otherwise authorize an unverified recurrence.
+- Check fetch diagnostics before cleanup, contain DBI exceptions and log a bounded error while continuing with other pending reminders; retain the accepted occurrence's claim and do not resend it or retry an uncertain recurrence automatically.
+- Extend the existing native reminder case with real SQLite reads, two-connection state changes, prepare/execute/fetch failures under both DBI error modes, confirmed recurrence and same-handle recovery; no new test file, interpreter or database schema change.
+
 ## MB1370 — Keep Unicode digits out of poll timer and weight arithmetic
 
 - Parse poll timeouts, extensions and option weights as complete ASCII numeric tokens before arithmetic; mixed Unicode digits could otherwise become a shorter duration or an unintended vote multiplier and emit warnings.
