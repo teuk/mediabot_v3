@@ -818,6 +818,12 @@ sub mbRemindSnooze_ctx {
     $msg =~ s/\s*\[at:\d+\]\s*/ /g;   # strip partout ailleurs (cas daily + snooze)
     $msg =~ s/^\s+|\s+$//g;           # trim
     my $new_msg = "[at:$new_ts] $msg";
+    # MB1373: adding a deadline (or replacing it with more digits) can exceed
+    # VARCHAR(512), even when the original reminder fit at creation.
+    if (length($new_msg) > 512) {
+        botNotice($self, $nick, 'Cannot snooze: message too long with the new deadline (max 512 chars).');
+        return;
+    }
     my ($sth2, $rows);
     my $update_ok = eval {
         $sth2 = $self->{dbh}->prepare(

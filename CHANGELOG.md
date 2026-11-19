@@ -1,3 +1,9 @@
+## MB1373 — Preserve reminder text when a snooze exceeds storage capacity
+
+- Check the complete replacement message, including its new deadline, against the existing 512-character storage limit before snooze prepares an UPDATE; a valid full-length reminder could otherwise grow beyond the column capacity.
+- Refuse an oversized snooze with a private explanation while preserving the original text, deadline and pending state; retain exact-boundary messages, Unicode, urgency, recurrence tags and conditional snapshot ownership.
+- Extend the existing native reminder case across the module and both facades with real SQL, fresh-connection reads, creation at capacity and growing timestamps; no new test file, interpreter or database schema change.
+
 ## MB1372 — Rank karma voters across nickname letter case
 
 - Merge voter nickname case variants before choosing karmainfo's top voter and karmadiff's top three; a single voter could otherwise lose first place or consume multiple ranking slots.

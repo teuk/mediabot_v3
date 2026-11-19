@@ -401,4 +401,55 @@ for my $prefix ('[daily:09:00] ', '[weekly:1:09:00] ') {
         }
     }
 }
+# MB1373: snooze must include its replacement timestamp in the VARCHAR(512)
+# character budget, just like creation. Read through the second connection to
+# verify the stored body and state; no replacement may be attempted on refusal.
+for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
+    for my $glyph ('x', 'é', '🪄') {
+        my (@actual, @expected);
+        for my $case (
+            ['plain_boundary', '', '', 512],
+            ['plain_overflow', '', '', 513],
+            ['created_full', '', '', 528],
+            ['growing_timestamp', '[at:1] ', '', 513],
+            ['daily_boundary', '[daily:09:00] [at:1] ', '[daily:09:00] ', 512],
+            ['weekly_overflow', '[weekly:1:09:00] [at:1] ', '[weekly:1:09:00] ', 513],
+            ['urgent_boundary', '[!] ', '[!] ', 512],
+            ['same_width', '[at:1800000000] ', '', 512],
+        ) {
+            my ($label, $old_prefix, $kept_prefix, $size) = @$case;
+            my $next_prefix = '[at:1800003600] ' . $kept_prefix;
+            my $body = $glyph x ($size - length($next_prefix) - 4) . ' END';
+            my $original = $old_prefix . $body;
+            my ($bot, $db, undef, $peer) = setup_1337($label eq 'created_full' ? undef : $original);
+            $MB961::Clock::now = 1800000000;
+            if ($label eq 'created_full') {
+                invoke_1337($bot, $entry, 'mbRemind_ctx', 'Friend', $body);
+            }
+            $db->do(q{INSERT INTO REMINDERS(id_channel,from_nick,to_nick,message)
+                VALUES(8,'sender','friend','Other channel'),(7,'other','friend','Other owner')});
+            my $before = $peer->selectall_arrayref('SELECT * FROM REMINDERS ORDER BY id_reminder');
+            my $updates = 0;
+            $db->{private_mb961_snooze} = sub { $updates++ };
+            @wire = ();
+            my $result = invoke_1337($bot, $entry, 'mbRemindSnooze_ctx', '1', '1h');
+            my $after = $peer->selectall_arrayref('SELECT * FROM REMINDERS ORDER BY id_reminder');
+            my $valid = $size <= 512;
+            my $wanted = $valid ? $next_prefix . $body : $original;
+            my $response = $valid ? 'Reminder #1 snoozed for 1h00m.'
+                : 'Cannot snooze: message too long with the new deadline (max 512 chars).';
+            # Compare every persisted field, including unrelated rows, while
+            # keeping failure output compact for long Unicode messages.
+            $before->[0][4] = $wanted;
+            push @actual, [$label, $result ? 1 : 0, $updates,
+                Test::More::eq_array($after, $before) ? 1 : 0,
+                [@wire], scalar @warnings];
+            push @expected, [$label, $valid ? 1 : 0, $valid ? 1 : 0, 1,
+                [['notice', 'Sender', $response]], 0];
+            $db->disconnect; $peer->disconnect;
+        }
+        is_deeply(\@actual, \@expected,
+            "$entry $glyph: snooze preserves full text, accepts 512 characters and refuses overflow before UPDATE");
+    }
+}
 done_testing;
