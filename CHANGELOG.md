@@ -1,3 +1,9 @@
+## MB1375 — Keep heatmap colors on the six-hour bar scale
+
+- Normalize heatmap color intensity against six peak-hour buckets, matching the existing bar scale; a single busy hour no longer turns a one-cell bar red.
+- Apply the same correction to the legacy command and the channel-activity-v3 package, preserving message counts, bar lengths, peak selection, reply layout and database queries.
+- Extend the existing command-package case with both native renderers, empty/sparse/full blocks, exact color thresholds, merged buckets and unavailable reads without adding a test file or interpreter.
+
 ## MB1374 — Require a confirmed badword lookup before changing rules
 
 - Stop addbadword/rembadword when their lookup fetch reports an error, even if it returns a row; a failed fetch could otherwise authorize a duplicate INSERT, an unverified DELETE or a misleading normal no-op reply.

@@ -743,7 +743,8 @@ sub mbHeatmap_ctx {
         my $bar_len = int(10 * $total / ($max * 6 || 1));
         $bar_len = 1 if $total > 0 && $bar_len == 0;
         # IMP22: IRC color codes — intensity: green < yellow < red
-        my $ratio = $max > 0 ? $total / $max : 0;
+        # Color and bar length share the same six-hour reference scale.
+        my $ratio = $max > 0 ? $total / ($max * 6) : 0;
         my $irc_color = $ratio >= 0.75 ? "\x0304"  # red
                       : $ratio >= 0.40 ? "\x0308"  # yellow
                       : $ratio >  0    ? "\x0303"  # green

@@ -99,7 +99,8 @@ sub command_heatmap {
         push @totals, $total;
         my $bar_length = int(10 * $total / ($maximum * 6 || 1));
         $bar_length = 1 if $total > 0 && $bar_length == 0;
-        my $ratio = $maximum > 0 ? $total / $maximum : 0;
+        # Color and bar length share the same six-hour reference scale.
+        my $ratio = $maximum > 0 ? $total / ($maximum * 6) : 0;
         my $color = $ratio >= 0.75 ? "\x0304"
             : $ratio >= 0.40 ? "\x0308"
             : $ratio > 0 ? "\x0303" : '';
