@@ -648,12 +648,19 @@ sub mbKarmaInfo_ctx {
     my $all_label  = $all_chans ? ' (all channels)' : '';
     my $reply_to   = $klog_chan // $nick;
     my ($received_pos, $received_neg, $given_pos, $given_neg) = (0,0,0,0);
-    my %givers;
+    my (%givers, %giver_names);
     for my $e (@entries) {
         if (($e->{delta} // '') eq '+1') { $received_pos++; }  # B24/fix
         else                             { $received_neg++; }
-        $givers{$e->{from} // $e->{giver} // ''}++  # B23/fix: field is 'from' not 'giver'
-            if ($e->{from} // $e->{giver} // '');
+        my $giver = $e->{from} // $e->{giver} // '';
+        if ($giver) {
+            # MB1372: rank one case-folded identity, retaining an observed
+            # spelling chosen independently of history/channel iteration order.
+            my $key = lc($giver);
+            $givers{$key}++;
+            $giver_names{$key} = $giver
+                if !exists($giver_names{$key}) || $giver lt $giver_names{$key};
+        }
     }
     # KI1/fix2: use all_entries (collected across channels) for @given too
     my @all_entries_for_given;
@@ -682,8 +689,9 @@ sub mbKarmaInfo_ctx {
         my @sorted_givers = sort {
             $givers{$b} <=> $givers{$a} || lc($a) cmp lc($b)
         } keys %givers;
-        $top_giver       = $sorted_givers[0];
-        $top_giver_count = $givers{$top_giver};
+        my $key = $sorted_givers[0];
+        $top_giver       = $giver_names{$key};
+        $top_giver_count = $givers{$key};
     } else {
         $top_giver = 'nobody'; $top_giver_count = 0;
     }
@@ -924,16 +932,20 @@ sub mbKarmaDiff_ctx {
     my $sign  = $delta > 0 ? '+' : '';
 
     # mb89-IMP1: top 3 givers dans la fenêtre
-    my %givers_w;
+    my (%givers_w, %giver_names_w);
     for my $e (@entries) {
         my $g = $e->{from} // $e->{giver} // '';
-        $givers_w{$g}++ if $g;
+        next unless $g;
+        my $key = lc($g);
+        $givers_w{$key}++;
+        $giver_names_w{$key} = $g
+            if !exists($giver_names_w{$key}) || $g lt $giver_names_w{$key};
     }
     my @top_givers = (sort { $givers_w{$b} <=> $givers_w{$a} || $a cmp $b }
                       keys %givers_w)[0..2];
     @top_givers = grep { defined } @top_givers;
     my $givers_str = @top_givers
-        ? '  | by: ' . join(', ', map { "$_($givers_w{$_})" } @top_givers)
+        ? '  | by: ' . join(', ', map { "$giver_names_w{$_}($givers_w{$_})" } @top_givers)
         : '';
 
     # CC11: fetch current score.

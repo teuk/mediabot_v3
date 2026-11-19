@@ -1,3 +1,9 @@
+## MB1372 — Rank karma voters across nickname letter case
+
+- Merge voter nickname case variants before choosing karmainfo's top voter and karmadiff's top three; a single voter could otherwise lose first place or consume multiple ranking slots.
+- Retain an observed nickname spelling with deterministic selection, preserve single-spelling display, legacy giver fallback, vote signs, channel/private/all scope and period boundaries; keep the stored history unchanged.
+- Extend the existing native karma case across command, facade and registry routes with mixed-case voters, ranking ties/cutoffs, reversed histories and cross-channel reports; no new test file, interpreter or database schema change.
+
 ## MB1371 — Require confirmed delivery state before recurring reminders
 
 - Require a successful post-delivery state read and delivered=1 before creating the next daily or weekly reminder; failed reads, deleted rows and pending rows could otherwise authorize an unverified recurrence.

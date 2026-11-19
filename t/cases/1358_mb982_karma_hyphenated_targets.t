@@ -576,4 +576,74 @@ for my $prefix ('#','&','!','+') {
         }
     }
 }
+# MB1372: one voter can change letter case between votes. Count the identity
+# once before ranking, retaining a deterministic observed spelling for display.
+{
+    require Storable;
+    local *Mediabot::UserCommands::logBot=sub {1};
+    my @local=(
+        {nick=>'bob',from=>'Alice',delta=>'+1',score=>7,ts=>time()-100},
+        {nick=>'BOB',from=>'ALICE',delta=>'-1',score=>7,ts=>time()-90},
+        {nick=>'bob',from=>'aLiCe',delta=>'+1',score=>7,ts=>time()-80},
+        {nick=>'bob',giver=>'alice',delta=>'+1',score=>7,ts=>time()-3600},
+        {nick=>'bob',from=>'Bob',giver=>'Alice',delta=>'+1',score=>7,ts=>time()-70},
+        {nick=>'bob',from=>'Bob',delta=>'+1',score=>7,ts=>time()-60},
+        {nick=>'bob',from=>'Carol',delta=>'-1',score=>7,ts=>time()-50},
+        {nick=>'bob',from=>'Dave',delta=>'+1',score=>7,ts=>time()-40},
+        (map {{nick=>'bob',from=>'Zed',delta=>'+1',score=>7,ts=>time()-3601}} 1..4),
+        (map {{nick=>'else',from=>'Ignored',delta=>'+1',score=>99,ts=>time()-1}} 1..5),
+    );
+    my @remote=(
+        (map {{nick=>'bob',from=>'ALIce',delta=>'+1',score=>7,ts=>time()-20}} 1..3),
+        (map {{nick=>'bob',from=>'Remote',delta=>'+1',score=>7,ts=>time()-10}} 1..5),
+    );
+    for my $route ('native','facade','registry') {
+        my ($bot,$peer)=setup_1358();
+        for my $reversed (0,1) {
+            $bot->{_karma_log}={'#test'=>[ $reversed ? reverse(@local) : @local ],
+                '#other'=>[ $reversed ? reverse(@remote) : @remote ]};
+            my $before=Storable::dclone($bot->{_karma_log});
+            my (@actual,@expected);
+            @warnings=();
+            for my $case (
+                ['karmainfo','#TeSt',['bob','1h'],'ALICE (4x)','+4'],
+                ['karmadiff','#TeSt',['bob','1h'],'ALICE(4), Bob(2), Carol(1)','+4'],
+                ['karmainfo','#TeSt',['bob','2h'],'ALICE (4x)','+8'],
+                ['karmadiff','#TeSt',['bob','2h'],'ALICE(4), Zed(4), Bob(2)','+8'],
+                ['karmainfo','#TeSt',['bob','all','1h'],'ALICE (7x)','+12'],
+                ($route ne 'registry' ? (
+                    ['karmainfo','Reader',['bob','1h'],'ALICE (7x)','+12'],
+                    ['karmadiff','Reader',['bob','1h'],'ALICE(7), Remote(5), Bob(2)','+12'],
+                ) : ())
+            ) {
+                my ($command,$channel,$args,$voters,$delta)=@$case;
+                my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>$channel,
+                    command=>$command,args=>$args);
+                $ctx->{_user_fetched}=1;
+                @wire=();
+                my $ok=eval {
+                    if ($route eq 'registry') { $bot->command_registry->handler_for($command,'public')->($ctx) }
+                    else {
+                        no strict 'refs';
+                        my $owner=$route eq 'native'?'Mediabot::Karma':'Mediabot::UserCommands';
+                        my $method=$command eq 'karmainfo'?'mbKarmaInfo_ctx':'mbKarmaDiff_ctx';
+                        &{"${owner}::$method"}($ctx);
+                    }
+                    1;
+                };
+                my $error=$@;
+                my $text=$wire[0][2]//'';
+                my ($seen_voters)=$text=~/(?:top voter: |  \| by: )(.*)\z/;
+                my ($seen_delta)=$text=~/(?:received |karma )([+-]?[0-9]+) /;
+                push @actual,[$ok?1:0,$error,scalar @wire,$wire[0][1],$seen_voters,$seen_delta];
+                push @expected,[1,'',1,grep($_ eq 'all',@$args)?'Reader':$channel,$voters,$delta];
+            }
+            is_deeply(\@actual,\@expected,
+                "$route reversed=$reversed: case variants share ranks across scope/window, legacy giver fallback and top-three cutoff");
+            is_deeply($bot->{_karma_log},$before,'reports preserve original voter spellings and stored vote history');
+            is_deeply(\@warnings,[],'voter ranking emits no warnings');
+        }
+        $bot->{dbh}->disconnect; $peer->disconnect;
+    }
+}
 done_testing;
