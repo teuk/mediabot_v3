@@ -158,6 +158,7 @@ sub prepare {
     return bless {db=>$s,stage=>$stage},'MB1236::STH';
 }
 package MB1236::STH;
+sub err {0}
 sub execute {
     my ($s,@bind)=@_;my $d=$s->{db};push @{$d->{events}},['execute',$s->{stage},@bind];
     die $d->{exception} if $d->{mode} eq $s->{stage}.'_execute_throw';
@@ -198,7 +199,8 @@ sub check_badword_write_contracts {
                 eval {$ret=$op eq 'add' ? Mediabot::ChannelCommands::channelAddBadword_ctx($ctx) : Mediabot::ChannelCommands::channelRemBadword_ctx($ctx);1} or $error=$@;
             }
             my $mutated=$mode =~ /^(success|write_finish_throw|notice_throw)$/;
-            Test::More::ok($mode =~ /_throw$/ ? ref($error) && Scalar::Util::refaddr($error)==Scalar::Util::refaddr($exception) : !$error,"$op $mode: exception identity");
+            my $throws=$mode =~ /_throw$/ && $mode ne 'select_fetch_throw';
+            Test::More::ok($throws ? ref($error) && Scalar::Util::refaddr($error)==Scalar::Util::refaddr($exception) : !$error,"$op $mode: fetch errors contained; other exception identities preserved");
             Test::More::is_deeply($bot->{_badword_cache},$mutated?{'#other'=>{ts=>4}}:$cache,"$op $mode: invalidate only after accepted mutation; preserve no-ops");
             my @exec=grep {$_->[0] eq 'execute'} @events;
             for my $exec (@exec) {

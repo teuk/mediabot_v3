@@ -1,3 +1,9 @@
+## MB1374 — Require a confirmed badword lookup before changing rules
+
+- Stop addbadword/rembadword when their lookup fetch reports an error, even if it returns a row; a failed fetch could otherwise authorize a duplicate INSERT, an unverified DELETE or a misleading normal no-op reply.
+- Capture the fetch outcome before cleanup, contain fetch exceptions and return a private database-error notice with a bounded diagnostic; preserve stored rules, output caches and mutation audit on failure.
+- Extend the existing native output case with SQLite/DBI failures under both error modes, public/private commands, present/absent words and same-handle recovery; retain authorization, query bindings and ordinary mutation/no-op behavior without a new test file or schema change.
+
 ## MB1373 — Preserve reminder text when a snooze exceeds storage capacity
 
 - Check the complete replacement message, including its new deadline, against the existing 512-character storage limit before snooze prepares an UPDATE; a valid full-length reminder could otherwise grow beyond the column capacity.

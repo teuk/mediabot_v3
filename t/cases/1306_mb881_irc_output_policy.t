@@ -155,6 +155,8 @@ my @leaked;
             if $read && ($db->{private_fault}//'') eq 'prepare';
         my $sth=$db->SUPER::prepare($sql,@args);
         $sth->{private_read}=$read?1:0 if $sth;
+        $sth->{private_lookup}=$sql=~/^SELECT id_badwords(?:, badword)? FROM BADWORDS WHERE id_channel\s*=/ ? 1:0 if $sth;
+        $db->{private_lookup_writes}++ if $db->{private_lookup_trace} && $sql =~ /^(?:INSERT INTO|DELETE FROM) BADWORDS/;
         return $sth;
     }
     package MB1073::DBI::st;our @ISA=('DBI::st');
@@ -170,16 +172,23 @@ my @leaked;
     }
     sub fetchrow_hashref {
         my ($sth,@args)=@_;
+        my $lookup_fault=$sth->{private_lookup} ? $sth->{Database}{private_lookup_fault}//'' : '';
+        return $sth->set_err(1915,'private command fetch detail') if $lookup_fault eq 'empty';
         my $fault=$sth->{Database}{private_fault}//'';
         return $sth->set_err(1903,'private badword fetch detail')
             if $sth->{private_read} && ($fault eq 'fetch_first'
                 || ($fault eq 'fetch_after_one' && $sth->{private_rows}));
         my $row=$sth->SUPER::fetchrow_hashref(@args);
         $sth->{private_rows}++ if $row;
+        $sth->set_err(1916,'private command row diagnostic') if $lookup_fault eq 'row';
         return $row;
     }
     sub finish {
         my ($sth)=@_;
+        if ($sth->{private_lookup}) {
+            $sth->{Database}{private_lookup_finishes}++;
+            $sth->set_err(undef,undef);
+        }
         if ($sth->{private_read}) {
             $sth->{Database}{private_finishes}++;
             $sth->set_err(undef,undef);
@@ -370,6 +379,65 @@ MB881OutputFixture::with_policy(sub {
         }
         is_deeply(\@actual,\@expected,
             "RaiseError=$raise: native add/remove invalidates all channel spellings immediately; no-ops, isolation and wire/history targets remain intact");
+    }
+});
+# MB1374: a failed command fetch must not authorize INSERT/DELETE, report a
+# normal no-op, or invalidate working output rules. Reuse native SQLite/DBI.
+MB881OutputFixture::with_policy(sub {
+    no warnings 'redefine';
+    my (@notices,@audit);
+    local *Mediabot::ChannelCommands::botNotice=sub {push @notices,[@_[1,2]];1};
+    local *Mediabot::ChannelCommands::logBot=sub {push @audit,[@_[2..4]];1};
+    for my $op (qw(addbadword rembadword)) {
+        for my $raise (0,1) {
+            for my $fault (qw(empty row)) {
+                my (@failed,@expected_failed,@recovered,@expected_recovered);
+                for my $private (0,1) {
+                    for my $present (0,1) {
+                        my ($bot,$db)=native_1073($raise);
+                        $bot->{channels}{'#test'}=Mediabot::Channel->new({id=>1,name=>'#TeSt'});
+                        $db->do(q{INSERT INTO BADWORDS(id_channel,badword) VALUES(1,'café noir')}) if $present;
+                        privmsg($bot,'#test','warmup');privmsg($bot,'#else','warmup');
+                        my %cache=%{$bot->{_badword_cache}};
+                        my $before=$db->selectall_arrayref('SELECT * FROM BADWORDS ORDER BY id_badwords');
+                        $bot->{irc}{wire}=[];$bot->{events}=[];$bot->{logger}{rows}=[];
+                        @notices=();@audit=();
+                        $db->{private_lookup_trace}=1;$db->{private_lookup_fault}=$fault;
+                        my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'operator',
+                            channel=>$private?'operator':'#TeST', command=>$op,
+                            args=>[$private?('#TeST'):(),'café','noir']);
+                        $ctx->{user}=bless {},'MB1098::Master';$ctx->{_user_fetched}=1;
+                        my $call=$op eq 'addbadword' ? \&Mediabot::ChannelCommands::channelAddBadword_ctx
+                            : \&Mediabot::ChannelCommands::channelRemBadword_ctx;
+                        my $ok=eval {$call->($ctx);1};
+                        push @failed,[$ok?1:0,$db->selectall_arrayref('SELECT * FROM BADWORDS ORDER BY id_badwords'),
+                            $db->{private_lookup_writes}//0,$db->{private_lookup_finishes}//0,
+                            [map {refaddr($cache{$_})==refaddr($bot->{_badword_cache}{$_}//{})?1:0} ('#test','#else')],
+                            [@notices],[@audit],[@{$bot->{irc}{wire}}],[@{$bot->{events}}],[@{$bot->{logger}{rows}}]];
+                        my $method=$op eq 'addbadword'?'channelAddBadword_ctx':'channelRemBadword_ctx';
+                        push @expected_failed,[1,$before,0,1,[1,1],[['operator','Database error.']],[],[],[],
+                            [[1,"$method() badword lookup failed."]]];
+                        $db->{private_lookup_fault}='';@notices=();@audit=();$bot->{logger}{rows}=[];
+                        my $ret=$call->($ctx);
+                        my $mutates=$op eq 'addbadword' ? !$present : $present;
+                        my $wanted=$op eq 'addbadword' ? 1 : 0;
+                        my $reply=$op eq 'addbadword'
+                            ? ($present ? "Badword [4] 'café noir' is already defined on #TeST" : "Added badword 'café noir' to #TeST")
+                            : ($present ? "Removed badword 'café noir' from #TeST" : "Badword 'café noir' is not set on #TeST");
+                        push @recovered,[$ret?1:0,$db->selectrow_array(q{SELECT COUNT(*) FROM BADWORDS WHERE id_channel=1 AND badword='café noir'}),
+                            $db->{private_lookup_writes}//0,$db->{private_lookup_finishes},
+                            exists($bot->{_badword_cache}{'#test'})?1:0,
+                            refaddr($cache{'#else'})==refaddr($bot->{_badword_cache}{'#else'})?1:0,
+                            [@notices],scalar @audit,[@{$bot->{logger}{rows}}]];
+                        push @expected_recovered,[$mutates?1:0,$wanted,$mutates?1:0,2,$mutates?0:1,1,
+                            [['operator',$reply]],$op eq 'addbadword'||$present?1:0,[]];
+                        $db->disconnect;
+                    }
+                }
+                is_deeply(\@failed,\@expected_failed,"$op RaiseError=$raise $fault: failed fetch preserves rows and rules without writes, false no-op or audit");
+                is_deeply(\@recovered,\@expected_recovered,"$op RaiseError=$raise $fault: same-handle recovery retains real mutation/no-op behavior and private/public targets");
+            }
+        }
     }
 });
 # MB1099: fixed ping text, with deterministic monotonic time and no sleep.

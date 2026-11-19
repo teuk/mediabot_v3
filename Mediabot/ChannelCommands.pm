@@ -3719,7 +3719,21 @@ sub channelAddBadword_ctx {
         return;
     }
 
-    if (my $ref = $sth->fetchrow_hashref()) {
+    # MB1374: a failed fetch is neither an absent word nor a confirmed row.
+    # Capture the diagnostic before finish() can clear it, including RaiseError.
+    my $ref;
+    my $read_ok = eval {
+        $ref = $sth->fetchrow_hashref();
+        die "badword lookup fetch failed\n" if $sth->err;
+        1;
+    };
+    unless ($read_ok) {
+        eval { $sth->finish };
+        $self->{logger}->log(1, 'channelAddBadword_ctx() badword lookup failed.');
+        botNotice($self, $nick, 'Database error.');
+        return;
+    }
+    if ($ref) {
         # mb162-B1: pas d'invalidation de cache ici — rien n'a change en DB.
         # L'ancien code invalidait le cache dans CETTE branche (no-op) et
         # oubliait de le faire apres l'INSERT (la branche qui change les
@@ -3833,7 +3847,19 @@ sub channelRemBadword_ctx {
         return;
     }
 
-    my $ref = $sth->fetchrow_hashref();
+    # MB1374: do not delete or report a normal no-op after an uncertain read.
+    my $ref;
+    my $read_ok = eval {
+        $ref = $sth->fetchrow_hashref();
+        die "badword lookup fetch failed\n" if $sth->err;
+        1;
+    };
+    unless ($read_ok) {
+        eval { $sth->finish };
+        $self->{logger}->log(1, 'channelRemBadword_ctx() badword lookup failed.');
+        botNotice($self, $nick, 'Database error.');
+        return;
+    }
     $sth->finish;
 
     unless ($ref && $ref->{id_badwords}) {
