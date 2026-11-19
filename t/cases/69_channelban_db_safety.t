@@ -204,6 +204,10 @@ use MockMessage;
                 && $state->{target_fault} eq 'prepare') {
             return $self->set_err(1, 'target permission prepare interrupted');
         }
+        if ($state && ($state->{ban_fault} // '') eq 'prepare'
+                && $sql =~ /FROM CHANNEL_BAN\b.*ORDER BY id_channel_ban DESC/s) {
+            return $self->set_err(1, 'active ban prepare interrupted');
+        }
         # Only this MariaDB interval expression needs a private dialect bridge.
         my $sqlite = $sql;
         $sqlite =~ s/\(NOW\(\) \+ INTERVAL \? SECOND\)/datetime(NOW(), ? || ' seconds')/g;
@@ -220,6 +224,10 @@ use MockMessage;
                 && ($p->{state}{target_fault} // '') eq 'execute') {
             return $self->set_err(1, 'target permission execute interrupted');
         }
+        if ($p && ($p->{state}{ban_fault} // '') eq 'execute'
+                && $p->{sql} =~ /FROM CHANNEL_BAN\b.*ORDER BY id_channel_ban DESC/s) {
+            return $self->set_err(1, 'active ban execute interrupted');
+        }
         return $self->SUPER::execute(@bind);
     }
     sub fetchrow_hashref {
@@ -228,6 +236,12 @@ use MockMessage;
         if ($p && $p->{sql} =~ /SELECT\s+u\.id_user,/s
                 && ($p->{state}{target_fault} // '') eq 'fetch') {
             return $self->set_err(1, 'target permission fetch interrupted');
+        }
+        if ($p && $p->{sql} =~ /FROM CHANNEL_BAN\b.*ORDER BY id_channel_ban DESC/s) {
+            my $fault = $p->{state}{ban_fault} // '';
+            my $seen = $p->{fetches}++;
+            return $self->set_err(1, 'active ban fetch interrupted')
+                if $fault eq 'fetch' || ($fault eq 'fetch_late' && $seen == 1);
         }
         return $self->SUPER::fetchrow_hashref(@args);
     }
@@ -238,6 +252,10 @@ use MockMessage;
             $p->{state}{target_finishes}++;
             $self->set_err(undef, undef); # cleanup must not erase a fetch failure
             die 'target permission finish interrupted' if ($p->{state}{target_fault} // '') eq 'finish';
+        }
+        if ($p && $p->{sql} =~ /FROM CHANNEL_BAN\b.*ORDER BY id_channel_ban DESC/s) {
+            $self->set_err(undef, undef);
+            die 'active ban finish interrupted' if ($p->{state}{ban_fault} // '') eq 'finish';
         }
         return $self->SUPER::finish;
     }
@@ -397,7 +415,8 @@ for my $raise (0, 1) {
     for my $command (qw(ban kickban kb)) {
         for my $private (0, 1) {
             for my $state (qw(higher equal lower zero no_membership unknown other_channel mask
-                             prepare execute fetch finish unauthenticated actor_low)) {
+                             prepare execute fetch finish unauthenticated actor_low
+                             ban_prepare ban_execute ban_fetch ban_fetch_late ban_finish)) {
                 my ($b, $cb, $trace, $dir) = fixture();
                 bless $b, 'MB1368::Bot';
                 my $h = $b->{dbh};
@@ -411,7 +430,7 @@ for my $raise (0, 1) {
                 $h->do("INSERT INTO CHANNEL VALUES(1,'#test'),(2,'#other')");
                 $h->do('INSERT INTO USER_CHANNEL VALUES(1,1,?)', undef, $state eq 'actor_low' ? 74 : 100);
                 unless ($state eq 'unknown' || $state eq 'no_membership') {
-                    my $level = $state eq 'equal' ? 100 : $state eq 'lower' ? 50 : $state eq 'zero' ? 0 : 150;
+                    my $level = $state =~ /^ban_/ ? 0 : $state eq 'equal' ? 100 : $state eq 'lower' ? 50 : $state eq 'zero' ? 0 : 150;
                     $h->do('INSERT INTO USER_CHANNEL VALUES(2,?,?)', undef, $state eq 'other_channel' ? 2 : 1, $level);
                 }
                 $h->do("INSERT INTO CHANNEL_LOG VALUES(1,1,'Target','Target!ident\@target.example','2026-10-23 12:00:00')");
@@ -420,6 +439,7 @@ for my $raise (0, 1) {
                 $h->{RaiseError} = $raise;
                 $trace->{target_fault} = $state if $state =~ /^(?:prepare|execute|fetch|finish)$/;
                 $trace->{target_fault} = 'prepare' if $state eq 'mask'; # explicit masks do not query nick levels
+                $trace->{ban_fault} = $1 if $state =~ /^ban_(.+)$/;
                 $trace->{sql} = []; $trace->{binds} = [];
                 my $target = $state eq 'mask' ? '*!ident@target.example' : 'Target';
                 my @args = ($private ? '#test' : (), $target, '10m', '75', 'fixture');
@@ -452,6 +472,29 @@ for my $raise (0, 1) {
                 }
                 $h->disconnect; delete $b->{channel_ban}; delete $cb->{bot};
             }
+        }
+    }
+}
+# MB1369: duplicate prevention must never convert a read error into an INSERT.
+for my $raise (0, 1) {
+    for my $fault (qw(prepare execute fetch fetch_late finish)) {
+        for my $existing (0, 1) {
+            my ($b, $cb, $trace, $dir) = fixture();
+            my $h = $b->{dbh}; $h->{RaiseError} = $raise;
+            my $before = rows($b);
+            my $mask = $existing ? '*!*old@old.example' : '*!*new@new.example';
+            $trace->{ban_fault} = $fault;
+            my (@result, @warnings);
+            local $SIG{__WARN__} = sub {push @warnings, @_};
+            my $ok = eval {@result = $cb->add_ban(id_channel => 1, mask => $mask,
+                ban_level => 75, expires_seconds => 600); 1};
+            my $unchanged = JSON::PP->new->canonical->encode(rows($b)) eq JSON::PP->new->canonical->encode($before);
+            my @inserts = grep {$_->[0] =~ /INSERT INTO CHANNEL_BAN/} @{$trace->{binds}};
+            $trace->{ban_fault} = '';
+            my @recovery = $cb->add_ban(id_channel => 1, mask => $mask, ban_level => 75, expires_seconds => 600);
+            push @{$out{duplicate_guard}}, [$raise, $fault, $existing, $ok ? 1 : 0,
+                \@result, \@warnings, $unchanged ? 1 : 0, scalar(@inserts), \@recovery];
+            $h->disconnect; delete $b->{channel_ban}; delete $cb->{bot};
         }
     }
 }
@@ -520,7 +563,8 @@ MB922_NATIVE
         my @wire = $allowed ? (['MODE',undef,'#test','+b',$mask]) : ();
         push @wire, ['KICK',undef,'#test','Target','(Alice) fixture']
             if $allowed && $command ne 'ban' && $state ne 'mask';
-        my @notices = $fault ? ('Cannot verify target channel level; ban cancelled.')
+        my @notices = $state =~ /^ban_/ ? ('Cannot verify existing channel bans; ban cancelled.')
+            : $fault ? ('Cannot verify target channel level; ban cancelled.')
             : $state eq 'unauthenticated' ? ('You must be logged to use this command.')
             : $state eq 'actor_low' ? ('Your channel level on #test must be at least 75 to use ban commands.')
             : !$allowed ? ('Refusing to ban Target: target channel level (' . ($state eq 'equal' ? 100 : 150) . ') is >= your level (100).')
@@ -544,6 +588,15 @@ MB922_NATIVE
     $assert->is($json->encode(\@recovery), $json->encode([map {[1,[],
         [{target=>'Alice',text=>'Refusing to ban Target: target channel level (150) is >= your level (100).'}],
         [],[],[],0]} @recovery]), 'target permission recovery on the same DB handle preserves the higher-level ban refusal');
+    my (@duplicate_guard, @wanted_duplicate_guard);
+    for my $v (@{$r->{duplicate_guard}}) {
+        my ($raise, $fault, $existing) = @$v;
+        push @duplicate_guard, [@{$v}[3..$#$v]];
+        push @wanted_duplicate_guard, [1,[undef,'Cannot verify existing channel bans; ban cancelled.'],[],1,0,
+            $existing ? [undef,'an active ban already exists for *!*old@old.example (id 10)'] : [78,undef]];
+    }
+    $assert->is($json->encode(\@duplicate_guard), $json->encode(\@wanted_duplicate_guard),
+        'native duplicate read failures preserve every ban row and skip INSERT; recovery restores existing-ban refusal or genuine new insertion');
     my $limit_error='duration exceeds maximum of 2147483647 seconds; use perm for a permanent ban';
     $assert->is($json->encode($r->{duration_parse}),$json->encode([
         ['600','10m',undef],['7200','2h',undef],['2147483640','35791394m',undef],

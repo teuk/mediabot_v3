@@ -320,12 +320,17 @@ sub _mask_matches_irc {
 #
 # B3/A3: check all active bans for the channel with IRC wildcard matching,
 # not SQL equality. The $hostmask argument is a full nick!ident@host string
-# (or a normalised mask). Returns the most specific matching ban row or undef.
+# (or a normalised mask). Returns the most recent matching ban row or undef.
+# Optional $require_complete makes reported read errors fatal for callers that
+# must distinguish a confirmed non-match from an incomplete lookup before writing.
+# Ordinary readers retain the same single row-or-undef result in every context.
 # ---------------------------------------------------------------------------
 sub active_ban_for_mask {
-    my ($self, $id_channel, $hostmask) = @_;
+    my ($self, $id_channel, $hostmask, $require_complete) = @_;
 
-    return undef unless $self->_current_dbh;
+    my $dbh = $self->_current_dbh;
+    die "active ban lookup has no database handle\n" if !$dbh && $require_complete;
+    return undef unless $dbh;
     return undef unless defined($id_channel) && $id_channel ne '';
     return undef unless defined($hostmask)   && $hostmask   ne '';
 
@@ -352,12 +357,14 @@ sub active_ban_for_mask {
 
     unless ($sth) {
         $self->_log(1, "active_ban_for_mask() SQL prepare error: $DBI::errstr Query: $sql");
+        die "active ban prepare failed\n" if $require_complete;
         return undef;
     }
 
     unless ($sth && $sth->execute($id_channel)) {
         $self->_log(1, "active_ban_for_mask() SQL execute error: $DBI::errstr Query: $sql");
         $sth->finish;
+        die "active ban execute failed\n" if $require_complete;
         return undef;
     }
 
@@ -370,7 +377,16 @@ sub active_ban_for_mask {
         }
     }
 
+    # Capture the fetch error before finish() can clear DBI diagnostics. In
+    # strict mode, a partial scan cannot prove that no matching ban exists.
+    my $fetch_error = $sth->can('err') && $sth->err
+        ? ($sth->errstr // 'unknown fetch error') : undef;
     $sth->finish;
+    if (defined $fetch_error) {
+        $self->_log(1, "active_ban_for_mask() SQL fetch error: $fetch_error");
+        die "active ban fetch failed\n" if $require_complete;
+        return undef;
+    }
     return $best;
 }
 
@@ -401,7 +417,17 @@ sub add_ban {
         return (undef, $err);
     }
 
-    if (my $existing = $self->active_ban_for_mask($id_channel, $mask)) {
+    my $existing;
+    my $checked = eval {
+        $existing = $self->active_ban_for_mask($id_channel, $mask, 1);
+        1;
+    };
+    unless ($checked) {
+        (my $error = $@ || 'unknown lookup error') =~ s/\s+/ /g;
+        $self->_log(1, "add_ban() existing ban lookup failed: $error");
+        return (undef, 'Cannot verify existing channel bans; ban cancelled.');
+    }
+    if ($existing) {
         return (undef, "an active ban already exists for $mask (id $existing->{id_channel_ban})");
     }
 

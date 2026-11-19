@@ -1,3 +1,9 @@
+## MB1369 — Refuse new bans when the existing-ban lookup fails
+
+- Require a successful active-ban lookup before inserting a persistent ban; reported prepare/execute/fetch failures could otherwise be treated as no match and permit a duplicate, including after a partial scan.
+- Convert lookup exceptions into an explicit add_ban error before storage or IRC side effects, capture fetch diagnostics before cleanup, and preserve the ordinary row-or-undef reader contract, wildcard/latest-match behavior and genuine new-ban insertion.
+- Extend the existing native ban probe with real SQL, first/later fetch failures, RaiseError off/on, command routes and same-handle recovery; no new test file, interpreter or database schema change.
+
 ## MB1368 — Cancel nick bans when target-level verification fails
 
 - Stop ban, kickban and kb when the target channel-level query fails during prepare, execute, fetch or cleanup; a database error must not be mistaken for an unprivileged target and allow a higher-level user to be banned.
