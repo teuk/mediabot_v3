@@ -1044,7 +1044,7 @@ sub mbPollExtend_ctx {
     my $nick    = $ctx->nick;
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
-    my $extra   = defined($args[0]) && $args[0] =~ /^(\d+)$/ ? int($args[0]) : 60;
+    my $extra   = defined($args[0]) && $args[0] =~ /\A[0-9]+\z/ ? int($args[0]) : 60;
     $extra = 10 if $extra < 10; $extra = 600 if $extra > 600;
     my $poll = $self->{_polls}{lc($channel // '')};
     unless ($poll && $poll->{active}) {
@@ -1082,7 +1082,9 @@ sub mbPoll_ctx {
     # BB7: optional 'weighted' keyword enables weighted voting mode
     my $poll_weighted = 0;
     if ($raw =~ s/^weighted\s+//i) { $poll_weighted = 1; }
-    if ($raw =~ s/^(\d+)\s+//) {
+    # MB1370: Perl's numeric coercion does not consume Unicode digits. Only
+    # ASCII tokens may set a duration; leave other tokens in the question.
+    if ($raw =~ s/\A([0-9]+)\s+//) {
         $poll_timeout = int($1); $poll_timeout = 10 if $poll_timeout < 10;
         $poll_timeout = 3600 if $poll_timeout > 3600;
     }
@@ -1101,7 +1103,7 @@ sub mbPoll_ctx {
     # BB7: build weighted option list
     my @weighted_parts;
     for my $opt (@parts) {
-        if ($poll_weighted && $opt =~ /^(.+?):(\d+)$/ && $2 >= 1 && $2 <= 10) {
+        if ($poll_weighted && $opt =~ /\A(.+?):([0-9]+)\z/ && $2 >= 1 && $2 <= 10) {
             push @weighted_parts, { label => $1, weight => int($2) };
         } else {
             push @weighted_parts, { label => $opt, weight => 1 };

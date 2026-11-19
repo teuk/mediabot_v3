@@ -1,3 +1,9 @@
+## MB1370 — Keep Unicode digits out of poll timer and weight arithmetic
+
+- Parse poll timeouts, extensions and option weights as complete ASCII numeric tokens before arithmetic; mixed Unicode digits could otherwise become a shorter duration or an unintended vote multiplier and emit warnings.
+- Preserve malformed duration prefixes as question text, malformed weight suffixes as option labels with unit weight, and the existing 60-second extension fallback; retain ASCII leading zeroes, duration bounds, weighted-prefix orders and channel isolation.
+- Extend the existing native poll case through command, facade and registry routes, including live weighted tallies and overdue extension anchors; no new test file, interpreter or database schema change.
+
 ## MB1369 — Refuse new bans when the existing-ban lookup fails
 
 - Require a successful active-ban lookup before inserting a persistent ban; reported prepare/execute/fetch failures could otherwise be treated as no match and permit a duplicate, including after a partial scan.

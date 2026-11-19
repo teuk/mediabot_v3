@@ -71,8 +71,10 @@ is_deeply(\@warnings,[],'case-varying poll commands are warning-free');
 # MB1345: omitted seconds follow the fallback, rather than int(undef) -> 10.
 for my $route ('native','facade','registry') {
     for my $deadline (1900,2100) {
-        for my $case ([[],60], [['0'],10], [['30'],30], [['900'],600], [['bad'],60]) {
+        for my $case ([[],60], [['0'],10], [['30'],30], [['900'],600], [['bad'],60],
+                         [['1٢'],60], [['٢'],60], [["30\n"],60], [['0060'],60]) {
             my ($args,$extra)=@$case;
+            my $display = join(' ', @$args); $display =~ s/\n/\\n/g;
             my $state={active=>1,question=>'Keep ballots?',options=>['Yes','No'],
                 votes=>{alice=>0,bob=>1},started=>1800,deadline=>$deadline};
             $bot->{_polls}{'#test'}=dclone($state);
@@ -88,8 +90,56 @@ for my $route ('native','facade','registry') {
             my $remaining=$expected->{'#test'}{deadline}-2000;
             is_deeply([$bot->{_polls},$bot->{wire},\@warnings],
                 [$expected,[['public','#TeSt',"Poll extended by ${extra}s (${remaining}s remaining)."]],[]],
-                "$route deadline=$deadline args='@$args': correct extension without warnings or ballot changes");
+                "$route deadline=$deadline args='$display': correct extension without warnings or ballot changes");
         }
     }
+}
+# MB1370: Unicode digit tokens are text, never partially parsed durations or
+# option weights. Exercise the public registry and real weighted result path.
+for my $order ('plain', 'weighted-first', 'timeout-first') {
+    my (@actual, @expected);
+    for my $token ('1٢', '٢3', '３０', '00060') {
+        my $weighted = $order ne 'plain';
+        my $raw = $order eq 'weighted-first' ? "weighted $token Choice? | Yes | No"
+                : $order eq 'timeout-first' ? "$token weighted Choice? | Yes | No"
+                : "$token Choice? | Yes | No";
+        @warnings = (); @audit = ();
+        my $other = dclone($bot->{_polls}{'#other'});
+        my $count = $bot->{metrics}{mediabot_poll_created_total};
+        invoke_1407('poll', '#TeSt', $raw);
+        my $ascii = $token eq '00060';
+        my $question = $ascii ? 'Choice?' : "$token "
+            . ($order eq 'timeout-first' ? 'weighted ' : '') . 'Choice?';
+        my $is_weighted = $weighted && ($ascii || $order eq 'weighted-first') ? 1 : 0;
+        push @actual, [$bot->{_polls}{'#test'}, $bot->{wire}, [@warnings], [@audit],
+            $bot->{metrics}{mediabot_poll_created_total} - $count, $bot->{_polls}{'#other'}];
+        push @expected, [{question=>$question,options=>['Yes','No'],weights=>[1,1],
+            weighted=>$is_weighted,votes=>{},started=>2000,deadline=>2000+($ascii?60:300),active=>1},
+            [['public','#TeSt',"Poll: \"$question\"  [1] Yes  [2] No  -- vote with !vote <n>"]],
+            [], [['#TeSt','poll',$question]], 1, $other];
+    }
+    is_deeply(\@actual, \@expected, "$order: only a complete ASCII timeout is consumed; Unicode text, defaults and other channels survive");
+}
+{
+    my (@actual, @expected);
+    for my $case (['2١',1], ['١',1], ['２',1], ['003',3], ['10',10], ['11',1]) {
+        my ($token, $weight) = @$case;
+        @warnings = ();
+        my $label = $weight == 1 ? "Yes:$token" : 'Yes';
+        invoke_1407('poll', '#TeSt', "weighted 60 Choice? | Yes:$token | No");
+        invoke_1407('vote', '#test', '1', 'Alice');
+        invoke_1407('vote', '#TEST', '2', 'Bob');
+        invoke_1407('pollstatus', '#tEsT');
+        my $first_pct = int($weight * 100 / ($weight + 1));
+        my $second_pct = int(100 / ($weight + 1));
+        push @actual, [$bot->{_polls}{'#test'}{options}, $bot->{_polls}{'#test'}{weights},
+            $bot->{_polls}{'#test'}{votes}, $bot->{wire}, [@warnings]];
+        push @expected, [[$label,'No'], [$weight,1], {alice=>0,bob=>1},
+            [['public','#tEsT','"Choice?" [weighted] -- 2 vote(s) so far:'],
+             ['public','#tEsT',"  [1] $label (x$weight): 1=$weight ($first_pct%)"],
+             ['public','#tEsT',"  [2] No (x1): 1=1 ($second_pct%)"]], []];
+    }
+    is_deeply(\@actual, \@expected,
+        'weighted ballots use whole ASCII weights in 1..10; malformed suffixes remain labels with unit weight and no warnings');
 }
 done_testing;
