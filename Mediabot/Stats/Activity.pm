@@ -498,6 +498,8 @@ sub mbActive_ctx {
             "SELECT cl.nick, COUNT(*) AS mc FROM CHANNEL_LOG cl"
             . " JOIN CHANNEL c ON c.id_channel = cl.id_channel"
             . " WHERE $where_clause"
+            # Presence and channel-state events are not spoken messages.
+            . " AND cl.event_type IN ('public','action')"
             . " GROUP BY cl.nick ORDER BY mc DESC"
             # An online nick below rank 30 may still have spoken. Stream the
             # full hourly result for this comparison; retain only 30 for display.

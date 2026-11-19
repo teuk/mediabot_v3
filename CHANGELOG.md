@@ -1,3 +1,9 @@
+## MB1361 — Count speech rather than presence in active reports
+
+- Count only public messages and actions in active rankings, excluding joins, parts and other channel-state events from message totals.
+- Keep online users silent until they actually speak within the requested channel and hour; preserve other periods, nickname case handling, the top-30 display and database-error handling.
+- Extend the existing native SQLite activity scenario with mixed events and join-only history, without adding a test file or interpreter.
+
 ## MB1360 — Accept every supported channel type for compatibility reports
 
 - Use the shared IRC channel classifier in compat so &, ! and + channels reach the same compatibility calculation as # channels instead of receiving the private-context syntax error.

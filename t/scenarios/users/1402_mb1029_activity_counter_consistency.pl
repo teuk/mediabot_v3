@@ -271,5 +271,45 @@ for my $raise (0, 1) {
         ['public', '#test', 'Present but silent in last 60min: Quiet (1 nick(s))'],
     ], 'a confirmed empty hourly result still reports genuine silence');
 }
+# MB1361: joining or changing channel state is not speaking.
+{
+    my ($bot, $db) = setup_1402();
+    add_1402($db, 'Alice', 2);
+    add_1402($db, 'ALICE', 1, 'waves', undef, undef, 'action');
+    add_1402($db, 'Bob', 2, 'waves', undef, undef, 'action');
+    add_1402($db, 'Boundary', 1);
+    $db->do("UPDATE CHANNEL_LOG SET ts = '2026-10-01 11:00:00' WHERE nick = 'Boundary'");
+    add_1402($db, 'Yesterday', 4);
+    $db->do("UPDATE CHANNEL_LOG SET ts = '2026-09-30 14:00:00' WHERE nick = 'Yesterday'");
+    add_1402($db, 'Old', 30, 'outside both windows', '2020-01');
+    add_1402($db, 'Elsewhere', 40, 'other channel', '2026-10', 2);
+    for my $type (qw(join part quit nick mode topic kick)) {
+        add_1402($db, 'Quiet', 10, 'not a message', undef, undef, $type);
+        add_1402($db, 'Alice', 10, 'not a message', undef, undef, $type);
+    }
+    local *Mediabot::gethChannelsNicksOnChan = sub {
+        ('aLICE', 'bOB', 'Boundary', 'Quiet', 'Old', 'Elsewhere', 'Yesterday')
+    };
+    $db->do('PRAGMA query_only = ON');
+    my $before = $db->selectall_arrayref('SELECT * FROM CHANNEL_LOG');
+    is_deeply(invoke_1402($bot, 'active', 'Caller', 'now'), [
+        ['public', '#test', 'Active in last 60min on #test: Alice(3), Bob(2), Boundary(1) (3 nick(s))'],
+        ['public', '#test', 'Present but silent in last 60min: Elsewhere, Old, Quiet, Yesterday (4 nick(s))'],
+    ], 'active now counts messages and actions only, preserving hour boundary, channel and nick case');
+    is_deeply(invoke_1402($bot, 'active', 'Caller'), [
+        ['public', '#test', 'Active in last 24h on #test: Yesterday(4), Alice(3), Bob(2), Boundary(1) (4 nick(s))'],
+    ], 'ordinary active rankings also exclude presence events without changing the time window');
+    is_deeply($db->selectall_arrayref('SELECT * FROM CHANNEL_LOG'), $before,
+        'filtering active reports leaves presence and message history intact');
+}
+{
+    my ($bot, $db) = setup_1402();
+    add_1402($db, 'Quiet', 1, undef, undef, undef, 'join');
+    local *Mediabot::gethChannelsNicksOnChan = sub { ('Quiet') };
+    is_deeply(invoke_1402($bot, 'active', 'Caller', 'now'), [
+        ['public', '#test', 'No activity in last 60min on #test.'],
+        ['public', '#test', 'Present but silent in last 60min: Quiet (1 nick(s))'],
+    ], 'a channel with only a join has no speech activity and retains its silent online nick');
+}
 is_deeply(\@warnings, [], 'native activity handlers emit no warnings');
 1;
