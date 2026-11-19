@@ -32,6 +32,14 @@ does not call it from the package yet. Delete
 uses authenticated numeric authorship, global Administrator authority or
 channel level 400; matching nickname text is never authorization.
 
+## List filters
+
+Both the historical and v3 `factoids` commands reject an invalid nonempty
+filter with a private syntax notice before reading factoids. After trimming
+whitespace and normalizing letter case, patterns accept 1–64 characters from
+`a-z`, `0-9`, `_`, `.`, `-`, `*` and `?`. Only an absent or blank filter lists
+all channel keywords within the existing limit; `top` retains its ranking.
+
 ## Supervised development-channel pilot
 
 Use an authenticated Owner Partyline session and one quiet development channel.

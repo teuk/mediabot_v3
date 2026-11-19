@@ -11,6 +11,7 @@ use Mediabot::Context;
     sub prepare {
         my ($db,$sql,@rest) = @_;
         my $read = $sql =~ /\bSELECT\b.*\bFROM\s+FACTOID\b/is;
+        $db->{private_factoid_reads}++ if $read;
         $db->{private_updates}++ if $sql =~ /UPDATE FACTOID/;
         my $actual = $read && ($db->{private_fault}//'') eq 'prepare'
             ? 'SELECT * FROM mb971_missing_table' : $sql;
@@ -78,6 +79,7 @@ sub setup_1347 {
         (20,2,'word','Other channel','Other','2026-10-01','2026-10-01',99)});
     $db->{private_fault} = $fault;
     $db->{private_finished} = 0; $db->{private_updates} = 0;
+    $db->{private_factoid_reads} = 0;
     my $bot = bless {dbh=>$db,channels=>{'#test'=>bless({},'MB971::Channel')},
         logger=>bless({},'MB971::Log'),metrics=>bless({},'MB971::Metrics')},'Mediabot';
     return ($bot,$db);
@@ -150,5 +152,38 @@ for my $raise (0,1) {
                 "confirmed absence RaiseError=$raise keeps its existing message");
         }
     }
+}
+# MB1376: malformed list filters cannot silently widen the requested search.
+{
+    my ($bot,$db) = setup_1347(1,'');
+    $db->do('PRAGMA query_only = ON');
+    my $before = $db->selectall_arrayref('SELECT * FROM FACTOID ORDER BY id_factoid');
+    my $pattern_error = 'factoids: invalid pattern (1-64 chars: a-z, 0-9, _, ., -, *, ?).';
+    for my $bad ('bad/pattern', 'word%', 'two words', "caf\x{e9}*", "wo\x00rd", 'x' x 65) {
+        $db->{private_factoid_reads} = 0;
+        is(invoke_1347('Mediabot::CommunityState',$bot,{command=>'Factoids',args=>[$bad]}), '',
+            'mb1376: invalid list filter is handled without exceptions');
+        is_deeply(\@wire, [['notice','Reader',$pattern_error]],
+            'mb1376: invalid filter receives a private syntax error, never all keywords');
+        is($db->{private_factoid_reads},0,'mb1376: invalid filter performs no FACTOID read');
+    }
+    for my $case (
+        [[], '2 factoid(s) on #test: word, word2'],
+        [['  '], '2 factoid(s) on #test: word, word2'],
+        [['  W*  '], '2 factoid(s) on #test: word, word2'],
+        [['w?rd'], '1 factoid(s) on #test: word'],
+        [['word2'], '1 factoid(s) on #test: word2'],
+        [['TOP'], 'Top factoids on #test: word (3), word2 (1)'],
+        [['x' x 64], "No factoids matching '" . ('x' x 64) . "' on #test."],
+    ) {
+        $db->{private_factoid_reads} = 0;
+        is(invoke_1347('Mediabot::CommunityState',$bot,{command=>'Factoids',args=>$case->[0]}), '',
+            'mb1376: valid list, glob, top or empty result remains available');
+        is_deeply(\@wire, [['notice','Reader',$case->[1]]],
+            'mb1376: valid requests preserve normalization, matching, scope and notices');
+        is($db->{private_factoid_reads},1,'mb1376: valid request performs one FACTOID read');
+    }
+    is_deeply($db->selectall_arrayref('SELECT * FROM FACTOID ORDER BY id_factoid'),$before,
+        'mb1376: rejected and valid list requests preserve stored facts and counters');
 }
 1;

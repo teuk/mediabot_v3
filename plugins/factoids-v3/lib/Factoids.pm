@@ -123,6 +123,10 @@ sub command_factoids {
 
     my $channel = $invocation->channel;
     my $pattern = _keyword($invocation);
+    # A supplied but invalid filter must never become an unfiltered listing.
+    return $context->notice($invocation,
+        'factoids: invalid pattern (1-64 chars: a-z, 0-9, _, ., -, *, ?).')
+        if length($pattern) && $pattern !~ /\A[a-z0-9_.?*-]{1,64}\z/;
     if ($pattern eq 'top') {
         my $result = $context->top_factoids($invocation, limit => 10);
         return $context->notice($invocation, 'factoids: listing failed.')
@@ -138,8 +142,7 @@ sub command_factoids {
     }
 
     my %args;
-    $args{pattern} = $pattern
-        if $pattern =~ /\A[a-z0-9_.?*-]{1,64}\z/;
+    $args{pattern} = $pattern if length($pattern);
     my $result = $context->factoid_list($invocation, %args, limit => 60);
     return $context->notice($invocation, 'factoids: listing failed.')
         unless $result && $result->{ok};

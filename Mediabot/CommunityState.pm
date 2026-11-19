@@ -1853,6 +1853,11 @@ sub mbFactoids_ctx {
     my @args = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
     my $pattern = lc(join(' ', @args));
     $pattern =~ s/^\s+|\s+$//g;
+    # A supplied but invalid filter must never become an unfiltered listing.
+    if (length($pattern) && $pattern !~ /\A[a-z0-9_.?*-]{1,64}\z/) {
+        botNotice($self, $nick, 'factoids: invalid pattern (1-64 chars: a-z, 0-9, _, ., -, *, ?).');
+        return;
+    }
 
     my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
     unless ($dbh) { botNotice($self, $nick, "factoids: database unavailable."); return; }
@@ -1880,7 +1885,7 @@ sub mbFactoids_ctx {
     }
 
     my ($sql, @bind);
-    if ($pattern ne '' && $pattern =~ /^[a-z0-9_.\-*?]{1,64}$/) {
+    if ($pattern ne '') {
         # translate glob to LIKE, escaping literal % and _
         my $like = '';
         for my $ch (split //, $pattern) {

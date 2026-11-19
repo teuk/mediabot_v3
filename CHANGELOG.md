@@ -1,3 +1,9 @@
+## MB1376 — Reject invalid factoid filters before listing
+
+- Stop treating malformed or overlong factoids filters as an unfiltered request in both the historical handler and factoids-v3; return one private syntax notice before reading factoids.
+- Keep absent/blank filters, top rankings, valid glob patterns, normalization, channel scope and list limits unchanged; document the shared pattern contract.
+- Extend the existing native SQL scenario and command-package case with rejected filters and valid boundary/search cases without adding a test file or interpreter.
+
 ## MB1375 — Keep heatmap colors on the six-hour bar scale
 
 - Normalize heatmap color intensity against six peak-hour buckets, matching the existing bar scale; a single busy hour no longer turns a one-cell bar red.

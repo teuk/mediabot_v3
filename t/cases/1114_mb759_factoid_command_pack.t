@@ -116,12 +116,26 @@ return sub {
         'Top factoids on #test: coffee (7), perl (3)',
         'top ranking preserves the historical rendering');
 
-    $plugin->command_factoids(
-        $authority, $invoke->('factoids', ['bad/pattern']));
-    $assert->is($reads[-1][0], 'list',
-        'invalid historical pattern still performs an unfiltered list');
-    $assert->ok(!defined($reads[-1][1]{pattern}),
-        'invalid pattern never crosses the factoid facade');
+    # MB1376: an invalid supplied filter must not become an unfiltered read.
+    my $pattern_error = 'factoids: invalid pattern (1-64 chars: a-z, 0-9, _, ., -, *, ?).';
+    for my $bad ('bad/pattern', 'word%', 'two words', "caf\x{e9}*", "wo\x00rd", 'x' x 65) {
+        my $before = scalar @reads;
+        @notices = ();
+        $plugin->command_factoids($authority, $invoke->('factoids', [$bad]));
+        $assert->is(scalar @reads, $before,
+            'mb1376: invalid filter cannot reach any read facade');
+        $assert->is(join('|', @notices), $pattern_error,
+            'mb1376: invalid filter gets one private syntax error instead of a list');
+    }
+    for my $case ([[], undef], [['  '], undef], [['  Pe*  '], 'pe*'],
+                  [['p?rl'], 'p?rl'], [['w_rd.-*'], 'w_rd.-*'], [['x' x 64], 'x' x 64]) {
+        my $before = scalar @reads;
+        $plugin->command_factoids($authority, $invoke->('factoids', $case->[0]));
+        $assert->is(scalar @reads, $before + 1, 'mb1376: valid list request reads once');
+        $assert->is(JSON::PP->new->canonical->encode($reads[-1]),
+            JSON::PP->new->canonical->encode(['list', {limit => 60, pattern => $case->[1]}]),
+            'mb1376: only absent/blank filters request the full bounded list');
+    }
 
     $plugin->command_factoid(
         $authority, $invoke->('factoid', ['missing']));
