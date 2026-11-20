@@ -1,3 +1,9 @@
+## MB1381 — Match personal top ranks to the displayed tie order
+
+- Apply the same case-folded nickname tie-break to the personal rank in top as to the displayed rows, so a caller tied at the cutoff still sees their place.
+- Preserve the visible ordering, percentages, channel and bot filters, and the optional live/archive confirmation.
+- Extend the existing native activity scenario with ties at and below the cutoff and a caller already displayed.
+
 ## MB1380 — Show the caller's top rank on every supported channel type
 
 - Use the shared IRC channel classifier for top's personal rank line so callers outside the displayed cutoff also see their rank on &, + and ! channels.

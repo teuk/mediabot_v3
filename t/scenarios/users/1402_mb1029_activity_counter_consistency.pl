@@ -227,6 +227,28 @@ for my $channel ('#test', '&test', '+test', '!test') {
     is_deeply(invoke_on_1402($bot, $channel, 'top', 'Absent', '1'), \@ranking,
         "top does not report a rank for a caller without messages on $channel");
 }
+# MB1381: a caller tied at the cutoff keeps a distinct place in top's ordering.
+{
+    my ($bot, $db) = setup_1402();
+    add_1402($db, 'Leader', 4);
+    add_1402($db, 'Alpha', 2);
+    add_1402($db, 'Zulu', 1);
+    add_1402($db, 'ZULU', 1, 'waves', undef, undef, 'action');
+    $db->do('PRAGMA query_only = ON');
+    my $leader = ['public', '#test', sprintf('  1. %-16s 4 msgs (50.0%%)', 'Leader')];
+    my $alpha = ['public', '#test', sprintf('  2. %-16s 2 msgs (25.0%%)', 'Alpha')];
+    my $personal = ['public', '#test', '  (your rank: #3 — 2 msg(s), 25.0%)'];
+    is_deeply(invoke_1402($bot, 'top', 'ZULU', '2'), [
+        ['public', '#test', 'Top 2 on #test (8 msgs):'], $leader, $alpha, $personal,
+    ], 'top reports the caller tied with the last displayed nickname at the next position');
+    is_deeply(invoke_1402($bot, 'top', 'ZULU', '1'), [
+        ['public', '#test', 'Top 1 on #test (8 msgs):'], $leader, $personal,
+    ], 'a tie below the cutoff still uses the same position and case-folded ordering');
+    is_deeply(invoke_1402($bot, 'top', 'ZULU', '3'), [
+        ['public', '#test', 'Top 3 on #test (8 msgs):'], $leader, $alpha,
+        ['public', '#test', sprintf('  3. %-16s 2 msgs (25.0%%)', 'Zulu')],
+    ], 'including the tied caller in the main rows shows the same rank without a duplicate');
+}
 # MB1346: failed reads must not masquerade as empty or partial monthly charts.
 for my $raise (0, 1) {
     for my $compare (0, 1) {

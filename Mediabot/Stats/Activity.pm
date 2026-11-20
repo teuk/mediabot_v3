@@ -408,26 +408,26 @@ sub mbTop_ctx {
         # mb578-B1: gather OPTIONNEL documente — la ligne bonus « your
         # rank » est simplement omise si ce comptage echoue ($mine reste 0,
         # le classement principal deja affiche n'est pas invalide). Teste.
+        my $caller_key = lc($nick);
         my $mine = 0;
         my $top_mine_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
             "SELECT COUNT(*) AS mine FROM __CLSRC__ cl"
           . " JOIN CHANNEL c ON c.id_channel=cl.id_channel"
           . " WHERE c.name=? AND cl.event_type IN ('public','action')"
           . " $bots_filter $period_sql AND LOWER(cl.nick)=LOWER(?)",
-            [ $channel, @bot_list, lc($nick) ],
+            [ $channel, @bot_list, $caller_key ],
             sub { $mine += $_[0]->{mine} // 0 }, 'content');
         $mine = 0 unless $top_mine_g->{live_ok};
         if ($mine > 0) {
-            # mb576-B1: la fusion complete par nick est deja en memoire
-            # (%top_counts porte le meme filtre) — zero requete de plus.
-            {
-                my $my_rank = 1 + scalar grep { $top_counts{$_} > $mine }
-                    keys %top_counts;
-                if ($my_rank > $n) {
-                    my $pct_me = $total > 0 ? sprintf('%.1f%%', 100*$mine/$total) : '0%';
-                    botPrivmsg($self, $channel,
-                        "  (your rank: #$my_rank — $mine msg(s), $pct_me)");
-                }
+            # Match the displayed order, including the folded nickname on ties.
+            my $my_rank = 1 + scalar grep {
+                $top_counts{$_} > $mine
+                    || ($top_counts{$_} == $mine && $_ lt $caller_key)
+            } keys %top_counts;
+            if ($my_rank > $n) {
+                my $pct_me = $total > 0 ? sprintf('%.1f%%', 100*$mine/$total) : '0%';
+                botPrivmsg($self, $channel,
+                    "  (your rank: #$my_rank — $mine msg(s), $pct_me)");
             }
         }
     }
