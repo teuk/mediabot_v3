@@ -41,7 +41,7 @@ sub mbWordCount_ctx {
     $self->{metrics}->inc('mediabot_wordcount_requests_total') if $self->{metrics};
 
     # mb92/polish: wordcount is channel-scoped
-    unless (defined($channel) && $channel =~ /^#/) {
+    unless (Mediabot::Helpers::isIrcChannelTarget($channel)) {
         botNotice($self, $nick, "wordcount must be used from a channel.");
         return 1;
     }
@@ -462,16 +462,16 @@ sub userTopSay_ctx {
     }
 
     # Channel and nick extraction:
-    # - If first arg is a #channel => use it, and output there (unless ctx is private and you prefer notice; we keep original behavior)
+    # - If first arg is an IRC channel => use it, preserving private notices.
     # - Else use ctx->channel
     my $chan = undef;
-    if (@args && defined $args[0] && $args[0] =~ /^#/) {
+    if (@args && Mediabot::Helpers::isIrcChannelTarget($args[0])) {
         $chan = shift @args;
     } else {
         $chan = $ctx_chan;
     }
 
-    unless (defined $chan && $chan =~ /^#/) {
+    unless (Mediabot::Helpers::isIrcChannelTarget($chan)) {
         botNotice($self, $nick, "Syntax: topsay [#channel] <nick>");
         return;
     }

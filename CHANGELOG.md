@@ -1,3 +1,9 @@
+## MB1379 — Recognize every supported channel type in history commands
+
+- Use the shared IRC channel classifier for wordcount and topsay instead of a hash-only check; valid &, + and ! channels were refused, and an explicit topsay channel could be mistaken for the nickname filter.
+- Preserve current/explicit channel scope, private topsay notices, administrator authentication, literal nickname LIKE escaping, pagination and wordcount streaming/capped behavior; queries and stored history remain unchanged.
+- Extend the existing native wordcount SQL scenario and topsay import-order probes across all four prefixes and refusal paths without adding a test file or interpreter.
+
 ## MB1378 — Keep active lists within their IRC byte budgets
 
 - Measure active rankings by UTF-8 wire bytes and truncate both ranked and silent-online nickname lists on complete characters; decoded Unicode previously exceeded the compact-list budget and raw UTF-8 could be cut inside a character.

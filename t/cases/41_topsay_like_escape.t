@@ -178,6 +178,29 @@ return sub {
             @notice=();@public=();
             $call->('userTopSay_ctx',undef,['#test','bob'],$user);
             die 'private sayings route changed' unless !@public && @notice==4;
+            # MB1379: current/explicit channels share Context's prefix contract.
+            for my $channel ('#test','&test','+test','!ABCDEtest') {
+                for my $route (qw(current explicit private)) {
+                    @notice=();@public=();
+                    my $prior=$queries;
+                    my $origin=$route eq 'private'?undef:$route eq 'explicit'?'#origin':$channel;
+                    my $args=$route eq 'current'?['b%b_!']:[$channel,'b%b_!'];
+                    $call->('userTopSay_ctx',$origin,$args,$user);
+                    die "topsay selected the wrong channel or nickname: $channel $route"
+                        unless $queries==$prior+1 && $bind[-1][0] eq $channel && $bind[-1][1] eq 'b!%b!_!!';
+                    die "topsay reply scope changed: $channel $route"
+                        unless $route eq 'private' ? (!@public && @notice==4)
+                        : (@public==1 && $public[0][0] eq $channel && @notice==3);
+                }
+                for my $allowed ([0,2,'Administrator'],[1,3,'User']) {
+                    ($user->{auth},$user->{level},$user->{level_desc})=@$allowed;
+                    @notice=();@public=();my $prior=$queries;
+                    $call->('userTopSay_ctx',undef,[$channel,'bob'],$user);
+                    die "topsay prefix bypassed authentication/role: $channel"
+                        unless $queries==$prior && !@public && @notice==1;
+                }
+                ($user->{auth},$user->{level},$user->{level_desc})=(1,2,'Administrator');
+            }
             my $before=$queries;
             $call->('mbCompat_ctx',undef,['bob'],undef);
             die 'private affinity reached SQL' unless $queries==$before && $notice[-1][1]=~/must be in a channel/;

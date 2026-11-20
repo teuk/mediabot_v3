@@ -42,8 +42,9 @@ sub fixture_words {
     return ($bot,$db,$before);
 }
 sub invoke_words {
-    my ($bot,$all)=@_;@wire=();
-    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Observer',channel=>'#test',
+    my ($bot,$all,$channel)=@_;@wire=();
+    $channel='#test' if @_ < 3;
+    my $ctx=Mediabot::Context->new(bot=>$bot,nick=>'Observer',channel=>$channel,
         command=>'wordcount',args=>['Alice',($all?'all':())]);
     $ctx->{_user_fetched}=1;
     $bot->command_registry->handler_for('wordcount','public')->($ctx);
@@ -144,6 +145,31 @@ finish_words($raw_db,$raw_before);finish_words($char_db,$char_before);
         [$before,[['alice','#test',2]]],
         'ranking preserves both history tables and the capped distinct-word achievement count');
     $db->disconnect;
+}
+# MB1379: all supported IRC channel prefixes use the same scoped history query.
+for my $channel ('#test','&test','+test','!ABCDEtest') {
+    my ($bot,$db,$before)=fixture_words(1,['alpha alpha beta']);
+    $db->do('UPDATE CHANNEL SET name=? WHERE id_channel=1',undef,$channel);
+    $db->do('PRAGMA query_only = ON');
+    for my $all (0,1) {
+        $bot->{achievements}{calls}=[];
+        my $out=invoke_words($bot,$all,$channel);
+        my $period=$all?' (all time, no limit — may be slow)':'  | activity rank: #1';
+        is_deeply([$out,$bot->{achievements}{calls}],
+            [[['public',$channel,"alice: 2 distinct word(s) on $channel$period  | top words: alpha (2), beta (1)"]],
+             [['alice',$channel,2]]],
+            "wordcount $channel all=$all: native query, replies and progress use the requested channel only");
+    }
+    finish_words($db,$before);
+}
+for my $channel (undef,'','Observer') {
+    my ($bot,$db,$before)=fixture_words(1,['alpha']);
+    $db->do('PRAGMA query_only = ON');
+    my $out=invoke_words($bot,0,$channel);
+    is_deeply([$out,$bot->{achievements}{calls}],
+        [[['notice','Observer','wordcount must be used from a channel.']],[]],
+        'wordcount still refuses private/non-channel contexts without progress');
+    finish_words($db,$before);
 }
 is_deeply([\@warnings,[map {$_->[1]} @snapshots]],
     [[],[map {$_->[0]} @snapshots]],'counting leaves all stored source rows intact and emits no warning');
