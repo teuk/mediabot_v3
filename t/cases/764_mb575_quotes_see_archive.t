@@ -39,11 +39,18 @@ return sub {
             "$sub_name: template avec token __CLSRC__");
     }
 
-    # [2] last : fusion triee ts desc puis splice au plafond demande
+    # [2] last : meme tri par source et a la fusion, puis plafond demande.
     my $last = _sub_src_764($src, 'mbLast_ctx');
     $assert->like($last,
-        qr/sort \{ \(\$b->\{ts\} \/\/ ''\) cmp \(\$a->\{ts\} \/\/ ''\) \}/,
-        'last: tri desc de la fusion');
+        qr/ORDER BY cl\.ts DESC, cl\.id_channel_log DESC\s+LIMIT \$limit/,
+        'last: ordre stable avant le plafond de chaque source');
+    $assert->like($last,
+        qr{
+            sort\s*\{\s*
+            \(\$b->\{ts\}\s+//\s+''\)\s+cmp\s+\(\$a->\{ts\}\s+//\s+''\)
+            \s+\|\|\s+\$b->\{id_channel_log\}\s+<=>\s+\$a->\{id_channel_log\}\s*\}
+        }x,
+        'last: meme tri date et id a la fusion');
     $assert->like($last, qr/splice\(\@rows, \$limit\)/,
         'last: plafond applique apres fusion');
 

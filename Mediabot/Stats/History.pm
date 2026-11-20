@@ -367,19 +367,24 @@ sub mbLast_ctx {
     # reponse fonctionnelle, plus jamais « Database error ».
     my @rows;
     my $last_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh}, qq{
-        SELECT cl.publictext, cl.ts,
+        SELECT cl.publictext, cl.ts, cl.id_channel_log,
                TIMESTAMPDIFF(MINUTE, cl.ts, NOW()) AS minutes_ago
         FROM __CLSRC__ cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE cl.nick = ? AND c.name = ?
           AND cl.event_type IN ('public','action') AND cl.publictext != ''
-        ORDER BY cl.ts DESC
+        ORDER BY cl.ts DESC, cl.id_channel_log DESC
         LIMIT $limit
     }, [ $target, $channel ], sub { push @rows, $_[0] }, 'content');
     unless ($last_g->{live_ok}) {
         botNotice($self, $nick, 'Database error.'); return;
     }
-    @rows = sort { ($b->{ts} // '') cmp ($a->{ts} // '') } @rows;
+    # The archive preserves the live row ID. Match the per-source SQL order
+    # so the same-second tie-break also applies to the merged cutoff.
+    @rows = sort {
+        ($b->{ts} // '') cmp ($a->{ts} // '')
+            || $b->{id_channel_log} <=> $a->{id_channel_log}
+    } @rows;
     splice(@rows, $limit) if @rows > $limit;
 
     unless (@rows) {

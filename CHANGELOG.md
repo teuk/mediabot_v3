@@ -1,3 +1,8 @@
+## MB1384 — Order same-second messages consistently in last
+
+- Break timestamp ties by channel log ID in each source before limiting rows and again when merging live and archive results.
+- Cover single-message and multi-message requests with equal timestamps in the real command registry, including the output order and existing channel and speech filters.
+
 ## MB1383 — Keep presence events out of monthly message charts
 
 - Count public messages and actions in both monthstats modes, matching the other message-activity commands. Joins, parts, quits and channel changes no longer inflate bars or produce presence-only months.

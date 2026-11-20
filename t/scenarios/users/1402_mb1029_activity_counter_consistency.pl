@@ -22,6 +22,7 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 60 MINUTE\)/'2026-10-01 11:00:00'/g;
         $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 0*24 HOUR\)/'2026-09-30 12:00:00'/g;
         $sql =~ s/NOW\(\) - INTERVAL 14 DAY/'2026-09-17 12:00:00'/g;
+        $sql =~ s/TIMESTAMPDIFF\(MINUTE, cl\.ts, NOW\(\)\)/(unixepoch('2026-10-01 12:30:00') - unixepoch(cl.ts)) \/ 60/g;
         my $monthly = $sql =~ /SELECT DATE_FORMAT/;
         my $active = $sql =~ /SELECT cl\.nick, COUNT\(\*\) AS mc/;
         $sql = 'SELECT * FROM mb1346_missing_table'
@@ -79,6 +80,8 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
     package MB1029::Channel;
     sub get_id {1}
     sub get_timezone {'UTC'}
+    package MB1029::Conf;
+    sub get {$_[0]{$_[1]}}
 }
 $INC{'MB1029/DBI.pm'} = __FILE__;
 
@@ -113,7 +116,8 @@ sub setup_1402 {
     });
     $db->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY, name TEXT)');
     $db->do('INSERT INTO CHANNEL VALUES(1, ?), (2, ?)', undef, $channel, '#other');
-    $db->do('CREATE TABLE CHANNEL_LOG(id_channel INTEGER, nick TEXT COLLATE NOCASE, ts TEXT, event_type TEXT, publictext TEXT)');
+    $db->do('CREATE TABLE CHANNEL_LOG(id_channel_log INTEGER PRIMARY KEY,
+        id_channel INTEGER, nick TEXT COLLATE NOCASE, ts TEXT, event_type TEXT, publictext TEXT)');
     $db->do('CREATE TABLE USER_SEEN(nick TEXT, seen_at TEXT, event_type TEXT)');
     $db->do('CREATE TABLE USER(id_user INTEGER, nickname TEXT)');
     $db->do('CREATE TABLE KARMA(id_channel INTEGER, nick TEXT, score INTEGER)');
@@ -124,7 +128,7 @@ sub setup_1402 {
 }
 sub add_1402 {
     my ($db, $nick, $count, $text, $month, $channel, $type) = @_;
-    $db->do('INSERT INTO CHANNEL_LOG VALUES(?, ?, ?, ?, ?)', undef,
+    $db->do('INSERT INTO CHANNEL_LOG(id_channel, nick, ts, event_type, publictext) VALUES(?, ?, ?, ?, ?)', undef,
         $channel//1, $nick, ($month//'2026-10').'-01 12:00:00', $type//'public', $text//'hello')
         for 1..$count;
 }
@@ -301,6 +305,53 @@ for my $channel ('#test', '&test', '+test', '!test') {
     is_deeply(invoke_1402($bot, 'compare', 'Alice', 'Alice', 'Bob', '02W'), [
         ['public', '#test', '[last 02w] alice: 3 msg(s) (75%) | bob: 1 msg(s) (25%) | alice leads by 2 msg(s)'],
     ], 'compare still multiplies a valid ASCII week count and retains the period label');
+}
+# MB1384: last must break same-second ties before LIMIT and after merging.
+{
+    my ($bot, $db) = setup_1402();
+    $db->do("ATTACH DATABASE ':memory:' AS history");
+    $db->do('CREATE TABLE history.CHANNEL_LOG_ARCHIVE(id_channel_log INTEGER PRIMARY KEY,
+        id_channel INTEGER, nick TEXT COLLATE NOCASE, ts TEXT, event_type TEXT, publictext TEXT)');
+    my $ts = '2026-10-01 12:00:00';
+    for my $row (
+        [101, 1, 'Alice', $ts, 'public', 'live one'],
+        [102, 1, 'alice', $ts, 'public', 'live two'],
+        [105, 1, 'Alice', $ts, 'public', 'live five'],
+        [107, 1, 'Alice', '2026-10-01 11:59:59', 'public', 'older despite a higher id'],
+        [108, 2, 'Alice', $ts, 'public', 'other channel'],
+        [109, 1, 'Bob', $ts, 'public', 'other nick'],
+        [110, 1, 'Alice', $ts, 'join', 'presence'],
+        [111, 1, 'Alice', $ts, 'public', ''],
+    ) {
+        $db->do('INSERT INTO CHANNEL_LOG VALUES(?, ?, ?, ?, ?, ?)', undef, @$row);
+    }
+    for my $row (
+        [103, 1, 'Alice', $ts, 'public', 'archive three'],
+        [104, 1, 'alice', $ts, 'public', 'archive four'],
+        [106, 1, 'ALICE', $ts, 'action', 'archive six'],
+    ) {
+        $db->do('INSERT INTO history.CHANNEL_LOG_ARCHIVE VALUES(?, ?, ?, ?, ?, ?)', undef, @$row);
+    }
+    $db->do('PRAGMA query_only = ON');
+    is_deeply(invoke_1402($bot, 'last', 'Caller', 'Alice'), [
+        ['public', '#test', 'alice last said (30m ago, 12:00 on #test): "live five"'],
+    ], 'last takes the newest live row when several messages share a second');
+    $bot->{conf} = bless {
+        'mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'history',
+        'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS' => 30,
+    }, 'MB1029::Conf';
+    is_deeply(invoke_1402($bot, 'last', 'Caller', 'Alice'), [
+        ['public', '#test', 'alice last said (30m ago, 12:00 on #test): "archive six"'],
+    ], 'last takes the newest row across the live and archive queries');
+    is_deeply(invoke_1402($bot, 'last', 'Caller', 'ALICE', '3'), [
+        ['public', '#test', 'Last 3 message(s) from alice on #test:'],
+        map { ['public', '#test', "  (30m ago [12:00]) $_"] } ('archive four', 'live five', 'archive six'),
+    ], 'last 3 applies the merged cutoff and displays tied messages from oldest to newest');
+    is_deeply(invoke_1402($bot, 'last', 'Caller', 'Alice', '5'), [
+        ['public', '#test', 'Last 5 message(s) from alice on #test:'],
+        map { ['public', '#test', "  (30m ago [12:00]) $_"] }
+            ('live two', 'archive three', 'archive four', 'live five', 'archive six'),
+    ], 'last keeps timestamp priority and the existing channel, author and speech filters');
 }
 # MB1346: failed reads must not masquerade as empty or partial monthly charts.
 for my $raise (0, 1) {
