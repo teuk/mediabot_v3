@@ -285,7 +285,13 @@ sub mbTop_ctx {
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
     my $n = 5;
-    if (@args && $args[0] =~ /^\d+$/) {
+    if (@args && $args[0] =~ /\A\d+\z/) {
+        # Recognize Unicode decimal digits to report the invalid argument.
+        # Perl's numeric conversion only understands ASCII digits.
+        if ($args[0] =~ /[^0-9]/) {
+            botNotice($self, $nick, 'Use ASCII digits (0-9) for numeric arguments.');
+            return;
+        }
         $n = int(shift @args);
         $n = 1  if $n < 1;
         $n = 10 if $n > 10;
@@ -332,8 +338,12 @@ sub mbTop_ctx {
         } elsif ($p eq 'week') {
             $period_sql   = "AND cl.ts >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)";
             $period_label = " (this week)";
-        } elsif ($p =~ /^(\d+)(d|h)$/i) {
-            my ($val, $unit) = ($1, lc $2);
+        } elsif ($p =~ /\A(\d+)([dh])\z/) {
+            my ($val, $unit) = ($1, $2);
+            if ($val =~ /[^0-9]/) {
+                botNotice($self, $nick, 'Use ASCII digits (0-9) for numeric arguments.');
+                return;
+            }
             my $interval = $unit eq 'h' ? "$val HOUR" : "$val DAY";
             $period_sql   = "AND cl.ts >= DATE_SUB(NOW(), INTERVAL $interval)";
             $period_label = " (last ${val}${unit})";
@@ -478,8 +488,12 @@ sub mbActive_ctx {
         } elsif ($p eq 'now') {
             $interval = '60 MINUTE';
             $label    = 'last 60min';
-        } elsif ($p =~ /^(\d+)(d|h)$/i) {
-            my ($v, $u) = ($1, lc $2);
+        } elsif ($p =~ /\A(\d+)([dh])\z/) {
+            my ($v, $u) = ($1, $2);
+            if ($v =~ /[^0-9]/) {
+                botNotice($self, $nick, 'Use ASCII digits (0-9) for numeric arguments.');
+                return;
+            }
             $interval = $u eq 'h' ? "$v HOUR" : "$v DAY";
             $label    = "last ${v}${u}";
         }
@@ -649,17 +663,17 @@ sub mbCompare_ctx {
     my ($period_sql, $period_label) = ('', 'all time');
     if (@args >= 3) {
         my $p = lc($args[2]);
-        if ($p =~ /^(\d+)d$/) {
+        if ($p =~ /\A([0-9]+)d\z/) {
             $period_sql   = "AND cl.ts >= NOW() - INTERVAL $1 DAY";
             $period_label = "last ${1}d";
-        } elsif ($p =~ /^(\d+)w$/) {
+        } elsif ($p =~ /\A([0-9]+)w\z/) {
             my $days = $1 * 7;
             $period_sql   = "AND cl.ts >= NOW() - INTERVAL $days DAY";
             $period_label = "last ${1}w";
-        } elsif ($p =~ /^(\d+)m$/) {
+        } elsif ($p =~ /\A([0-9]+)m\z/) {
             $period_sql   = "AND cl.ts >= NOW() - INTERVAL $1 MONTH";
             $period_label = "last ${1}m";
-        } elsif ($p =~ /^(\d+)y$/) {
+        } elsif ($p =~ /\A([0-9]+)y\z/) {
             $period_sql   = "AND cl.ts >= NOW() - INTERVAL $1 YEAR";
             $period_label = "last ${1}y";
         } elsif ($p eq 'all') {

@@ -20,7 +20,8 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         # WHERE, bindings, grouping, counts and ordering run in the real DBI engine.
         $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 12 MONTH\)/'2025-10-30 12:00:00'/g;
         $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 60 MINUTE\)/'2026-10-01 11:00:00'/g;
-        $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 24 HOUR\)/'2026-09-30 12:00:00'/g;
+        $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 0*24 HOUR\)/'2026-09-30 12:00:00'/g;
+        $sql =~ s/NOW\(\) - INTERVAL 14 DAY/'2026-09-17 12:00:00'/g;
         my $monthly = $sql =~ /SELECT DATE_FORMAT/;
         my $active = $sql =~ /SELECT cl\.nick, COUNT\(\*\) AS mc/;
         $sql = 'SELECT * FROM mb1346_missing_table'
@@ -248,6 +249,46 @@ for my $channel ('#test', '&test', '+test', '!test') {
         ['public', '#test', 'Top 3 on #test (8 msgs):'], $leader, $alpha,
         ['public', '#test', sprintf('  3. %-16s 2 msgs (25.0%%)', 'Zulu')],
     ], 'including the tied caller in the main rows shows the same rank without a duplicate');
+}
+# MB1382: numeric activity options use the same digit alphabet as Perl and SQL.
+{
+    my ($bot, $db) = setup_1402();
+    add_1402($db, 'Alice', 3);
+    add_1402($db, 'Bob', 1);
+    add_1402($db, 'Alice', 5, 'outside the interval', '2026-09');
+    $db->do('PRAGMA query_only = ON');
+
+    my $digits = 'Use ASCII digits (0-9) for numeric arguments.';
+    my @invalid = (
+        ['top',     ['٢'],                       $digits],
+        ['top',     ['1２'],                      $digits],
+        ['top',     ['1٢H'],                      $digits],
+        ['top',     ['2', 'nobots', '２d'],         $digits],
+        ['active',  ['٢٤H'],                      $digits],
+        ['active',  ['1２d'],                      $digits],
+        ['compare', ['Alice', 'Bob', '1٢W'],      "Unknown period '1٢w'. Use: 7d, 4w, 3m, 1y, all"],
+        ['compare', ['Alice', 'Bob', '２y'],       "Unknown period '２y'. Use: 7d, 4w, 3m, 1y, all"],
+    );
+    for my $case (@invalid) {
+        my ($command, $args, $notice) = @$case;
+        my $before_queries = scalar @{$db->{private_queries}};
+        my $before_warnings = scalar @warnings;
+        my $output = invoke_1402($bot, $command, 'Caller', @$args);
+        is_deeply([$output, scalar(@{$db->{private_queries}}) - $before_queries,
+            scalar(@warnings) - $before_warnings], [[['notice', 'Caller', $notice]], 0, 0],
+            "$command @$args rejects non-ASCII digits privately before query or conversion");
+    }
+    is_deeply(invoke_1402($bot, 'top', 'Alice', '002', '024H'), [
+        ['public', '#test', 'Top 2 on #test (last 024h) (4 msgs):'],
+        ['public', '#test', sprintf('  1. %-16s 3 msgs (75.0%%)', 'Alice')],
+        ['public', '#test', sprintf('  2. %-16s 1 msg (25.0%%)', 'Bob')],
+    ], 'top still accepts an ASCII zero-padded limit and a case-insensitive relative period');
+    is_deeply(invoke_1402($bot, 'active', 'Alice', '024H'), [
+        ['public', '#test', 'Active in last 024h on #test: Alice(3), Bob(1) (2 nick(s))'],
+    ], 'active retains the time filter for an ASCII zero-padded period');
+    is_deeply(invoke_1402($bot, 'compare', 'Alice', 'Alice', 'Bob', '02W'), [
+        ['public', '#test', '[last 02w] alice: 3 msg(s) (75%) | bob: 1 msg(s) (25%) | alice leads by 2 msg(s)'],
+    ], 'compare still multiplies a valid ASCII week count and retains the period label');
 }
 # MB1346: failed reads must not masquerade as empty or partial monthly charts.
 for my $raise (0, 1) {

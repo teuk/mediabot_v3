@@ -1,3 +1,9 @@
+## MB1382 — Reject unsupported digits in activity filters
+
+- Validate ASCII digits before converting or querying numeric options in top, active and compare, so mixed Unicode digits cannot be truncated or reach an SQL interval.
+- Use a private input notice for invalid numeric options and retain existing ASCII limits, relative periods and defaults.
+- Extend the native activity scenario with invalid digits, query and warning checks, and valid zero-padded limits and periods.
+
 ## MB1381 — Match personal top ranks to the displayed tie order
 
 - Apply the same case-folded nickname tie-break to the personal rank in top as to the displayed rows, so a caller tied at the cutoff still sees their place.
