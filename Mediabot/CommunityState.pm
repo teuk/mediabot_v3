@@ -1279,6 +1279,7 @@ sub mbPollStop_ctx {
     return unless $ctx->require_level('Master');
 
     my $poll = $self->{_polls}{lc($channel // '')};
+    return 1 if _expire_poll_if_due($self, $channel, $poll);
     unless ($poll && $poll->{active}) {
         botNotice($self, $nick, 'No active poll.'); return;
     }

@@ -1,3 +1,8 @@
+## MB1390 — Respect the poll deadline in pollstop
+
+- Report an overdue poll as expired and keep all ballots available to pollresult. Expiration leaves manual closure metrics and audit entries untouched.
+- Preserve manual closure at the exact deadline and verify both ordinary and weighted polls through the public command registry.
+
 ## MB1389 — Compare complete weather locations from the cache
 
 - Let weather compare and meteo compare use `|` to separate multiword locations. Keep the two-word syntax and explain the separator in a private notice for ambiguous input.

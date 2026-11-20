@@ -102,4 +102,45 @@ for my $weighted (0, 1) {
          [['public','#test','Poll expired. Use !pollresult to see results.']]],
         'the existing lazy-expiry rule still closes a due poll before input handling and preserves its ballots');
 }
+for my $weighted (0, 1) {
+    my $bot = setup_1385($weighted);
+    invoke_1385($bot, 'vote', ['1'], 'Alice', '#test');
+    invoke_1385($bot, 'vote', ['2'], 'Bob', '#test');
+    my $expected = state_1385($bot);
+    $expected->[0]{'#test'}{active} = 0;
+    $NOW = 2061;
+
+    @wire = ();
+    my $stop = invoke_1385($bot, 'pollstop', [], 'Creator', '#TeSt');
+    my $mode = $weighted ? 'weighted' : 'ordinary';
+    is_deeply([$stop, state_1385($bot), \@wire],
+        [['', [], []], $expected,
+         [['public','#TeSt','Poll expired. Use !pollresult to see results.']]],
+        "$mode: stop observes expiry without changing ballots, metrics, audit or other polls");
+
+    @wire = ();
+    invoke_1385($bot, 'pollstop', [], 'Creator', '#TeSt');
+    is_deeply([state_1385($bot), \@wire],
+        [$expected, [['notice','Creator','No active poll.']]],
+        "$mode: a second stop reports no active poll privately");
+
+    @wire = ();
+    invoke_1385($bot, 'pollresult', [], 'Reader', '#TeSt');
+    my $outcome = $weighted ? '  Winner: Oui (75% weighted)' : '  Tie: Oui:3, Non:1';
+    is($wire[0][2],
+        'Closed poll' . ($weighted ? ' [weighted]' : '') . ': "Thé ?" (2 vote(s))' . $outcome,
+        "$mode: final results still reflect all ballots after expiry");
+}
+{
+    my $bot = setup_1385(1);
+    invoke_1385($bot, 'vote', ['2']);
+    @wire = (); @audit = ();
+    $NOW = 2060;
+    invoke_1385($bot, 'pollstop', [], 'Creator');
+    is_deeply([$bot->{_polls}{'#test'}{active}, \@wire, \@audit,
+               $bot->{metrics}{mediabot_poll_closed_total}, $bot->{metrics}{mediabot_poll_duration_seconds}],
+        [0, [['public','#test','Poll closed (1 vote(s)). Winner: Non (1 vote(s), weighted score 1/1, 100%). Use !pollresult for details.']],
+         [['#test','pollstop','']], 1, 60],
+        'manual stop at the exact deadline still reports the winner, records metrics and is audited');
+}
 done_testing;
