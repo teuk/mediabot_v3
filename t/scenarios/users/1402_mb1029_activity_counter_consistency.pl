@@ -3,6 +3,7 @@ use warnings;
 use utf8;
 use Test::More;
 use DBI;
+use Encode qw(encode decode FB_CROAK LEAVE_SRC);
 use Mediabot::Mediabot;
 use Mediabot::Context;
 
@@ -310,6 +311,75 @@ for my $raise (0, 1) {
         ['public', '#test', 'No activity in last 60min on #test.'],
         ['public', '#test', 'Present but silent in last 60min: Quiet (1 nick(s))'],
     ], 'a channel with only a join has no speech activity and retains its silent online nick');
+}
+# MB1378: the compact active lists are wire-byte budgets, not character counts.
+for my $sample (['ASCII','x'], ['accent','é'], ['CJK','界'], ['emoji','😀']) {
+    my ($label,$glyph)=@$sample;
+    for my $bytes (0,1) {
+        my ($bot,$db)=setup_1402();
+        my @nicks=map {sprintf('u%02d',$_).($glyph x 10)} 1..20;
+        add_1402($db,$nicks[$_],20-$_) for 0..$#nicks;
+        $db->{sqlite_unicode}=!$bytes;
+        $db->do('PRAGMA query_only = ON');
+        my $before=$db->selectall_arrayref('SELECT * FROM CHANNEL_LOG');
+        for my $silent (0,1) {
+            my @online=$silent?map {s/^u/q/r} @nicks:();
+            @online=map {encode('UTF-8',$_)} @online if $bytes;
+            local *Mediabot::gethChannelsNicksOnChan=sub {@online};
+            my $out=invoke_1402($bot,'active','Caller', $silent?('now'):());
+            my $line=$out->[$silent][2];
+            my $wire=utf8::is_utf8($line)?encode('UTF-8',$line):$line;
+            my $decoded=eval {decode('UTF-8',$wire,FB_CROAK|LEAVE_SRC)};
+            my $prefix=$silent?'Present but silent in last 60min: ':'Active in last 24h on #test: ';
+            my $suffix=' (20 nick(s))';
+            my $list=defined($decoded)&&index($decoded,$prefix)==0
+                && substr($decoded,-length($suffix)) eq $suffix
+                ?substr($decoded,length($prefix),length($decoded)-length($prefix)-length($suffix)):undef;
+            my $original=$silent?join(', ',map {s/^u/q/r} @nicks)
+                :join(', ',map {$nicks[$_].'('.(20-$_).')'} 0..$#nicks);
+            my $truncated=length(encode('UTF-8',$original))>350;
+            my $limit=$silent?353:350; # Existing silent budget appends its three dots.
+            diag("$label bytes=$bytes silent=$silent: invalid UTF-8 or exceeded $limit-byte list budget")
+                if !defined($list) || length(encode('UTF-8',$list))>$limit;
+            my $shown=$list//'';$shown=~s/\.\.\.\z// if $truncated;
+            is_deeply([scalar(@$out),$out->[$silent][0],$out->[$silent][1],
+                defined($list)?1:0,length(encode('UTF-8',$list//''))<=$limit?1:0,
+                $truncated?(($list//'') =~ /\.\.\.\z/?1:0):(($list//'') eq $original?1:0),
+                length($shown)>0 && index($original,$shown)==0?1:0],
+                [$silent?2:1,'public','#test',1,1,1,1],
+                "$label bytes=$bytes silent=$silent: native active output keeps its layout, count, UTF-8 prefix and byte budget");
+        }
+        is_deeply($db->selectall_arrayref('SELECT * FROM CHANNEL_LOG'),$before,
+            "$label bytes=$bytes: compact output never modifies stored activity");
+    }
+}
+# Preserve the exact historical ASCII thresholds, including untruncated 350 bytes.
+for my $size (349,350,351) {
+    my ($bot,$db)=setup_1402();
+    my @nicks=map {sprintf('u%02d',$_).('x' x 19)} 1..15;
+    # Make the silent list exactly $size bytes while every nick stays short.
+    my $excess=length(join(', ',@nicks))-$size;
+    substr($nicks[-1],-$excess)='' if $excess>0;
+    my @online=@nicks;
+    local *Mediabot::gethChannelsNicksOnChan=sub {@online};
+    my $out=invoke_1402($bot,'active','Caller','now');
+    my $list=join(', ',@nicks);
+    my $expected=$size>350?substr($list,0,350).'...':$list;
+    is($out->[1][2],"Present but silent in last 60min: $expected (15 nick(s))",
+        "silent ASCII $size-byte boundary keeps its established layout");
+}
+for my $size (349,350,351) {
+    my ($bot,$db)=setup_1402();
+    my @nicks=map {sprintf('u%02d',$_).('x' x 19)} 1..13;
+    my $list=join(', ',map {$nicks[$_].'('.(13-$_).')'} 0..$#nicks);
+    substr($nicks[-1],-(length($list)-$size))='';
+    add_1402($db,$nicks[$_],13-$_) for 0..$#nicks;
+    $db->do('PRAGMA query_only = ON');
+    my $out=invoke_1402($bot,'active','Caller');
+    $list=join(', ',map {$nicks[$_].'('.(13-$_).')'} 0..$#nicks);
+    my $expected=$size>350?substr($list,0,347).'...':$list;
+    is($out->[0][2],"Active in last 24h on #test: $expected (13 nick(s))",
+        "ranked ASCII $size-byte boundary keeps its established layout");
 }
 is_deeply(\@warnings, [], 'native activity handlers emit no warnings');
 1;

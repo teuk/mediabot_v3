@@ -1,3 +1,9 @@
+## MB1378 — Keep active lists within their IRC byte budgets
+
+- Measure active rankings by UTF-8 wire bytes and truncate both ranked and silent-online nickname lists on complete characters; decoded Unicode previously exceeded the compact-list budget and raw UTF-8 could be cut inside a character.
+- Preserve existing ASCII thresholds, ellipses, output layout, counts, ranking, channel/time scope and genuine-silence detection; reuse the shared text helper without changing queries or stored history.
+- Extend the existing native user-read scenario with ASCII/accent/CJK/emoji names, decoded and raw UTF-8, exact boundaries and read-only SQLite checks; no new test file or interpreter.
+
 ## MB1377 — Reject ambiguous numeric reminder schedules
 
 - Require ASCII digits before converting reminder times and relative durations; Unicode digits could previously become zero or a truncated ASCII prefix, silently scheduling midnight, the wrong minute or a shorter delay.

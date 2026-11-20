@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Mediabot::Helpers ();
+use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
 our @EXPORT_OK = qw(
     mbStats_ctx
@@ -522,8 +523,8 @@ sub mbActive_ctx {
         # EE9: format as 'nick(msg_count)' pairs
         my $list = join(', ', map { ref $_ ? "$_->[0]($_->[1])" : $_ } @nicks);
         # B5/fix: truncate to avoid IRC 512-byte limit
-        if (length($list) > 350) {
-            $list = substr($list, 0, 347) . '...';
+        if (_irc_wire_bytes($list) > 350) {
+            $list = Mediabot::Helpers::truncate_utf8($list, 347, '...');
         }
         botPrivmsg($self, $channel,
             "Active in $label on $channel: $list"
@@ -538,7 +539,7 @@ sub mbActive_ctx {
             my @online_only = grep { $silent{lc($_)} } @online;
             if (@online_only) {
                 my $silent = join(', ', sort @online_only);
-                $silent = substr($silent, 0, 350) . '...' if length($silent) > 350;
+                $silent = Mediabot::Helpers::truncate_utf8($silent, 350, '...');
                 botPrivmsg($self, $channel,
                     "Present but silent in last 60min: $silent (" . scalar(@online_only) . " nick(s))");
             }
