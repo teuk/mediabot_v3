@@ -1,3 +1,8 @@
+## MB1385 — Give moved history rows one slot in last
+
+- Collapse matching live and archive copies before applying the merged limit in last. A message moved between source reads no longer takes two slots.
+- Preserve distinct rows with repeated text and rows with a reused ID but a different timestamp or text. Exercise an actual archive move between the source reads in the native regression.
+
 ## MB1384 — Order same-second messages consistently in last
 
 - Break timestamp ties by channel log ID in each source before limiting rows and again when merging live and archive results.

@@ -15,6 +15,11 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
     package MB1029::DBI::db; our @ISA = ('DBI::db');
     sub prepare {
         my ($db, $sql, @rest) = @_;
+        if ($sql =~ /\bFROM history\.CHANNEL_LOG_ARCHIVE cl\b/
+            && (my $before_read = $db->{private_before_archive_read})) {
+            $db->{private_before_archive_read} = undef;
+            $before_read->($db);
+        }
         push @{$db->{private_queries}}, $sql;
         # Only adapt MySQL's date spelling to a fixed SQLite test calendar.
         # WHERE, bindings, grouping, counts and ordering run in the real DBI engine.
@@ -352,6 +357,44 @@ for my $channel ('#test', '&test', '+test', '!test') {
         map { ['public', '#test', "  (30m ago [12:00]) $_"] }
             ('live two', 'archive three', 'archive four', 'live five', 'archive six'),
     ], 'last keeps timestamp priority and the existing channel, author and speech filters');
+}
+# MB1385: moving a row between the two reads must not displace another message.
+{
+    my ($bot, $db) = setup_1402();
+    $db->do("ATTACH DATABASE ':memory:' AS history");
+    $db->do('CREATE TABLE history.CHANNEL_LOG_ARCHIVE(id_channel_log INTEGER PRIMARY KEY,
+        id_channel INTEGER, nick TEXT COLLATE NOCASE, ts TEXT, event_type TEXT, publictext TEXT)');
+    add_1402($db, 'Alice', 1, 'first');
+    add_1402($db, 'Alice', 1, 'same text');
+    add_1402($db, 'Alice', 1, 'same text', undef, undef, 'action');
+    $db->do(q{INSERT INTO history.CHANNEL_LOG_ARCHIVE VALUES
+        (4,1,'Alice','2026-10-01 12:00:00','public','already archived'),
+        (2,1,'Alice','2026-10-01 11:59:00','public','an older row with a reused id')});
+    $bot->{conf} = bless {
+        'mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'history',
+        'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS' => 30,
+    }, 'MB1029::Conf';
+    $db->{private_before_archive_read} = sub {
+        my ($dbh) = @_;
+        $dbh->begin_work;
+        $dbh->do('INSERT INTO history.CHANNEL_LOG_ARCHIVE
+            SELECT * FROM CHANNEL_LOG WHERE id_channel_log = 3');
+        $dbh->do('DELETE FROM CHANNEL_LOG WHERE id_channel_log = 3');
+        $dbh->commit;
+    };
+    my @recent = map { ['public', '#test', "  (30m ago [12:00]) $_"] }
+        ('first', 'same text', 'same text', 'already archived');
+    is_deeply(invoke_1402($bot, 'last', 'Caller', 'Alice', '4'), [
+        ['public', '#test', 'Last 4 message(s) from alice on #test:'], @recent,
+    ], 'last gives the moved row one slot and keeps distinct rows with the same text');
+    is_deeply([
+        $db->selectrow_array('SELECT COUNT(*) FROM CHANNEL_LOG WHERE id_channel_log = 3'),
+        $db->selectrow_array('SELECT COUNT(*) FROM history.CHANNEL_LOG_ARCHIVE WHERE id_channel_log = 3'),
+    ], [0, 1], 'the fixture committed the move between the live and archive reads');
+    is_deeply(invoke_1402($bot, 'last', 'Caller', 'Alice', '5'), [
+        ['public', '#test', 'Last 5 message(s) from alice on #test:'],
+        ['public', '#test', '  (31m ago [11:59]) an older row with a reused id'], @recent,
+    ], 'last keeps distinct messages when an older archive row reused a live id');
 }
 # MB1346: failed reads must not masquerade as empty or partial monthly charts.
 for my $raise (0, 1) {

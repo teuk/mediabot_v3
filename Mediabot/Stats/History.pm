@@ -379,6 +379,11 @@ sub mbLast_ctx {
     unless ($last_g->{live_ok}) {
         botNotice($self, $nick, 'Database error.'); return;
     }
+    # A row moved after the live read can also appear in the archive read.
+    # Keep distinct history even if an older archive row reused the same ID.
+    my %seen;
+    @rows = grep { !$seen{$_->{id_channel_log}}{$_->{ts}}{$_->{publictext}}++ } @rows;
+
     # The archive preserves the live row ID. Match the per-source SQL order
     # so the same-second tie-break also applies to the merged cutoff.
     @rows = sort {
