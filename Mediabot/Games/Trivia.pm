@@ -1051,22 +1051,28 @@ sub mbTriviaTop_ctx {
     # mb411-R1: id canal via le helper central (cache d'abord).
     my $cid_tt = Mediabot::Helpers::channel_id_cached($self, $channel);
     unless (defined $cid_tt) { botPrivmsg($self, $channel, _trivia_text($language, 'Channel not found.', 'Salon introuvable.')); return; }
-    my $rc = { id_channel => $cid_tt };
-    my $sth = $self->{dbh}->prepare(q{
-        SELECT nick, score, last_correct
-        FROM TRIVIA_SCORES
-        WHERE id_channel = ?
-        ORDER BY score DESC LIMIT ?
-    });
-    unless ($sth && $sth->execute($rc->{id_channel}, $limit)) {
-        botPrivmsg($self, $channel, _trivia_text($language, 'DB error.', 'Erreur de base de données.')); $sth->finish if $sth; return;
+    my ($sth, @raw);
+    my $read_ok = eval {
+        $sth = $self->{dbh}->prepare(q{
+            SELECT nick, score, last_correct
+            FROM TRIVIA_SCORES
+            WHERE id_channel = ?
+            ORDER BY score DESC LIMIT ?
+        }) or die "trivia_top_prepare\n";
+        $sth->execute($cid_tt, $limit) or die "trivia_top_execute\n";
+        while (my $r = $sth->fetchrow_hashref) {
+            push @raw, { nick => $r->{nick}, score => $r->{score} // 0 };
+        }
+        # DBI returns undef for both EOF and a failed fetch.
+        die "trivia_top_fetch\n" if $sth->err;
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
+        botPrivmsg($self, $channel, _trivia_text($language, 'DB error.', 'Erreur de base de données.'));
+        return;
     }
     my @ranked; my $i = 1;
-    my @raw;  # JJ2: collect all rows first to compute total
-    while (my $r = $sth->fetchrow_hashref) {
-        push @raw, { nick => $r->{nick}, score => $r->{score}//0 };
-    }
-    $sth->finish;
     my $t_tot = 0; $t_tot += $_->{score} for @raw;
     for my $r (@raw) {
         my $pct = $t_tot > 0 ? sprintf(' (%.0f%%)', 100*$r->{score}/$t_tot) : '';

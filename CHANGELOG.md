@@ -1,3 +1,8 @@
+## MB1387 — Require a complete read before publishing Trivia rankings
+
+- Handle prepare, execute and fetch failures in triviatop before rendering the leaderboard. Incomplete rows now yield the existing localized database error.
+- Release the statement in both DBI error modes and test recovery on the same handle through the native command registry.
+
 ## MB1386 — Rank streak activity using speech and the channel timezone
 
 - Use public messages and actions and count their channel-local dates in the optional streak rank.

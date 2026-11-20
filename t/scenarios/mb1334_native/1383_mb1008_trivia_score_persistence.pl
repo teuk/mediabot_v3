@@ -16,6 +16,10 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
     sub prepare {
         my ($db,$sql,@rest)=@_;
         my $write=$sql=~/INSERT INTO TRIVIA_SCORES/;
+        my $leaderboard = $sql =~ /SELECT nick, score, last_correct\s+FROM TRIVIA_SCORES/;
+        if ($leaderboard && ($db->{private_read_fault} // '') eq 'prepare') {
+            return $db->set_err(1, 'private leaderboard prepare detail');
+        }
         if ($write) {
             $db->{private_prepares}++;
             return $db->set_err(1,'private score prepare detail') if ($db->{private_fault}//'') eq 'prepare';
@@ -24,11 +28,18 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         $sql=~s/NOW\(\)/CURRENT_TIMESTAMP/g;
         my $sth=$db->SUPER::prepare($sql,@rest);
         $sth->{private_write}=$write if $sth;
+        if ($sth && $leaderboard) {
+            $sth->{private_leaderboard} = 1;
+            $sth->{private_fetched} = 0;
+        }
         return $sth;
     }
     package MB1008::DBI::st; our @ISA=('DBI::st');
     sub execute {
         my ($sth,@bind)=@_;
+        if ($sth->{private_leaderboard} && ($sth->{Database}{private_read_fault} // '') eq 'execute') {
+            return $sth->set_err(1, 'private leaderboard execute detail');
+        }
         return $sth->SUPER::execute(@bind) unless $sth->{private_write};
         my $db=$sth->{Database};my $fault=$db->{private_fault}//'';
         $db->{private_executes}++;
@@ -43,8 +54,22 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         return 2 if $fault eq 'affected_two' || $fault eq 'error_flag';
         return $result;
     }
+    sub fetchrow_hashref {
+        my ($sth, @args) = @_;
+        if ($sth->{private_leaderboard}) {
+            my $fault = $sth->{Database}{private_read_fault} // '';
+            my $fetched = $sth->{private_fetched}++;
+            return $sth->set_err(1, 'private leaderboard fetch detail')
+                if $fault eq 'fetch' || ($fault eq 'partial' && $fetched);
+        }
+        return $sth->SUPER::fetchrow_hashref(@args);
+    }
     sub finish {
         my ($sth)=@_;
+        if ($sth->{private_leaderboard}) {
+            $sth->{Database}{private_read_finished}++;
+            $sth->set_err(undef, undef);
+        }
         if ($sth->{private_write}) {
             $sth->{Database}{private_finished}++;
             $sth->set_err(undef,undef);
@@ -175,5 +200,39 @@ for my $lang (qw(en fr)) {
     }
     is_deeply(\@actual,\@expected,'missing database/channel and a foreign transaction cannot become saved points or trigger an unowned commit/rollback');
 }
-is_deeply(\@warnings,[],'persistence result handling emits no warnings');
+# MB1387: public leaderboard reads must reach a confirmed EOF before ranking.
+{
+    local *Mediabot::UserCommands::botPrivmsg = sub {
+        push @{$_[0]{wire}}, ['public', $_[1], $_[2]];
+        return 1;
+    };
+    for my $lang (qw(en fr)) {
+        for my $raise (0, 1) {
+            my ($bot, $db) = setup_1383($raise, $lang);
+            $db->do("INSERT INTO TRIVIA_SCORES VALUES(1,'bob',10,'2026-10-29')");
+            $db->do('PRAGMA query_only = ON');
+            my $ctx = Mediabot::Context->new(bot=>$bot, nick=>'Reader', channel=>'#test',
+                command=>'triviatop', args=>[]);
+            my $handler = $bot->command_registry->handler_for('triviatop', 'public');
+            my $failure = $lang eq 'fr' ? 'Erreur de base de données.' : 'DB error.';
+            for my $fault (qw(prepare execute fetch partial)) {
+                $db->{private_read_fault} = $fault;
+                $db->{private_read_finished} = 0;
+                $bot->{wire} = [];
+                my $ok = eval { $handler->($ctx); 1 };
+                is_deeply([$ok ? 1 : 0, $bot->{wire}, $db->{private_read_finished}],
+                    [1, [['public', '#test', $failure]], $fault eq 'prepare' ? 0 : 1],
+                    "triviatop $lang RaiseError=$raise $fault aborts and releases incomplete reads");
+            }
+            $db->{private_read_fault} = '';
+            $bot->{wire} = [];
+            $handler->($ctx);
+            my $heading = $lang eq 'fr' ? 'Palmarès Trivia (#test) : ' : 'Trivia hall of fame (#test): ';
+            is_deeply($bot->{wire}, [
+                ['public', '#test', $heading . '#1. alice: 40 (80%)  #2. bob: 10 (20%)'],
+            ], "triviatop $lang RaiseError=$raise recovers on the same handle and keeps channel scope");
+        }
+    }
+}
+is_deeply(\@warnings,[],'score reads and writes emit no warnings');
 1;
