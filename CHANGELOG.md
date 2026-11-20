@@ -1,3 +1,9 @@
+## MB1380 — Show the caller's top rank on every supported channel type
+
+- Use the shared IRC channel classifier for top's personal rank line so callers outside the displayed cutoff also see their rank on &, + and ! channels.
+- Preserve the displayed ranking, optional live/archive lookup, bot filtering, percentages and channel bindings.
+- Extend the existing native activity scenario with real SQLite counts on all four IRC prefixes, including callers already displayed, callers without messages, actions and unrelated events.
+
 ## MB1379 — Recognize every supported channel type in history commands
 
 - Use the shared IRC channel classifier for wordcount and topsay instead of a hash-only check; valid &, + and ! channels were refused, and an explicit topsay channel could be mistaken for the nickname filter.

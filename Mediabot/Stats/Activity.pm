@@ -404,8 +404,7 @@ sub mbTop_ctx {
     }
 
     # V10 / mb576-B1: caller rank uses the exact same live+archive source.
-    my $chan_ok = defined $channel && $channel =~ /^#/;
-    if ($total > 0 && $chan_ok && $bots_mode != 1) {
+    if ($total > 0 && Mediabot::Helpers::isIrcChannelTarget($channel) && $bots_mode != 1) {
         # mb578-B1: gather OPTIONNEL documente — la ligne bonus « your
         # rank » est simplement omise si ce comptage echoue ($mine reste 0,
         # le classement principal deja affiche n'est pas invalide). Teste.

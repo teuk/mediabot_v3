@@ -89,6 +89,8 @@ local *Mediabot::UserCommands::logBot = sub {1};
 local $SIG{__WARN__} = sub {push @warnings, @_};
 
 sub setup_1402 {
+    my ($channel) = @_;
+    $channel //= '#test';
     my $db = DBI->connect('dbi:SQLite:dbname=:memory:', '', '', {
         RootClass=>'MB1029::DBI', RaiseError=>1, PrintError=>0, AutoCommit=>1,
         sqlite_unicode=>1,
@@ -109,14 +111,14 @@ sub setup_1402 {
         return defined($text) && $text =~ /$pattern/ ? 1 : 0;
     });
     $db->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY, name TEXT)');
-    $db->do('INSERT INTO CHANNEL VALUES(1, ?), (2, ?)', undef, '#test', '#other');
+    $db->do('INSERT INTO CHANNEL VALUES(1, ?), (2, ?)', undef, $channel, '#other');
     $db->do('CREATE TABLE CHANNEL_LOG(id_channel INTEGER, nick TEXT COLLATE NOCASE, ts TEXT, event_type TEXT, publictext TEXT)');
     $db->do('CREATE TABLE USER_SEEN(nick TEXT, seen_at TEXT, event_type TEXT)');
     $db->do('CREATE TABLE USER(id_user INTEGER, nickname TEXT)');
     $db->do('CREATE TABLE KARMA(id_channel INTEGER, nick TEXT, score INTEGER)');
     my $bot = Mediabot->new({});
     $bot->{dbh} = $db;
-    $bot->{channels}{'#test'} = bless {}, 'MB1029::Channel';
+    $bot->{channels}{lc $channel} = bless {}, 'MB1029::Channel';
     return ($bot, $db);
 }
 sub add_1402 {
@@ -127,9 +129,13 @@ sub add_1402 {
 }
 sub invoke_1402 {
     my ($bot, $command, $nick, @args) = @_;
+    return invoke_on_1402($bot, '#test', $command, $nick, @args);
+}
+sub invoke_on_1402 {
+    my ($bot, $channel, $command, $nick, @args) = @_;
     @wire=();
     my $ctx = Mediabot::Context->new(bot=>$bot, command=>$command,
-        nick=>$nick, channel=>'#test', args=>\@args);
+        nick=>$nick, channel=>$channel, args=>\@args);
     $bot->command_registry->handler_for($command, 'public')->($ctx);
     return [map {[@$_]} @wire];
 }
@@ -200,6 +206,26 @@ sub bars_1402 {chr(0x2588) x $_[0] . chr(0x2591) x (4-$_[0])}
     }
     is_deeply(\@ranks, [2,2,1],
         'ties, actions, NULL text and ordinary words beginning with stats retain their existing counts');
+}
+# MB1380: the caller's bonus rank uses the same channel types as IRC routing.
+for my $channel ('#test', '&test', '+test', '!test') {
+    my ($bot, $db) = setup_1402($channel);
+    add_1402($db, 'Leader', 3);
+    add_1402($db, 'Caller', 1, 'waves', undef, undef, 'action');
+    add_1402($db, 'Caller', 5, 'elsewhere', undef, 2);
+    add_1402($db, 'Caller', 7, undef, undef, undef, 'join');
+    $db->do('PRAGMA query_only = ON');
+    my @ranking = (
+        ['public', $channel, "Top 1 on $channel (4 msgs):"],
+        ['public', $channel, sprintf('  1. %-16s 3 msgs (75.0%%)', 'Leader')],
+    );
+    is_deeply(invoke_on_1402($bot, $channel, 'top', 'cALLER', '1'), [
+        @ranking, ['public', $channel, '  (your rank: #2 — 1 msg(s), 25.0%)'],
+    ], "top adds the caller's own scoped rank on $channel");
+    is_deeply(invoke_on_1402($bot, $channel, 'top', 'Leader', '1'), \@ranking,
+        "top does not repeat a caller already displayed on $channel");
+    is_deeply(invoke_on_1402($bot, $channel, 'top', 'Absent', '1'), \@ranking,
+        "top does not report a rank for a caller without messages on $channel");
 }
 # MB1346: failed reads must not masquerade as empty or partial monthly charts.
 for my $raise (0, 1) {
