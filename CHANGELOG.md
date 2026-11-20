@@ -1,3 +1,8 @@
+## MB1388 — Establish the RSS baseline only after reading a feed body
+
+- Fetch new feeds without conditional validators and record an initial HTTP 304 as a poll error. The first accepted body still stores existing articles silently.
+- Keep conditional requests and retries of pending articles for established feeds. Cover the initial failure and recovery with the HTTP parser and a native SQLite repository fixture.
+
 ## MB1387 — Require a complete read before publishing Trivia rankings
 
 - Handle prepare, execute and fetch failures in triviatop before rendering the leaderboard. Incomplete rows now yield the existing localized database error.

@@ -60,9 +60,8 @@ return sub {
     $assert->is(scalar(@{ $base->{pending} }), 0,
         'mb693-901: first successful poll announces no historical items');
     $assert->is($seen{max_items}, 100, 'mb693-901: poll fetches bounded dedup horizon');
-    $assert->is($seen{etag}, '"v1"', 'mb693-901: ETag validator forwarded');
-    $assert->is($seen{last_modified}, 'Fri, 22 Aug 2026 09:00:00 GMT',
-        'mb693-901: Last-Modified validator forwarded');
+    $assert->ok(!defined($seen{etag}), 'MB1388: baseline ignores a saved ETag');
+    $assert->ok(!defined($seen{last_modified}), 'MB1388: baseline ignores a saved Last-Modified');
     $assert->is(join(',', map { $_->[3] // '' } grep { $_->[0] eq 'insert_item' } @{ $repo->{calls} }),
         '1,1', 'mb693-901: baseline items are persisted already-announced');
 
@@ -88,16 +87,24 @@ return sub {
     $repo3->{pending} = [ { item_key => sprintf('%064x', 9), title => 'retry' } ];
     my $poller3 = Mediabot::RSS::Poller->new(
         repo => $repo3,
-        fetcher => sub { return { ok=>1, not_modified=>1, status=>304, etag=>'"same"' } },
+        fetcher => sub {
+            my ($url, %opts) = @_;
+            %seen = %opts;
+            return { ok=>1, not_modified=>1, status=>304, etag=>'"same"' };
+        },
     );
     my $notmod = $poller3->poll_feed({
         id_rss_feed=>9, url=>'https://feed.example/rss', announce_limit=>5,
         last_success_at=>'2026-08-23 10:00:00', etag=>'"same"',
+        last_modified=>'Fri, 22 Aug 2026 09:00:00 GMT',
     });
     $assert->ok($notmod->{ok} && $notmod->{not_modified},
         'mb693-901: HTTP 304 is a successful poll');
     $assert->is(scalar(@{ $notmod->{pending} }), 1,
         'mb693-901: 304 still exposes durable pending items for retry');
+    $assert->is($seen{etag}, '"same"', 'mb693-901: established feed forwards its ETag');
+    $assert->is($seen{last_modified}, 'Fri, 22 Aug 2026 09:00:00 GMT',
+        'mb693-901: established feed forwards its Last-Modified');
 
     my $repo4 = FakeRepo901->new;
     my $poller4 = Mediabot::RSS::Poller->new(

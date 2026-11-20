@@ -51,8 +51,8 @@ sub poll_feed {
         $self->{fetcher}->(
             $feed->{url},
             max_items     => 100,
-            etag          => $feed->{etag},
-            last_modified => $feed->{last_modified},
+            etag          => $baseline ? undef : $feed->{etag},
+            last_modified => $baseline ? undef : $feed->{last_modified},
         );
     };
     if (!$res || ref($res) ne 'HASH') {
@@ -60,6 +60,11 @@ sub poll_feed {
         my $err = { error => 'fetch_exception', detail => $detail };
         my $recorded = eval { $self->repo->record_poll_error($id, _clean_error($err)) };
         return { ok => 0, %$err, error_recorded => $recorded ? 1 : 0 };
+    }
+
+    # Only a complete feed body can establish the silent baseline.
+    if ($baseline && $res->{ok} && $res->{not_modified}) {
+        $res = { ok => 0, error => 'unexpected_not_modified', status => 304 };
     }
 
     if (!$res->{ok}) {

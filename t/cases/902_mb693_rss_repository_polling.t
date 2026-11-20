@@ -17,7 +17,7 @@ use JSON::PP;
 use POSIX ();
 use Time::Local ();
 
-# Native DBI queries and cursors. Adapt only MySQL's date functions to SQLite;
+# Native DBI queries and cursors. Adapt MySQL syntax and functions to SQLite;
 # the driver/authorizer and DBI set_err inject errors at the actual boundaries.
 {
     package MB1080::DBI;
@@ -27,6 +27,10 @@ use Time::Local ();
     sub prepare {
         my ($db,$sql,@rest)=@_;
         $sql =~ s/\bSECOND\b/'SECOND'/g;
+        if ($sql =~ s/\bINSERT IGNORE INTO RSS_ITEM\b/INSERT OR IGNORE INTO RSS_ITEM/) {
+            # SQLite does not coerce the bound announcement flag to a number.
+            $sql =~ s/\bIF\(\? = 1,/IIF(CAST(? AS INTEGER) = 1,/;
+        }
         $sql =~ s/\bWHERE\b/WHERE mb1080_gate() AND/i
             if $sql =~ /^\s*SELECT/ && ($db->{private_fault}//'') eq 'execute';
         my $sth=$db->SUPER::prepare($sql,@rest);
@@ -214,6 +218,57 @@ return sub {
     );
     $assert->ok($nm->{ok} && $nm->{not_modified},
         'mb693-902: HTTP 304 succeeds without trying to parse an empty body');
+
+    {
+        my ($repo, $db) = _fixture1080(1);
+        my @responses = (
+            {success => 0, status => 304, headers => {etag => '"no-body"' }},
+            {success => 1, status => 200, headers => {etag => '"first-body"' }, content => $rss},
+            {success => 0, status => 304, headers => {}},
+        );
+        my @requests;
+        my $poller = Mediabot::RSS::Poller->new(
+            repo => $repo,
+            fetcher => sub {
+                my ($url, %opts) = @_;
+                return Mediabot::RSS::Fetcher::fetch_feed_once($url, %opts,
+                    resolver => sub { ['93.184.216.34'] },
+                    requester => sub {
+                        my ($url, %request) = @_;
+                        push @requests, $request{request_headers};
+                        return shift @responses;
+                    },
+                );
+            },
+        );
+        my $first = $poller->poll_feed($repo->get_feed('#two', 'Delta'));
+        my $failed = $repo->get_feed('#two', 'Delta');
+        $assert->is($json902->encode([
+            $first->{ok}, $first->{error}, $first->{error_recorded},
+            (exists $first->{pending} ? 1 : 0),
+            @$failed{qw(last_poll_at last_success_at last_error etag item_count)},
+        ]), $json902->encode([
+            0, 'unexpected_not_modified', 1, 0,
+            '2026-11-03 12:00:00', undef, 'unexpected_not_modified', undef, 0,
+        ]), 'MB1388: an initial 304 records an error without establishing a baseline');
+
+        my $retry = $poller->poll_feed($failed);
+        my $ready = $repo->get_feed('#two', 'Delta');
+        $assert->is($json902->encode([
+            $retry->{ok}, $retry->{baseline}, $retry->{inserted}, $retry->{pending},
+            @$ready{qw(last_success_at last_error etag item_count pending_count)},
+        ]), $json902->encode([
+            1, 1, 1, [], '2026-11-03 12:00:00', undef, '"first-body"', 1, 0,
+        ]), 'MB1388: the first complete feed body establishes a silent baseline');
+
+        my $steady = $poller->poll_feed($ready);
+        $assert->ok($steady->{ok} && $steady->{not_modified},
+            'MB1388: established feed accepts a conditional 304');
+        $assert->is($json902->encode(\@requests),
+            $json902->encode([{}, {}, {'If-None-Match' => '"first-body"'}]),
+            'MB1388: only an accepted body supplies a conditional validator');
+        _clean1080($db);
+    }
 
     my $tiny = bless {}, 'FakeTiny902';
     {
