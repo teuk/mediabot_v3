@@ -144,11 +144,17 @@ sub bars_1402 {chr(0x2588) x $_[0] . chr(0x2591) x (4-$_[0])}
 {
     my ($bot, $db) = setup_1402();
     add_1402($db, 'Alice', 3, 'hi', '2026-09');
-    add_1402($db, 'bOB', 2, 'hi', '2026-09');
-    add_1402($db, 'ALICE', 2, 'hi', '2026-10');
+    add_1402($db, 'bOB', 2, 'waves', '2026-09', undef, 'action');
+    add_1402($db, 'ALICE', 2, 'waves', '2026-10', undef, 'action');
     add_1402($db, 'Bob', 4, 'hi', '2026-10');
     add_1402($db, 'Alice', 20, 'unrelated channel', '2026-10', 2);
     add_1402($db, 'Alice', 20, 'outside window', '2020-01');
+    # MB1383: presence and channel state must not inflate bars or create a month.
+    add_1402($db, 'Alice', 12, undef, '2026-10', undef, 'join');
+    add_1402($db, 'Bob', 15, undef, '2026-10', undef, 'mode');
+    add_1402($db, 'ALICE', 1, undef, '2026-08', undef, 'part');
+    add_1402($db, 'Quiet', 1, undef, '2026-10', undef, 'join');
+    add_1402($db, 'Quiet', 1, undef, '2026-10', undef, 'quit');
     $db->do('PRAGMA query_only = ON');
     my $before = $db->selectall_arrayref('SELECT * FROM CHANNEL_LOG');
     my $expected = [
@@ -157,7 +163,7 @@ sub bars_1402 {chr(0x2588) x $_[0] . chr(0x2591) x (4-$_[0])}
             .'  2026-10 '.bars_1402(2).'/'.bars_1402(4)],
     ];
     is_deeply(invoke_1402($bot, 'monthstats', 'Caller', 'Alice', 'vs', 'Bob'), $expected,
-        'native monthly comparison retains real mixed-case grouped counts, channel and date scope');
+        'monthly comparison counts messages and actions with mixed case, channel and date scope');
     is_deeply(invoke_1402($bot, 'monthstats', 'Caller', 'ALICE', 'VS', 'bOB'), $expected,
         'changing requested nickname case cannot change the monthly chart');
     my $single = invoke_1402($bot, 'monthstats', 'Caller', 'Alice');
@@ -165,7 +171,13 @@ sub bars_1402 {chr(0x2588) x $_[0] . chr(0x2591) x (4-$_[0])}
         ['public', '#test', 'alice on #test (last 12 months):'],
         ['public', '#test', '  2026-09 '.chr(0x2588)x5 .' 3  2026-10 '
             .chr(0x2588)x3 .chr(0x2591)x2 .' 2'],
-    ], 'single-nickname chart keeps its existing scale and counts');
+    ], 'single-nickname chart scales speech counts and excludes presence-only months');
+    is_deeply(invoke_1402($bot, 'monthstats', 'Quiet'), [
+        ['public', '#test', 'quiet: no data in last 12 months on #test.'],
+    ], 'a caller with only presence events has no monthly speech data');
+    is_deeply(invoke_1402($bot, 'monthstats', 'Caller', 'Quiet', 'vs', 'Absent'), [
+        ['public', '#test', 'No data found for quiet or absent on #test.'],
+    ], 'a comparison with only presence events has no monthly speech data');
     is_deeply(invoke_1402($bot, 'monthstats', 'Caller', 'Nobody', 'vs', 'Absent'),
         [['public', '#test', 'No data found for nobody or absent on #test.']],
         'a genuinely empty comparison keeps its absence response');

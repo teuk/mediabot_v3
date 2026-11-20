@@ -1,3 +1,8 @@
+## MB1383 — Keep presence events out of monthly message charts
+
+- Count public messages and actions in both monthstats modes, matching the other message-activity commands. Joins, parts, quits and channel changes no longer inflate bars or produce presence-only months.
+- Extend the existing native activity scenario to check mixed-case names, action counts and presence-only results alongside channel scope and the rolling date filter.
+
 ## MB1382 — Reject unsupported digits in activity filters
 
 - Validate ASCII digits before converting or querying numeric options in top, active and compare, so mixed Unicode digits cannot be truncated or reach an SQL interval.

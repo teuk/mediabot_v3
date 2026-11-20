@@ -814,12 +814,13 @@ sub mbMonthStats_ctx {
     }
 
     if (defined $t1 && defined $t2) {
-        # Fetch counts for both nicks per month
+        # Fetch public message and action counts for both nicks per month.
         my $rows = _monthstats_rows($self->{dbh},
             "SELECT DATE_FORMAT(cl.ts, '%Y-%m') AS ym, cl.nick, COUNT(*) AS cnt"
             . ' FROM CHANNEL_LOG cl'
             . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
             . ' WHERE cl.nick IN (?,?) AND c.name = ?'
+            . "   AND cl.event_type IN ('public','action')"
             . '   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)'
             . ' GROUP BY ym, cl.nick ORDER BY ym', $t1, $t2, $channel
         );
@@ -866,7 +867,8 @@ sub mbMonthStats_ctx {
         . ' FROM CHANNEL_LOG cl'
         . ' JOIN CHANNEL c ON c.id_channel = cl.id_channel'
         . ' WHERE cl.nick = ? AND c.name = ?'
-        . "   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)"
+        . "   AND cl.event_type IN ('public','action')"
+        . '   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)'
         . ' GROUP BY ym ORDER BY ym', $target, $channel
     );
     unless ($rows) {
