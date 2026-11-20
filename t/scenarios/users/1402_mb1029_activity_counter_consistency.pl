@@ -28,6 +28,12 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL 0*24 HOUR\)/'2026-09-30 12:00:00'/g;
         $sql =~ s/NOW\(\) - INTERVAL 14 DAY/'2026-09-17 12:00:00'/g;
         $sql =~ s/TIMESTAMPDIFF\(MINUTE, cl\.ts, NOW\(\)\)/(unixepoch('2026-10-01 12:30:00') - unixepoch(cl.ts)) \/ 60/g;
+        # Paris is UTC+2 on the September and October fixture dates.
+        $sql =~ s{CONVERT_TZ\(cl\.ts, \@\@session\.time_zone, \?\)}
+            {datetime(cl.ts, CASE ? WHEN '+00:00' THEN '+0 hours' WHEN 'Europe/Paris' THEN '+2 hours' END)}g;
+        $sql =~ s/CURDATE\(\) - INTERVAL 365 DAY/'2025-10-01'/g;
+        # Match MariaDB's numeric comparison for the derived COUNT column.
+        $sql =~ s/WHERE sub\.days_active > \?/WHERE sub.days_active > CAST(? AS INTEGER)/g;
         my $monthly = $sql =~ /SELECT DATE_FORMAT/;
         my $active = $sql =~ /SELECT cl\.nick, COUNT\(\*\) AS mc/;
         $sql = 'SELECT * FROM mb1346_missing_table'
@@ -84,7 +90,7 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
     }
     package MB1029::Channel;
     sub get_id {1}
-    sub get_timezone {'UTC'}
+    sub get_timezone {$_[0]{timezone} // 'UTC'}
     package MB1029::Conf;
     sub get {$_[0]{$_[1]}}
 }
@@ -395,6 +401,31 @@ for my $channel ('#test', '&test', '+test', '!test') {
         ['public', '#test', 'Last 5 message(s) from alice on #test:'],
         ['public', '#test', '  (31m ago [11:59]) an older row with a reused id'], @recent,
     ], 'last keeps distinct messages when an older archive row reused a live id');
+}
+# MB1386: the optional streak rank should count the same kind of activity day.
+{
+    my ($bot, $db) = setup_1402();
+    my $insert = sub {
+        $db->do('INSERT INTO CHANNEL_LOG(id_channel, nick, ts, event_type, publictext)
+            VALUES(1, ?, ?, ?, ?)', undef, @_, 'fixture');
+    };
+    $insert->('Alice', "$_ 12:00:00", 'public') for ('2026-09-30', '2026-10-01');
+    for my $day ('2026-09-28', '2026-09-29', '2026-09-30') {
+        $insert->('Speaker', "$day 12:00:00", 'action');
+        $insert->('Quiet', "$day 12:00:00", 'join');
+    }
+    $insert->('NearMidnight', $_, 'public') for (
+        '2026-09-29 23:30:00', '2026-09-30 00:30:00', '2026-10-01 00:30:00',
+    );
+    $db->do('PRAGMA query_only = ON');
+    my $summary = 'alice: 2 consecutive day(s) active on #test (most recent: 2026-10-01)';
+    is_deeply(invoke_1402($bot, 'streak', 'Caller', 'Alice'), [
+        ['public', '#test', "$summary  rank #3"],
+    ], 'streak rank counts public and action days but excludes a presence-only nick');
+    $bot->{channels}{'#test'}{timezone} = 'Europe/Paris';
+    is_deeply(invoke_1402($bot, 'streak', 'Caller', 'Alice'), [
+        ['public', '#test', "$summary  rank #2"],
+    ], 'streak rank groups days by the channel timezone and recomputes after a timezone change');
 }
 # MB1346: failed reads must not masquerade as empty or partial monthly charts.
 for my $raise (0, 1) {

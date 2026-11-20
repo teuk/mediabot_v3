@@ -290,7 +290,7 @@ sub mbStreak_ctx {
 
     # mb85-IMP1 / mb92-B2: rang du streak — cache TTL 5min pour éviter la sous-requête coûteuse
     my $rank_str  = '';
-    my $cache_key = "streak_rank:$channel:$target:$streak";
+    my $cache_key = "streak_rank:$channel:$target:$streak:$sql_timezone";
     my $cached    = $self->{_streak_rank_cache}{$cache_key};
     # mb94-IMP2: invalider le cache si !streak all
     delete $self->{_streak_rank_cache}{$cache_key} if $force_refresh;
@@ -302,11 +302,13 @@ sub mbStreak_ctx {
             my $sth_r2 = $self->{dbh}->prepare(q{
                 SELECT COUNT(DISTINCT sub.nick) AS ahead
                 FROM (
-                    SELECT cl.nick, COUNT(DISTINCT DATE(cl.ts)) AS days_active
+                    SELECT cl.nick,
+                           COUNT(DISTINCT DATE(CONVERT_TZ(cl.ts, @@session.time_zone, ?))) AS days_active
                     FROM CHANNEL_LOG cl
                     JOIN CHANNEL c ON c.id_channel = cl.id_channel
                     WHERE c.name = ?
                       AND cl.nick != ?
+                      AND cl.event_type IN ('public','action')
                       -- mb627-B1: plage indexable. DATE(ts) >= D equivaut a
                       -- ts >= D (DATE() tronque vers le bas), mais la fonction
                       -- autour de la colonne interdisait l'index (id_channel, ts).
@@ -315,7 +317,7 @@ sub mbStreak_ctx {
                 ) sub
                 WHERE sub.days_active > ?
             });
-            if ($sth_r2 && $sth_r2->execute($channel, $target, $streak)) {
+            if ($sth_r2 && $sth_r2->execute($sql_timezone, $channel, $target, $streak)) {
                 my $rrow = $sth_r2->fetchrow_hashref; $sth_r2->finish;
                 if ($rrow && defined $rrow->{ahead}) {
                     $rank_str = "  rank #" . ($rrow->{ahead} + 1);

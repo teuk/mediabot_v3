@@ -1,3 +1,9 @@
+## MB1386 — Rank streak activity using speech and the channel timezone
+
+- Use public messages and actions and count their channel-local dates in the optional streak rank.
+- Key the rank cache by timezone so a channel timezone change refreshes the comparison even when the user's streak length is unchanged.
+- Cover presence-only peers and messages around midnight through the native command registry.
+
 ## MB1385 — Give moved history rows one slot in last
 
 - Collapse matching live and archive copies before applying the merged limit in last. A message moved between source reads no longer takes two slots.
