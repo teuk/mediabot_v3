@@ -85,7 +85,7 @@ compare_1373("$paris_missing  ||  Lyon weather #3",3,
     my $before = dclone($bot->{_weather_cache});
     my $wire = weather_1373(['compare','Paris'],'#test');
     is_deeply([$wire,scalar(@{$http->{calls}}),$bot->{_weather_cache}],
-        [[['notice','Reader','Syntax: weather compare <city1> <city2>']],3,$before],
+        [[['notice','Reader','Syntax: weather compare <city1> <city2> (use | between multiword locations)']],3,$before],
         'insufficient comparison arguments retain private syntax feedback and do not fetch');
 }
 weather_1373(['Paris'],'#seed');

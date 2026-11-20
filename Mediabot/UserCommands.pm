@@ -30,6 +30,7 @@ use Mediabot::Helpers;
 # Keep legacy lookup symbols; Wiktionary owns source and async adaptation.
 use Mediabot::External::Wiktionary qw(_define_pick_entry _define_lookup_sync _define_lookup_async _define_word_text);
 use Mediabot::External::OpenTriviaDB qw(_trivia_parse_api_content _trivia_fetch_sync);
+use Mediabot::External::Weather qw(_weather_location);
 # Account-level readers and profile views keep their historical facade names.
 use Mediabot::Users::Levels qw(
     getIdUserLevel
@@ -1722,7 +1723,7 @@ sub _seconds_to_human {
 
 # ---------------------------------------------------------------------------
 # mbWeatherCompare_ctx --- !weather compare <city1> <city2>
-# Compare cached weather for two cities without requesting new data.
+# Compare cached weather for two cities. Use | between multiword locations.
 # ---------------------------------------------------------------------------
 sub mbWeatherCompare_ctx {
     my ($ctx) = @_;
@@ -1732,19 +1733,19 @@ sub mbWeatherCompare_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
-    unless (@args >= 2) {
-        botNotice($self, $nick, 'Syntax: weather compare <city1> <city2>');
+    my $query = join(' ', @args);
+    my @cities = $query =~ /\|/ ? split(/\|/, $query, -1) : @args;
+    @cities = map { _weather_location($_) } @cities if @cities == 2;
+    if (@cities != 2 || $cities[0] eq '' || $cities[1] eq '') {
+        botNotice($self, $nick, 'Syntax: weather compare <city1> <city2> (use | between multiword locations)');
         return;
     }
-
-    my ($city1, $city2) = ($args[0], $args[1]);
 
     # Match the maximum stale-fallback age in displayWeather_ctx.
     my $now = time();
     my $max_age = 900;
-    # Cache key is simply lc($location), as in displayWeather_ctx.
     my @parts;
-    for my $city ($city1, $city2) {
+    for my $city (@cities) {
         my $cache_key = lc($city);
         my $cache     = $self->{_weather_cache}{$cache_key};
         if ($cache && defined($cache->{ts}) && $cache->{ts} <= $now

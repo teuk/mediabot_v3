@@ -1,3 +1,8 @@
+## MB1389 — Compare complete weather locations from the cache
+
+- Let weather compare and meteo compare use `|` to separate multiword locations. Keep the two-word syntax and explain the separator in a private notice for ambiguous input.
+- Apply the same location normalization to cache lookups and weather fetches, including space-separated country codes. Comparison still uses cached data only.
+
 ## MB1388 — Establish the RSS baseline only after reading a feed body
 
 - Fetch new feeds without conditional validators and record an initial HTTP 304 as a poll error. The first accepted body still stores existing articles silently.

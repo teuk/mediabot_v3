@@ -8,7 +8,15 @@ use Mediabot::External::URLCodec qw(_uri_escape_bytes);
 use Mediabot::IRC::Target qw(is_channel);
 use Mediabot::IRC::TextBudget qw(_irc_wire_bytes);
 
-our @EXPORT_OK = qw(displayWeather_ctx);
+our @EXPORT_OK = qw(displayWeather_ctx _weather_location);
+
+sub _weather_location {
+    my ($location) = @_;
+    $location =~ s/^\s+|\s+$//g;
+    # Allow "Paris FR" as shorthand for "Paris,FR"; keep comma forms literal.
+    $location =~ s/\s+([A-Za-z]{2})$/,$1/ if $location !~ /,/;
+    return $location;
+}
 
 sub _weather_line {
     my ($res) = @_;
@@ -48,24 +56,12 @@ sub displayWeather_ctx {
     my $id_channel_set = Mediabot::External::getIdChannelSet($self, $channel, $id_chanset_list);
     return unless defined $id_channel_set;
 
-    my $q = join(' ', grep { defined && $_ ne '' } @args);
-    $q =~ s/^\s+|\s+$//g;
+    my $location = _weather_location(join(' ', grep { defined && $_ ne '' } @args));
 
-    unless ($q ne '') {
+    if ($location eq '') {
         Mediabot::Helpers::botNotice($self, $nick, "Syntax (no accents): weather <City|City,CC|lat,lon>");
         return;
     }
-
-    # Normalize input a bit:
-    # - allow "Paris FR" => "Paris,FR"
-    # - keep "lat,lon"
-    my $location = $q;
-    if ($location !~ /,/ && $location =~ /\s+([A-Za-z]{2})$/) {
-        my $cc = $1;
-        $location =~ s/\s+[A-Za-z]{2}$/,$cc/;
-    }
-    # Preserve spaces inside city names; _uri_escape_bytes encodes them for HTTP.
-    $location =~ s/^\s+|\s+$//g;
 
     # Cache (keyed by location)
     my $cache_key = lc($location);

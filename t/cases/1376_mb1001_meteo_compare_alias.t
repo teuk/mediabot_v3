@@ -50,6 +50,7 @@ sub setup_1376 {
     invoke_1376($bot,'meteo',['Lyon'],'#seed');
     return $bot;
 }
+my $compare_syntax = 'Syntax: weather compare <city1> <city2> (use | between multiword locations)';
 {
     my $bot=setup_1376();
     is_deeply([\@wire,\@audit,scalar(@{$http->{calls}}),$bot->{_weather_cache}],
@@ -77,7 +78,7 @@ sub setup_1376 {
         push @actual,[invoke_1376($bot,'meteo',$args,'#test'),dclone(\@audit),
             scalar(@{$http->{calls}}),dclone($bot->{_weather_cache})];
     }
-    is_deeply(\@actual,[map { [[['notice','Reader','Syntax: weather compare <city1> <city2>']],[],2,$before] } 1..2],
+    is_deeply(\@actual,[map { [[['notice','Reader',$compare_syntax]],[],2,$before] } 1..2],
         'missing comparison cities use the existing private syntax notice without fetching a fictitious location');
 }
 {
@@ -117,6 +118,28 @@ sub setup_1376 {
         [[[],[['notice','Reader','Syntax (in channel): weather <City|City,CC|lat,lon>']],
               [['notice','Reader','Syntax (no accents): weather <City|City,CC|lat,lon>']]],2,$before],
         'ordinary alias keeps the Weather gate, private-channel refusal and empty-city syntax');
+}
+{
+    my $bot = setup_1376();
+    invoke_1376($bot, 'weather', [qw(New York US)], '#seed');
+    invoke_1376($bot, 'meteo', [qw(Rio de Janeiro)], '#seed');
+    my $before = dclone($bot->{_weather_cache});
+    for my $command (qw(weather meteo)) {
+        # The IRC entry point splits on whitespace before calling the registry.
+        my @args = split /\s+/, 'compare new York us | Rio de Janeiro';
+        my $wire = invoke_1376($bot, $command, \@args, '#compare');
+        is_deeply([$wire, \@audit, scalar(@{$http->{calls}}), $bot->{_weather_cache}],
+            [[['public','#compare','New%20York%2CUS weather #3  ||  Rio%20de%20Janeiro weather #4']],
+             [],4,$before], "$command compares both complete, normalized locations from cache");
+    }
+    for my $line ('compare New York Paris', 'compare | Paris', 'compare Paris |',
+                  'compare Paris | Lyon | Rio') {
+        my @args = split /\s+/, $line;
+        my $wire = invoke_1376($bot, 'weather', \@args, '#compare');
+        is_deeply([$wire, \@audit, scalar(@{$http->{calls}}), $bot->{_weather_cache}],
+            [[['notice','Reader',$compare_syntax]],[],4,$before],
+            "ambiguous or invalid syntax receives a private notice ($line)");
+    }
 }
 is_deeply(\@warnings,[],'meteo alias emits no warnings');
 done_testing;
