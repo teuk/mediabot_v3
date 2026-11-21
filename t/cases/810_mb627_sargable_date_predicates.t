@@ -56,14 +56,13 @@ return sub {
         push @bad, $line if $line =~ /\b(?:DATE|YEAR|MONTH|DAY|DATE_FORMAT)\s*\(\s*(?:cl\.)?ts\s*[,)]/
                          && $line =~ /(?:AND|WHERE)\s/;
     }
-    my @unexplained = grep { $_ !~ /\$md_expr|\$year_bound/ } @bad;
+    my @unexplained = grep { $_ !~ /\$md_expr/ } @bad;
     $assert->is(scalar @unexplained, 0,
         'mb627-810: plus aucun predicat non-indexable hors du cas impossible');
-    # Les lignes restantes sont les DEFINITIONS de $md_expr / $year_bound, et
-    # elles ne servent plus qu'a la requete de balayage multi-annees : la
-    # conversion des deux requetes par annee les a liberees.
-    $assert->is(scalar @bad, 3,
-        'mb627-810: seules les definitions du cas impossible subsistent');
+    # Les deux formes de $md_expr filtrent le même mois/jour sur plusieurs
+    # années. La borne historique ts < CURDATE() travaille sur la colonne brute.
+    $assert->is(scalar @bad, 2,
+        'mb627-810: seules les deux formes du filtre mois/jour subsistent');
     my $md_uses = () = $src =~ /AND \$md_expr/g;
     $assert->is($md_uses, 1,
         'mb627-810: md_expr ne sert plus qu a UNE requete (le balayage)');

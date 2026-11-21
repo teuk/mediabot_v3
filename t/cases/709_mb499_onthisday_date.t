@@ -8,8 +8,7 @@
 #       le digest quotidien (mb496) n'est pas impacté ;
 #   [3] parsing de l'argument dans mbOnThisDay_ctx (MM-DD, MM/DD ; rejet des
 #       dates invalides) ;
-#   [4] borne d'année correcte (une date passée cette année compte l'année en
-#       cours ; une date future l'exclut).
+#   [4] borne explicite à la veille, commune aux dates demandées et au digest.
 # =============================================================================
 
 use strict;
@@ -79,8 +78,7 @@ return sub {
         $assert->like($lines[0], qr/\(Dec 25\)/, 'date: label "(Dec 25)"');
         $assert->like($cap[0]{sql}, qr/MONTH\(ts\) = \? AND DAY\(ts\) = \?/, 'date: month/day en placeholders');
         $assert->unlike($cap[0]{sql}, qr/MONTH\(ts\) = MONTH\(CURDATE/, 'date: le filtre jour n\'utilise plus CURDATE');
-        # binds : id_channel, month, day, + 3 pour la borne d'année (month, month, day)
-        $assert->is(scalar(@{$cap[0]{bind}}), 6, 'date: 6 binds (id + m/d + borne année)');
+        $assert->is(scalar(@{$cap[0]{bind}}), 3, 'date: 3 binds (id + m/d)');
         $assert->is($cap[0]{bind}[1], 12, 'date: bind month=12');
         $assert->is($cap[0]{bind}[2], 25, 'date: bind day=25');
         # mb627: la requête top-talker connaît l'année et doit donc utiliser
@@ -125,12 +123,12 @@ return sub {
         $assert->like($bad2, qr/NOTICE:.*unrecognized date/, 'parsing: "hello" rejeté');
     }
 
-    # --- [4] garde source : borne d'année conditionnelle -------------------
+    # --- [4] garde source : borne au début de la journée courante ----------
     {
         my $src = _slurp_709(File::Spec->catfile('.', 'Mediabot', 'SocialHistory.pm'));
         my ($fn) = $src =~ /(sub _onthisday_lines \{.*?\n\})/s; $fn //= '';
-        $assert->like($fn, qr/YEAR\(ts\) < YEAR\(CURDATE\(\)\)/, '[4] borne: années passées incluses');
-        $assert->like($fn, qr/\? < MONTH\(CURDATE\(\)\)/, '[4] borne: gère la date passée/future dans l\'année');
+        $assert->like($fn, qr/AND \$md_expr\s+AND ts < CURDATE\(\)/,
+            '[4] borne de date commune au scan par jour explicite et au digest');
         $assert->like($fn, qr/event_type IN \('public','action'\)/, 'convention event_type (garde projet)');
     }
     for my $case (['é' x 120,'é' x 100 . '...'],['🌟' x 80,'🌟' x 50 . '...'],

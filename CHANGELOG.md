@@ -1,3 +1,8 @@
+## MB1400 — Exclude future-dated messages from onthisday
+
+- Bound both the default and explicit-date anniversary queries to rows before the database's current day, across live history and archives.
+- Keep past dates from the current year eligible. An explicit month/day earlier this year can no longer admit matching rows from future years.
+
 ## MB1399 — Require a complete channel history read for recap
 
 - Return the existing private database error on a failed channel log prepare, execute or fetch in both DBI error modes.

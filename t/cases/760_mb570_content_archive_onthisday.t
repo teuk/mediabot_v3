@@ -37,6 +37,8 @@ sub _slurp_760 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
         $sql =~ s/DATE_ADD\(\?, INTERVAL 1 DAY\)/datetime(?, '+1 day')/g;
         my $day = q{STR_TO_DATE(CONCAT(?, '-', ?, '-', ?), '%Y-%m-%d')};
         $sql =~ s/\Q$day\E \+ INTERVAL 1 DAY/datetime($day, '+1 day')/g;
+        my $today = q{STR_TO_DATE(CONCAT(?, DATE_FORMAT('2026-11-19', '-%m-%d')), '%Y-%m-%d')};
+        $sql =~ s/\Q$today\E \+ INTERVAL 1 DAY/datetime($today, '+1 day')/g;
         $sql =~ s/FROM_UNIXTIME\(UNIX_TIMESTAMP\(\?\) \+ \?\)/datetime(?, printf('+%d seconds', ?))/g;
         return $db->SUPER::prepare($sql, @rest);
     }
@@ -211,6 +213,10 @@ return sub {
         $db->sqlite_create_function('MONTH', 1, sub { 0 + substr($_[0], 5, 2) });
         $db->sqlite_create_function('DAY', 1, sub { 0 + substr($_[0], 8, 2) });
         $db->sqlite_create_function('CONCAT', -1, sub { join('', @_) });
+        $db->sqlite_create_function('DATE_FORMAT', 2, sub {
+            die 'unexpected DATE_FORMAT in archive fixture' unless $_[1] eq '-%m-%d';
+            return substr($_[0], 4, 6);
+        });
         $db->sqlite_create_function('STR_TO_DATE', 2, sub {
             my ($y,$m,$d) = split /-/, $_[0]; sprintf('%04d-%02d-%02d', $y,$m,$d)
         });
@@ -235,6 +241,31 @@ return sub {
             'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS'=>1,
         );
         my $bot = bless {dbh=>$db, conf=>$conf, logger=>L760->new}, 'Mediabot';
+        # The adapter fixes the database's current date at 2026-11-19.
+        for my $table ('CHANNEL_LOG', 'archive.CHANNEL_LOG_ARCHIVE') {
+            my $ins = $db->prepare("INSERT INTO $table VALUES (5, ?, ?, 'public', 'history sample')");
+            for my $date ('2025-11-18', '2026-11-18', '2027-11-18',
+                          '2025-11-19', '2026-11-19', '2025-11-20', '2026-11-20') {
+                $ins->execute("$date 12:00:00", "$date-speaker");
+            }
+            $ins->finish;
+        }
+        my @past = Mediabot::UserCommands::_onthisday_lines($bot, 5, '#quebec', month=>11, day=>18);
+        $assert->is($past[0],
+            'On this day on #quebec (Nov 18) (2025-2026): 4 message(s) across 2 year(s).',
+            'a past month/day includes this year and excludes future-year rows in both tables');
+        my @today = Mediabot::UserCommands::_onthisday_lines($bot, 5, '#quebec', month=>11, day=>19);
+        $assert->is($today[0],
+            'On this day on #quebec (Nov 19) (2025): 2 message(s) across 1 year(s).',
+            'an explicit date matching today still excludes today');
+        my @later = Mediabot::UserCommands::_onthisday_lines($bot, 5, '#quebec', month=>11, day=>20);
+        $assert->is($later[0],
+            'On this day on #quebec (Nov 20) (2025): 2 message(s) across 1 year(s).',
+            'a later month/day only includes earlier years');
+        my @default = Mediabot::UserCommands::_onthisday_lines($bot, 5, '#quebec');
+        $assert->is($default[0],
+            'On this day on #quebec (2025): 2 message(s) across 1 year(s).',
+            'the default anniversary used by the daily digest still excludes today');
         for my $mode ('merged', 'live-only', 'missing-archive') {
             delete $conf->{'mysql.CHANNEL_LOG_ARCHIVE_DBNAME'} if $mode eq 'live-only';
             if ($mode eq 'missing-archive') {

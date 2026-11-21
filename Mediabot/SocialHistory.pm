@@ -2635,20 +2635,6 @@ sub _onthisday_lines {
         @md_bind = ();
     }
 
-    # "Historical only" bound. For today, exclude the current day. For an
-    # explicit date, exclude the current year only when that date hasn't
-    # occurred yet this year (a future MM-DD), so a past date this year counts.
-    my $year_bound = '';
-    if (!$has_date) {
-        $year_bound = ' AND ts < CURDATE()';
-    }
-    else {
-        # exclude current year if (month,day) is today or still ahead this year
-        $year_bound = ' AND (YEAR(ts) < YEAR(CURDATE()) '
-                    . 'OR (? < MONTH(CURDATE()) OR (? = MONTH(CURDATE()) AND ? < DAY(CURDATE()))))';
-    }
-    my @year_bound_bind = $has_date ? ($month, $month, $day) : ();
-
     # mb570-B1: onthisday lit le VIF puis l'ARCHIVE (mb569) et fusionne par
     # annee — archiver le vieux public ne coupe plus la memoire du canal.
     # L'archive est best-effort : non configuree, table absente ou droits
@@ -2669,11 +2655,12 @@ sub _onthisday_lines {
               -- mb627-B1: celle-ci cherche le meme jour SUR TOUTES les annees :
               -- aucune plage ne peut l'exprimer, la forme fonctionnelle reste
               -- (et le GROUP BY YEAR(ts) l'impose de toute facon).
-              AND $md_expr$year_bound
+              AND $md_expr
+              AND ts < CURDATE()
             GROUP BY YEAR(ts)
             ORDER BY y DESC
         }) };
-        return unless $q && eval { $q->execute($id_channel, @md_bind, @year_bound_bind) };
+        return unless $q && eval { $q->execute($id_channel, @md_bind) };
         while (my $r = $q->fetchrow_hashref) {
             my $slot = $by_year{ $r->{y} } //= { y => $r->{y}, msgs => 0, people => 0, src => {} };
             $slot->{msgs}  += $r->{msgs};
