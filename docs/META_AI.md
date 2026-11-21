@@ -260,8 +260,10 @@ this heuristic is not proof that a result is relevant or editorially independent
 
 Extraction includes the query and bounded page chunks; local passage selection
 keeps matching sentences/paragraphs beyond navigation-heavy prefixes, within
-40,000 inspected and 5,000 retained characters. Page extracts and search snippets
-remain distinct untrusted evidence; publication, incident and retrieval dates
+40,000 inspected and 5,000 retained characters. If a page extract matches none
+of the query terms, or drops query terms already present in the search snippet,
+MetaAI keeps the search snippet. Page extracts and search snippets remain
+distinct untrusted evidence; publication, incident and retrieval dates
 are not interchangeable. Missing dates and gaps must be stated in the synthesis.
 
 The synthesis must select existing source IDs; invented IDs fail. URLs come

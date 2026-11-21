@@ -158,7 +158,7 @@ sub select_sources {
     return \@selected;
 }
 sub select_passages {
-    my ($raw,$query)=@_;return '' unless defined($raw) && !ref($raw);
+    my ($raw,$query,$search_excerpt)=@_;return '' unless defined($raw) && !ref($raw);
     # Preserve complete relevant sentence/paragraph fragments instead of
     # feeding only a site's navigation and first 5000 characters.
     $raw=substr($raw,0,40_000);my $terms=_terms($query);my @parts;my $index=0;
@@ -169,7 +169,10 @@ sub select_passages {
         push @parts,{text=>$part,index=>$index++};
     }
     $_->{hits}=_hits($_->{text},$terms) for @parts;
-    return clean($raw,5000) unless grep {$_->{hits}} @parts;
+    unless (grep {$_->{hits}} @parts) {
+        return '' if defined($search_excerpt) && @$terms;
+        return clean($raw,5000);
+    }
     @parts=sort {$b->{hits}<=>$a->{hits} || $a->{index}<=>$b->{index}} @parts;
     my (@chosen,$length);
     for my $part (@parts) {
@@ -178,7 +181,13 @@ sub select_passages {
         last if @chosen>=6;
     }
     @chosen=sort {$a->{index}<=>$b->{index}} @chosen;
-    return join(' … ',map {$_->{text}} @chosen);
+    my $excerpt=join(' … ',map {$_->{text}} @chosen);
+    # Compare the actual output, not the page before the passage limit. A page
+    # can mention a query term in its navigation while losing another useful
+    # term present in the search excerpt.
+    return '' if defined($search_excerpt)
+        && grep {_hits($search_excerpt,[$_]) && !_hits($excerpt,[$_])} @$terms;
+    return $excerpt;
 }
 sub _literal {
     my $text=NFC(clean($_[0],6000));

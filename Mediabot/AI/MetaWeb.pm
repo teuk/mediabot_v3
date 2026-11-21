@@ -65,8 +65,10 @@ sub search {
         for my $row (@{$extracted->{results}}) {
             next unless ref($row) eq 'HASH';my $url=safe_url($row->{url});
             next unless $url && exists $by_url{$url};
-            my $text=select_passages($row->{raw_content},$query);next unless length($text)>=80;
-            $by_url{$url}{text}=$text;$by_url{$url}{kind}='page_excerpt';
+            my $source=$by_url{$url};
+            my $text=select_passages($row->{raw_content},$query,$source->{text});
+            next unless length($text)>=80;
+            $source->{text}=$text;$source->{kind}='page_excerpt';
         }
     }
     for my $source (@$sources) {delete $source->{$_} for qw(_score _host _index _hits)}

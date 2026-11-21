@@ -64,6 +64,15 @@ my $body=('Navigation cookies privacy contact. 'x250)."\nOn 12 October 2026, ANS
 my $passages=select_passages($body,'ANSSI phishing forged login citizens');
 like($passages,qr/ANSSI reported phishing through forged login pages/,'relevant late passage survives page selection instead of a navigation-only prefix');
 cmp_ok(length($passages),'<=',5000,'extract sent to providers remains bounded');
+my $query='CERN visitor tickets';
+my $snippet='The CERN visitor centre opens from Tuesday to Sunday with advance booking.';
+my $changed_subject='CERN tickets for staff and accredited contractors are handled by an internal office. 'x2;
+is(select_passages($changed_subject,$query,$snippet),'',
+    'a page extract cannot trade a snippet topic term for a different query term');
+is(select_passages('Access denied. Navigation and site footer. 'x5,$query,$snippet),'',
+    'a page extract with no query terms cannot replace a useful snippet');
+like(select_passages('CERN visitor tickets can be reserved online. Admission to the visitor centre is free of charge. ',
+    $query,$snippet),qr/Admission to the visitor centre is free/,'a relevant page extract adds useful details');
 my $valid={answer=>'A concrete advisory.',source_ids=>[1],basis=>'supported',support=>[{source_id=>1,quote=>'an ANSSI phishing advisory described forged login pages'}]};
 ok(!defined(validate_support($valid,[$selected->[0]])),'verbatim supporting passage matches the selected source');
 is(validate_support({%$valid,support=>[{source_id=>1,quote=>'ANSSI reported a ransomware incident in Paris.'}]},[$selected->[0]]),'mismatch','fabricated supporting passage is rejected');
@@ -79,6 +88,7 @@ my (@calls,@tls);my $responses=[
  {success=>1,status=>200,content=>encode_json({results=>[@rows[2,3]]})},
  {success=>1,status=>200,content=>encode_json({results=>[
     {url=>$rows[2]{url},raw_content=>$body},
+    {url=>$rows[3]{url},raw_content=>'France visitor menu. Cookie consent. Legal notice and terms. Sign up for our mailing list. 'x4},
     {url=>'https://rogue.example.org/wrong',raw_content=>'ANSSI phishing forged login citizens. 'x10}]})}];
 my $web=Mediabot::AI::MetaWeb->new(api_key=>'YOUR_TAVILY_TEST_KEY',domains=>$plan->{domains},clock=>sub {1791892800},
     http_factory=>sub {push @tls,$_[1];bless {calls=>\@calls,responses=>$responses},'MB821HTTP'});
@@ -100,6 +110,9 @@ is($extract->{chunks_per_source},3,'remote extraction has bounded per-page chunk
 ok(!grep($_->{url}=~/rogue/,@{$research->{sources}}),'extractor cannot introduce an unrequested destination');
 ok(!grep(exists($_->{_score}),@{$research->{sources}}),'ranking internals are removed before provider payloads');
 like($research->{sources}[0]{text},qr/ANSSI reported phishing/,'selected source contains late relevant page text');
+my ($retained)=grep {$_->{url} eq $rows[3]{url}} @{$research->{sources}};
+is($retained->{text},$rows[3]{content},'search retains the useful snippet when extraction lands on boilerplate');
+is($retained->{kind},'search_excerpt','retained evidence keeps its search-excerpt provenance');
 
 my $conf=bless {'openai.API_KEY'=>'YOUR_OPENAI_TEST_KEY','anthropic.API_KEY'=>'YOUR_CLAUDE_TEST_KEY',
     'meta_ai.PROVIDERS'=>'openai anthropic','meta_ai.OPENAI_MODEL'=>'gpt-4o'},'MB821Conf';

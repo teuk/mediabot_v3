@@ -1,3 +1,7 @@
+## MB1413 — Preserve useful MetaAI search excerpts
+
+- Keep a search excerpt when page extraction finds no terms from the query or loses terms already present in the excerpt. Relevant extracts can still replace the excerpt with fuller evidence.
+
 ## MB1412 — Route IRC banter without unrelated sources
 
 - Send recognizable teasing, feedback and untargeted requests for help to the conversational route. Keep explicit verification and factual questions on the research route.

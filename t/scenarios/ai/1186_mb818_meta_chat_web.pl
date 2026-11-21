@@ -95,7 +95,7 @@ my (@http_calls,@tls);my $responses=[
         {url=>'https://www.example.org/releases',title=>'ExampleSoft release',content=>'A searchable excerpt with enough concrete information for grounding.',published_date=>'2026-10-13'},
         {url=>'https://other.example.org/releases',title=>'ExampleSoft update',content=>'A second searchable excerpt with independent source information.'} ]})},
     {success=>1,status=>200,content=>encode_json({results=>[
-        {url=>'https://www.example.org/releases',raw_content=>'A read page with sufficient detail. '.('Concrete evidence. 'x12)},
+        {url=>'https://www.example.org/releases',raw_content=>'The ExampleSoft release notes describe the new export formats and how to migrate settings from the previous release.'},
         {url=>'https://rogue.example.org/injected',raw_content=>'Unrequested content. 'x50} ]})},
 ];
 my $web=Mediabot::AI::MetaWeb->new(api_key=>'fake-search-credential',domains=>['example.org'],
