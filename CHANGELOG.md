@@ -1,3 +1,8 @@
+## MB1393 — Preserve deadline-like text inside reminders
+
+- Read only the leading scheduling metadata in reminder delivery, listing and snooze. An inline `[at:...]` stays in the message and cannot delay delivery.
+- Preserve ordinary, urgent, daily and weekly layouts, including snoozed occurrences, and test literal tokens across storage, display and recurrence.
+
 ## MB1392 — Keep valid LUSERS replies after an expired sample
 
 - Discard an expired or future-dated sample before handling a valid reply. A standalone 255 or 266 can start a new sample without inheriting old counts.

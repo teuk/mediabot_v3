@@ -452,4 +452,51 @@ for my $entry (qw(Mediabot::CommunityState Mediabot::UserCommands Mediabot)) {
             "$entry $glyph: snooze preserves full text, accepts 512 characters and refuses overflow before UPDATE");
     }
 }
+{
+    my $entry = 'Mediabot::CommunityState';
+    my $body = 'Vérifie [at:9999999999] puis [at:3]';
+    my ($bot, $db) = setup_1337();
+    invoke_1337($bot, $entry, 'mbRemind_ctx', 'Friend', $body);
+    @wire = ();
+    deliver_1337($bot, $entry);
+    is_deeply([\@wire, $db->selectrow_arrayref('SELECT message,delivered FROM REMINDERS')],
+        [[['public','#test',"Friend: reminder from sender (stored): $body"]], [$body,1]],
+        'an inline deadline-like token does not delay an ordinary reminder');
+
+    for my $case (
+        ['[!] ', '[!] ', '', '[!] '],
+        ['[daily:09:00] ', '[daily:09:00] ', ' [daily 09:00]', ''],
+        ['','[weekly:1:09:00] ', ' [weekly Mon 09:00]', ''],
+    ) {
+        my ($prefix, $kept, $label, $urgent) = @$case;
+        my $tail = $prefix eq '' ? $kept . $body : $body;
+        my $stored = $prefix . '[at:2000] ' . $tail;
+        my ($bot, $db) = setup_1337($stored);
+        $db->do('CREATE TABLE CHANNEL(id_channel INTEGER,name TEXT)');
+        $db->do("INSERT INTO CHANNEL VALUES(7,'#test')");
+        invoke_1337($bot, $entry, 'mbRemindList_ctx');
+        my $notice = $wire[1][2] // '';
+        my ($shown) = $notice =~ /:\s+"(.*)"/;
+        is_deeply([$shown, $notice =~ /\[in 16m 40s\]/ ? 1 : 0],
+            [$body,1], "$kept: list separates the actual deadline from literal text");
+
+        invoke_1337($bot, $entry, 'mbRemindSnooze_ctx', '1', '30m');
+        is($db->selectrow_array('SELECT message FROM REMINDERS WHERE id_reminder=1'),
+            '[at:2800] ' . $kept . $body, "$kept: snooze replaces only the stored deadline");
+        @wire = ();
+        $MB961::Clock::now = 2799;
+        deliver_1337($bot, $entry);
+        is(scalar @wire, 0, "$kept: actual future deadline still blocks delivery");
+        $MB961::Clock::now = 2800;
+        deliver_1337($bot, $entry);
+        is_deeply(\@wire,
+            [['public','#test',"Friend: reminder from sender (stored)$label: $urgent$body"]],
+            "$kept: actual deadline delivers the intact text at the boundary");
+        if ($label ne '') {
+            my $next = $db->selectrow_array('SELECT message FROM REMINDERS WHERE delivered=0');
+            like($next // '', qr/\A\Q$kept\E\[at:[0-9]+\] \Q$body\E\z/,
+                "$kept: the next occurrence keeps the original body");
+        }
+    }
+}
 done_testing;

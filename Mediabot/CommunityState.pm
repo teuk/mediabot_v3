@@ -76,6 +76,18 @@ sub _reminder_next_epoch {
     die "reminder_calendar\n";
 }
 
+# Creation can put the deadline after recurrence or urgency; snooze puts it
+# first. Remove only that deadline, preserving the remaining tags and body.
+sub _reminder_without_deadline {
+    my ($text) = @_;
+    $text //= '';
+    return (undef, $text) unless $text =~ s{
+        \A ( (?: \[(?:!|daily:[0-9]{2}:[0-9]{2}|weekly:[0-6]:[0-9]{2}:[0-9]{2})\]\s+ )* )
+        \[at:([0-9]+)\] (?:\s+|\z)
+    }{$1}x;
+    return ($2, $text);
+}
+
 # ---------------------------------------------------------------------------
 # mbRemind_ctx --- !remind <nick> <message>
 # Store a memo in DB; deliver it next time the target nick speaks.
@@ -471,9 +483,6 @@ sub deliverReminders {
     my ($self, $nick, $channel) = @_;
 
     $self->{logger}->log(4, "deliverReminders() nick=$nick chan=$channel");
-    # Q2: helper to check if a remind message has a future [at:TS] tag
-    # Returns undef if not yet due, or stripped message if due/no tag
-    # (Inline — not a separate sub to avoid scope issues)
 
     # S3/fix: ensure DB connection alive before using dbh
     my $dbh = eval { $self->{db}->ensure_connected } // $self->{dbh};
@@ -511,23 +520,16 @@ sub deliverReminders {
     # mb161-B1: filtrer les non-dus AVANT de constituer la liste de livraison.
     my @pending;
     for my $row (@candidates) {
-        if ($row->{message} =~ /\[at:(\d+)\]/) {
-            next if time() < $1;   # pas encore du -> on ne le compte pas
-        }
-        push @pending, $row;
+        my ($deadline, $message) = _reminder_without_deadline($row->{message});
+        next if defined($deadline) && time() < $deadline;
+        push @pending, [$row, $message];
         last if @pending >= 3;     # limite anti-flood preservee
     }
     return unless @pending;
 
-    for my $r (@pending) {
+    for my $pending (@pending) {
+        my ($r, $message) = @$pending;
         my $stored_message = $r->{message};
-        # mb161-B1: le skip des non-dus est desormais fait en amont (boucle
-        # @candidates). Ici on strip seulement les tags [at:TS] du message
-        # avant livraison.
-        if ($r->{message} =~ /\[at:(\d+)\]/) {
-            $r->{message} =~ s/\s*\[at:\d+\]\s*/ /g;
-            $r->{message} =~ s/^\s+|\s+$//g;
-        }
         # Claim BEFORE offering output: a transport exception may follow a partial
         # send. Only an explicit refusal below permits a conditional release.
         my $sth_up = $dbh->prepare(q{
@@ -566,7 +568,7 @@ sub deliverReminders {
             }
         }
         # mb91-B1: strip les tags récurrents du message affiché
-        my $display_msg = $r->{message};
+        my $display_msg = $message;
         my $recur_tag = '';
         if ($display_msg =~ s/^\[daily:(\d{2}:\d{2})\]\s*//) {
             $recur_tag = " [daily $1]";
@@ -623,7 +625,7 @@ sub deliverReminders {
             next;
         }
         next unless $check && defined($check->{delivered}) && $check->{delivered} == 1;
-        if ($r->{message} =~ /^\[daily:(\d{2}:\d{2})\]\s*(.*)/) {
+        if ($message =~ /^\[daily:(\d{2}:\d{2})\]\s*(.*)/) {
             my ($hhmm, $real_msg) = ($1, $2);
             my ($hh, $mm) = split /:/, $hhmm;
             my $next_ts = eval { _reminder_next_epoch(time(), $hh, $mm) };
@@ -643,7 +645,7 @@ sub deliverReminders {
             };
             $self->{logger}->log(3, "daily remind re-scheduled for $nick at $hhmm (next: $next_ts)")
                 unless $@;
-        } elsif ($r->{message} =~ /^\[weekly:(\d):(\d{2}:\d{2})\]\s*(.*)/) {
+        } elsif ($message =~ /^\[weekly:(\d):(\d{2}:\d{2})\]\s*(.*)/) {
             # mb90-IMP1: réinsertion hebdomadaire — calcul du prochain occurrence du DOW+HH:MM
             my ($target_dow, $hhmm, $real_msg) = ($1, $2, $3);
             my ($hh, $mm) = split /:/, $hhmm;
@@ -724,10 +726,7 @@ sub mbRemindList_ctx {
     my $total = scalar(@rows);
     botNotice($self, $nick, "$total pending reminder(s) you have set:");
     for my $r (@rows) {
-        my $msg = $r->{message} // '';
-        # Snooze puts [at:] before recurrence. Remove scheduling tags first
-        # so both creation and snooze layouts expose recurrence and urgency.
-        $msg =~ s/\s*\[at:(\d+)\]\s*/ /g;  # strip tous les [at:TS]
+        my ($deadline, $msg) = _reminder_without_deadline($r->{message});
         $msg =~ s/^\s+|\s+$//g;
         # Render recurrence separately from the user message.
         my $daily_tag = '';
@@ -737,11 +736,9 @@ sub mbRemindList_ctx {
             my @dow_names = qw(Sun Mon Tue Wed Thu Fri Sat);
             $daily_tag = " [weekly $dow_names[$1] $2]";
         }
-        # BX-12/fix: strip [at:TS], detect remaining [at:TS] (après daily)
         my $due_str = '';
-        # Recalculer due_str depuis le message original si [at:TS] présent
-        if ($r->{message} =~ /\[at:(\d+)\]/) {
-            my $sl = $1 - time();
+        if (defined $deadline) {
+            my $sl = $deadline - time();
             $due_str = $sl > 0
                 ? ' [in ' . _seconds_to_human($sl) . ']'
                 : ' [overdue ' . _seconds_to_human(-$sl) . ' ago]';
@@ -819,11 +816,7 @@ sub mbRemindSnooze_ctx {
         botNotice($self, $nick, "Reminder #$id not found or already delivered."); return;
     }
     my $stored_message = $row->{message} // '';
-    my $msg = $stored_message;
-    # mb88-R2: strip [at:TS] où qu'il soit dans le message (pas seulement en début)
-    # Cas daily: "[daily:09:00] [at:1234] texte" → strip le [at:...] interne aussi
-    $msg =~ s/^\[at:\d+\]\s*//;       # strip en début (cas standard)
-    $msg =~ s/\s*\[at:\d+\]\s*/ /g;   # strip partout ailleurs (cas daily + snooze)
+    my (undef, $msg) = _reminder_without_deadline($stored_message);
     $msg =~ s/^\s+|\s+$//g;           # trim
     my $new_msg = "[at:$new_ts] $msg";
     # MB1373: adding a deadline (or replacing it with more digits) can exceed
