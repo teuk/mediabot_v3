@@ -231,7 +231,7 @@ sub _render_source_line {
 }
 
 sub _source_line {
-    my ($sources,$lang,$urls)=@_;
+    my ($sources,$lang,$urls,$displayed)=@_;
     my $prefix=$lang eq 'fr' ? 'Sources : ' : 'Sources: ';
     my (@entries,$line);
     $urls={} unless ref($urls) eq 'HASH';
@@ -254,6 +254,7 @@ sub _source_line {
         @entries=@candidate;
         last if @entries>=2;
     }
+    @$displayed=map {$_->[0]} @entries if $displayed;
     return $line;
 }
 sub _present_sources {
@@ -375,9 +376,11 @@ sub _ask {
     if (@{$self->{rate}{$key}}>=$cfg->{rate_max} || @{$self->{rate}{__global__}}>=$cfg->{global_rate_max}) {
         $self->_notice($nick,$lang,'rate');return 1;
     }
+    my $recall=clean($prompt) =~ /\A (?:(?:et|and)\s+)?
+        (?:(?:quelles\s+sont\s+)?(?:tes|vos|les)\s+|(?:what\s+are\s+)?your\s+)? sources? \s*[?!.]* \z/ix;
     my @providers=grep {provider_configured($bot->{conf},$_)} @{$cfg->{providers}};
-    if (@providers<$cfg->{min_providers}) {$self->_notice($nick,$lang,'not_enough_providers');return 1}
-    my $ticket=eval {$memory->begin_turn($scope,$actor,$prompt,$cfg->{daily_limit},$nick)};
+    if (!$recall && @providers<$cfg->{min_providers}) {$self->_notice($nick,$lang,'not_enough_providers');return 1}
+    my $ticket=eval {$memory->begin_turn($scope,$actor,$prompt,$cfg->{daily_limit},$nick,$recall)};
     unless ($ticket) {$self->_notice($nick,$lang,'memory');return 1}
     if ($ticket->{error}) {$self->_notice($nick,$lang,$ticket->{error});return 1}
     $ticket->{metaai_policy_epoch}=policy_epoch($bot,$channel);
@@ -415,14 +418,15 @@ sub _ask {
             unless ($alive->()) {$release->();return}
             my $base=eval {$bot->{conf}->get('shorturl.PUBLIC_BASE_URL')}//'';
             my $urls=display_urls($sources,$presentation,$base);
-            my $source_line=@$sources?_source_line($sources,$lang,$urls):undef;
+            my @displayed;
+            my $source_line=@$sources?_source_line($sources,$lang,$urls,\@displayed):undef;
             if (@$sources && !defined($source_line)) {$release->();$self->_notice($nick,$lang,'web');return}
-            my $chunks=format_meta_reply($result->{answer});
+            my $chunks=$recall && defined($source_line) ? [$source_line] : format_meta_reply($result->{answer});
             unless (@$chunks) {$release->();$self->_notice($nick,$lang,'failed');return}
-            push @$chunks,$source_line if defined $source_line;
+            push @$chunks,$source_line if defined($source_line) && !$recall;
             $self->_emit($channel,$chunks,$cfg,$alive,sub {
                 my ($sent)=@_;
-                eval {$memory->commit_turn($ticket,$sent)} if defined $sent;
+                eval {$memory->commit_turn($ticket,$sent,\@displayed)} if defined($sent) && !$recall;
                 $release->();
                 my $shortened=grep {$urls->{$_} ne $_} keys %$urls;
                 my $anchors=defined($result->{evidence_anchors}) && !ref($result->{evidence_anchors})
@@ -433,6 +437,14 @@ sub _ask {
         if (@$sources) {$self->_present_sources($sources,$deliver)}
         else {$deliver->({})}
     };
+    if ($recall) {
+        $self->_log_event({kind=>'intent',route=>'task'});
+        my $answer=$lang eq 'fr'
+            ? 'Je n’ai pas de sources vérifiées pour cette réponse. Quel point veux-tu que je vérifie ?'
+            : 'I have no verified sources for that reply. What would you like me to check?';
+        $done->({ok=>1,answer=>$answer,sources=>[map {{url=>$_}} @{$ticket->{source_urls}}]});
+        return 1;
+    }
     my ($room_nicks,$clarify)=_room_context($bot,$channel,$prompt,$ticket->{messages});
     if ($clarify && $cfg->{web} ne 'always') {
         $self->_log_event({kind=>'intent',route=>'chat'});

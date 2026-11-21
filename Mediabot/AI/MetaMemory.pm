@@ -10,7 +10,7 @@ use File::Temp qw(tempfile);
 use Digest::SHA qw(sha256_hex);
 use Encode qw(encode);
 use JSON::PP ();
-use Mediabot::AI::MetaPolicy qw(clean fold);
+use Mediabot::AI::MetaPolicy qw(clean fold is_acknowledgement safe_url);
 
 sub new {
     my ($class,%args)=@_;
@@ -107,8 +107,21 @@ sub _locked {
     close $lock;
     return $result;
 }
+sub _source_urls {
+    my ($urls)=@_;
+    return [] unless ref($urls) eq 'ARRAY';
+    my (%seen,@valid);
+    for my $raw (@$urls) {
+        my $url=safe_url($raw);
+        next unless defined($url) && !$seen{$url}++;
+        push @valid,$url;
+        last if @valid==2;
+    }
+    return \@valid;
+}
+
 sub begin_turn {
-    my ($self,$scope,$nick,$prompt,$daily,$display)=@_;
+    my ($self,$scope,$nick,$prompt,$daily,$display,$recall_sources)=@_;
     my $key=$self->_key($scope); my $actor=$self->actor($nick);
     return $self->_locked(sub {
         my ($state,$now)=@_;
@@ -137,19 +150,27 @@ sub begin_turn {
         my $speaker=$room->{actors}{$actor};
         my $name=$room->{names}{$actor}//'';
         push @messages,{role=>'user',content=>$speaker.(length($name)?" ($name)":'').': '.clean($prompt,4000)};
+        my %recall;
+        if ($recall_sources) {
+            # A new substantive reply ends the topic, even if it had no sources.
+            my ($previous)=grep {!is_acknowledgement($_->{prompt})} reverse @{$room->{turns}};
+            $recall{source_urls}=$previous ? _source_urls($previous->{source_urls}) : [];
+        }
         $room->{at}=$now; $state->{usage}{$day}++;
         return ({messages=>\@messages,scope=>$key,epoch=>$room->{epoch},incarnation=>$room->{incarnation},actor=>$actor,
-            speaker=>$speaker,name=>$name,prompt=>clean($prompt,4000)},1);
+            speaker=>$speaker,name=>$name,prompt=>clean($prompt,4000),%recall},1);
     });
 }
 sub commit_turn {
-    my ($self,$ticket,$answer)=@_;
+    my ($self,$ticket,$answer,$source_urls)=@_;
+    my $urls=_source_urls($source_urls);
     return $self->_locked(sub {
         my ($state,$now)=@_; my $room=_ticket_room($state,$ticket);
         return (0,0) unless $room;
         my ($current_actor)=grep {$room->{actors}{$_} eq $ticket->{speaker}} keys %{$room->{actors}};
         push @{$room->{turns}},{actor=>$current_actor//$ticket->{actor},speaker=>$ticket->{speaker},
-            name=>$ticket->{name}//'',prompt=>$ticket->{prompt},answer=>clean($answer,1600),at=>$now};
+            name=>$ticket->{name}//'',prompt=>$ticket->{prompt},answer=>clean($answer,1600),at=>$now,
+            (@$urls ? (source_urls=>$urls) : ())};
         splice @{$room->{turns}},0,@{$room->{turns}}-$self->{turns} if @{$room->{turns}}>$self->{turns};
         $room->{at}=$now;
         return (1,1);

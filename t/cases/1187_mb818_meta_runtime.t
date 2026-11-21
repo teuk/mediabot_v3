@@ -306,7 +306,7 @@ complete_addressed_turn($bot,$client,'Qui est Papillon ?');
 complete_addressed_turn($bot,$client,'Papillon, quelle est la météo à Brest ?');
 unlike(complete_addressed_turn($bot,$client,'Et lui ?'),qr/^CURRENT IRC NICKNAMES:/m,
     'a factual topic change does not carry over an old IRC nick');
-complete_addressed_turn($bot,$client,'Tes sources ?');
+complete_addressed_turn($bot,$client,'Donne-moi des sources sur la météo à Brest.');
 like($sent[-1][1],qr/^Sources : /,'an explicit source request still reaches the evidence route');
 
 ($bot,$client,$runtime,$dir)=fixture();
@@ -327,4 +327,51 @@ unlike(complete_addressed_turn($bot,$client,'Et lui ?'),qr/^CURRENT IRC NICKNAME
 $bot->{conf}{'meta_ai.WEB_MODE'}='always';
 complete_addressed_turn($bot,$client,'Et elle ?');
 is(scalar @queries,1,'always mode retains forced research');
+
+($bot,$client,$runtime,$dir)=fixture();
+$bot->{conf}{'meta_ai.RATE_MAX'}=12;
+complete_addressed_turn($bot,$client,'Quelle est la dernière version de Debian ?');
+my $debian_sources=$sent[-1][1];
+complete_addressed_turn($bot,$client,'Merci !');
+my $calls_before_recall=@{$client->{calls}};
+my $queries_before_recall=@queries;
+my $sent_before_recall=@sent;
+complete_addressed_turn($bot,$client,'Tes sources ?');
+is_deeply([map {$_->[1]} @sent[$sent_before_recall..$#sent]],[$debian_sources],
+    'a bare source request resends the verified styled IRC line on its own after a thank-you');
+complete_addressed_turn($bot,$client,'Et tes sources ?');
+is(scalar @{$client->{calls}},$calls_before_recall,'repeated source recall makes no model calls');
+is(scalar @queries,$queries_before_recall,'repeated source recall starts no new search');
+is(scalar @{history($dir)},2,'source recall leaves the substantive turn in conversation memory');
+
+my $callback;
+$runtime->{shorten_start}=sub {$callback=$_[1]};
+ask($bot,'Bob','#test','Tes sources ?');
+my $sent_before_forget=@sent;
+ask($bot,'Alice','#test','/forget');
+$callback->({}) if $callback;
+is(scalar @sent,$sent_before_forget,'forget cancels pending source recall');
+$runtime->{shorten_start}=undef;
+complete_addressed_turn($bot,$client,'Sources ?');
+like($sent[-1][1],qr/Quel point veux-tu que je vérifie/,'forgotten sources cannot be recalled');
+
+($bot,$client,$runtime,$dir)=fixture();
+complete_addressed_turn($bot,$client,'Quelle est la dernière version de Debian ?');
+$lang='en';
+my $sent_before_other=@sent;
+ok(ask($bot,'Bob','#other','Your sources?'),'source recall is handled on another enabled channel');
+is_deeply([map {$_->[1]} @sent[$sent_before_other..$#sent]],
+    ['I have no verified sources for that reply. What would you like me to check?'],
+    'the other channel receives a clarification in English, with no cross-channel citations');
+is(scalar @{$client->{calls}},4,'the clarification does not call a contributor');
+
+($bot,$client,$runtime,$dir)=fixture();
+complete_addressed_turn($bot,$client,'Quelle est la dernière version de Debian ?');
+ask($bot,'Alice','#test','mon mot repère : hibou');
+drafts($client,4,0);
+final($client,7,'Chat reply with https://example.org/unverified');
+complete_addressed_turn($bot,$client,'Sources ?');
+like($sent[-1][1],qr/Quel point veux-tu que je vérifie/,
+    'an intervening chat turn blocks recall of older sources and unverified links');
+is(scalar @queries,1,'the latest unsourced reply does not trigger a search without a topic');
 done_testing;

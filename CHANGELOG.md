@@ -1,3 +1,8 @@
+## MB1411 — Recall the sources used in the previous MetaAI answer
+
+- Replay the verified links that were delivered in the last substantive reply in the channel. A brief acknowledgement can follow the reply before the request for sources.
+- Ask what to verify when the reply has no saved sources. Keep source requests with a stated topic on the research route.
+
 ## MB1410 — Keep MetaAI's conversational follow-ups on topic
 
 - Retain a single live room nickname across acknowledgements and repeated short follow-ups. Stop at the latest substantive turn.
