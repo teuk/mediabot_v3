@@ -82,7 +82,7 @@ return sub {
     $assert->is($fmt->('PT2H'),       '2h',            'PT2H → 2h');
 
     # --- 2. displayYoutubeDetails() garde le bloc durée ---------------------
-    my $display = _extract_sub_528($src, 'displayYoutubeDetails');
+    my $display = _extract_sub_528($src, 'youtube_preview_message');
     $assert->ok(
         defined $display && $display ne '',
         'displayYoutubeDetails source extrait'

@@ -20,6 +20,7 @@ use Mediabot::AI::MetaChat;
 use Mediabot::AI::MetaReply qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label source_requires_shortening);
 use Mediabot::AI::MetaKnowledge ();
 use Mediabot::AI::MetaActivation qw(channel_policy policy_epoch);
+use Mediabot::External::YouTube qw(_is_youtube_url youtube_preview_message);
 
 sub new {
     my ($class,%args)=@_;
@@ -293,6 +294,42 @@ sub _present_sources {
         });
     $complete->({}) unless $worker;
 }
+
+sub _preview_sources {
+    my ($self,$displayed,$done)=@_;
+    my (%seen,@videos);
+    for my $url (@$displayed) {
+        my $id=_is_youtube_url($url);
+        push @videos,$url if defined($id) && !$seen{$id}++;
+    }
+    return $done->([]) unless @videos;
+    my $bot=$self->{bot};
+    my $loop=Mediabot::AI::Transport::usable_loop($bot);
+    return $done->([]) unless $loop;
+
+    my $finished=0;
+    my $complete=sub {
+        my ($record)=@_;
+        return if $finished++;
+        my $value=ref($record) eq 'HASH' && $record->{ok} ? $record->{value} : undef;
+        $done->(ref($value) eq 'ARRAY' ? $value : []);
+    };
+    my $worker=eval {
+        require Mediabot::AsyncWorker;
+        require Mediabot::External;
+        Mediabot::AsyncWorker->start(loop=>$loop,label=>'meta YouTube previews',
+            timeout=>18,max_output=>8192,child=>sub {
+                my @previews;
+                for my $url (@videos) {
+                    my $preview=eval {youtube_preview_message($bot,$url,compact=>1)};
+                    push @previews,$preview if defined($preview) && length($preview)
+                        && _utf8_text_bytes($preview)<=400;
+                }
+                return \@previews;
+            },on_done=>$complete);
+    };
+    $complete->() unless $worker;
+}
 sub _log_event {
     my ($self,$event)=@_;
     return unless ref($event) eq 'HASH';
@@ -427,11 +464,16 @@ sub _ask {
             $self->_emit($channel,$chunks,$cfg,$alive,sub {
                 my ($sent)=@_;
                 eval {$memory->commit_turn($ticket,$sent,\@displayed)} if defined($sent) && !$recall;
-                $release->();
                 my $shortened=grep {$urls->{$_} ne $_} keys %$urls;
                 my $anchors=defined($result->{evidence_anchors}) && !ref($result->{evidence_anchors})
                     && $result->{evidence_anchors}=~/^[0-2]$/?$result->{evidence_anchors}:0;
                 eval {$bot->{logger}->log(0,defined($sent)?'META_AI completed contributors='.scalar(@{$result->{contributors}||[]}).' web='.($result->{web_used}?1:0).' degraded='.($result->{degraded}?1:0).' citation_repair='.($result->{citation_repair}?1:0).' anchors='.$anchors.' shorturls='.$shortened:'[WARN] META_AI delivery_aborted')};
+                return $release->() unless defined($sent) && @displayed;
+                $self->_preview_sources(\@displayed,sub {
+                    my ($previews)=@_;
+                    return $release->() unless @$previews && $alive->();
+                    $self->_emit($channel,$previews,$cfg,$alive,$release);
+                });
             });
         };
         if (@$sources) {$self->_present_sources($sources,$deliver)}

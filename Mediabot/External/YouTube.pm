@@ -17,6 +17,7 @@ use Exporter 'import';
 use JSON::MaybeXS;
 use URI::Escape qw(uri_escape_utf8);
 use Mediabot::External::URLCodec qw(_uri_escape_bytes);
+use Mediabot::IRC::TextBudget qw(_utf8_text_bytes truncate_utf8);
 
 # MB876: preserve legacy imports and fully-qualified calls while each feature
 # has one implementation in its own module. External imports the owners directly.
@@ -31,6 +32,7 @@ our @EXPORT_OK = qw(
     getYoutubeDetails
     _youtube_html_fallback
     displayYoutubeDetails
+    youtube_preview_message
     displayWeather_ctx
     _irc_color
     _yt_text
@@ -167,6 +169,24 @@ sub getYoutubeDetails {
 
 sub _youtube_html_fallback {
     my ($self, $nick, $channel, $url, $video_id) = @_;
+    my $preview = _youtube_oembed_preview($self, $url, $video_id);
+    return undef unless defined $preview;
+    Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $preview");
+    return 1;
+}
+
+sub _preview_field {
+    my ($text, $max_bytes) = @_;
+    return '' if ref($text);
+    $text =~ s/[\x00-\x1f\x7f]+/ /g;
+    $text =~ s/^\s+|\s+$//g;
+    utf8::upgrade($text);
+    return $text if _utf8_text_bytes($text) <= $max_bytes;
+    return truncate_utf8($text, $max_bytes - 3, '…');
+}
+
+sub _youtube_oembed_preview {
+    my ($self, $url, $video_id, $compact) = @_;
 
     $self->{logger}->log(3, "_youtube_html_fallback() trying oEmbed for $video_id");
 
@@ -181,7 +201,7 @@ sub _youtube_html_fallback {
     my $oembed_url = 'https://www.youtube.com/oembed?format=json&url='
                    . uri_escape_utf8($oembed_base);
 
-    my $http = Mediabot::External::_make_http(timeout => 8, max_size => 64 * 1024);
+    my $http = Mediabot::External::_make_http(timeout => $compact ? 4 : 8, max_size => 64 * 1024);
     my $res  = eval { $http->get($oembed_url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($res->{success}) {
@@ -201,6 +221,7 @@ sub _youtube_html_fallback {
 
     my $title       = $data->{title}       // '';
     my $author_name = $data->{author_name} // '';
+    return undef if ref($title) || ref($author_name);
 
     unless ($title ne '') {
         $self->{logger}->log(3, "_youtube_html_fallback() oEmbed returned no title for $video_id");
@@ -211,6 +232,11 @@ sub _youtube_html_fallback {
     $author_name = Mediabot::External::_decode_html($author_name);
     # MB1190: strip only the exact terminal channel marker, never the title.
     $author_name =~ s/(?<=\S) - Topic\z//;
+    if ($compact) {
+        $title = _preview_field($title, 208);
+        $author_name = _preview_field($author_name, 92);
+        return undef unless length $title;
+    }
 
     $self->{logger}->log(3, "_youtube_html_fallback() oEmbed title='$title' author='$author_name'");
 
@@ -221,14 +247,21 @@ sub _youtube_html_fallback {
         $msg .= _yt_meta("by $author_name");
     }
 
-    Mediabot::Helpers::botPrivmsg($self, $channel, "($nick) $msg");
-    return 1;
+    return $msg;
 }
 
 
 sub displayYoutubeDetails {
     my ($self, $message, $sNick, $sChannel, $sText) = @_;
+    my $preview = youtube_preview_message($self, $sText);
+    return undef unless defined $preview;
+    Mediabot::Helpers::botPrivmsg($self, $sChannel, "($sNick) $preview");
+    return 1;
+}
 
+sub youtube_preview_message {
+    my ($self, $sText, %opts) = @_;
+    my $compact = $opts{compact};
     my $conf = $self->{conf};
     $self->{logger}->log(3, "displayYoutubeDetails() $sText");
 
@@ -246,14 +279,14 @@ sub displayYoutubeDetails {
     # S5/cache: serve from cache if fresh (TTL = YT_CACHE_TTL seconds)
     my $now = time();
     my $yt_cache = $self->{_yt_cache}{$sYoutubeId};
-    if ($yt_cache && ($now - $yt_cache->{ts}) < YT_CACHE_TTL) {
+    if (!$compact && $yt_cache && ($now - $yt_cache->{ts}) < YT_CACHE_TTL) {
         $self->{logger}->log(4, "displayYoutubeDetails() cache hit for $sYoutubeId");
-        Mediabot::Helpers::botPrivmsg($self, $sChannel, "($sNick) $yt_cache->{msg}");
-        return 1;
+        return $yt_cache->{msg};
     }
 
     my $APIKEY = $conf->get('main.YOUTUBE_APIKEY');
     unless (defined($APIKEY) && $APIKEY ne '') {
+        return _youtube_oembed_preview($self, $sText, $sYoutubeId, $compact) if $compact;
         $self->{logger}->log(1, "displayYoutubeDetails() API Youtube V3 DEV KEY not set in " . $self->{config_file});
         $self->{logger}->log(1, "displayYoutubeDetails() section [main] YOUTUBE_APIKEY=key");
         return undef;
@@ -263,11 +296,12 @@ sub displayYoutubeDetails {
     my $url = "https://www.googleapis.com/youtube/v3/videos"
             . "?id=$sYoutubeId&key=$APIKEY&part=snippet,contentDetails,statistics,status";
 
-    my $http     = Mediabot::External::_make_http(timeout => 8, verify_SSL => 1);
+    my $http     = Mediabot::External::_make_http(timeout => $compact ? 4 : 8, verify_SSL => 1);
     my $response = eval { $http->get($url); } // { success => 0, status => 0, reason => $@ };
 
     unless ($response->{success}) {
         $self->{logger}->log(3, "displayYoutubeDetails() HTTP error $response->{status} for $sYoutubeId");
+        return _youtube_oembed_preview($self, $sText, $sYoutubeId, $compact) if $compact;
         return undef;
     }
 
@@ -293,7 +327,7 @@ sub displayYoutubeDetails {
 
     unless (@fTyoutubeItems && ref($fTyoutubeItems[0]) eq 'HASH') {
         $self->{logger}->log(3, "displayYoutubeDetails() API returned no usable items for $sYoutubeId — trying HTML fallback");
-        return _youtube_html_fallback($self, $sNick, $sChannel, $sText, $sYoutubeId);
+        return _youtube_oembed_preview($self, $sText, $sYoutubeId, $compact);
     }
 
     my $item          = $fTyoutubeItems[0];
@@ -309,6 +343,7 @@ sub displayYoutubeDetails {
     my $sTitle        = $localized->{title}          // $snippet->{title} // '';
     my $schannelTitle = $snippet->{channelTitle}     // '';
     my $sDuration     = $contentDetails->{duration}  // '';
+    return undef if $compact && (ref($sTitle) || ref($schannelTitle) || ref($sDuration) || length($sDuration)>32);
 
     # A2: single log entry for all YouTube fields
     $self->{logger}->log(4, "displayYoutubeDetails() duration=$sDuration views=$sViewCount title=$sTitle channel=$schannelTitle");
@@ -335,6 +370,13 @@ sub displayYoutubeDetails {
     if (($sTitle        =~ tr/A-Z//) > 20) { $sTitle        = ucfirst(lc($sTitle)); }
     if (($schannelTitle =~ tr/A-Z//) > 20) { $schannelTitle = ucfirst(lc($schannelTitle)); }
     substr($schannelTitle, -8) = '' if $is_topic_channel;
+    if ($compact) {
+        $sTitle = _preview_field($sTitle, 208);
+        $schannelTitle = _preview_field($schannelTitle, 92);
+        $sDisplayDuration = _preview_field($sDisplayDuration, 24);
+        $sViewCount = _preview_field($sViewCount, 20);
+        return undef unless length $sTitle;
+    }
 
     # --- Formatage IRC coloré ---
     my $sMsgSong = _yt_label();
@@ -357,6 +399,7 @@ sub displayYoutubeDetails {
     $sMsgSong   .= _yt_meta("by $schannelTitle");
 
     $sMsgSong =~ s/\r|\n//g;
+    return $sMsgSong if $compact;
 
     # S5/cache: store result
     $self->{_yt_cache}{$sYoutubeId} = { ts => time(), msg => $sMsgSong };
@@ -366,9 +409,7 @@ sub displayYoutubeDetails {
             if (time() - ($self->{_yt_cache}{$vid}{ts} // 0)) > YT_CACHE_TTL * 10;
     }
 
-    Mediabot::Helpers::botPrivmsg($self, $sChannel, "($sNick) $sMsgSong");
-
-    return 1;
+    return $sMsgSong;
 }
 
 # ---------------------------------------------------------------------------

@@ -590,6 +590,16 @@ For example, a plain-text view reads:
 French channels keep `Sources :`. Labels and style controls share the existing
 400-byte sources-message budget. Labels are compacted or omitted to fit
 complete URLs.
+
+Each distinct YouTube video from the displayed citations can add a separate
+preview after the sources message, even when the answer used two lines. The
+original destination identifies the video when the displayed link is shortened.
+MetaAI uses the existing YouTube metadata format, with title and channel via
+oEmbed when no YouTube API key is available. Long metadata is clipped to fit a
+single IRC message. Preview lookup runs after the answer and citations are
+delivered. A missing preview leaves them in place. Preview text stays outside
+the conversation memory and uses the same channel delivery checks.
+
 Accidental literal line-break/bullet escape artifacts are flattened in provider
 prose before output and memory retention; incoming prompts and evidence are not
 rewritten. Quoted escape notation and ambiguous code/path sequences remain intact.

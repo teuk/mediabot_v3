@@ -1,3 +1,8 @@
+## MB1414 — Preview YouTube videos cited by MetaAI
+
+- Show a separate YouTube preview after the source line, including after a long IRC answer. Resolve shortened citations by their original video URL and preview duplicates once.
+- Use the existing YouTube metadata format and fall back to oEmbed when no API key is configured. Unavailable previews leave the delivered answer and source links usable.
+
 ## MB1413 — Preserve useful MetaAI search excerpts
 
 - Keep a search excerpt when page extraction finds no terms from the query or loses terms already present in the excerpt. Relevant extracts can still replace the excerpt with fuller evidence.

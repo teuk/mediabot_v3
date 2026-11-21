@@ -6,7 +6,10 @@ use Test::More;
 use File::Temp qw(tempdir);
 use JSON::PP qw(encode_json decode_json);
 use Encode qw(encode);
+use IO::Async::Loop;
+use Mediabot::AsyncWorker;
 use Mediabot::AI::MetaRuntime;
+use Mediabot::External ();
 {
     package MB818RuntimeConf;
     sub get {$_[0]{$_[1]}}
@@ -20,6 +23,8 @@ use Mediabot::AI::MetaRuntime;
     sub gethChannelsNicksOnChan {return @{$_[0]{nicks}{lc $_[1]}||[]}}
     package MB818RuntimeClient;
     sub submit {my ($s,$request,%args)=@_;push @{$s->{calls}},{request=>$request,done=>$args{on_done}};1}
+    package MB818RuntimeYouTube;
+    sub get {my ($self,$url)=@_;push @{$self->{calls}},$url;return $self->{response}}
 }
 my (@sent,@notices,@timers,@opts,@queries);my $accepted=1;my $chanset=1;my $lang='fr';my $now=1791892800;
 no warnings 'redefine';
@@ -421,4 +426,58 @@ while (my $timer=shift @timers) {$timer->[1]->()}
 is_deeply([map {$_->[1]} @sent],[q{Je n’ai rien trouvé de fiable sur ce point.}],
     'a verified evidence limit is brief and emits no unrelated citation');
 ok(!exists(history($dir)->[0]{source_urls}),'insufficient findings cannot be recalled as delivered references');
+
+{
+    ($bot,$client,$runtime,$dir)=fixture();
+    $bot->{loop}=IO::Async::Loop->new;
+    my $video='https://www.youtube.com/watch?v=AbCdEfGh123&feature='.('x'x120);
+    my $duplicate='https://youtu.be/AbCdEfGh123';
+    my $alias='https://go.example.org/shorturl/ABCD2345';
+    $bot->{conf}{'shorturl.PUBLIC_BASE_URL'}='https://go.example.org/shorturl/';
+    $runtime->{shorten_start}=sub {$_[1]->({mappings=>[{url=>$video,display_url=>$alias}]})};
+    $runtime->{web_start}=sub {$_[1]->({ok=>1,sources=>[
+        {id=>1,url=>$video,text=>'The official recording documents the question and its supporting facts.'},
+        {id=>2,url=>$duplicate,text=>'Another permissible link to the same recording of the event.'},
+        {id=>3,url=>'https://www.youtube.com/shorts/ZyXwVuTs987',text=>'A third recording that will not be cited.'},
+    ]});1};
+    my (@workers,@http);
+    local *Mediabot::AsyncWorker::start=sub {my (undef,%args)=@_;push @workers,\%args;return 1};
+    local *Mediabot::External::_make_http=sub {bless {calls=>\@http,response=>{success=>1,
+        content=>encode_json({title=>'Émission '.('🎬'x145)."\x01ACTION",author_name=>'Studio '.('é'x90)})}},'MB818RuntimeYouTube'};
+    ask($bot,'Alice','#test','Trouve la vidéo officielle de l’événement.');
+    drafts($client,0,1);
+    final($client,3,'Une explication longue. 'x50,[1,2]);
+    is(scalar @workers,0,'the optional lookup does not delay the answer');
+    while (my $timer=shift @timers) {$timer->[1]->()}
+    is(scalar @sent,3,'a two-line answer and its source line are sent first');
+    like($sent[2][1],qr/\Q$alias\E/,'citation visibly uses the verified short URL');
+    is(scalar @workers,1,'one worker prepares previews for displayed sources');
+    SKIP: {
+        skip 'source preview worker did not start', 13 unless @workers;
+        my $work=shift @workers;
+        my $preview=$work->{child}->();
+        $work->{on_done}->({ok=>1,value=>$preview});
+        $work->{on_done}->({ok=>1,value=>$preview});
+        is(scalar @http,1,'duplicate variants and uncited videos do not cause more lookups');
+        like($http[0],qr{\Ahttps://www\.youtube\.com/oembed\?.*AbCdEfGh123},
+            'oEmbed uses the original YouTube identity without an API key');
+        is(scalar @sent,4,'one separate preview line follows the existing lines');
+        my $preview_line=$sent[3] ? $sent[3][1] : '';
+        like($preview_line,qr/Émission.*by Studio/s,'preview uses YouTube title and channel metadata');
+        unlike($preview_line,qr/[\x00\x01\r\n]/,'remote fields cannot inject IRC commands or lines');
+        cmp_ok(length(encode('UTF-8',$preview_line)),'<=',400,'long Unicode metadata fits a single IRC message');
+        unlike(history($dir)->[0]{answer},qr/Émission/,'preview is not stored as conversation or evidence');
+        is_deeply(history($dir)->[0]{source_urls},[$video,$duplicate],'memory keeps the displayed original destinations');
+        ok(!keys %{$runtime->{jobs}},'completed preview releases the job');
+
+        ask($bot,'Alice','#test','Tes sources ?');
+        is(scalar @workers,1,'source recall also adds a preview for the displayed video');
+        my $before=@sent;
+        $bot->{wit_runtime_state}{generation}++;
+        $workers[0]{on_done}->({ok=>1,value=>$preview});
+        is(scalar @sent,$before,'a stale connection cannot publish the late preview');
+        ok(!keys %{$runtime->{jobs}},'a stale preview still releases its job');
+        is(scalar @{history($dir)},1,'source recall leaves the original answer in memory');
+    }
+}
 done_testing;
