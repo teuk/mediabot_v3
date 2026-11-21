@@ -1,5 +1,6 @@
 use strict;
 use warnings;
+use utf8;
 use Protocol::IRC;
 use Test::More;
 use DBI;
@@ -644,6 +645,44 @@ for my $prefix ('#','&','!','+') {
             is_deeply(\@warnings,[],'voter ranking emits no warnings');
         }
         $bot->{dbh}->disconnect; $peer->disconnect;
+    }
+}
+{
+    local *Mediabot::UserCommands::logBot = sub { 1 };
+    my $bot = Mediabot->new({});
+    $bot->{_karma_log} = {'#test' => [
+        map { {nick=>'bob',from=>'Alice',delta=>'+1',ts=>time()-$_} }
+            (3600, 3601, 86400, 2592000, 2592001)
+    ]};
+    for my $report (['karmadiff','bob'], ['karmadiff','all'], ['karmainfo','bob']) {
+        my ($command,$target) = @$report;
+        my $invoke = sub {
+            @wire = (); @warnings = ();
+            my $ctx = Mediabot::Context->new(bot=>$bot,nick=>'Reader',channel=>'#TeSt',
+                command=>$command,args=>[$target,@_]);
+            $bot->command_registry->handler_for($command,'public')->($ctx);
+        };
+        my (@invalid,@expected);
+        for my $window ('1٢h','٣d','1h30m','tomorrow',"7d\n") {
+            $invoke->($window);
+            push @invalid, [[@wire], [@warnings]];
+            push @expected, [[['notice','Reader',"Unknown window '$window'. Use: 6h 12h 24h 7d 30d ..."]], []];
+        }
+        is_deeply(\@invalid,\@expected,"$command $target rejects invalid windows privately and without warnings");
+
+        for my $case (['0d','1h',1], ['1H','1h',1], ['24h','24h',3], ['31d','30d',4],
+                      [('9' x 340).'h','30d',4]) {
+            my ($window,$label,$votes) = @$case;
+            $invoke->($window);
+            my $text = $wire[0][2] // '';
+            my ($actual_window) = $command eq 'karmainfo'
+                ? $text =~ /\[memory\] \(last ([0-9]+[dh])\)/
+                : $text =~ /\blast ([0-9]+[dh])\b/;
+            my ($delta) = $text =~ /(?:bob: |received |karma )\+([0-9]+)/;
+            is_deeply([scalar @wire,$wire[0][0],$wire[0][1],$actual_window,$delta,\@warnings],
+                [1,'public','#TeSt',$label,$votes,[]],
+                "$command $target reports the applied window and its inclusive cutoff for $label");
+        }
     }
 }
 done_testing;

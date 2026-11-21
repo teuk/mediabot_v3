@@ -1,3 +1,8 @@
+## MB1396 — Validate and report the effective karma time window
+
+- Use one duration parser for karmainfo, karmadiff and karmadiff all. Reject malformed durations privately before reading the vote log.
+- Display the effective one-hour or 30-day limit when a request is clamped. Keep existing defaults and include votes at the exact cutoff.
+
 ## MB1395 — Report conversion underflow instead of displaying zero
 
 - Reject nonzero input that rounds to zero during parsing and nonzero linear conversions that round to zero after scaling.

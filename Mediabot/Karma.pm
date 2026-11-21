@@ -599,6 +599,23 @@ sub mbKarmaWatch_ctx {
     return 1;
 }
 
+sub _karma_report_window {
+    my ($ctx, $token) = @_;
+    my $window = lc($token // '');
+    unless ($window =~ /\A([0-9]+)([dh])\z/) {
+        botNotice($ctx->bot, $ctx->nick, "Unknown window '$window'. Use: 6h 12h 24h 7d 30d ...");
+        return;
+    }
+    my ($amount, $unit) = ($1, $2);
+    $amount =~ s/\A0+//;
+    return (3600, '1h') unless length $amount;
+    # Bound the digits before numeric conversion. The maximum is 720 hours.
+    return (2592000, '30d') if length($amount) > 3;
+    my $seconds = $amount * ($unit eq 'd' ? 86400 : 3600);
+    return (2592000, '30d') if $seconds > 2592000;
+    return ($seconds, $window);
+}
+
 # ---------------------------------------------------------------------------
 # mbKarmaInfo_ctx --- !karmainfo <nick>  (BB5)
 # Show detailed karma stats for a nick from _karma_log.
@@ -621,13 +638,11 @@ sub mbKarmaInfo_ctx {
     # mb112-IMP1: période optionnelle Nd/Nh — borner le ring buffer
     my $window_secs;
     my $window_label = '';
-    if (@args && $args[0] =~ /^(\d+)(d|h)$/i) {
-        my ($val, $unit) = ($1, lc $2);
-        $window_secs  = $unit eq 'h' ? $val * 3600 : $val * 86400;
-        $window_secs  = 3600    if $window_secs < 3600;
-        $window_secs  = 2592000 if $window_secs > 2592000;
-        $window_label = " (last ${val}${unit})";
-        shift @args;
+    if (@args) {
+        my $label;
+        ($window_secs, $label) = _karma_report_window($ctx, $args[0]);
+        return unless defined $window_secs;
+        $window_label = " (last $label)";
     }
     my $since = defined $window_secs ? time() - $window_secs : 0;
 
@@ -846,18 +861,14 @@ sub mbKarmaDiff_ctx {
     my $channel = $ctx->channel;
     my @args    = (ref($ctx->args) eq 'ARRAY') ? @{ $ctx->args } : ();
 
+    my ($window_secs, $window_label) = (86400, '24h');
+    if (@args >= 2) {
+        ($window_secs, $window_label) = _karma_report_window($ctx, $args[1]);
+        return unless defined $window_secs;
+    }
+
     # mb109-IMP1: !karmadiff all [period] — top 5 variations sur la période
     if (@args && lc($args[0]) eq 'all') {
-        shift @args;
-        my $window_secs  = 86400;
-        my $window_label = '24h';
-        if (@args && $args[0] =~ /^(\d+)(d|h)$/) {
-            my ($val, $unit) = ($1, $2);
-            $window_secs  = $unit eq 'h' ? $val * 3600 : $val * 86400;
-            $window_secs  = 3600    if $window_secs < 3600;
-            $window_secs  = 2592000 if $window_secs > 2592000;
-            $window_label = "${val}${unit}";
-        }
         my $kd_chan = is_channel($channel) ? $channel : undef;
         my @all_entries;
         if ($kd_chan) {
@@ -890,24 +901,6 @@ sub mbKarmaDiff_ctx {
     }
 
     my $target  = @args ? lc($args[0]) : lc($nick);
-
-    # mb89-IMP1 / mb108-IMP2: fenêtre temporelle configurable
-    # Formes acceptées : 6h, 12h, 24h (défaut), 7d — et maintenant toute forme Nd/Nh
-    my $window_secs  = 86400;
-    my $window_label = '24h';
-    if (@args >= 2) {
-        my $w = lc($args[1]);
-        if ($w =~ /^(\d+)(d|h)$/) {
-            my ($val, $unit) = ($1, $2);
-            $window_secs  = $unit eq 'h' ? $val * 3600 : $val * 86400;
-            $window_secs  = 3600    if $window_secs < 3600;    # min 1h
-            $window_secs  = 2592000 if $window_secs > 2592000; # max 30d
-            $window_label = "${val}${unit}";
-        } else {
-            botNotice($self, $nick, "Unknown window '$w'. Use: 6h 12h 24h 7d 30d ...");
-            return;
-        }
-    }
 
     # KD1/fix: search across all channels in PM
     my $kd_chan = is_channel($channel) ? $channel : undef;
