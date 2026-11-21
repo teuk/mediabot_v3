@@ -1,7 +1,7 @@
 {
   "api": 3,
   "name": "playful-v3",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "A reversible v3 home for Mediabot's small playful commands and one quiet autonomous ritual.",
   "runtime": {
     "api": 3,
@@ -52,7 +52,7 @@
     },
     "morse": {
       "source": "public",
-      "help": "Translate a short message to Morse code.",
+      "help": "Encode with !morse <text> or decode with !morse -d <Morse code>. Use spaces between letters and / between words.",
       "level": 0,
       "handler": "command_morse",
       "migration": "legacy-public-fallback"

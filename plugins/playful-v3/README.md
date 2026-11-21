@@ -11,6 +11,16 @@ authoritative. In `observe`, the plugin executes with output suppressed and
 the built-in command still answers. Unloading the package restores the exact
 previous registry entries.
 
+## Morse
+
+- `!morse SOS AIDE` returns `... --- ... / .- .. -.. .`.
+- `!morse -d ... --- ... / .- .. -.. .` returns `SOS AIDE`.
+
+The decoder accepts the plugin's A–Z and 0–9 alphabet and preserves the `?`
+placeholder used by the encoder. Separate letters with spaces and words with
+`/`. Use at most 30 space-separated arguments after `-d`, including
+standalone slashes. The plugin reports invalid or overlong input privately.
+
 The `quiet_magic` job can publish an occasional self-contained comic line. It
 does not ask a question or require a reply. It is disabled by typed channel
 configuration until an Owner explicitly sets `ritual_enabled=1`.

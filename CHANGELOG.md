@@ -1,3 +1,8 @@
+## MB1407 — Decode Morse in Playful
+
+- Add `!morse -d` for the plugin's Morse alphabet, using spaces between letters and slashes between words.
+- Keep text encoding as the default.
+
 ## MB1406 — Send complete Morse conversions
 
 - Pass the full native Morse reply to the IRC sender for normal line wrapping.

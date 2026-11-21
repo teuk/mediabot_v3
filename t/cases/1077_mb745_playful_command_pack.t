@@ -42,6 +42,34 @@ return sub {
     $assert->is($replies[-1], '... --- ...',
         'morse keeps the expected alphabet mapping');
 
+    $plugin->command_morse($authority, $invoke->('morse', ['decode']));
+    $assert->is($replies[-1], '-.. . -.-. --- -.. .',
+        'morse encodes decode as ordinary text');
+
+    for my $case (
+        [[qw(-d ... --- ... / .- .. -.. .)], 'SOS AIDE'],
+        [[qw(-D .-/.---- ----- ?)], 'A 10?'],
+        [['-d', ('.') x 30], 'E' x 30],
+    ) {
+        my ($args, $expected) = @$case;
+        $plugin->command_morse($authority, $invoke->('morse', $args));
+        $assert->is($replies[-1], $expected,
+            'morse decodes letters, digits, placeholders and word boundaries');
+    }
+    for my $case (
+        [['-d'], qr/Syntax:.*-d/],
+        [[qw(-d ... ......)], qr/Invalid Morse/],
+        [[qw(-d ... / / ---)], qr/Invalid Morse/],
+        [['-d', ('.') x 32], qr/Morse input too long/],
+        [['-d', './' x 128 . '.'], qr/Morse input too long/],
+    ) {
+        my ($args, $expected) = @$case;
+        my $before = @replies;
+        $plugin->command_morse($authority, $invoke->('morse', $args));
+        $assert->ok(@replies == $before && ($notices[-1] // '') =~ $expected,
+            'invalid or truncated Morse receives a private notice before any decoded reply');
+    }
+
     my @long_input = ('0' x 40, '9' x 39);
     my $encoded = join ' / ', join(' ', ('-----') x 40), join(' ', ('----.') x 39);
     my $reply_start = @replies;

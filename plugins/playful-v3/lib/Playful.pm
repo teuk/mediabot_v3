@@ -250,25 +250,51 @@ sub command_choose {
             . (@pool > 2 ? ' (1 of ' . scalar(@pool) . ' options)' : ''));
 }
 
+my %MORSE_CODE = (
+    A=>'.-', B=>'-...', C=>'-.-.', D=>'-..', E=>'.', F=>'..-.',
+    G=>'--.', H=>'....', I=>'..', J=>'.---', K=>'-.-', L=>'.-..',
+    M=>'--', N=>'-.', O=>'---', P=>'.--.', Q=>'--.-', R=>'.-.',
+    S=>'...', T=>'-', U=>'..-', V=>'...-', W=>'.--', X=>'-..-',
+    Y=>'-.--', Z=>'--..', '0'=>'-----', '1'=>'.----', '2'=>'..---',
+    '3'=>'...--', '4'=>'....-', '5'=>'.....', '6'=>'-....',
+    '7'=>'--...', '8'=>'---..', '9'=>'----.',
+);
+my %MORSE_TEXT = (reverse(%MORSE_CODE), '?' => '?');
+
 sub command_morse {
     my ($self, $context, $invocation) = @_;
-    my $text = uc join(' ', @{ $invocation->args });
+    my @args = @{ $invocation->args };
+    my $decode = lc($args[0] // '') eq '-d';
+    shift @args if $decode;
+    my $text = join(' ', @args);
     $text =~ s/^\s+|\s+$//g;
-    return $context->notice($invocation, 'Syntax: morse <text>')
-        unless length $text;
+    return $context->notice($invocation,
+        'Syntax: morse <text> | morse -d <Morse code>') unless length $text;
+
+    if ($decode) {
+        my $too_long = 'Morse input too long. Split it into shorter messages.';
+        # InvocationV3 keeps up to 32 arguments of 256 characters. At either
+        # limit the original code may have been truncated before dispatch.
+        return $context->notice($invocation, $too_long)
+            if @args > 30 || grep { length($_) >= 256 } @args;
+        my @words;
+        for my $word (split m{/}, $text, -1) {
+            my @symbols = split ' ', $word;
+            return $context->notice($invocation,
+                'Invalid Morse. Separate letters with spaces and words with /.')
+                if !@symbols || grep { !exists $MORSE_TEXT{$_} } @symbols;
+            push @words, join('', map { $MORSE_TEXT{$_} } @symbols);
+        }
+        my $decoded = join(' ', @words);
+        return $context->notice($invocation, $too_long) if length($decoded) > 400;
+        return $context->reply($invocation, $decoded);
+    }
+
+    $text = uc $text;
     return $context->notice($invocation, 'Text too long (max 80 chars).')
         if length($text) > 80;
-    my %code = (
-        A=>'.-', B=>'-...', C=>'-.-.', D=>'-..', E=>'.', F=>'..-.',
-        G=>'--.', H=>'....', I=>'..', J=>'.---', K=>'-.-', L=>'.-..',
-        M=>'--', N=>'-.', O=>'---', P=>'.--.', Q=>'--.-', R=>'.-.',
-        S=>'...', T=>'-', U=>'..-', V=>'...-', W=>'.--', X=>'-..-',
-        Y=>'-.--', Z=>'--..', '0'=>'-----', '1'=>'.----', '2'=>'..---',
-        '3'=>'...--', '4'=>'....-', '5'=>'.....', '6'=>'-....',
-        '7'=>'--...', '8'=>'---..', '9'=>'----.',
-    );
     my $result = join(' / ', map {
-        join(' ', map { $code{$_} // '?' } split //)
+        join(' ', map { $MORSE_CODE{$_} // '?' } split //)
     } split /\s+/, $text);
     # Encoded Morse is ASCII, with spaces between all symbols.
     while (length($result) > 400) {

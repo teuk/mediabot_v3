@@ -112,6 +112,20 @@ return sub {
     $assert->is($ctx->{replies}[0], 'Tangy: QLC (3 word(s))',
         'on returns the migrated command result');
 
+    my $morse = $bot->{registry}->handler_for('morse', 'public');
+    my $on = T1076::Context->new(
+        nick => 'Tangy', channel => '#development', command => 'morse',
+        args => [qw(-d ... --- ...)]);
+    $morse->($on);
+    $assert->is($on->{replies}[0], 'SOS',
+        'morse -d reaches Playful through the public command registry');
+    my $off = T1076::Context->new(
+        nick => 'Tangy', channel => '#other', command => 'morse',
+        args => [qw(-d ... --- ...)]);
+    $morse->($off);
+    $assert->ok($legacy_calls == 3 && !@{ $off->{replies} },
+        'other channels still use the existing native handler');
+
     $manager->unregister_plugin('playful-v3');
     my $restored = $bot->{registry}->command_for('abbrev', 'public');
     $assert->is(refaddr($restored->{handler}), refaddr($original{abbrev}),
