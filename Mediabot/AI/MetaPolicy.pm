@@ -116,9 +116,31 @@ sub wants_web {
     # to it. Contributors may additionally request verification for local tasks.
     return $s =~ /[\p{L}\p{N}]/ ? 1:0;
 }
+
+sub _room_chat {
+    my ($prompt,$nicks)=@_;
+    return 0 unless ref($nicks) eq 'ARRAY' && @$nicks;
+    return 0 if _external_request($prompt);
+    my $topic=_instruction($prompt);
+    return 0 if _conversation_only($topic)
+        || research_kind($topic) =~ /\A(?:cve|software|documentation)\z/;
+    for my $nick (@$nicks) {
+        # A leading nickname followed by a comma or colon may just address
+        # someone. It does not make an independent question about the room.
+        if ($topic =~ /\A\@?\Q$nick\E\s*[:,]\s*(.+)\z/i) {
+            return 0 if research_kind($1) ne 'general';
+        }
+    }
+    # Time words alone can describe this conversation. Factual signals such
+    # as weather, versions, prices or medical questions still use research.
+    $topic =~ s/\b(?:aujourd.hui|today)\b/ /g;
+    return !_external_facts($topic);
+}
+
 sub research_needed {
     my (%args)=@_;my $prompt=$args{prompt};
     return 1 if ($args{mode}//'auto') eq 'always';
+    return 0 if _room_chat($prompt,$args{room_nicks});
     return 0 if !wants_web($prompt);
     my $kind=research_kind($prompt);
     my $drafts=ref($args{drafts}) eq 'ARRAY'?$args{drafts}:[];
@@ -143,7 +165,8 @@ sub intent_route {
     my (%args)=@_;
     return 'research' if research_needed(%args);
     my $prompt=lc clean($args{prompt},2000);
-    return 'chat' if is_acknowledgement($prompt) || _personal_context($prompt);
+    return 'chat' if is_acknowledgement($prompt) || _personal_context($prompt)
+        || _room_chat($args{prompt},$args{room_nicks});
     my $drafts=ref($args{drafts}) eq 'ARRAY' ? $args{drafts} : [];
     my $minimum=$args{minimum}//2; $minimum=2 if $minimum<2;
     return 'chat' if @$drafts >= $minimum

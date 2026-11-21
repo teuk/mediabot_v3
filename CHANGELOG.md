@@ -1,3 +1,8 @@
+## MB1409 — Ground MetaAI in the IRC conversation
+
+- Resolve mentioned nicks against the addressed channel's current nicklist and carry one live referent into a short follow-up.
+- Give questions about those participants the conversational voice and keep independent factual and explicit source requests on the research route.
+
 ## MB1408 — Style every MetaAI source link
 
 - Use the same light blue and underline for direct URLs, verified aliases and original URLs after shortening fails.

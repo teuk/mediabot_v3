@@ -2,6 +2,7 @@ package Mediabot::AI::MetaRuntime;
 use strict;
 use warnings;
 use Mediabot::IRC::TextBudget qw(_utf8_text_bytes);
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 use utf8;
 use Digest::SHA qw(sha256_hex);
 use File::Basename qw(dirname);
@@ -41,6 +42,55 @@ sub _identity {
         && defined($host) && !ref($host) && length($host);
     return join('!',fold($nick),$ident,$host);
 }
+
+my $NICK_TOKEN=qr/[\p{L}\p{N}_\-\[\]\\\x60^{}|~]+/;
+
+sub _nick_mentions {
+    my ($text,$live,$mapping)=@_;
+    $text=fold_irc($text,$mapping);
+    $text =~ s{https?://\S+}{ }g;
+    my (%seen,@matches);
+    while ($text =~ /([@#]?)($NICK_TOKEN)/g) {
+        my ($marker,$token,$offset)=($1,$2,$-[0]);
+        next unless exists $live->{$token} && $marker ne '#';
+        if ($marker ne '@') {
+            next if length($token)<3
+                || $token =~ /\A(?:elle|lui|eux|moi|toi|est|les|des|que|qui|sur|oui|non|and|the|you)\z/;
+            # A determiner can identify a common noun even if the room has a
+            # nick with the same spelling: "un papillon", "the butterfly".
+            my $before=substr($text,0,$offset);
+            next if $before =~ /(?<![\p{L}\p{N}])(?:(?:un|une|du|des|le|la|les|the|a|an)\s+|l['’])\z/;
+        }
+        next if $seen{$token}++;
+        push @matches,$live->{$token};
+        last if @matches>=4;
+    }
+    return @matches;
+}
+
+sub _room_nicks {
+    my ($bot,$channel,$prompt,$messages)=@_;
+    my @members=eval {$bot->gethChannelsNicksOnChan($channel)};
+    return [] unless @members;
+    my $mapping=eval {$bot->{wit_runtime_state}->casemapping} // 'ascii';
+    my $own_nick=fold_irc(scalar(eval {$bot->{irc}->nick}),$mapping);
+    my %live=map {fold_irc($_,$mapping)=>$_} grep {
+        defined($_) && !ref($_) && length($_)<=40 && /\A$NICK_TOKEN\z/
+            && fold_irc($_,$mapping) ne $own_nick
+    } @members;
+
+    my @matches=_nick_mentions($prompt,\%live,$mapping);
+    return \@matches if @matches;
+    # Only a clear pronoun-led continuation can inherit one live referent
+    # from the immediately preceding addressed turn in this channel.
+    return [] unless length($prompt)<=160 && @$messages>=3
+        && $prompt =~ /\A(?:(?:et|and)\s+)?(?:lui|elle|eux|elles|il|he|she|they|him|her|them)\b/i;
+    my $previous=$messages->[-3]{content};
+    return [] unless $previous =~ s/\Aspeaker[0-9]+(?: \([^)]*\))?:\s*//;
+    @matches=_nick_mentions($previous,\%live,$mapping);
+    return @matches==1 ? \@matches : [];
+}
+
 sub _memory {
     my ($self,$cfg)=@_;my $bot=$self->{bot};
     my $file=File::Spec->rel2abs($bot->{config_file}//'mediabot.conf');
@@ -392,7 +442,8 @@ sub _ask {
         if (@$sources) {$self->_present_sources($sources,$deliver)}
         else {$deliver->({})}
     };
-    my $ok=eval {$engine->submit(messages=>$ticket->{messages},prompt=>$prompt,
+    my $room_nicks=_room_nicks($bot,$channel,$prompt,$ticket->{messages});
+    my $ok=eval {$engine->submit(messages=>$ticket->{messages},prompt=>$prompt,room_nicks=>$room_nicks,
         language=>$lang,on_done=>$done,is_current=>$alive);1};
     $done->({ok=>0,error=>'failed'}) unless $ok;
     return 1;

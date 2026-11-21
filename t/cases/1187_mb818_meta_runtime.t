@@ -12,21 +12,23 @@ use Mediabot::AI::MetaRuntime;
     sub get {$_[0]{$_[1]}}
     package MB818RuntimeGeneration;
     sub capture_generation {$_[0]{generation}}
+    sub casemapping {$_[0]{casemapping}//'rfc1459'}
     package MB818RuntimeLogger;
     sub log {push @{$_[0]{lines}},$_[2]}
     package MB818RuntimeBot;
     sub getMessageNickIdentHost {my ($s,$message)=@_;return @$message}
+    sub gethChannelsNicksOnChan {return @{$_[0]{nicks}{lc $_[1]}||[]}}
     package MB818RuntimeClient;
     sub submit {my ($s,$request,%args)=@_;push @{$s->{calls}},{request=>$request,done=>$args{on_done}};1}
 }
-my (@sent,@notices,@timers,@opts);my $accepted=1;my $chanset=1;my $lang='fr';my $now=1791892800;
+my (@sent,@notices,@timers,@opts,@queries);my $accepted=1;my $chanset=1;my $lang='fr';my $now=1791892800;
 no warnings 'redefine';
 local *Mediabot::Helpers::channel_lang=sub {$lang};
 local *Mediabot::Helpers::chanset_enabled=sub {$chanset};
 local *Mediabot::Helpers::botPrivmsg=sub {push @opts,$_[3];return 0 unless $accepted;push @sent,[$_[1],$_[2]];1};
 local *Mediabot::Helpers::botNotice=sub {push @notices,[$_[1],$_[2]];1};
 sub fixture {
-    @sent=();@notices=();@timers=();@opts=();$accepted=1;$chanset=1;$lang='fr';
+    @sent=();@notices=();@timers=();@opts=();@queries=();$accepted=1;$chanset=1;$lang='fr';
     my $dir=tempdir(CLEANUP=>1);
     my $conf=bless {'meta_ai.ENABLED'=>1,'meta_ai.CHANNELS'=>'#test #other','meta_ai.STATE_FILE'=>"$dir/state.json",
         'openai.API_KEY'=>'fake-openai','anthropic.API_KEY'=>'fake-claude','gemini.API_KEY'=>'fake-gemini',
@@ -39,7 +41,7 @@ sub fixture {
         logger=>bless({lines=>[]},'MB818RuntimeLogger')},'MB818RuntimeBot';
     my $runtime=Mediabot::AI::MetaRuntime->new(bot=>$bot,clock=>sub {$now},
         client_factory=>sub {$client},schedule_cb=>sub {push @timers,[@_]},
-        web_start=>sub {$_[1]->({ok=>1,sources=>[{id=>1,url=>'https://www.example.org/news',text=>'A verified page excerpt.',kind=>'page_excerpt'}]});1});
+        web_start=>sub {push @queries,$_[0];$_[1]->({ok=>1,sources=>[{id=>1,url=>'https://www.example.org/news',text=>'A verified page excerpt.',kind=>'page_excerpt'}]});1});
     $bot->{_meta_ai_runtime}=$runtime;
     return ($bot,$client,$runtime,$dir);
 }
@@ -203,4 +205,53 @@ final($client,$start+3,'Une réponse vérifiée.',[1]);
 while (my $timer=shift @timers) {$timer->[1]->()}
 is(scalar @{history($dir)},3,'researched reply still commits through normal delivery');
 like(join(' ',@{$bot->{logger}{lines}}),qr/META_AI intent=research/,'research route remains observable');
+
+($bot,$client,$runtime,$dir)=fixture();
+$bot->{nicks}={'#test'=>['Papillon','Te[u]K','Bystander'],'#other'=>['OtherNick']};
+for my $case (
+    ['Qui est papillon ?', 'Papillon'],
+    ['Et lui ?', 'Papillon'],
+    ['Te{u}K est là ?', 'Te[u]K'],
+) {
+    my ($prompt,$live_nick)=@$case;
+    my $start=@{$client->{calls}};
+    ok(ask($bot,'Alice','#test',$prompt),'addressed question about a channel member is admitted');
+    my $draft=$client->{calls}[$start]{request}{system};
+    like($draft,qr/^CURRENT IRC NICKNAMES: \["\Q$live_nick\E"\]/m,
+        'contributors receive the matched live nick, including on a follow-up');
+    unlike($draft,qr/Bystander|OtherNick|public\.example\.org/,
+        'unmentioned nicks, other channels and hostnames stay out of the prompt');
+    drafts($client,$start,1); # A model's mistaken interpretation must not launch a butterfly search.
+    my $synthesis=$client->{calls}[$start+3]{request}{system};
+    like($synthesis,qr/CHAT INTENT.*CURRENT IRC NICKNAMES: \["\Q$live_nick\E"\]/s,
+        'room-bound misclassification selects the conversational synthesis with the live referent');
+    final($client,$start+3,'Local chat reply.',$synthesis =~ /CHAT INTENT/ ? [] : [1]);
+    while (my $timer=shift @timers) {$timer->[1]->()}
+}
+is_deeply(\@queries,[],'local nick questions never reach web search');
+is_deeply([map {$_->[1]} @sent], [('Local chat reply.') x 3],
+    'local nick questions have no emitted source line');
+unlike(encode_json(history($dir)),qr/CURRENT IRC NICKNAMES|Bystander/,
+    'per-request nick hints are not persisted in conversation memory');
+
+for my $case (
+    ['#test','Que mange un papillon ?',0],
+    ['#other','Qui est Papillon ?',0],
+    ['#test','Papillon, quelle est la météo ?',1],
+    ['#test','Papillon, pourquoi le ciel est bleu ?',1],
+    ['#test','Qui est Papillon ? Donne tes sources.',1],
+) {
+    my ($channel,$prompt,$known)=@$case;
+    ($bot,$client,$runtime,$dir)=fixture();
+    $bot->{nicks}={'#test'=>['Papillon']};
+    ask($bot,'Alice',$channel,$prompt);
+    my $system=$client->{calls}[0]{request}{system};
+    is(($system =~ /^CURRENT IRC NICKNAMES: \["Papillon"\]/m ? 1:0),$known,
+        'member detection distinguishes an ordinary noun or another channel');
+    drafts($client,0,1);
+    is(scalar(@queries),1,'factual or explicit verification request still enters research');
+    final($client,3,'Réponse vérifiée.',[1]);
+    while (my $timer=shift @timers) {$timer->[1]->()}
+    like($sent[-1][1],qr/^Sources : /,'researched answers still have a source line');
+}
 done_testing;
