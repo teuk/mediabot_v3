@@ -13,7 +13,7 @@ use Mediabot::AI qw(provider_configured);
 use Mediabot::AI::Client;
 use Mediabot::AI::IRCOutput qw(format_ai_reply);
 use Mediabot::AI::Transport ();
-use Mediabot::AI::MetaPolicy qw(settings fold clean safe_url);
+use Mediabot::AI::MetaPolicy qw(settings fold clean safe_url intent_route is_acknowledgement);
 use Mediabot::AI::MetaMemory;
 use Mediabot::AI::MetaWeb;
 use Mediabot::AI::MetaChat;
@@ -68,10 +68,14 @@ sub _nick_mentions {
     return @matches;
 }
 
-sub _room_nicks {
+sub _bare_pronoun_question {
+    my ($prompt)=@_;
+    return $prompt =~ /\A(?:(?:et|and|what about)\s+)?(?:lui|elle|eux|elles|him|her|them)\s*[?!.]*\z/i;
+}
+
+sub _room_context {
     my ($bot,$channel,$prompt,$messages)=@_;
     my @members=eval {$bot->gethChannelsNicksOnChan($channel)};
-    return [] unless @members;
     my $mapping=eval {$bot->{wit_runtime_state}->casemapping} // 'ascii';
     my $own_nick=fold_irc(scalar(eval {$bot->{irc}->nick}),$mapping);
     my %live=map {fold_irc($_,$mapping)=>$_} grep {
@@ -79,16 +83,27 @@ sub _room_nicks {
             && fold_irc($_,$mapping) ne $own_nick
     } @members;
 
-    my @matches=_nick_mentions($prompt,\%live,$mapping);
-    return \@matches if @matches;
-    # Only a clear pronoun-led continuation can inherit one live referent
-    # from the immediately preceding addressed turn in this channel.
-    return [] unless length($prompt)<=160 && @$messages>=3
-        && $prompt =~ /\A(?:(?:et|and)\s+)?(?:lui|elle|eux|elles|il|he|she|they|him|her|them)\b/i;
-    my $previous=$messages->[-3]{content};
-    return [] unless $previous =~ s/\Aspeaker[0-9]+(?: \([^)]*\))?:\s*//;
-    @matches=_nick_mentions($previous,\%live,$mapping);
-    return @matches==1 ? \@matches : [];
+    my $bare=_bare_pronoun_question($prompt);
+    my @matches=$bare ? () : _nick_mentions($prompt,\%live,$mapping);
+    return (\@matches,0) if @matches;
+    return ([],0) unless length($prompt)<=160 && ($bare
+        || $prompt =~ /\A(?:(?:et|and)\s+)?(?:lui|elle|eux|elles|il|he|she|they|him|her|them)\b/i);
+
+    # Memory supplies complete user/assistant pairs before the latest prompt.
+    # Only bare pronouns can skip turns that carry no new subject.
+    for (my $i=$#$messages-2;$i>=0;$i-=2) {
+        my $previous=$messages->[$i]{content};
+        return ([],0) unless $previous =~ s/\Aspeaker[0-9]+(?: \([^)]*\))?:\s*//;
+        if (is_acknowledgement($previous) || _bare_pronoun_question($previous)) {
+            return ([],0) unless $bare;
+            next;
+        }
+        @matches=_nick_mentions($previous,\%live,$mapping);
+        # Stop at a substantive turn, even if it has changed the subject.
+        return ([],0) unless @matches && intent_route(prompt=>$previous,room_nicks=>\@matches) eq 'chat';
+        return @matches==1 ? (\@matches,0) : ([],$bare);
+    }
+    return ([],$bare);
 }
 
 sub _memory {
@@ -375,30 +390,6 @@ sub _ask {
     };
     my $release=sub {delete $self->{jobs}{$key} if $owns->()};
     my $alive=sub {$owns->() && $self->_alive($channel,$generation,$signature,$memory,$ticket)};
-    my %overrides=('openai.API_URL'=>'https://api.openai.com/v1/responses',
-        'gemini.FALLBACK_MODEL'=>$cfg->{gemini_fallback},
-        'openai.WEB_SEARCH'=>1,'openai.FALLBACK_MODEL'=>'','gemini.THINKING_LEVEL'=>'LOW',
-        map {($_.'.MODEL'=>$cfg->{models}{$_})} keys %{$cfg->{models}});
-    my @order=($cfg->{synthesizer},grep {$_ ne $cfg->{synthesizer}} @providers);
-    my $client=eval {$self->{client_factory} ? $self->{client_factory}->(\%overrides,\@order)
-        : Mediabot::AI::Client->new(conf=>$bot->{conf},loop_owner=>$bot,
-            config_overrides=>\%overrides,provider_order=>\@order)};
-    unless ($client) {$release->();$self->_notice($nick,$lang,'failed');return 1}
-    my $web=Mediabot::AI::MetaWeb->new(api_key=>eval {$bot->{conf}->get('tavily.API_KEY')} // '',
-        domains=>$cfg->{domains},clock=>$self->{clock});
-    my $web_start=$self->{web_start} || sub {
-        my ($query,$done,$plan)=@_;require Mediabot::AsyncWorker;
-        my $worker=Mediabot::AsyncWorker->start(loop=>Mediabot::AI::Transport::usable_loop($bot),
-            label=>'meta research',timeout=>27,max_output=>64*1024,
-            child=>sub {$web->search($query,plan=>$plan)},on_done=>sub {
-                my ($result)=@_;$done->(ref($result) eq 'HASH' && $result->{ok} ? $result->{value}:{ok=>0});
-            });
-        $done->({ok=>0}) unless $worker;
-        return $worker?1:0;
-    };
-    my $engine=Mediabot::AI::MetaChat->new(conf=>$bot->{conf},settings=>$cfg,
-        client=>$client,web=>$web,web_start=>$web_start,clock=>$self->{clock},
-        on_event=>sub {$self->_log_event($_[0])},evidence_mode=>'passage_ids');
     my $completed=0;
     my $done=sub {
         my ($result)=@_;return if $completed++;
@@ -442,7 +433,36 @@ sub _ask {
         if (@$sources) {$self->_present_sources($sources,$deliver)}
         else {$deliver->({})}
     };
-    my $room_nicks=_room_nicks($bot,$channel,$prompt,$ticket->{messages});
+    my ($room_nicks,$clarify)=_room_context($bot,$channel,$prompt,$ticket->{messages});
+    if ($clarify && $cfg->{web} ne 'always') {
+        $self->_log_event({kind=>'intent',route=>'chat'});
+        $done->({ok=>1,answer=>$lang eq 'fr' ? 'Tu parles de qui ?' : 'Who do you mean?'});
+        return 1;
+    }
+    my %overrides=('openai.API_URL'=>'https://api.openai.com/v1/responses',
+        'gemini.FALLBACK_MODEL'=>$cfg->{gemini_fallback},
+        'openai.WEB_SEARCH'=>1,'openai.FALLBACK_MODEL'=>'','gemini.THINKING_LEVEL'=>'LOW',
+        map {($_.'.MODEL'=>$cfg->{models}{$_})} keys %{$cfg->{models}});
+    my @order=($cfg->{synthesizer},grep {$_ ne $cfg->{synthesizer}} @providers);
+    my $client=eval {$self->{client_factory} ? $self->{client_factory}->(\%overrides,\@order)
+        : Mediabot::AI::Client->new(conf=>$bot->{conf},loop_owner=>$bot,
+            config_overrides=>\%overrides,provider_order=>\@order)};
+    unless ($client) {$release->();$self->_notice($nick,$lang,'failed');return 1}
+    my $web=Mediabot::AI::MetaWeb->new(api_key=>eval {$bot->{conf}->get('tavily.API_KEY')} // '',
+        domains=>$cfg->{domains},clock=>$self->{clock});
+    my $web_start=$self->{web_start} || sub {
+        my ($query,$done,$plan)=@_;require Mediabot::AsyncWorker;
+        my $worker=Mediabot::AsyncWorker->start(loop=>Mediabot::AI::Transport::usable_loop($bot),
+            label=>'meta research',timeout=>27,max_output=>64*1024,
+            child=>sub {$web->search($query,plan=>$plan)},on_done=>sub {
+                my ($result)=@_;$done->(ref($result) eq 'HASH' && $result->{ok} ? $result->{value}:{ok=>0});
+            });
+        $done->({ok=>0}) unless $worker;
+        return $worker?1:0;
+    };
+    my $engine=Mediabot::AI::MetaChat->new(conf=>$bot->{conf},settings=>$cfg,
+        client=>$client,web=>$web,web_start=>$web_start,clock=>$self->{clock},
+        on_event=>sub {$self->_log_event($_[0])},evidence_mode=>'passage_ids');
     my $ok=eval {$engine->submit(messages=>$ticket->{messages},prompt=>$prompt,room_nicks=>$room_nicks,
         language=>$lang,on_done=>$done,is_current=>$alive);1};
     $done->({ok=>0,error=>'failed'}) unless $ok;

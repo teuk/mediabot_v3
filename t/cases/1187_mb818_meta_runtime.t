@@ -254,4 +254,77 @@ for my $case (
     while (my $timer=shift @timers) {$timer->[1]->()}
     like($sent[-1][1],qr/^Sources : /,'researched answers still have a source line');
 }
+
+sub complete_addressed_turn {
+    my ($bot,$client,$prompt)=@_;
+    my $start=@{$client->{calls}};
+    ok(ask($bot,'Alice','#test',$prompt),'follow-up scenario enters MetaAI');
+    my $system='';
+    if (@{$client->{calls}}>$start) {
+        $system=$client->{calls}[$start]{request}{system};
+        drafts($client,$start,1);
+        if (my $synthesis=$client->{calls}[$start+3]) {
+            my $research=$synthesis->{request}{system} =~ /UNTRUSTED SOURCES/;
+            final($client,$start+3,'Test answer.',$research ? [1] : []);
+        }
+    }
+    while (my $timer=shift @timers) {$timer->[1]->()}
+    return $system;
+}
+
+($bot,$client,$runtime,$dir)=fixture();
+$bot->{nicks}={'#test'=>['Papillon','About']};
+$bot->{conf}{'meta_ai.RATE_MAX'}=8;
+complete_addressed_turn($bot,$client,'Qui est Papillon ?');
+complete_addressed_turn($bot,$client,'Merci !');
+for my $prompt ('Et lui ?', 'Et lui ?', 'What about him?') {
+    like(complete_addressed_turn($bot,$client,$prompt),qr/^CURRENT IRC NICKNAMES: \["Papillon"\]/m,
+        'a bare follow-up retains the live nick through brief intervening turns');
+}
+is_deeply(\@queries,[],'a chain of room follow-ups never launches research');
+ok(!grep($_->[1] =~ /^Sources : /,@sent),'the room follow-ups publish no source lines');
+is(scalar @{history($dir)},5,'all five delivered turns use the existing memory');
+unlike(complete_addressed_turn($bot,$client,'Il pleut à Brest ?'),qr/^CURRENT IRC NICKNAMES:/m,
+    'a new question starting with an impersonal pronoun does not skip back to the old nick');
+like($sent[-1][1],qr/^Sources : /,'the independent weather question can still use sources');
+
+($bot,$client,$runtime,$dir)=fixture();
+$bot->{nicks}={'#test'=>['Papillon','Renard']};
+complete_addressed_turn($bot,$client,'Qui est Papillon et Renard ?');
+my $before_clarification=@{$client->{calls}};
+complete_addressed_turn($bot,$client,'Et lui ?');
+is(scalar @{$client->{calls}},$before_clarification,'ambiguous nick follow-up needs no provider');
+is_deeply(\@queries,[],'ambiguous nick follow-up needs no web search');
+is($sent[-1][1],'Tu parles de qui ?','ambiguous nick follow-up asks for clarification on IRC');
+like(complete_addressed_turn($bot,$client,'Je parle de Papillon.'),qr/^CURRENT IRC NICKNAMES: \["Papillon"\]/m,
+    'an explicit nick resumes the conversation after clarification');
+is(scalar @{history($dir)},3,'the clarification uses normal delivery and releases the job');
+
+($bot,$client,$runtime,$dir)=fixture();
+$bot->{nicks}={'#test'=>['Papillon']};
+complete_addressed_turn($bot,$client,'Qui est Papillon ?');
+complete_addressed_turn($bot,$client,'Papillon, quelle est la météo à Brest ?');
+unlike(complete_addressed_turn($bot,$client,'Et lui ?'),qr/^CURRENT IRC NICKNAMES:/m,
+    'a factual topic change does not carry over an old IRC nick');
+complete_addressed_turn($bot,$client,'Tes sources ?');
+like($sent[-1][1],qr/^Sources : /,'an explicit source request still reaches the evidence route');
+
+($bot,$client,$runtime,$dir)=fixture();
+$lang='en';
+$bot->{conf}{'meta_ai.WEB_MODE'}='off';
+complete_addressed_turn($bot,$client,'What about her?');
+is_deeply($client->{calls},[],'a bare pronoun without any previous subject needs no provider');
+is_deeply([map {$_->[1]} @sent],['Who do you mean?'],'clarification follows the channel language');
+
+($bot,$client,$runtime,$dir)=fixture();
+$bot->{nicks}={'#test'=>['Papillon']};
+complete_addressed_turn($bot,$client,'Qui est Papillon ?');
+$bot->{nicks}{'#test'}=[];
+unlike(complete_addressed_turn($bot,$client,'Et lui ?'),qr/^CURRENT IRC NICKNAMES:/m,
+    'a departed nickname is no longer supplied as a live referent');
+
+($bot,$client,$runtime,$dir)=fixture();
+$bot->{conf}{'meta_ai.WEB_MODE'}='always';
+complete_addressed_turn($bot,$client,'Et elle ?');
+is(scalar @queries,1,'always mode retains forced research');
 done_testing;

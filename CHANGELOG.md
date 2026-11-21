@@ -1,3 +1,8 @@
+## MB1410 — Keep MetaAI's conversational follow-ups on topic
+
+- Retain a single live room nickname across acknowledgements and repeated short follow-ups. Stop at the latest substantive turn.
+- Ask for clarification locally when a bare pronoun question has no prior subject or several plausible room nicknames. Keep forced research available.
+
 ## MB1409 — Ground MetaAI in the IRC conversation
 
 - Resolve mentioned nicks against the addressed channel's current nicklist and carry one live referent into a short follow-up.

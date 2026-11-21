@@ -29,7 +29,10 @@ It can recall a coffee preference from an earlier addressed exchange. When
 someone mentions a nick present in the current channel, MetaAI gives the
 models that nick as context. For example, `mediabot: qui est Papillon ?` takes
 the chat route if Papillon is present. A short follow-up such as `et lui ?`
-can reuse a single live nick from the immediately preceding addressed turn.
+can reuse a single live nick from the last substantive addressed turn, even
+after a `merci` or another bare pronoun question. A new topic ends that chain.
+In auto or off mode, a bare pronoun question with no previous subject or
+multiple possible room nicks receives a brief clarification on IRC.
 Ordinary phrases such as `un papillon` can still refer to the animal. The bot
 uses its IRC nicklist and addressed exchanges, without sending the full
 nicklist or reading the channel's general transcript. A nick match establishes
