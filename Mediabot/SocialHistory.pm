@@ -294,13 +294,15 @@ sub _yearbook_day_label {
 }
 
 sub _yearbook_collect {
-    my ($self, $id_channel, $year) = @_;
+    my ($self, $id_channel, $year, $as_of) = @_;
     my $dbh = $self->{dbh};
     return unless $dbh && defined($id_channel) && $id_channel =~ /^\d+$/;
     return unless defined($year) && $year =~ /^\d{4}$/;
 
     my $start = sprintf('%04d-01-01 00:00:00', $year);
     my $end   = sprintf('%04d-01-01 00:00:00', $year + 1);
+    # Use one instant for every count, converted by the database session.
+    my @bind = ($id_channel, $start, $end, $as_of // time());
 
     # Pass 1: group by nick. Merging by lower-cased nick avoids double
     # counting a case-only nick variant when the year crosses live/archive.
@@ -312,8 +314,9 @@ sub _yearbook_collect {
           AND event_type IN ('public','action')
           AND ts >= ?
           AND ts < ?
+          AND ts <= FROM_UNIXTIME(?)
         GROUP BY nick
-    }, [ $id_channel, $start, $end ], sub {
+    }, \@bind, sub {
         my ($r) = @_;
         my $display = $r->{nick};
         return unless defined($display) && length($display);
@@ -352,8 +355,9 @@ sub _yearbook_collect {
           AND event_type IN ('public','action')
           AND ts >= ?
           AND ts < ?
+          AND ts <= FROM_UNIXTIME(?)
         GROUP BY DATE(ts), HOUR(ts)
-    }, [ $id_channel, $start, $end ], sub {
+    }, \@bind, sub {
         my ($r) = @_;
         my $day = $r->{day_key};
         return unless defined($day) && $day =~ /\A\d{4}-\d{2}-\d{2}\z/;
@@ -383,13 +387,15 @@ sub _yearbook_collect {
         SELECT
             (SELECT COUNT(*)
                FROM QUOTES
-              WHERE id_channel = ? AND ts >= ? AND ts < ?) AS quote_count,
+              WHERE id_channel = ? AND ts >= ? AND ts < ?
+                AND ts <= FROM_UNIXTIME(?)) AS quote_count,
             (SELECT COUNT(*)
                FROM FACTOID
-              WHERE id_channel = ? AND created_at >= ? AND created_at < ?) AS factoid_count
+              WHERE id_channel = ? AND created_at >= ? AND created_at < ?
+                AND created_at <= FROM_UNIXTIME(?)) AS factoid_count
     }) };
     if ($sth_c && eval {
-        $sth_c->execute($id_channel, $start, $end, $id_channel, $start, $end)
+        $sth_c->execute(@bind, @bind)
     }) {
         my $r = eval { $sth_c->fetchrow_hashref } || {};
         $quote_count   = int($r->{quote_count}   // 0);
@@ -431,7 +437,8 @@ sub mbYearbook_ctx {
         Mediabot::Helpers::chanset_enabled($self, $channel, 'OnThisDay', default => 1)
     } // 1;
 
-    my $current_year = (localtime())[5] + 1900;
+    my $as_of = time();
+    my $current_year = (localtime($as_of))[5] + 1900;
     my $year = @args ? ($args[0] // '') : ($current_year - 1);
     if (@args > 1 || $year !~ /\A\d{4}\z/ || $year < 2000 || $year > $current_year) {
         botNotice($self, $nick, "Syntax: yearbook [YYYY]  (2000-$current_year)");
@@ -452,7 +459,7 @@ sub mbYearbook_ctx {
         return 1;
     }
 
-    my $yb = _yearbook_collect($self, $id_channel, $year);
+    my $yb = _yearbook_collect($self, $id_channel, $year, $as_of);
     unless ($yb) {
         botNotice($self, $nick, "yearbook: no usable channel history found for $year.");
         return 1;

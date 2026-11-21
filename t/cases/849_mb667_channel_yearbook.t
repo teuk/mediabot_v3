@@ -5,6 +5,9 @@
 use strict;
 use warnings;
 use utf8;
+use DBI ();
+use POSIX ();
+use Time::Local ();
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 
 {
@@ -45,6 +48,13 @@ BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
     sub nick { $_[0]{nick} }
     sub channel { $_[0]{channel} }
     sub args { $_[0]{args} }
+
+    package YMergedConf849;
+    sub get {
+        return 'archive' if $_[1] eq 'mysql.CHANNEL_LOG_ARCHIVE_DBNAME';
+        return 1 if $_[1] eq 'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS';
+        return undef;
+    }
 }
 
 sub slurp849 {
@@ -96,10 +106,12 @@ return sub {
     my ($assert) = @_;
 
     require Mediabot::UserCommands;
+    my $native_gather = \&Mediabot::Helpers::channel_log_gather;
 
     my @sent;
     my $expected_year = (localtime())[5] + 1899; # last completed year
     my $gather_calls = 0;
+    my @cutoffs;
     my $dbh = YDBH849->new;
     my $bot = bless {
         dbh => $dbh,
@@ -117,6 +129,7 @@ return sub {
     local *Mediabot::Helpers::channel_log_gather = sub {
         my ($self, $dbh2, $sql, $bind, $cb, $scope) = @_;
         $gather_calls++;
+        push @cutoffs, $bind->[3];
         $assert->is($scope, 'content',
             'mb667-849: yearbook uses archive-aware content scope');
         $assert->is($bind->[0], 42,
@@ -172,8 +185,11 @@ return sub {
         'mb667-849: quote contribution query is channel-scoped');
     $assert->is($sth->{bind}[1], "$expected_year-01-01 00:00:00",
         'mb667-849: quote contribution query is year-scoped');
-    $assert->is($sth->{bind}[3], 42,
+    $assert->is($sth->{bind}[4], 42,
         'mb667-849: factoid contribution query is channel-scoped');
+    $assert->ok($cutoffs[0] > 0
+        && !(grep { $_ != $cutoffs[0] } ($cutoffs[1], @{$sth->{bind}}[3, 7])),
+        'yearbook uses one cutoff for both history passes and both contribution counts');
 
     # Future years are rejected before any DB/history work.
     @sent = ();
@@ -189,6 +205,55 @@ return sub {
         'mb667-849: invalid year performs no history gather');
     $assert->is(scalar @{ $dbh->{sql} }, $q_before,
         'mb667-849: invalid year performs no direct query');
+
+    {
+        local *Mediabot::Helpers::channel_log_gather = $native_gather;
+        my $db = DBI->connect('dbi:SQLite:dbname=:memory:', '', '', { RaiseError=>1, PrintError=>0 });
+        $db->sqlite_create_function('HOUR', 1, sub { 0 + substr($_[0], 11, 2) });
+        $db->sqlite_create_function('FROM_UNIXTIME', 1, sub {
+            POSIX::strftime('%Y-%m-%d %H:%M:%S', gmtime($_[0]));
+        });
+        $db->do("ATTACH DATABASE ':memory:' AS archive");
+        for my $table ('CHANNEL_LOG', 'archive.CHANNEL_LOG_ARCHIVE') {
+            $db->do("CREATE TABLE $table (id_channel INTEGER, ts TEXT, nick TEXT, event_type TEXT)");
+        }
+        $db->do(q{INSERT INTO CHANNEL_LOG VALUES
+            (42, '2026-11-21 12:34:00', 'alice', 'public'),
+            (42, '2026-11-21 12:34:00', 'Bob', 'action'),
+            (42, '2026-11-21 12:34:01', 'Future', 'public'),
+            (42, '2026-12-01 00:00:00', 'Future', 'public'),
+            (42, '2027-01-01 00:00:00', 'NextYear', 'public'),
+            (21, '2026-11-21 12:34:00', 'Elsewhere', 'public'),
+            (42, '2026-11-21 12:34:00', 'Presence', 'join')});
+        $db->do(q{INSERT INTO archive.CHANNEL_LOG_ARCHIVE VALUES
+            (42, '2025-12-31 23:59:59', 'Old', 'public'),
+            (42, '2026-01-01 00:00:00', 'Alice', 'public'),
+            (42, '2026-12-01 00:00:00', 'Future', 'public')});
+        for my $source (['QUOTES','ts'], ['FACTOID','created_at']) {
+            my ($table, $column) = @$source;
+            $db->do("CREATE TABLE $table (id_channel INTEGER, $column TEXT)");
+            $db->do("INSERT INTO $table VALUES
+                (42, '2025-12-31 23:59:59'), (42, '2026-01-01 00:00:00'),
+                (42, '2026-11-21 12:34:00'), (42, '2026-11-21 12:34:01'),
+                (42, '2027-01-01 00:00:00'), (21, '2026-11-21 12:34:00')");
+        }
+        my $native_bot = {dbh=>$db, conf=>bless({}, 'YMergedConf849')};
+        my $as_of = Time::Local::timegm_modern(0,34,12,21,10,2026);
+        my $ytd = Mediabot::UserCommands::_yearbook_collect($native_bot, 42, 2026, $as_of);
+        $assert->is(join('|', @$ytd{qw(messages people first_day last_day)}),
+            '3|2|2026-01-01|2026-11-21',
+            'current-year activity includes the cutoff second and omits future live and archived rows');
+        $assert->is(join('|', @{$ytd->{best_day}}, @{$ytd->{best_hour}}, @{$ytd->{top_voices}[0]}),
+            '2026-11-21|2|12|2|alice|2',
+            'peaks and top voices use the same cutoff as the message count');
+        $assert->is(join('|', @$ytd{qw(quote_count factoid_count)}), '2|2',
+            'current-year community counts use the same inclusive cutoff');
+        my $past = Mediabot::UserCommands::_yearbook_collect($native_bot, 42, 2025, $as_of);
+        $assert->is(join('|', @$past{qw(messages people first_day last_day quote_count factoid_count)}),
+            '1|1|2025-12-31|2025-12-31|1|1',
+            'a completed year still excludes the start of the following year');
+        $db->disconnect;
+    }
 
     my $uc = slurp849('Mediabot/SocialHistory.pm');
     my $mb = slurp849('Mediabot/Mediabot.pm');

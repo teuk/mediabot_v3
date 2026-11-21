@@ -1,3 +1,8 @@
+## MB1401 — Exclude future-dated activity from yearbook
+
+- Bound the annual history and community counters to one instant captured when the command starts, in addition to the calendar-year range.
+- Apply the cutoff to live and archived messages, activity peaks, quotes and factoids. Include entries at the cutoff second.
+
 ## MB1400 — Exclude future-dated messages from onthisday
 
 - Bound both the default and explicit-date anniversary queries to rows before the database's current day, across live history and archives.
