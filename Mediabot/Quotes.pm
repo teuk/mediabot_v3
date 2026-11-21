@@ -693,7 +693,8 @@ sub mbQuoteRand {
     # Ce test compare random vs random sans aucun lien avec $last_id, donc
     # la prevention "deux fois de suite la meme quote" ne fonctionnait pas.
     # On exclut maintenant $last_id directement dans la requete SQL.
-    my $last_id = $self->{_quote_last_rand}{$sChannel};
+    my $channel_key = lc($sChannel // '');
+    my $last_id = $self->{_quote_last_rand}{$channel_key};
     my $exclude_last = (defined $last_id && $count > 1) ? 1 : 0;
 
     # On utilise count - 1 pour le random si on exclut, sinon count.
@@ -739,7 +740,7 @@ sub mbQuoteRand {
     if (my $ref = $sth->fetchrow_hashref) {
         # mb124-B1: id_quotes ne peut plus etre egal a $last_id grace au
         # filtre SQL, donc on memorise sans risque de doublon.
-        $self->{_quote_last_rand}{$sChannel} = $ref->{id_quotes};
+        $self->{_quote_last_rand}{$channel_key} = $ref->{id_quotes};
         my $id_q   = String::IRC->new($ref->{id_quotes})->bold;
         my $handle = getUserhandle($self, $ref->{id_user}) || 'Unknown';
         # mb93: extrait tronqué cohérent avec mbQuoteView (max 300 chars)
@@ -960,8 +961,8 @@ sub mbQuoteByNick {
 
     return undef unless $row;
 
-    # mb101-IMP1: ring buffer anti-doublon (même clé que mbQuoteRand mais par nick)
-    my $cache_key = "$sChannel:$targetNick";
+    # Keep the last draw for the same case-insensitive channel and author filter.
+    my $cache_key = lc($sChannel // '') . ":$target_lc";
     my $last_id   = $self->{_quote_bynick_last}{$cache_key};
     if (defined $last_id && $last_id == $row->{id_quotes} && $count > 1) {
         # MB924: draw uniformly from the other count-1 positions. Repeated

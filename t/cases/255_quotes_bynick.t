@@ -84,7 +84,7 @@ sub run {
     my (%a) = @_;
     my $h = DBI->connect('dbi:SQLite:dbname=:memory:','','',{
         RootClass=>'MB924::DBI',RaiseError=>0,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
-    $h->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT)');
+    $h->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT COLLATE NOCASE)');
     $h->do('CREATE TABLE USER(id_user INTEGER PRIMARY KEY,nickname TEXT)');
     $h->do('CREATE TABLE QUOTES(id_quotes INTEGER PRIMARY KEY,id_channel INTEGER,id_user INTEGER,quotetext TEXT,hits INTEGER)');
     $h->do(q{INSERT INTO CHANNEL VALUES(1,'#test'),(2,'#other')});
@@ -97,17 +97,26 @@ sub run {
     $h->do(q{INSERT INTO QUOTES VALUES(201,1,2,'other author',0)});
     my $trace = {sql=>[],binds=>[],finished=>[],selects=>0,fail=>$a{fail}};
     $h->{private_mb924} = $trace;
-    my $b = {dbh=>$h,logger=>bless({},'MB924::Log'),sent=>[]};
+    my $b = $a{entry} eq 'registry' ? Mediabot->new({}) : {};
+    $b->{dbh} = $h;
+    $b->{logger} = bless({},'MB924::Log');
+    $b->{sent} = [];
     my $target = $a{target}//'Alice';
-    my $key = '#test:'.$target;
+    my $key = '#test:'.lc($target);
     $b->{_quote_bynick_last}{$key} = $a{last} if defined $a{last};
     local $MB924::Random::active = 1;
     local $MB924::Random::bounds = [];
     local $MB924::Random::fractions = [@{$a{fractions}//[0]}];
     my @warnings; local $SIG{__WARN__} = sub {push @warnings,@_};
-    my $ctx = Mediabot::Context->new(bot=>$b,nick=>'Reader',channel=>'#test',command=>'quote',args=>[$target]);
-    my $method = $a{entry} eq 'module' ? \&Mediabot::Quotes::mbQuoteByNick : \&Mediabot::mbQuoteByNick;
-    my $ret = $method->($ctx);
+    my $command = $a{command} // 'quote';
+    my $method = $a{entry} eq 'registry' ? $b->command_registry->handler_for($command, 'public')
+        : $a{entry} eq 'module' ? \&Mediabot::Quotes::mbQuoteByNick : \&Mediabot::mbQuoteByNick;
+    my $ret;
+    for my $call (@{$a{calls} // [['#test', $target]]}) {
+        my ($channel, $arg) = @$call;
+        my $ctx = Mediabot::Context->new(bot=>$b,nick=>'Reader',channel=>$channel,command=>$command,args=>[$arg]);
+        $ret = $method->($ctx);
+    }
     my $out = {return=>$ret,sent=>$b->{sent},cache=>$b->{_quote_bynick_last}//{},
         sql=>[@{$trace->{sql}}],binds=>[@{$trace->{binds}}],finished=>[@{$trace->{finished}}],
         bounds=>$MB924::Random::bounds,warnings=>\@warnings,
@@ -118,6 +127,7 @@ sub run {
 no warnings qw(redefine once);
 local *Mediabot::Quotes::botPrivmsg = sub {push @{$_[0]{sent}},['PRIVMSG',$_[1],$_[2]];1};
 local *Mediabot::Quotes::botNotice = sub {push @{$_[0]{sent}},['NOTICE',$_[1],$_[2]];1};
+local *Mediabot::Quotes::logBot = sub { 1 };
 local *Mediabot::Helpers::botNotice = sub {push @{$_[0]{sent}},['NOTICE',$_[1],$_[2]];1};
 my %out;
 for my $entry (qw(module facade)) {
@@ -150,6 +160,13 @@ for my $entry (qw(module facade)) {
         $out{failure}{$entry}{$failure} = run(entry=>$entry,count=>2,last=>10,fail=>$failure,fractions=>[0,0.9]);
     }
 }
+$out{case_aliases}{quote} = run(entry=>'registry',count=>2,calls=>[
+    ['#test','Alice'], ['#TeSt','Alice'], ['#test','aLiCe'],
+    ['#other','ALICE'], ['#test','Bob'], ['#test','ALICE'],
+]);
+$out{case_aliases}{q} = run(entry=>'registry',command=>'q',count=>2,calls=>[
+    ['#test','random'], ['#TeSt','random'], ['#other','random'], ['#test','r'],
+]);
 print JSON::PP->new->canonical->utf8->encode(\%out);
 MB924_NATIVE
     open my $native, '-|', $^X, '-I.', '-It/lib', '-e', $probe
@@ -171,11 +188,11 @@ MB924_NATIVE
         my $v = $r->{repeated_draws}{$entry};
         push @got, [@$v{qw(return sent cache bounds warnings)},$v->{rows}];
         push @want, [1,[['PRIVMSG','#test','[21] <Alice> '.$quote_text->(21)]],
-            {'#test:Alice'=>21},[2,1],[],$rows->(2)];
+            {'#test:alice'=>21},[2,1],[],$rows->(2)];
         $v = $r->{high_draws}{$entry};
         push @got, [@$v{qw(return sent cache bounds warnings)},$v->{rows}];
         push @want, [1,[['PRIVMSG','#test','[99] <Alice> '.$quote_text->(99)]],
-            {'#test:Alice'=>99},[5,4],[],$rows->(5)];
+            {'#test:alice'=>99},[5,4],[],$rows->(5)];
     }
     $assert->is($json->encode(\@got),$json->encode(\@want),
         'repeated random draws choose the other available quote in exactly two draws');
@@ -190,7 +207,7 @@ MB924_NATIVE
                     my @selects = grep {$_->[0] =~ /SELECT q\.id_quotes.*LIMIT 1 OFFSET \?/s} @{$v->{binds}};
                     push @got, [@$v{qw(return cache sent bounds warnings)},$v->{rows},
                         [map {$_->[-1]} @selects],scalar(@{$v->{sql}})];
-                    push @want, [1,{'#test:Alice'=>$id},
+                    push @want, [1,{'#test:alice'=>$id},
                         [['PRIVMSG','#test',"[$id] <Alice> ".$quote_text->($id)]],[0+$n,$n-1],[],
                         $rows->($n),[$initial,$alternative],3];
                 }
@@ -212,16 +229,30 @@ MB924_NATIVE
             push @got, [@$v{qw(return sent cache bounds warnings)},$v->{rows}];
             push @want, defined($id)
                 ? [1,[['PRIVMSG','#test',"[$id] <$author> ".$quote_text->($id)]],
-                    {'#test:'.$target=>$id},[0+$n],[],$rows->($n)]
+                    {'#test:'.lc($target)=>$id},[0+$n],[],$rows->($n)]
                 : [undef,[['NOTICE','Reader','No quotes from Missing on #test.']],{},[],[],$rows->($n)];
         }
         for my $failure (qw(prepare execute empty)) {
             my $v = $r->{failure}{$entry}{$failure};
             push @got, [@$v{qw(return sent cache warnings)},$v->{rows}];
             push @want, [1,[['PRIVMSG','#test','[10] <Alice> '.$quote_text->(10)]],
-                {'#test:Alice'=>10},[],[grep {$failure ne 'empty' || $_->[0] != 21} @{$rows->(2)}]];
+                {'#test:alice'=>10},[],[grep {$failure ne 'empty' || $_->[0] != 21} @{$rows->(2)}]];
         }
     }
     $assert->is($json->encode(\@got),$json->encode(\@want),
         'nominal selection, one-row repeats, prefix/fuzzy/escaped matches and SQL-refusal fallback retain their contracts');
+    for my $case (
+        ['quote', [10,21,10,200,201,21], ['#test','#TeSt','#test','#other','#test','#test']],
+        ['q', [10,21,200,10], ['#test','#TeSt','#other','#test']],
+    ) {
+        my ($command, $ids, $channels) = @$case;
+        my $v = $r->{case_aliases}{$command};
+        my @wire = map {
+            my ($id) = $_->[2] =~ /\[(?:id: \D*)?(\d+)/;
+            [$_->[0], $_->[1], $id];
+        } @{$v->{sent}};
+        my @expected = map { ['PRIVMSG', $channels->[$_], "$ids->[$_]"] } 0..$#$ids;
+        $assert->is($json->encode([\@wire, $v->{warnings}]), $json->encode([\@expected, []]),
+            "$command shares the last draw across case variants while respecting channel and author scope");
+    }
 };

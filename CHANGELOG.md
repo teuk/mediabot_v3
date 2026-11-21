@@ -1,3 +1,8 @@
+## MB1397 — Preserve quote repeat protection across case changes
+
+- Share the previous random quote across letter-case variants of the channel in q random and of the channel and author filter in quote.
+- Keep different channels and author filters independent. Exercise both public commands through the native registry with deterministic draws.
+
 ## MB1396 — Validate and report the effective karma time window
 
 - Use one duration parser for karmainfo, karmadiff and karmadiff all. Reject malformed durations privately before reading the vote log.
