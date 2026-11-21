@@ -92,10 +92,10 @@ return sub {
             $fail_prepare=1;@out=();$call->('mbObservatory_ctx','#empty');
             die 'unavailable activity fallback changed' unless @out==2 && $out[1][2]=~/energy silent/;
             $fail_prepare=0;@out=();$call->('mbRadar_ctx','#history','999d');
-            # MB1053: thirty calendar dates start 29 days before CURDATE;
-            # the exclusive upper bound is tomorrow. Keep scope parameterized.
+            # Thirty calendar dates start 29 days before CURDATE and end at
+            # the current database time. Keep channel and day binds unchanged.
             die 'history window is not capped' unless $sql[-1]=~/CURDATE\(\) - INTERVAL \? DAY/
-                && $sql[-1]=~/cl\.ts < CURDATE\(\) \+ INTERVAL 1 DAY/
+                && $sql[-1]=~/cl\.ts <= NOW\(\)/
                 && $bind[-1][0] eq '#history' && $bind[-1][1]==29;
             die 'history route or formatter changed' unless @out==3
                 && !grep {$_->[0] ne 'message' || $_->[1] ne '#history'} @out;

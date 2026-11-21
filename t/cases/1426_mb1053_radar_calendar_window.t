@@ -8,6 +8,8 @@ use Mediabot::Context;
 use Time::Local qw(timegm);
 use Storable qw(dclone);
 
+binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
+
 {
     package MB1053::DBI; our @ISA=('DBI');
     package MB1053::DBI::db; our @ISA=('DBI::db');
@@ -24,7 +26,6 @@ use Storable qw(dclone);
         }
         $sql =~ s/NOW\(\)\s*-\s*INTERVAL\s+(\d+)\s+(DAY|HOUR)/DATETIME(NOW(), '-$1 $2')/ig;
         $sql =~ s/CURDATE\(\)\s*-\s*INTERVAL\s+\?\s+DAY/DATETIME(CURDATE(), '-' || ? || ' day')/ig;
-        $sql =~ s/CURDATE\(\)\s*\+\s*INTERVAL\s+1\s+DAY/DATETIME(CURDATE(), '+1 day')/ig;
         $sql =~ s/TIMESTAMPDIFF\((MINUTE|HOUR),/TIMESTAMPDIFF('$1',/g;
         my $sth=$db->SUPER::prepare($sql,@rest);
         if ($sth && $kind) {
@@ -205,6 +206,32 @@ my $standard=[
     ['public','#test',"  🎙️ loudest (1h): Alice:3"],
 ];
 my @kinds=qw(rate silence newcomers ghosts talkers);
+{
+    my ($b,$h)=standard_1426();
+    for my $row (
+        ['2026-11-01 10:00:01','Ancien'],
+        ['2026-11-01 20:00:00','Future'],
+        ['2026-11-02 00:00:00','Tomorrow'],
+    ) {
+        $h->do(q{INSERT INTO CHANNEL_LOG VALUES(1,?,'public',?)},undef,@$row);
+    }
+    push @{$b->{_karma_log}{'#test'}}, {ts=>time()+3600,delta=>'+1'};
+    my $error=invoke_1426($b,undef,'registry');
+    is_deeply([$error,\@wire],['',$standard],
+        'future activity cannot skew the rate, last message, newcomers, ghosts, karma or talkers');
+    $h->disconnect;
+}
+{
+    my ($b,$h)=fixture_1426('2026-11-01',[
+        ['2026-11-01 10:00:00',1],
+        ['2026-11-01 10:00:01',2],
+        ['2026-11-02 00:00:00',4],
+    ]);
+    is_deeply(view_1426(invoke_1426($b,'1d','registry')),
+        wanted_1426('█',1,1,'2026-11-01',1,'2026-11-01',1),
+        'the history includes the database clock second and excludes future messages from today');
+    $h->disconnect;
+}
 {
     my (@actual,@expected);
     for my $entry (qw(Mediabot::Stats::Radar Mediabot::UserCommands Mediabot registry)) {

@@ -1,3 +1,8 @@
+## MB1405 — Exclude future activity from radar
+
+- Limit the live diagnostics and calendar history to messages at or before the database clock.
+- Ignore future-dated votes in the one-hour karma summary. Keep messages at the exact cutoff eligible.
+
 ## MB1404 — Keep dice replies within their output budget
 
 - Normalize padded dice notation before displaying or recording a roll.

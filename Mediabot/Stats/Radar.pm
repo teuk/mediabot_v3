@@ -57,7 +57,7 @@ sub mbRadar_ctx {
             WHERE c.name = ?
               AND cl.event_type IN ('public','action')
               AND cl.ts >= CURDATE() - INTERVAL ? DAY
-              AND cl.ts < CURDATE() + INTERVAL 1 DAY
+              AND cl.ts <= NOW()
             GROUP BY DATE(cl.ts)
             ORDER BY d
             }) or die "radar_history_prepare\n";
@@ -150,6 +150,7 @@ sub mbRadar_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.event_type IN ('public','action')
+          AND cl.ts <= NOW()
     }, [$channel], 1);
     return unless $rate_rows;
     my $last_h   = $rate_rows->[0]{last_h}   // 0;
@@ -175,6 +176,7 @@ sub mbRadar_ctx {
         FROM CHANNEL_LOG cl
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ? AND cl.event_type IN ('public','action')
+          AND cl.ts <= NOW()
     }, [$channel], 1);
     return unless $last_rows;
     {
@@ -196,6 +198,7 @@ sub mbRadar_ctx {
         JOIN CHANNEL c ON c.id_channel = cl.id_channel
         WHERE c.name = ?
           AND cl.event_type IN ('public','action')
+          AND cl.ts <= NOW()
         GROUP BY cl.nick
         HAVING first >= NOW() - INTERVAL 24 HOUR
         ORDER BY first ASC
@@ -227,6 +230,7 @@ sub mbRadar_ctx {
                 WHERE c.name = ?
                   AND cl.nick IN ($ph)
                   AND cl.event_type IN ('public','action')
+                  AND cl.ts <= NOW()
                 GROUP BY cl.nick
             }, [$channel, @candidates]);
             return unless $ghost_rows;
@@ -251,9 +255,13 @@ sub mbRadar_ctx {
     # 5. Karma vortex — récent karma activity > 5 votes dernière heure
     my $klog = $self->{_karma_log}{lc($channel // '')} // [];
     my $now = time();
-    my $recent_karma = scalar grep { ($_->{ts}//0) >= $now - 3600 } @$klog;
+    my @recent_votes = grep {
+        my $ts = $_->{ts} // 0;
+        $ts >= $now - 3600 && $ts <= $now;
+    } @$klog;
+    my $recent_karma = @recent_votes;
     if ($recent_karma >= 5) {
-        my $kpos = scalar grep { ($_->{ts}//0) >= $now-3600 && ($_->{delta}//'') eq '+1' } @$klog;
+        my $kpos = scalar grep { ($_->{delta}//'') eq '+1' } @recent_votes;
         my $kneg = $recent_karma - $kpos;
         push @lines, sprintf("\x{26A1} karma vortex (1h): %d votes (+%d / -%d)",
             $recent_karma, $kpos, $kneg);
@@ -267,6 +275,7 @@ sub mbRadar_ctx {
             JOIN CHANNEL c ON c.id_channel = cl.id_channel
             WHERE c.name = ?
               AND cl.ts >= NOW() - INTERVAL 1 HOUR
+              AND cl.ts <= NOW()
               AND cl.event_type IN ('public','action')
             GROUP BY cl.nick
             ORDER BY c DESC
