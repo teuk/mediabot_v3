@@ -155,24 +155,41 @@ sub _emit {
     unless (@$chunks) {$finish->(undef);return}
     $pump->();
 }
+sub _render_source_line {
+    my ($prefix,$entries,$label_bytes)=@_;
+    return $prefix . join(' | ', map {
+        my ($original,$link)=@$_;
+        my $label=source_label($original,$label_bytes);
+        # Reset the grey label before the space leading into the link.
+        length($label) ? "\x0314$label\x0f $link" : $link;
+    } @$entries);
+}
+
 sub _source_line {
-    my ($sources,$lang,$urls)=@_;my $line=$lang eq 'fr'?'Sources : ':'Sources: ';my $count=0;
+    my ($sources,$lang,$urls)=@_;
+    my $prefix=$lang eq 'fr' ? 'Sources : ' : 'Sources: ';
+    my (@entries,$line);
     $urls={} unless ref($urls) eq 'HASH';
     for my $source (@$sources) {
         next unless ref($source) eq 'HASH';my $url=safe_url($source->{url});next unless $url;
-        # IRC colour 14 is dark grey. Reset before the space so neither the
-        # alias nor its separator inherits the source-site label's style.
-        my $label="\x0314".source_label($url)."\x0f";
-        if (defined($urls->{$url}) && $urls->{$url} ne $url) {
-            # IRC colour 12 is light blue; underline and reset are scoped to
-            # this verified private-service alias, never to the separator.
-            $url="\x0312\x1f".$urls->{$url}."\x0f";
+        # Use the same light blue and underline for a verified alias or the
+        # original destination. Reset before separators and any next label.
+        my $display=$urls->{$url}//$url;
+        my @candidate=(@entries,[$url,"\x0312\x1f$display\x0f"]);
+        my $rendered=_render_source_line($prefix,\@candidate);
+        if (_utf8_text_bytes($rendered)>400) {
+            my $links_only=_render_source_line($prefix,\@candidate,0);
+            my $remaining=400-_utf8_text_bytes($links_only);
+            next if $remaining<0;
+            # Reserve five bytes per label for its colour, reset and space.
+            my $label_bytes=int($remaining/@candidate)-5;
+            $rendered=_render_source_line($prefix,\@candidate,$label_bytes);
         }
-        my $candidate=$line.($count?' | ':'').$label.' '.$url;
-        next if _utf8_text_bytes($candidate)>400;
-        $line=$candidate;last if ++$count>=2;
+        $line=$rendered;
+        @entries=@candidate;
+        last if @entries>=2;
     }
-    return $count ? $line : undef;
+    return $line;
 }
 sub _present_sources {
     my ($self,$sources,$done)=@_;my $finished=0;

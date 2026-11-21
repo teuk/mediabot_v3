@@ -527,10 +527,10 @@ loss; styled replies retain the normal formatter.
 The sources message uses up to two evidence URLs actually selected by synthesis.
 Source URLs up to **140 UTF-8 bytes** are displayed unchanged. Longer URLs are
 eligible for private shortening, and an alias is used only when it is shorter
-than the original. Two 140-byte originals, maximum 48-byte site labels, styling
-and the French prefix fit within 399 of the 400 IRC payload bytes. An all-short
-batch needs no shortening worker or service request. Failures preserve the exact
-original URL, subject to the existing source-line budget; URLs are never cut.
+than the original. Two 140-byte originals with their link styling and French
+prefix fit within 400 IRC payload bytes when their labels are compacted. An
+all-short batch needs no shortening worker or service request. Failures preserve
+the exact original URL when it fits within the source-line budget.
 This threshold applies only to MetaAI source presentation.
 
 An isolated presentation worker reuses the configured `[shorturl]` service,
@@ -554,12 +554,14 @@ domain ending. Matching uses complete domain boundaries, including subdomains;
 a lookalike such as `franceinfo.fr.example.org` cannot borrow the FranceInfo label.
 No additional HTTP lookup or AI request is needed.
 
-Accepted private-service aliases use light blue (IRC colour 12), underline and
-a reset after each link. Separators and answer text retain their normal style.
+All source links use light blue (IRC colour 12), underline and a reset,
+including direct URLs, verified private aliases and originals shown after
+shortening fails. Separators and answer text retain their normal style.
 For example, a plain-text view reads:
 `Sources: FranceInfo https://teuk.org/shorturl/Abcdef23 | example.org https://teuk.org/shorturl/Ghijkm45`.
 French channels keep `Sources :`. Labels and style controls share the existing
-400-byte sources-message budget; URLs are never truncated to make room.
+400-byte sources-message budget. Labels are compacted or omitted to fit
+complete URLs.
 Accidental literal line-break/bullet escape artifacts are flattened in provider
 prose before output and memory retention; incoming prompts and evidence are not
 rewritten. Quoted escape notation and ambiguous code/path sequences remain intact.

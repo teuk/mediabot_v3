@@ -4,6 +4,7 @@ use utf8;
 use Test::More;
 use Encode qw(encode);
 use Mediabot::AI::MetaReply qw(shorten_sources display_urls source_requires_shortening);
+use Mediabot::AI::MetaRuntime ();
 return sub {
     my $prefix='https://example.org/';
     my @urls=map {$prefix.('x'x($_-length($prefix)))} (139,140,141);
@@ -56,25 +57,17 @@ return sub {
         {url=>$urls[2],display_url=>'https://foreign.example.org/Abcdef23'}]},'https://short.example.org/shorturl/');
     is_deeply($map,{},'foreign aliases remain rejected');
 
-    # Load exact runtime methods without the unrelated Helpers dependency graph.
-    open my $f,'<','Mediabot/AI/MetaRuntime.pm' or die $!;
-    my $src=do {local $/;<$f>};close $f;
-    my $code='package MB1286Runtime; use strict; use warnings; use Mediabot::IRC::TextBudget qw(_utf8_text_bytes); use Mediabot::AI::MetaPolicy qw(safe_url); use Mediabot::AI::MetaReply qw(source_label source_requires_shortening shorturl_ready);';
-    for my $name (qw(_source_line _present_sources)) {
-        my ($body)=$src=~/^(sub \Q$name\E \{.*?)(?=^sub \w+|\z)/ms;
-        die "missing $name" unless $body;$code.=$body;
-    }
-    eval $code;die $@ if $@;
     my $host=('a'x36).'.example.org'; # 48-byte label
     my $u='https://'.$host.'/';$u.='x'x(140-length($u));
-    my $line=MB1286Runtime::_source_line([{url=>$u},{url=>$u.'?'}],'fr',{});
-    cmp_ok(length(encode('UTF-8',$line)),'<=',400,'two boundary-length labelled sources fit the wire budget');
-    $line=MB1286Runtime::_source_line([{url=>$u},{url=>substr($u,0,-1).'y'}],'fr',{});
-    is(length(encode('UTF-8',$line)),399,'two 140-byte URLs and maximum labels consume exactly 399 bytes');
-    like($line,qr/\Q$u\E/,'original URL stays complete and clickable');
+    my $line=Mediabot::AI::MetaRuntime::_source_line([{url=>$u},{url=>$u.'?'}],'fr',{});
+    is(length(encode('UTF-8',$line)),400,'two styled links fit exactly after compacting their labels');
+    my @links=$line=~/\x0312\x1f([^\x00-\x1f]+)\x0f/g;
+    is_deeply(\@links,[$u,$u.'?'],'both original URLs stay complete and styled within the byte budget');
+    my $label='...'.substr($host,-40);
+    like($line,qr/\x0314\Q$label\E\x0f /,'compact site label retains its domain ending');
     my ($done,$value)=(0,undef);
-    local *MB1286Runtime::shorturl_ready=sub {die 'short batch should not inspect service configuration'};
-    my $runtime=bless {},'MB1286Runtime';
+    local *Mediabot::AI::MetaRuntime::shorturl_ready=sub {die 'short batch should not inspect service configuration'};
+    my $runtime=Mediabot::AI::MetaRuntime->new(bot=>{});
     my $ok=eval {$runtime->_present_sources([{url=>$urls[0]},{url=>$urls[1]}],sub {$done++;$value=shift});1};
     ok($ok,'all-short presentation finishes without configuration, event loop or worker');
     is($done,1,'all-short completion occurs exactly once');

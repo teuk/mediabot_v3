@@ -1,3 +1,8 @@
+## MB1408 — Style every MetaAI source link
+
+- Use the same light blue and underline for direct URLs, verified aliases and original URLs after shortening fails.
+- Compact site labels when needed to keep complete links within the IRC byte budget.
+
 ## MB1407 — Decode Morse in Playful
 
 - Add `!morse -d` for the plugin's Morse alphabet, using spaces between letters and slashes between words.

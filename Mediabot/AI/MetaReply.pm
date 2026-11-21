@@ -9,8 +9,8 @@ use Mediabot::URLShortener qw(make_bot_shortener);
 use Mediabot::AI::IRCOutput qw(format_ai_reply);
 our @EXPORT_OK=qw(clean_answer format_meta_reply shorten_sources display_urls shorturl_ready source_label source_requires_shortening);
 
-# Two 140-byte URLs plus two maximum 48-byte labels, their colour/reset
-# controls, spaces, separator and French prefix fit in 399 of 400 wire bytes.
+# Two 140-byte URLs with blue/underline controls fit in one source line
+# with site labels. The renderer compacts those labels when needed.
 sub source_requires_shortening {
     my ($url)=@_;
     $url=safe_url($url);
@@ -18,7 +18,9 @@ sub source_requires_shortening {
 }
 
 sub source_label {
-    my ($url)=@_;
+    my ($url,$max_bytes)=@_;
+    $max_bytes//=48;
+    return '' if $max_bytes<4;
     $url=safe_url($url);return '' unless defined $url;
     my ($host)=$url=~m{\Ahttps?://([^/]+)}i;
     $host=lc $host;$host=~s/\Awww\.//;
@@ -40,11 +42,14 @@ sub source_label {
         ['musee-orsay.fr',"Musée d'Orsay"],
     ) {
         my ($domain,$label)=@$site;
-        return $label if $host eq $domain || $host=~/\.\Q$domain\E\z/;
+        if ($host eq $domain || $host=~/\.\Q$domain\E\z/) {
+            return $label if _utf8_text_bytes($label)<=$max_bytes;
+            last;
+        }
     }
     # Unknown sites retain their host, including meaningful subdomains.
     # For unusually long names keep the domain ending, not a misleading prefix.
-    return length($host)>48?'...'.substr($host,-45):$host;
+    return length($host)>$max_bytes ? '...'.substr($host,3-$max_bytes) : $host;
 }
 
 sub shorturl_ready {

@@ -55,8 +55,8 @@ like($fr,qr/\ASources : \x0314FranceInfo/,'French prefix retains its spacing and
 my $translated=$fr;$translated=~s/\ASources : /Sources: /;
 is($translated,$line,'language does not change source attribution or URLs');
 my $fallback=Mediabot::AI::MetaRuntime::_source_line([$sources->[0]],'en',{});
-is($fallback,"Sources: \x0314FranceInfo\x0f ".$sources->[0]{url},
-    'failed shortening retains labelled exact original URL without alias styling');
+is($fallback,"Sources: \x0314FranceInfo\x0f \x0312\x1f".$sources->[0]{url}."\x0f",
+    'failed shortening retains the original URL with the same style as an alias');
 my $untrusted=display_urls($sources,{mappings=>[
     {url=>$sources->[0]{url},display_url=>'https://evil.example.org/Abcdef23'},
 ]},'https://teuk.org/shorturl/');
@@ -67,21 +67,24 @@ my $unicode=Mediabot::AI::MetaRuntime::_source_line([
     {url=>'https://www.musee-orsay.fr/visit'},
 ],'en',{'https://www.musee-orsay.fr/visit'=>'https://teuk.org/shorturl/Abcdef23'});
 like($unicode,qr/\x0314Musée d'Orsay\x0f /,'UTF-8 site label retains its accent and reset');
-my $unicode_prefix="Sources: \x0314Musée d'Orsay\x0f ";
-my $unicode_url='https://musee-orsay.fr/'.('x'x(400-length(encode('UTF-8',$unicode_prefix))-length('https://musee-orsay.fr/')));
-is(length(encode('UTF-8',Mediabot::AI::MetaRuntime::_source_line([{url=>$unicode_url}],'en',{}))),400,
+my $unicode_prefix="Sources: \x0314Musée d'Orsay\x0f \x0312\x1f";
+my $unicode_url='https://musee-orsay.fr/'.('x'x(399-length(encode('UTF-8',$unicode_prefix))-length('https://musee-orsay.fr/')));
+my $unicode_boundary=Mediabot::AI::MetaRuntime::_source_line([{url=>$unicode_url}],'en',{});
+is(length(encode('UTF-8',$unicode_boundary)),400,
     'non-ASCII label bytes count towards the exact 400-byte boundary');
-is(Mediabot::AI::MetaRuntime::_source_line([{url=>$unicode_url.'x'}],'en',{}),undef,
-    'UTF-8 byte budget cannot be bypassed by an accented label');
+like($unicode_boundary,qr/^\Q$unicode_prefix\E/,'an accented label is kept when it fits');
+my $compact=Mediabot::AI::MetaRuntime::_source_line([{url=>$unicode_url.'x'}],'en',{});
+cmp_ok(length(encode('UTF-8',$compact)),'<=',400,
+    'a compact label keeps its complete link inside the UTF-8 budget');
+like($compact,qr/\x0312\x1f\Q$unicode_url\Ex\x0f\z/,'compacting a label never changes the URL');
 my @many=(@$sources,{url=>'https://third.example.org/article'});
 my $limited=Mediabot::AI::MetaRuntime::_source_line(\@many,'en',$urls);
 is($limited,$line,'existing maximum of two source entries is unchanged');
 cmp_ok(length(encode('UTF-8',$line)),'<=',400,'labels and all controls fit the IRC byte envelope');
-my $prefix="Sources: \x0314example.org\x0f ";
-my $exact='https://example.org/'.('x'x(400-length(encode('UTF-8',$prefix))-length('https://example.org/')));
+my $prefix="Sources: \x0312\x1f";
+my $exact='https://example.org/'.('x'x(399-length($prefix)-length('https://example.org/')));
 my $boundary=Mediabot::AI::MetaRuntime::_source_line([{url=>$exact}],'en',{});
-is(length(encode('UTF-8',$boundary)),400,'exactly 400 bytes including label and controls remains valid');
-like($boundary,qr/\Q$exact\E\z/,'a fitting original URL is never truncated');
+is($boundary,$prefix.$exact."\x0f",'a 400-byte line retains the complete styled URL without a label');
 is(Mediabot::AI::MetaRuntime::_source_line([{url=>$exact.'x'}],'en',{}),undef,
     'one extra byte cannot publish an overlong or truncated sources line');
 is(Mediabot::AI::MetaRuntime::_source_line([],'en',{}),undef,'no sources creates no stray label line');

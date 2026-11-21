@@ -56,6 +56,11 @@ like($line,qr/\x0f \| \x0314two\.example\.org\x0f \x0312\x1f/,'separator stays o
 unlike($line,qr/first-article|second-article/,'long verified original links do not consume displayed space');
 cmp_ok(length(encode('UTF-8',$line)),'<',160,'source line is compact including colour and underline bytes');
 is(scalar(()=$line=~/\x0312\x1f/g),2,'both displayed aliases have the requested style');
+my $mixed=display_urls($sources,{mappings=>[$shortened->{mappings}[0]]},'https://teuk.org/shorturl/');
+my $mixed_line=Mediabot::AI::MetaRuntime::_source_line([$sources->[0],$sources->[2]],'fr',$mixed);
+is($mixed_line,"Sources : \x0314one.example.org\x0f \x0312\x1fhttps://teuk.org/shorturl/Abcdef23\x0f"
+    ." | \x0314third.example.org\x0f \x0312\x1f".$sources->[2]{url}."\x0f",
+    'direct URLs and verified aliases use identical link styling in the same line');
 my $untrusted=display_urls($sources,{mappings=>[
  {url=>$long1,display_url=>'https://evil.example.org/Abcdef23'},
  {url=>'https://not-requested.example.org/',display_url=>'https://teuk.org/shorturl/Abcdef23'},
