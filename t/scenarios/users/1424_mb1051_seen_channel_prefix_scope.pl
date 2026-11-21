@@ -40,7 +40,7 @@ sub fixture_1424 {
     $db->do(q{CREATE TABLE USER_SEEN(nick TEXT COLLATE NOCASE,channel TEXT COLLATE NOCASE,
         userhost TEXT,event_type TEXT,last_msg TEXT,new_nick TEXT,seen_at INTEGER)});
     $db->do(q{CREATE TABLE CHANNEL_LOG(id_channel INTEGER,nick TEXT,ts INTEGER,
-        userhost TEXT,publictext TEXT,event_type TEXT)});
+        userhost TEXT,publictext TEXT,event_type TEXT,id_channel_log INTEGER PRIMARY KEY)});
     $db->do(q{ATTACH DATABASE ':memory:' AS history});
     $db->do(q{CREATE TABLE history.CHANNEL_LOG_ARCHIVE AS SELECT * FROM CHANNEL_LOG});
     my $bot = bless {dbh=>$db,logger=>bless({},'MB1051::Log'),online=>{},
@@ -79,9 +79,9 @@ for my $channel ('#test','&local','!ABCDEsafe','+room') {
             "$channel: persisted lookup keeps its ".($explicit?'explicit':'current')." scope and reply destination");
     }
     $db->do(q{INSERT INTO CHANNEL_LOG VALUES
-        (7,'alice',1000,'alice!id@host','one','public'),
-        (7,'alice',1001,'alice!id@host','two','action'),
-        (9,'alice',1002,'alice!id@host','other','public')});
+        (7,'alice',1000,'alice!id@host','one','public',1),
+        (7,'alice',1001,'alice!id@host','two','action',2),
+        (9,'alice',1002,'alice!id@host','other','public',3)});
     like(invoke_1424($bot,undef,'Alice',$channel),qr/\[2 msg in last 24h\]/,
         "$channel: the best-effort activity hint uses the same channel classification and identity");
     $db->do(q{DELETE FROM CHANNEL_LOG});
@@ -99,9 +99,9 @@ for my $channel ('#test','&local','!ABCDEsafe','+room') {
     $db->do(q{DELETE FROM USER_SEEN});
     $bot->{online} = {'#other'=>['Alice']};
     $db->do(q{INSERT INTO history.CHANNEL_LOG_ARCHIVE VALUES
-        (7,'alice',1000,'alice!id@host','TARGET_ARCHIVE','public')});
+        (7,'alice',1000,'alice!id@host','TARGET_ARCHIVE','public',1)});
     $db->do(q{INSERT INTO CHANNEL_LOG VALUES
-        (9,'alice',2000,'alice!elsewhere@host','FORBIDDEN_QUIT','quit')});
+        (9,'alice',2000,'alice!elsewhere@host','FORBIDDEN_QUIT','quit',2)});
     for my $explicit (0,1) {
         my ($caller,@args) = $explicit ? (undef,'Alice',$channel) : ($channel,'Alice');
         my $text = invoke_1424($bot,$caller,@args);
@@ -123,7 +123,7 @@ for my $channel ('#test','&local','!ABCDEsafe','+room') {
     like(invoke_1424($bot,undef,'Ali*'),qr/alice.*#other/,
         'private wildcard lookup with no channel retains its historical global scope');
     $db->do(q{DELETE FROM USER_SEEN});
-    $db->do(q{INSERT INTO CHANNEL_LOG VALUES(9,'alice',2000,'alice!id@host','FORBIDDEN_QUIT','quit')});
+    $db->do(q{INSERT INTO CHANNEL_LOG VALUES(9,'alice',2000,'alice!id@host','FORBIDDEN_QUIT','quit',1)});
     is(invoke_1424($bot,undef,'Alice','&unknown'),'Channel unavailable.',
         'an unknown explicit channel cannot turn into a global history lookup');
     is(invoke_1424($bot,undef,'Nobody*','+unknown'),"No nicks matching 'Nobody*' on +unknown.",

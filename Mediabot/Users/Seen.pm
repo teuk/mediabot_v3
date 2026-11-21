@@ -250,61 +250,59 @@ sub mbSeen_ctx {
             }
         }
 
+        # Archive rows retain their live IDs. Use the same timestamp/ID
+        # order when picking the best row from the two source queries.
+        my $best;
+        my $keep_newest = sub {
+            my ($row) = @_;
+            my $order = $best
+                ? (($row->{uts} // 0) <=> ($best->{uts} // 0)
+                    || $row->{id_channel_log} <=> $best->{id_channel_log})
+                : 1;
+            $best = $row if $order > 0;
+        };
+
         if (defined($chan_for_part) && $id_channel) {
             # mb576-B1: LIMIT 1 par table, la fusion garde la plus recente
             # (le dernier passage d'un ancien vit dans l'archive).
-            my $seen_best;
             my $seen_chan_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
-                "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext, event_type
+                "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext, event_type, id_channel_log
                  FROM __CLSRC__ cl
                  WHERE id_channel = ?
                    AND nick = ?
                    AND event_type IN ('message', 'public', 'action', 'join', 'part', 'quit')
-                 ORDER BY ts DESC LIMIT 1",
-                [ $id_channel, $targetNick ], sub {
-                    my ($r) = @_;
-                    $seen_best = $r
-                        if !$seen_best
-                        || (($r->{uts} // 0) > ($seen_best->{uts} // 0));
-                }, 'all');
+                 ORDER BY ts DESC, id_channel_log DESC LIMIT 1",
+                [ $id_channel, $targetNick ], $keep_newest, 'all');
             # mb578-B1: panne LIVE = echec franc — sans quoi seen pourrait
             # repondre depuis une archive ancienne seule.
             unless ($seen_chan_g->{live_ok}) {
                 botNotice($self, $nick, 'Database error.');
                 return;
             }
-            {
-                if (my $r = $seen_best) {
-                    $chanlog = {
-                        ts    => $r->{ts},
-                        uts   => $r->{uts} // 0,
-                        host  => $r->{userhost} // '',
-                        text  => $r->{publictext} // '',
-                        event => (($r->{event_type} // 'message') =~ /\A(?:public|action)\z/
-                            ? 'message' : ($r->{event_type} // 'message')),
-                    };
-                }
+            if (my $r = $best) {
+                $chanlog = {
+                    ts    => $r->{ts},
+                    uts   => $r->{uts} // 0,
+                    host  => $r->{userhost} // '',
+                    text  => $r->{publictext} // '',
+                    event => (($r->{event_type} // 'message') =~ /\A(?:public|action)\z/
+                        ? 'message' : ($r->{event_type} // 'message')),
+                };
             }
         }
         else {
             # mb576-B1: LIMIT 1 par table, fusion = le quit le plus recent.
-            my $quit_best;
             my $seen_quit_g = Mediabot::Helpers::channel_log_gather($self, $self->{dbh},
-                "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext
+                "SELECT ts, UNIX_TIMESTAMP(ts) AS uts, userhost, publictext, id_channel_log
                  FROM __CLSRC__ cl
                  WHERE nick = ? AND event_type = 'quit'
-                 ORDER BY ts DESC LIMIT 1",
-                [ $targetNick ], sub {
-                    my ($r) = @_;
-                    $quit_best = $r
-                        if !$quit_best
-                        || (($r->{uts} // 0) > ($quit_best->{uts} // 0));
-                }, 'presence');
+                 ORDER BY ts DESC, id_channel_log DESC LIMIT 1",
+                [ $targetNick ], $keep_newest, 'presence');
             unless ($seen_quit_g->{live_ok}) {
                 botNotice($self, $nick, 'Database error.');
                 return;
             }
-            if (my $r = $quit_best) {
+            if (my $r = $best) {
                 $quit = {
                     ts   => $r->{ts},
                     uts  => $r->{uts} // 0,

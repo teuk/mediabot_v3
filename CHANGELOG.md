@@ -1,3 +1,8 @@
+## MB1394 — Pick the latest same-second event in seen
+
+- Break timestamp ties by channel log ID in both history sources and when merging their results. Scoped activity and global quit lookups now follow the same order.
+- Verify same-second live and archive events, cross-source ties, and channel isolation through the existing native seen scenarios.
+
 ## MB1393 — Preserve deadline-like text inside reminders
 
 - Read only the leading scheduling metadata in reminder delivery, listing and snooze. An inline `[at:...]` stays in the message and cannot delay delivery.

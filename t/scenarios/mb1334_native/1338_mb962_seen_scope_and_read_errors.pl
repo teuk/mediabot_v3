@@ -72,10 +72,10 @@ sub setup_1338 {
     $db->do(q{CREATE TABLE USER_SEEN(nick TEXT COLLATE NOCASE, channel TEXT COLLATE NOCASE,
         userhost TEXT, event_type TEXT, last_msg TEXT, new_nick TEXT, seen_at INTEGER)});
     $db->do(q{CREATE TABLE CHANNEL_LOG(id_channel INTEGER,nick TEXT,ts INTEGER,
-        userhost TEXT,publictext TEXT,event_type TEXT)});
+        userhost TEXT,publictext TEXT,event_type TEXT,id_channel_log INTEGER PRIMARY KEY)});
     $db->do(q{ATTACH DATABASE ':memory:' AS history});
     $db->do(q{CREATE TABLE history.CHANNEL_LOG_ARCHIVE AS SELECT * FROM CHANNEL_LOG});
-    $db->do(q{INSERT INTO CHANNEL_LOG VALUES(11,'alice',3000,'alice!elsewhere@host','OTHER_CHANNEL_ONLY','quit')});
+    $db->do(q{INSERT INTO CHANNEL_LOG VALUES(11,'alice',3000,'alice!elsewhere@host','OTHER_CHANNEL_ONLY','quit',1)});
     my $conf = bless { 'mysql.CHANNEL_LOG_ARCHIVE_DBNAME' => 'history',
         'mysql.CHANNEL_LOG_ARCHIVE_PRESENCE_DAYS' => 7,
         'mysql.CHANNEL_LOG_ARCHIVE_CONTENT_DAYS' => 7 }, 'MB962::Conf';
@@ -100,7 +100,7 @@ sub stored_1338 {
 for my $entry ('Mediabot::Users::Seen') {
     {
         my ($bot, $db) = setup_1338();
-        $db->do(q{INSERT INTO history.CHANNEL_LOG_ARCHIVE VALUES(9,'alice',1000,'alice!id@host','ARCHIVE_TARGET','public')});
+        $db->do(q{INSERT INTO history.CHANNEL_LOG_ARCHIVE VALUES(9,'alice',1000,'alice!id@host','ARCHIVE_TARGET','public',2)});
         is(invoke_1338($entry, $bot, '#test', 'Alice', '#archive'), '', "$entry: uncached channel lookup completes");
         like($wire[-1][2], qr/on #archive.*ARCHIVE_TARGET/, "$entry: resolves requested channel through its database identity");
         unlike(join(' ', map { $_->[2] } @wire), qr/OTHER_CHANNEL_ONLY/, "$entry: never falls back to an unrelated quit");
@@ -146,7 +146,7 @@ for my $entry ('Mediabot::Users::Seen') {
     }
     {
         my ($bot, $db) = setup_1338();
-        $db->do(q{INSERT INTO CHANNEL_LOG VALUES(11,'old',1000,'old!id@host',?,'quit')},
+        $db->do(q{INSERT INTO CHANNEL_LOG VALUES(11,'old',1000,'old!id@host',?,'quit',2)},
             undef, "\x02Global\x0f\t\x7f" . ('y' x 550));
         is(invoke_1338($entry, $bot, undef, 'Old'), '', "$entry: global legacy quit lookup completes");
         my $text = $wire[-1][2] // '';
@@ -158,10 +158,31 @@ for my $entry ('Mediabot::Users::Seen') {
         is(invoke_1338($entry, $bot, undef, 'Alice'), '', "$entry: legitimate private global lookup still works");
         like($wire[-1][2], qr/OTHER_CHANNEL_ONLY/, "$entry: unscoped private command retains its global fallback");
     }
+    for my $case (
+        ['live tie', 'CHANNEL_LOG', 'CHANNEL_LOG', '#test'],
+        ['archive tie', 'history.CHANNEL_LOG_ARCHIVE', 'history.CHANNEL_LOG_ARCHIVE', '#test'],
+        ['archive row wins cross-source tie', 'CHANNEL_LOG', 'history.CHANNEL_LOG_ARCHIVE', '#test'],
+        ['live row wins global quit tie', 'history.CHANNEL_LOG_ARCHIVE', 'CHANNEL_LOG', undef],
+        ['archive row wins global quit tie', 'CHANNEL_LOG', 'history.CHANNEL_LOG_ARCHIVE', undef],
+    ) {
+        my ($label, $first, $last, $channel) = @$case;
+        my ($bot, $db) = setup_1338();
+        my $event = defined($channel) ? 'public' : 'quit';
+        $db->do("INSERT INTO $first VALUES(7,'reader',2000,'reader!id\@host','FIRST',?,10)", undef, $event);
+        $db->do("INSERT INTO $last VALUES(7,'reader',2000,'reader!id\@host','LAST',?,11)", undef, $event);
+        $db->do("INSERT INTO $last VALUES(7,'reader',1999,'reader!id\@host','OLDER',?,12)", undef, $event);
+        if (defined $channel) {
+            $db->do("INSERT INTO $last VALUES(11,'reader',2000,'reader!id\@host','OTHER',?,13)", undef, $event);
+        }
+        is(invoke_1338($entry, $bot, $channel, 'Reader'), '', "$label: history lookup completes");
+        my $text = $wire[-1][2] // '';
+        is_deeply([$text =~ /\bLAST\b/ ? 1 : 0, $text =~ /\b(?:FIRST|OLDER|OTHER)\b/ ? 1 : 0],
+            [1,0], "$label: last event in the selected scope wins, with timestamps before row IDs");
+    }
     for my $source ('CHANNEL_LOG', 'history.CHANNEL_LOG_ARCHIVE') {
         my ($bot, $db) = setup_1338(cached => 1);
         my $body = "\x02Café\x0f \x0304rouge\x03\x00\r\n" . ('x' x 550);
-        $db->do("INSERT INTO $source VALUES(7,'alice',1000,'alice!id\@host',?,'public')", undef, $body);
+        $db->do("INSERT INTO $source VALUES(7,'alice',1000,'alice!id\@host',?,'public',2)", undef, $body);
         is(invoke_1338($entry, $bot, '#test', 'Alice'), '', "$entry $source: legacy text lookup completes");
         my $text = $wire[-1][2] // '';
         unlike($text, qr/[\x00-\x1f\x7f]/, "$entry $source: legacy body cannot inject formatting or controls");
@@ -248,7 +269,7 @@ for my $source ('USER_SEEN','CHANNEL_LOG','history.CHANNEL_LOG_ARCHIVE') {
         my ($body,$expected)=@$case;
         my ($bot,$db)=setup_1338(cached=>1);
         if ($source eq 'USER_SEEN') { stored_1338($db,'alice',$body) }
-        else { $db->do("INSERT INTO $source VALUES(7,'alice',1000,'alice!id\@host',?,'public')",undef,$body) }
+        else { $db->do("INSERT INTO $source VALUES(7,'alice',1000,'alice!id\@host',?,'public',2)",undef,$body) }
         is(invoke_1338('Mediabot::Users::Seen',$bot,'#test','Alice'),'','Unicode excerpt lookup completes');
         my ($excerpt)=($wire[-1][2] // '') =~ /saying: (.*?)(?: \[\d+ msg in last 24h\])?\z/;
         is($excerpt,$expected,"$source preserves whole characters within the excerpt budget");
