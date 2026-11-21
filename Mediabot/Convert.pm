@@ -157,9 +157,11 @@ sub convert {
     my ($value, $from_raw, $to_raw) = @_;
 
     return (0, "value must be a number") unless defined($value) && !ref($value)
-        && $value =~ /\A[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?\z/;
+        && $value =~ /\A[-+]?([0-9]*\.?[0-9]+)(?:[eE][-+]?[0-9]+)?\z/;
+    my $mantissa = $1;
     $value = 0 + $value;
-    return (0, "value is outside the supported numeric range") unless POSIX::isfinite($value);
+    return (0, "value is outside the supported numeric range")
+        if !POSIX::isfinite($value) || ($value == 0 && $mantissa =~ /[1-9]/);
     my $from = _canon($from_raw);
     my $to   = _canon($to_raw);
     return (0, "unknown unit '" . (defined $from_raw ? $from_raw : '') . "'") unless defined $from;
@@ -190,8 +192,9 @@ sub convert {
     # Form the bounded unit ratio first. A large/small but representable
     # result must not overflow/underflow through an unnecessary base value.
     my $out = $value * ($FAMILY{$ff}{f}{$from} / $FAMILY{$tf}{f}{$to});
+    # A positive scale factor can yield exact zero only for zero input.
     return (0, "conversion result is outside the supported numeric range")
-        unless POSIX::isfinite($out);
+        if !POSIX::isfinite($out) || ($out == 0 && $value != 0);
     return (1, _fmt($value) . " $LABEL{$from} = " . _fmt($out) . " $LABEL{$to}");
 }
 

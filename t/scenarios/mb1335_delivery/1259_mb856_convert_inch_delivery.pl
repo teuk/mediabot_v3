@@ -57,4 +57,16 @@ for my $args (['1e9999','m','km'],['1e308','tb','b'],['1e308','c','f'],['abc','i
     unlike($replies[0]{text},qr/=.*\b(?:Inf|NaN)\b/i,'invalid conversion cannot publish a non-finite success');
     is(scalar @logged,0,'refused conversion creates no successful-conversion audit event');
 }
+for my $channel ('#test',undef) {
+    my $bot = MockBot->new;
+    @logged = ();
+    my $ctx = Mediabot::Context->new(bot=>$bot,nick=>'alice',channel=>$channel,
+        command=>'convert',message=>'local underflow fixture',args=>['1e-9999','m','km']);
+    Mediabot::DBCommands::mbConvert_ctx($ctx);
+    my @replies = $bot->replies;
+    is_deeply([map { [@{$_}{qw(type to text)}] } @replies],
+        [['notice','alice','convert: value is outside the supported numeric range']],
+        'underflow sends exactly one private range error');
+    is(scalar @logged,0,'underflow does not log a successful conversion');
+}
 1;

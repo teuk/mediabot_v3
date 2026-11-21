@@ -1,3 +1,8 @@
+## MB1395 — Report conversion underflow instead of displaying zero
+
+- Reject nonzero input that rounds to zero during parsing and nonzero linear conversions that round to zero after scaling.
+- Preserve zero input, representable subnormal values and valid temperature conversions to zero. Report the existing private range error without a success audit.
+
 ## MB1394 — Pick the latest same-second event in seen
 
 - Break timestamp ties by channel log ID in both history sources and when merging their results. Scoped activity and global quit lookups now follow the same order.

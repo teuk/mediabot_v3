@@ -36,6 +36,22 @@ for my $case (
     my $n=result_number($out);
     ok(defined($n) && $n>0 && $n<1e-319,'identity does not underflow through the base-unit intermediate');
 }
+{
+    my $smallest = 1;
+    $smallest /= 2 while $smallest / 2;
+    for my $case (['1e-9999','m','km','value'],
+                  ['-.1e-9999','c','f','value'],
+                  [sprintf('%.17g', $smallest),'b','tb','conversion result']) {
+        my ($value,$from,$to,$subject)=@$case;
+        my @warnings;
+        local $SIG{__WARN__} = sub { push @warnings, @_ };
+        my ($ok,$out)=Mediabot::Convert::convert($value,$from,$to);
+        is_deeply([$ok,$out,\@warnings], [0,"$subject is outside the supported numeric range",[]],
+            "$value $from to $to: a nonzero value cannot silently become zero");
+    }
+    is_deeply([Mediabot::Convert::convert('0.000e-9999','b','tb')], [1,'0 B = 0 TB'],
+        'a zero mantissa with a nonzero exponent still converts as zero');
+}
 for my $case (
     ['1e9999','m','km'],['-1e9999','c','f'],['9'x400,'kg','g'],
     ['1e308','tb','b'],['1e308','km','mm'],['1e308','c','f'],['-1e308','c','f'],
