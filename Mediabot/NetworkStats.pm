@@ -79,11 +79,15 @@ sub observe {
     }
     my $v=parse_numeric($n,$args,$text);
     return unless keys %$v;
+    my $pending=$s->{pending};
+    # Drop the stale sample before deciding whether this reply can start one.
+    if ($pending && ($now-$pending->{sampled_at}>20 || $now<$pending->{sampled_at})) {
+        delete $s->{pending};
+    }
     if (!$s->{pending} && ($n eq '255' || $n eq '266')) {
         $s->{pending}={sampled_at=>$now,counts=>{},schema=>1,network=>$s->{network},interval=>$s->{interval}};
     }
     my $p=$s->{pending} or return;
-    if ($now-$p->{sampled_at}>20 || $now<$p->{sampled_at}) {delete $s->{pending};return;}
     @{$p->{counts}}{keys %$v}=values %$v;
     $s->{last_numeric}=$now;
     $p->{complete}=1 if $n eq '255' || $n eq '266';

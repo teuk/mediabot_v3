@@ -1,3 +1,8 @@
+## MB1392 — Keep valid LUSERS replies after an expired sample
+
+- Discard an expired or future-dated sample before handling a valid reply. A standalone 255 or 266 can start a new sample without inheriting old counts.
+- Cover the inclusive 20-second boundary, clock rollback and both fallback replies through the existing network statistics scenario.
+
 ## MB1391 — Apply the same minimum quote length across languages
 
 - Count characters when selecting a Quotegame prompt. UTF-8 accents, CJK characters and emoji can no longer make a quote shorter than 20 characters eligible.

@@ -61,6 +61,39 @@ sub sample_1400 { JSON::PP->new->utf8->decode(bytes_1400($_[0])) }
         [1,1030,{users=>12,global_users=>12,users_max=>20}],
         'an old unfinished burst cannot cause the new total-only reply to be discarded as expired');
 }
+for my $age (20, 21, -1) {
+    my ($e,$clock,$path)=fixture_1400();
+    my $bot=bless {network_stats_exporter=>$e,
+        irc=>bless({connected=>1},'MB1027::IRC')},'Mediabot';
+    burst_1400($e);
+    $$clock += $age;
+    my $arrival = $$clock;
+    $bot->update_network_metrics_from_numeric('266',[12,20],'');
+    my $early = $bot->flush_network_stats();
+    $$clock += 3;
+    my $published = $bot->flush_network_stats();
+    my $s = $published ? sample_1400($path) : {};
+    my $counts = $age == 20
+        ? {users=>100,visible_users=>17,invisible_users=>83,servers=>4,operators=>5,
+           local_users=>45,local_servers=>3,global_users=>12,users_max=>20}
+        : {users=>12,global_users=>12,users_max=>20};
+    is_deeply([$early,$published,$s->{sampled_at},$s->{counts}],
+        [0,1,($age == 20 ? 1000 : $arrival),$counts],
+        "valid 266 without a new 251 respects the prior sample window (age $age)");
+}
+{
+    my ($e,$clock,$path)=fixture_1400();
+    burst_1400($e);
+    $$clock = 1030;
+    $e->observe('255',[],'I have 7 clients and 2 servers');
+    $e->observe('266',[12,20],'');
+    $$clock = 1033;
+    my $published=$e->flush();
+    my $s=$published ? sample_1400($path) : {};
+    is_deeply([$published,$s->{sampled_at},$s->{counts}],
+        [1,1030,{users=>12,global_users=>12,users_max=>20,local_users=>7,local_servers=>2}],
+        'valid 255 can open a new sample after the prior sample expires');
+}
 {
     my ($e,$clock,$path)=fixture_1400();
     $e->observe('251',[],'There are 1000000000 users and 2 invisible on 1 servers');
