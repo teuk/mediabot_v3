@@ -174,7 +174,7 @@ sub mbCompat_ctx {
             WHERE c.name = ? AND cl.nick IN (?, ?)
               AND cl.event_type IN ('public','action')
               AND cl.ts >= NOW() - INTERVAL 90 DAY
-            ORDER BY cl.ts ASC
+            ORDER BY cl.ts ASC, cl.id_channel_log ASC
         }) or die "compat_copresence_prepare\n";
         $sth_co->execute($channel, $n1, $n2) or die "compat_copresence_execute\n";
         my $last_nick = '';

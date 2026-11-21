@@ -1,3 +1,8 @@
+## MB1398 — Order same-second co-presence messages by log ID
+
+- In compat, order equal timestamps by ascending channel log ID before counting adjacent exchanges. The score and pair count now follow message order when several entries share a second.
+- Keep the existing 90-day window and inclusive five-minute gap, and cover different row orders in the native compatibility case.
+
 ## MB1397 — Preserve quote repeat protection across case changes
 
 - Share the previous random quote across letter-case variants of the channel in q random and of the channel and author filter in quote.

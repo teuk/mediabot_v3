@@ -22,7 +22,7 @@ my $history=DBI->connect('dbi:SQLite:dbname=:memory:','','',
  {RaiseError=>1,PrintError=>0,AutoCommit=>1,sqlite_unicode=>1});
 $history->do('CREATE TABLE history(nick TEXT,publictext TEXT,ts TEXT)');
 my $insert=$history->prepare('INSERT INTO history VALUES(?,?,?)');
-$history->do('CREATE TABLE proximity(channel TEXT,nick TEXT,u INTEGER)');
+$history->do('CREATE TABLE proximity(channel TEXT,nick TEXT,u INTEGER,id_channel_log INTEGER)');
 {
  package Mediabot::UserCommands;
  sub botPrivmsg {push @public,[$_[1],$_[2]]}
@@ -56,8 +56,13 @@ $history->do('CREATE TABLE proximity(channel TEXT,nick TEXT,u INTEGER)');
   my ($db,$sql)=@_;
   die 'unexpected query' unless $sql =~ /UNIX_TIMESTAMP/;
   return undef if ($db->{fault}//'') eq 'prepare';
+  # Preserve the command's actual sort while adapting its timestamp column.
+  my ($order)=$sql =~ /\bORDER BY (cl\.ts ASC(?:, cl\.id_channel_log ASC)?)\s*\z/;
+  die 'unexpected proximity order' unless defined $order;
+  $order =~ s/\bcl\.ts\b/u/;
+  $order =~ s/\bcl\.id_channel_log\b/id_channel_log/;
   return bless {db=>$db,sth=>$history->prepare(
-   'SELECT nick,u FROM proximity WHERE channel=? AND nick IN (?,?) ORDER BY u')},'MB1025Statement';
+   "SELECT nick,u FROM proximity WHERE channel=? AND nick IN (?,?) ORDER BY $order")},'MB1025Statement';
  }
  package MB1025Statement;
  sub execute {
@@ -149,7 +154,7 @@ if ($ENV{PERL_HASH_SEED} eq '0') {
  $encoding='characters';
  for my $who (qw(alice bob)) {$history->do("INSERT INTO history VALUES(?, 'shared words', '2026-11-04')",undef,$who)}
  for my $n (0..6) {
-  $history->do('INSERT INTO proximity VALUES(?,?,?)',undef,'#test',($n%2?'bob':'alice'),60*$n);
+  $history->do('INSERT INTO proximity(channel,nick,u) VALUES(?,?,?)',undef,'#test',($n%2?'bob':'alice'),60*$n);
  }
  for my $fault (qw(none prepare execute fetch_partial fetch_throw)) {
   @public=();@notices=();@audit=();@flags=();
@@ -162,14 +167,32 @@ if ($ENV{PERL_HASH_SEED} eq '0') {
   $out{proximity}{$fault}=[$ok?1:0,scalar(@public),$score,[@notices],[@audit],
     $bot->{_compat_count}{Observer}//0,[@$metrics],$db->{finished}];
  }
+ my @same_second=(
+  [100,'alice',1000], [101,'bob',1000], [102,'alice',1000], [103,'bob',1000],
+  [200,'alice',1300], [1,'bob',1601], [2,'alice',1601],
+ );
+ for my $order ([0,1,2,3,4,5,6],[0,2,1,3,4,6,5]) {
+  $history->do('DELETE FROM proximity');
+  for my $i (@$order) {
+   my ($id,$nick,$u)=@{$same_second[$i]};
+   $history->do('INSERT INTO proximity VALUES(?,?,?,?)',undef,'#test',$nick,$u,$id);
+  }
+  @public=();@notices=();@audit=();
+  my $db=bless {finished=>0},'MB1025DB';
+  my $ctx=bless {bot=>{dbh=>$db}},'MB1025Context';
+  Mediabot::Stats::Affinity::mbCompat_ctx($ctx);
+  my ($component)=map {$_->[1]=~/co-presence ([0-9]+)\/20/ ? 0+$1 : ()} @public;
+  my ($pairs)=map {$_->[1]=~/([0-9]+) adjacent msg pairs/ ? 0+$1 : ()} @public;
+  push @{$out{same_second}},[$component,$pairs,[@notices],[@audit],$db->{finished}];
+ }
  # MB1360: every supported channel type follows the same Games and SQL scope.
  $history->do('DELETE FROM proximity');
  for my $n (0..100) {
-  $history->do('INSERT INTO proximity VALUES(?,?,?)',undef,'#elsewhere',($n%2?'bob':'alice'),60*$n);
+  $history->do('INSERT INTO proximity(channel,nick,u) VALUES(?,?,?)',undef,'#elsewhere',($n%2?'bob':'alice'),60*$n);
  }
  for my $channel ('#MiXeD','&MiXeD','!ABCDEMiXeD','+MiXeD') {
   for my $n (0..6) {
-   $history->do('INSERT INTO proximity VALUES(?,?,?)',undef,$channel,($n%2?'bob':'alice'),60*$n);
+   $history->do('INSERT INTO proximity(channel,nick,u) VALUES(?,?,?)',undef,$channel,($n%2?'bob':'alice'),60*$n);
   }
   $expected_channel=$channel;
   for my $enabled (1,0) {
@@ -262,6 +285,9 @@ my %failures=map {
 } qw(prepare execute fetch_partial fetch_throw);
 is_deeply({map {$_=>$proximity->{$_}} keys %failures}, \%failures,
  'failed and partial co-presence reads produce one private error, clean up and account for no success');
+is_deeply($runs[0]{same_second},
+ [(map {[1,5,[],[['#test','compat','alice vs bob = 61%']],1]} 1..2)],
+ 'same-second proximity follows message IDs in both insertion orders and includes gaps of 300 but not 301 seconds');
 my %channel_types;
 for my $channel ('#MiXeD','&MiXeD','!ABCDEMiXeD','+MiXeD') {
  $channel_types{$channel}{1}=[1,'',[],[($channel)x4],1,[],
