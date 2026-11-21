@@ -29,6 +29,7 @@ use Mediabot::Hailo::Policy;
 use Mediabot::Hailo::PostEditor;
 use Mediabot::Hailo::PostEditRuntime;
 use Mediabot::Hailo::ReplyQueue;
+use Mediabot::Users::Birthdays qw(_birthday_mmdd_from_value);
 use Hailo;
 
 our @EXPORT = qw(
@@ -1531,8 +1532,11 @@ sub check_birthdays_today {
         return;
     }
 
+    my %observed = map { $_ => 1 } @match_mmdd;
     my @bdays;
     while (my $row = $sth->fetchrow_hashref) {
+        my ($month, $day) = _birthday_mmdd_from_value($row->{birthday});
+        next unless defined($month) && $observed{"$month-$day"};
         push @bdays, $row->{nickname};
     }
     $sth->finish;

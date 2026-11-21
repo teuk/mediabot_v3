@@ -8,6 +8,7 @@ BEGIN {
     $ENV{TZ} = 'UTC'; require POSIX; POSIX::tzset(); require Time::Local;
     $MB994::now = Time::Local::timegm(0,0,12,28,9,2026);
     *CORE::GLOBAL::time = sub () { $MB994::now };
+    *CORE::GLOBAL::localtime = sub (;$) { CORE::localtime(@_ ? $_[0] : $MB994::now) };
 }
 use Mediabot::Mediabot;
 use Mediabot::Context;
@@ -57,6 +58,8 @@ binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
         die "private logger detail\n" if $_[0]{fail};
         return 1;
     }
+    package MB994::Channel;
+    sub auto_join { $_[0]{auto_join} }
 }
 $INC{'MB994/DBI.pm'} = __FILE__;
 my (@wire, @audit, @warnings);
@@ -133,6 +136,38 @@ for my $raise (0,1) {
     is_deeply([$error, \@wire, \@audit, rows_1369($db)],
         ['', [['notice','Caller','Database error.']], [], $before],
         'cleanup and logger failures cannot hide a failed read or publish its partial result');
+}
+{
+    local $MB994::now = Time::Local::timegm(0,0,12,28,1,2026);
+    my ($bot,$db) = setup_1369(1);
+    $db->do('DELETE FROM USER');
+    my @birthdays = (
+        ['Ada','2000-02-29'], ['Ann','02-29'], ['Bert','02-28'],
+        ['Century','1900-02-29'], ['Malformed','about-02-28'], ['March','03-01'],
+    );
+    $db->do('INSERT INTO USER(nickname,birthday) VALUES(?,?)', undef, @$_) for @birthdays;
+    my $before = rows_1369($db);
+    my $error = invoke_1369($bot, ['next'], '#test');
+    is_deeply([$error, \@wire], ['', [
+        ['notice','Caller','Upcoming birthdays in the next 30 days:'],
+        ['notice','Caller','  Ada : 2000-02-29 (today)'],
+        ['notice','Caller','  Ann : 02-29 (today)'],
+        ['notice','Caller','  Bert : 02-28 (today)'],
+        ['notice','Caller','  March : 03-01 (in 1d)'],
+    ]], 'birthday next ignores an impossible stored birth year and keeps valid leap-day observances');
+
+    my @announcements;
+    local *Mediabot::Helpers::botPrivmsg = sub { push @announcements, [@_[1,2]]; 1 };
+    $bot->{channels} = {
+        '#test' => bless({auto_join=>1}, 'MB994::Channel'),
+        '#other' => bless({auto_join=>0}, 'MB994::Channel'),
+    };
+    $bot->check_birthdays_today();
+    is_deeply(
+        [sort map { my ($who) = $_->[1] =~ /\AHappy Birthday, ([^!]+)!/; "$_->[0]:" . ($who // '') } @announcements],
+        ['#test:Ada','#test:Ann','#test:Bert'],
+        'daily announcements reject malformed date suffixes and impossible birth years');
+    is_deeply(rows_1369($db), $before, 'birthday reads preserve stored values for later correction');
 }
 is_deeply(\@warnings, [], 'birthday reads emit no warnings');
 my $digits_probe=do './t/lib/MB1287BirthdayDigits.pl' or die $@||$!;

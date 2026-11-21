@@ -280,17 +280,11 @@ sub _birthday_valid_date {
 sub _birthday_mmdd_from_value {
     my ($birthday) = @_;
 
-    return undef unless defined($birthday) && $birthday ne '';
-
-    if ($birthday =~ m{^([0-9]{2})-([0-9]{2})\z}) {
-        return ($1, $2);
-    }
-
-    if ($birthday =~ m{^[0-9]{4}-([0-9]{2})-([0-9]{2})\z}) {
-        return ($1, $2);
-    }
-
-    return undef;
+    return undef unless defined($birthday) && !ref($birthday)
+        && $birthday =~ /\A(?:([0-9]{4})-)?([0-9]{2})-([0-9]{2})\z/;
+    my ($year, $month, $day) = ($1, $2, $3);
+    return undef unless _birthday_valid_date($year // 2000, $month, $day);
+    return ($month, $day);
 }
 
 

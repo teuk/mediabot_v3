@@ -1,3 +1,8 @@
+## MB1402 — Validate stored dates before birthday observance
+
+- Share Gregorian validation between the upcoming birthday list and daily announcements. Malformed values and impossible full dates no longer trigger a birthday.
+- Keep month/day-only dates and celebrate valid February 29 birthdays on February 28 in non-leap years.
+
 ## MB1401 — Exclude future-dated activity from yearbook
 
 - Bound the annual history and community counters to one instant captured when the command starts, in addition to the calendar-year range.
