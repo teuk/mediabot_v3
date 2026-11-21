@@ -2380,32 +2380,39 @@ sub mbRecap_ctx {
     $window_s = 60 if $window_s < 60;   # au moins une minute
 
     # --- lire les messages de la fenêtre (index composite id_channel, ts) ---
-    my $sth = $dbh->prepare(q{
-        SELECT nick, publictext, UNIX_TIMESTAMP(ts) AS t
-        FROM CHANNEL_LOG
-        WHERE id_channel = ?
-          AND ts >= DATE_SUB(NOW(), INTERVAL ? SECOND)
-          AND event_type IN ('public','action')
-        ORDER BY ts ASC
-        LIMIT ?
-    });
-    unless ($sth && $sth->execute($id_channel, $window_s, $max_rows)) {
+    my ($sth, $first_t, $last_t);
+    my @rows;
+    my %by_nick;
+    # A failed cursor must not become an empty or partial recap.
+    my $read_ok = eval {
+        $sth = $dbh->prepare(q{
+            SELECT nick, publictext, UNIX_TIMESTAMP(ts) AS t
+            FROM CHANNEL_LOG
+            WHERE id_channel = ?
+              AND ts >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+              AND event_type IN ('public','action')
+            ORDER BY ts ASC
+            LIMIT ?
+        }) or die "recap_prepare\n";
+        $sth->execute($id_channel, $window_s, $max_rows) && !$sth->err
+            or die "recap_execute\n";
+        while (1) {
+            my $r = $sth->fetchrow_hashref;
+            die "recap_fetch\n" if $sth->err;
+            last unless $r;
+            next if lc($r->{nick}) eq $lc_nick;
+            push @rows, $r;
+            $by_nick{ $r->{nick} }++;
+            $first_t //= $r->{t};
+            $last_t = $r->{t};
+        }
+        1;
+    };
+    eval { $sth->finish } if $sth;
+    unless ($read_ok) {
         botNotice($self, $nick, "recap: could not read the channel log.");
         return;
     }
-
-    my @rows;
-    my %by_nick;
-    my ($first_t, $last_t);
-    while (my $r = $sth->fetchrow_hashref) {
-        # ne pas recaper les propres messages de l'appelant
-        next if lc($r->{nick}) eq $lc_nick;
-        push @rows, $r;
-        $by_nick{ $r->{nick} }++;
-        $first_t //= $r->{t};
-        $last_t = $r->{t};
-    }
-    $sth->finish;
 
     my $msg_count = scalar @rows;
     if ($msg_count == 0) {

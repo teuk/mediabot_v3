@@ -13,6 +13,8 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use File::Spec;
+use DBI ();
+use JSON::PP ();
 
 use MockBot;
 use Mediabot::Context;
@@ -34,6 +36,7 @@ sub _slurp_683 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     sub execute { $_[0]->{i} = 0; 1 }
     sub fetchrow_hashref { my $s=shift; return undef if $s->{i} >= @{$s->{rows}}; return $s->{rows}[$s->{i}++]; }
     sub fetchrow_array   { my $s=shift; return defined $s->{seen} ? ($s->{seen}) : (); }
+    sub err { 0 }
     sub finish { 1 }
 
     package FakeDBH683;
@@ -47,10 +50,57 @@ sub _slurp_683 { my ($p)=@_; open my $fh,'<:encoding(UTF-8)',$p or die "$p: $!";
     }
 }
 
+{
+    package RecapDB683; our @ISA = ('DBI');
+    package RecapDB683::db; our @ISA = ('DBI::db');
+    sub prepare {
+        my ($db, $sql, @rest) = @_;
+        my $state = $db->{private_mb1399};
+        return $db->SUPER::prepare($sql, @rest) unless $state && $sql =~ /FROM CHANNEL_LOG/;
+        return $db->set_err(1, 'recap fixture prepare failure') if $state->{fault} eq 'prepare';
+        $sql =~ s/UNIX_TIMESTAMP\(ts\)/CAST(strftime('%s', ts) AS INTEGER)/;
+        $sql =~ s/DATE_SUB\(NOW\(\), INTERVAL \? SECOND\)/datetime('2026-11-21 12:00:00', printf('-%d seconds', ?))/;
+        my $sth = $db->SUPER::prepare($sql, @rest);
+        $sth->{private_mb1399} = $state if $sth;
+        return $sth;
+    }
+    package RecapDB683::st; our @ISA = ('DBI::st');
+    sub execute {
+        my ($sth, @bind) = @_;
+        my $state = $sth->{private_mb1399};
+        return $sth->set_err(1, 'recap fixture execute failure') if $state && $state->{fault} eq 'execute';
+        return $sth->SUPER::execute(@bind);
+    }
+    sub fetchrow_hashref {
+        my ($sth, @args) = @_;
+        my $state = $sth->{private_mb1399};
+        my $row = $sth->SUPER::fetchrow_hashref(@args);
+        if ($state) {
+            my $read = ++$state->{reads};
+            my $fault = $state->{fault};
+            if (($fault eq 'first_fetch' && $read == 1)
+                    || (($fault eq 'partial_fetch' || $fault eq 'flagged_row') && $read == 2)) {
+                $sth->set_err(1, 'recap fixture fetch failure');
+                return $fault eq 'flagged_row' ? $row : undef;
+            }
+        }
+        return $row;
+    }
+    sub finish {
+        my ($sth) = @_;
+        my $state = $sth->{private_mb1399};
+        $state->{finished}++ if $state;
+        return $sth->SUPER::finish;
+    }
+    package RecapMetrics683;
+    sub inc { push @{$_[0]}, $_[1] }
+}
+$INC{'RecapDB683.pm'} = __FILE__;
+
 sub make_ctx_683 {
     my (%o) = @_;
     my $bot = MockBot->new(
-        dbh      => FakeDBH683->new($o{rows} // [], $o{seen}),
+        dbh      => $o{dbh} // FakeDBH683->new($o{rows} // [], $o{seen}),
         channels => { lc($o{channel} // '#test') => FakeChan683->new(42) },
     );
     # clés de conf recap éventuelles
@@ -127,6 +177,58 @@ return sub {
             'échantillon : première ligne');
         $assert->unlike($joined, qr/my own message/,
             'le message de l\'appelant est exclu du recap');
+    }
+
+    # -------------------------------------------------------------------------
+    # A failed history cursor must not publish stats or send a partial transcript.
+    # -------------------------------------------------------------------------
+    {
+        no warnings qw(redefine once);
+        require Mediabot::External::Claude;
+        my @prompts;
+        local *Mediabot::External::Claude::claudeAI = sub {
+            push @prompts, $_[1];
+            $_[4]->('fixture summary');
+            return 1;
+        };
+        my $json = JSON::PP->new;
+        for my $raise (0, 1) {
+            my $db = DBI->connect('dbi:SQLite:dbname=:memory:', '', '', {
+                RootClass => 'RecapDB683', RaiseError => $raise, PrintError => 0,
+            });
+            $db->do('CREATE TABLE CHANNEL_LOG (id_channel INTEGER, nick TEXT, publictext TEXT, ts TEXT, event_type TEXT)');
+            $db->do(q{INSERT INTO CHANNEL_LOG VALUES
+                (42,'bob','first fixture','2026-11-21 11:50:00','public'),
+                (42,'carol','second fixture','2026-11-21 11:55:00','action')});
+            for my $fault (qw(prepare execute first_fetch partial_fetch flagged_row)) {
+                for my $ai (0, 1) {
+                    my $state = {fault => $fault, reads => 0, finished => 0};
+                    $db->{private_mb1399} = $state;
+                    my ($bot, $ctx) = make_ctx_683(dbh => $db, channel => '#test',
+                        args => ['30m', ($ai ? 'ai' : ())], conf => {RECAP_COOLDOWN_S => 0});
+                    $bot->{conf}->set('anthropic.API_KEY', 'fixture');
+                    my $metrics = $bot->{metrics} = bless [], 'RecapMetrics683';
+                    @prompts = ();
+                    my $ok = eval { Mediabot::UserCommands::mbRecap_ctx($ctx); 1 };
+                    my @notices = map { [$_->{target}, $_->{text}] } notices_683($bot);
+                    my $accounted = grep { $_ eq 'mediabot_recap_total' } @$metrics;
+                    my $expected_finish = $fault eq 'prepare' ? 0 : 1;
+                    $assert->is(
+                        $json->encode([$ok // 0, \@notices, scalar(@prompts), $accounted, $state->{finished}]),
+                        $json->encode([1, [['alice', 'recap: could not read the channel log.']], 0, 0, $expected_finish]),
+                        "recap read failure ($fault, RaiseError=$raise, ai=$ai) closes the cursor and reports only a private error");
+                }
+            }
+            $db->{private_mb1399} = {fault => '', reads => 0, finished => 0};
+            my ($bot, $ctx) = make_ctx_683(dbh => $db, channel => '#test', args => ['30m', 'ai']);
+            $bot->{conf}->set('anthropic.API_KEY', 'fixture');
+            @prompts = ();
+            Mediabot::UserCommands::mbRecap_ctx($ctx);
+            $assert->is(scalar(@prompts), 1, "recap ai recovers on the same DBI handle (RaiseError=$raise)");
+            $assert->like($prompts[0] // '', qr/<bob> first fixture\n<carol> second fixture\n/,
+                "recap ai uses both rows after a complete read (RaiseError=$raise)");
+            $db->disconnect;
+        }
     }
 
     # -------------------------------------------------------------------------

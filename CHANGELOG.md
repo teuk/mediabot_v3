@@ -1,3 +1,8 @@
+## MB1399 — Require a complete channel history read for recap
+
+- Return the existing private database error on a failed channel log prepare, execute or fetch in both DBI error modes.
+- Finish the cursor and discard partial rows before producing recap statistics or calling the AI backend.
+
 ## MB1398 — Order same-second co-presence messages by log ID
 
 - In compat, order equal timestamps by ascending channel log ID before counting adjacent exchanges. The score and pair count now follow message order when several entries share a second.
