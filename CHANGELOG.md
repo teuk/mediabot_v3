@@ -1,3 +1,8 @@
+## MB1406 — Send complete Morse conversions
+
+- Pass the full native Morse reply to the IRC sender for normal line wrapping.
+- Split long Playful Morse replies between symbols, preserving all encoded text and word separators.
+
 ## MB1405 — Exclude future activity from radar
 
 - Limit the live diagnostics and calendar history to messages at or before the database clock.

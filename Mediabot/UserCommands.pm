@@ -1789,7 +1789,6 @@ sub mbMorse_ctx {
         join(' ', map { $code{$_} // '?' } split //, $_)
     } @words;
     my $result = join(' / ', @enc);
-    if (length($result) > 400) { $result = substr($result, 0, 397) . '...'; }
     botPrivmsg($self, $channel, $result);
     return 1;
 }

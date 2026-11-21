@@ -270,7 +270,12 @@ sub command_morse {
     my $result = join(' / ', map {
         join(' ', map { $code{$_} // '?' } split //)
     } split /\s+/, $text);
-    $result = substr($result, 0, 397) . '...' if length($result) > 400;
+    # Encoded Morse is ASCII, with spaces between all symbols.
+    while (length($result) > 400) {
+        my $cut = rindex($result, ' ', 400);
+        return 0 unless $context->reply($invocation, substr($result, 0, $cut));
+        $result = substr($result, $cut + 1);
+    }
     return $context->reply($invocation, $result);
 }
 

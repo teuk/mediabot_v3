@@ -42,6 +42,29 @@ return sub {
     $assert->is($replies[-1], '... --- ...',
         'morse keeps the expected alphabet mapping');
 
+    my @long_input = ('0' x 40, '9' x 39);
+    my $encoded = join ' / ', join(' ', ('-----') x 40), join(' ', ('----.') x 39);
+    my $reply_start = @replies;
+    $plugin->command_morse($authority, $invoke->('morse', \@long_input));
+    my @morse_lines = @replies[$reply_start .. $#replies];
+    $assert->is(join(' ', @morse_lines), $encoded,
+        'Playful sends every Morse symbol and the word separator for valid long input');
+    $assert->ok(@morse_lines == 2 && !grep({ length($_) > 400 } @morse_lines),
+        'Playful splits long Morse into two bounded replies');
+
+    require Mediabot::Mediabot;
+    require Mediabot::Context;
+    my $bot = Mediabot->new({});
+    my $ctx = Mediabot::Context->new(bot=>$bot,nick=>'Tangy',channel=>'#development',
+        command=>'morse',args=>\@long_input);
+    my $native_reply;
+    {
+        no warnings qw(redefine once);
+        local *Mediabot::UserCommands::botPrivmsg = sub { $native_reply = $_[2]; 1 };
+        $bot->command_registry->handler_for('morse','public')->($ctx);
+    }
+    $assert->is($native_reply, $encoded, 'native Morse hands the complete encoding to the IRC sender');
+
     $plugin->command_choose($authority,
         $invoke->('choose', ['tea', '|', 'coffee', '|', 'tea']));
     $assert->like($replies[-1], qr/Tangy: I choose\.\.\. (?:tea|coffee)!/,
