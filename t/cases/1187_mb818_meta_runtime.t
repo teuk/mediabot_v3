@@ -374,4 +374,51 @@ complete_addressed_turn($bot,$client,'Sources ?');
 like($sent[-1][1],qr/Quel point veux-tu que je vérifie/,
     'an intervening chat turn blocks recall of older sources and unverified links');
 is(scalar @queries,1,'the latest unsourced reply does not trigger a search without a topic');
+
+for my $prompt (
+    'en faite tes chelou toi',
+    'sa tombe bien mediabot, quand tu a rien a repondre, tu pourrais fermer ta gueule ?',
+    'tu sais qui ta ramené a ce diner mediabot ? et ce que ca veux dire ?',
+    "tu me dis que tu es la pour m'aidé a ce moqué des autres ?",
+    'aide moi et fournis des informations utiles stp',
+    "n'empêche que Villeret est excellent",
+    'tu pense que ton proprietaire est lunaire ?',
+    'tes sources sont merdiques',
+    'imagine que Papillon et Renard jouent aux cartes, qui mène actuellement ?',
+) {
+    ($bot,$client,$runtime,$dir)=fixture();
+    $bot->{nicks}={'#test'=>['Papillon','Renard']};
+    complete_addressed_turn($bot,$client,'tu connais le principe du diner de cons ?');
+    my $calls=@{$client->{calls}};
+    my $lines=@sent;
+    complete_addressed_turn($bot,$client,$prompt);
+    like($client->{calls}[$calls+3]{request}{system},qr/CHAT INTENT:.*sarcasm/,
+        'the latest social turn selects the conversational voice after factual context');
+    is(scalar @queries,1,'over-eager research votes do not browse for an in-room line');
+    is_deeply([map {$_->[1]} @sent[$lines..$#sent]],['Test answer.'],
+        'social turn emits only its conversational response');
+}
+
+for my $prompt (
+    'tes sources sont merdiques, cite les sources officielles sur la réforme',
+    'qui a chanté « Ah si tu pouvais fermer ta gueule » ?',
+    'n’empêche que Villeret est excellent, qui a réalisé Le Dîner de cons ?',
+) {
+    ($bot,$client,$runtime,$dir)=fixture();
+    complete_addressed_turn($bot,$client,$prompt);
+    is(scalar @queries,1,'a real verification question still enters research');
+    like($sent[-1][1],qr/^Sources : /,'supported research still delivers styled references');
+}
+
+($bot,$client,$runtime,$dir)=fixture();
+ask($bot,'Alice','#test','Qui a réalisé Le Dîner de cons ?');
+drafts($client,0,1);
+my ($catalogue)=$client->{calls}[3]{request}{system}=~/^UNTRUSTED SOURCES: ([^\n]+)/m;
+my $passage=decode_json($catalogue)->[0]{passages}[0]{passage_id};
+$client->{calls}[3]{done}->({ok=>1,answer=>encode_json({answer=>'A fact that the page did not establish.',
+    basis=>'insufficient',source_ids=>[1],support=>[{source_id=>1,passage_id=>$passage}]})});
+while (my $timer=shift @timers) {$timer->[1]->()}
+is_deeply([map {$_->[1]} @sent],[q{Je n’ai rien trouvé de fiable sur ce point.}],
+    'a verified evidence limit is brief and emits no unrelated citation');
+ok(!exists(history($dir)->[0]{source_urls}),'insufficient findings cannot be recalled as delivered references');
 done_testing;

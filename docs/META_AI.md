@@ -16,11 +16,17 @@ independent contributors. This adds no separate classifier API call:
   a short, warm, playfully sarcastic answer instead of a sourced mini-article.
   Examples: `mediabot: comment vas-tu ?`, `mediabot: j'ai mal dormi et c'est de ta faute`,
   `mediabot: j'vais me faire un café parce que j'suis pas réveillé`.
+  Replies to teasing or criticism such as `mediabot: t'es chelou toi` and
+  `mediabot: tes sources sont hors sujet` stay in chat. When someone requests
+  help without a subject, MetaAI asks what they need.
 - **Research:** informational or mixed requests retain the existing web,
   evidence validation and source-line pipeline. Source requests with a topic,
   current facts and sensitive advice keep their research guards. Contributor
   disagreement or insufficient agreement defaults to research for unfamiliar
   wording. A greeting before a factual question does not make it small talk.
+  When no retrieved evidence answers the question, MetaAI gives a short
+  explanation without a source line. Partial answers keep only citations
+  supporting at least one requested fact.
 - **Task:** calculations, translations and transformations retain their task
   instructions rather than acquiring the chat persona.
 

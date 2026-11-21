@@ -332,7 +332,7 @@ sub _log_event {
     }
     elsif (($event->{kind}//'') eq 'evidence') {
         my %reasons=map {$_=>1} qw(missing invalid mismatch invalid_ids missing_citations too_many_citations
-            unknown_passage source_changed passage_ids);
+            unknown_passage source_changed passage_ids insufficient);
         my $reason=!ref($event->{reason}) && $reasons{$event->{reason}//''}?$event->{reason}:'unknown';
         my $action=defined($event->{action}) && !ref($event->{action})
             && $event->{action}=~/\A(?:retry|rejected|accepted)\z/?$event->{action}:'unknown';

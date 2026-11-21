@@ -54,8 +54,12 @@ sub _instruction {
     }
     return $s;
 }
+my $SOURCE_FEEDBACK=qr/\A(?:franchement\s+)?(?:(?:tes|vos)\s+sources\s+sont|your\s+sources\s+are)\s+
+    (?:merdiques|pourries|nulles|mauvaises|hors[\s-]sujet|excellentes|bad|terrible|off[\s-]topic|great)\s*[.!?]*\z/ix;
+
 sub _external_request {
     my $s=_instruction($_[0]);
+    return 0 if $s =~ $SOURCE_FEEDBACK;
     return $s =~ m{https?://|(?:sur (?:le )?(?:web|net|internet)|\b(?:web search|recherche web|google|look up|lookup)\b)|\b(?:cite|citer|citations?)\b|\b(?:avec|with|tes|vos|your|des|les|the)\s+(?:sources|références|references)\b|\b(?:provide|include|donne|fournis|ajoute)\b.*\b(?:sources|références|references)\b|\b(?:vérifie|verifie|verify|check)\b.*\b(?:officiel|official|site|faits?|facts?)\b} ? 1:0;
 }
 sub _external_facts {
@@ -117,6 +121,25 @@ sub wants_web {
     return $s =~ /[\p{L}\p{N}]/ ? 1:0;
 }
 
+sub _addressed_chat {
+    my ($prompt)=@_;
+    return 0 if _external_facts($prompt) || research_kind($prompt) =~ /\A(?:cve|software|documentation)\z/;
+    my $s=_instruction($prompt);
+    $s =~ tr/’/'/;
+    return 1 if $s =~ $SOURCE_FEEDBACK;
+    # Match the conversational construction, including casual IRC spelling.
+    # A title mention, quotation or independent question must still route normally.
+    return 1 if $s =~ /\A(?:en faite?\s+)?(?:t'?es|tu es)\s+(?:chelou|louche|bizarre|dr[oô]le)(?:\s+toi)?\s*[.!?]*\z/;
+    return 1 if $s =~ /\A(?:(?:[çc]a|sa)\s+tombe\s+bien(?:\s+[\w-]+)?\s*,\s*)?(?:quand\s+tu\s+[^?!]{1,80},\s*)?
+        (?:(?:tu\s+(?:peux|pourrais)|(?:peux|pourrais)-tu)\s+fermer|ferme)\s+ta\s+(?:gueule|bouche)\s*[.!?]*\z/x;
+    return 1 if $s =~ /\Atu\s+sais\s+qui\s+t'?a\s+(?:amen[eé]|ramen[eé]|invit[eé])\s+(?:ici|[aà]\s+ce\s+d[iî]ner)(?:\s+[\w-]+)?\s*[.!?]*
+        (?:\s*et\s+ce\s+que\s+(?:[çc]a|sa)\s+veu[tx]\s+dire\s*[.!?]*)?\z/x;
+    return 1 if $s =~ /\Atu me dis que tu es l[aà] pour [^?!.]{1,100}[.!?]*\z/;
+    return 1 if $s =~ /\Atu penses? que ton (?:propri[eé]taire|cr[eé]ateur|admin) est [^?!.]{1,70}[.!?]*\z/;
+    return 1 if $s =~ /\A(?:n'emp[eê]che que|je trouve que)\s+[^?!.,:]{1,75}\s+(?:est|[eé]tait)\s+(?:excellent[e]?|g[eé]nial[e]?|dr[oô]le|superbe)\s*[.!?]*\z/;
+    return $s =~ /\Aaide[ -]moi(?: et fournis des informations utiles)?(?:\s+(?:stp|s'il te pla[iî]t))?\s*[.!?]*\z/ ? 1 : 0;
+}
+
 sub _room_chat {
     my ($prompt,$nicks)=@_;
     return 0 unless ref($nicks) eq 'ARRAY' && @$nicks;
@@ -134,13 +157,14 @@ sub _room_chat {
     # Time words alone can describe this conversation. Factual signals such
     # as weather, versions, prices or medical questions still use research.
     $topic =~ s/\b(?:aujourd.hui|today)\b/ /g;
+    $topic =~ s/\b(?:actuellement|currently)\b/ /g if $topic =~ /\Aimagine que\b/;
     return !_external_facts($topic);
 }
 
 sub research_needed {
     my (%args)=@_;my $prompt=$args{prompt};
     return 1 if ($args{mode}//'auto') eq 'always';
-    return 0 if _room_chat($prompt,$args{room_nicks});
+    return 0 if _addressed_chat($prompt) || _room_chat($prompt,$args{room_nicks});
     return 0 if !wants_web($prompt);
     my $kind=research_kind($prompt);
     my $drafts=ref($args{drafts}) eq 'ARRAY'?$args{drafts}:[];
@@ -165,7 +189,7 @@ sub intent_route {
     my (%args)=@_;
     return 'research' if research_needed(%args);
     my $prompt=lc clean($args{prompt},2000);
-    return 'chat' if is_acknowledgement($prompt) || _personal_context($prompt)
+    return 'chat' if is_acknowledgement($prompt) || _personal_context($prompt) || _addressed_chat($prompt)
         || _room_chat($args{prompt},$args{room_nicks});
     my $drafts=ref($args{drafts}) eq 'ARRAY' ? $args{drafts} : [];
     my $minimum=$args{minimum}//2; $minimum=2 if $minimum<2;

@@ -1,3 +1,8 @@
+## MB1412 — Route IRC banter without unrelated sources
+
+- Send recognizable teasing, feedback and untargeted requests for help to the conversational route. Keep explicit verification and factual questions on the research route.
+- Report insufficient evidence briefly without displaying or remembering an unrelated link. Allow synthesis providers to return empty citations for that outcome.
+
 ## MB1411 — Recall the sources used in the previous MetaAI answer
 
 - Replay the verified links that were delivered in the last substantive reply in the channel. A brief acknowledgement can follow the reply before the request for sources.

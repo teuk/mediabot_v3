@@ -70,10 +70,10 @@ sub build_payload {
                 schema=>{type=>'object',additionalProperties=>JSON::PP::false,
                     properties=>{
                         answer=>{type=>'string'},
-                        source_ids=>{type=>'array',minItems=>1,maxItems=>2,
+                        source_ids=>{type=>'array',maxItems=>2,
                             items=>{type=>'integer',enum=>[1,2,3]}},
                         basis=>{type=>'string',enum=>[qw(supported partial insufficient)]},
-                        support=>{type=>'array',minItems=>1,maxItems=>2,
+                        support=>{type=>'array',maxItems=>2,
                             items=>{type=>'object',additionalProperties=>JSON::PP::false,
                                 properties=>{source_id=>{type=>'integer',enum=>[1,2,3]},
                                     $proof=>$passages?{type=>'string',enum=>[@{$request->{passage_ids}}]}:{type=>'string'}},

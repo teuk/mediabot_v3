@@ -95,7 +95,9 @@ for my $language (qw(fr en)) {
     complete($client,3,selected($client,3,basis=>'insufficient',answer=>'PRIVATE_UNSUPPORTED_ASSERTION'));
     ok($out->[0]{ok},'honest insufficient evidence remains an accepted limited reply');
     unlike($out->[0]{answer},qr/PRIVATE_UNSUPPORTED_ASSERTION/,'unsupported prose is replaced before IRC delivery');
-    like($out->[0]{answer},$language eq 'fr'?qr/ne permettent pas d’établir/:qr/do not establish/,'limitation follows channel language');
+    is($out->[0]{answer},$language eq 'fr'?'Je n’ai rien trouvé de fiable sur ce point.':'I found nothing reliable on that point.',
+        'the brief limitation follows channel language');
+    is_deeply($out->[0]{sources},[],'an insufficient passage does not produce a source line');
 }
 
 my @ids=@{$request->{passage_ids}};

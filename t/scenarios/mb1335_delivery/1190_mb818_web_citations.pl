@@ -30,16 +30,18 @@ sub fixture {
 }
 my ($client,$results,$searches)=fixture();
 is($client->{calls}[2]{request}{purpose},'meta_synthesis_web','researched synthesis has its own schema purpose');
-like($client->{calls}[2]{request}{system},qr/nonempty source_ids array/,'nonempty references are explicit in the synthesis prompt');
+like($client->{calls}[2]{request}{system},qr/if none are established, use basis=insufficient and return empty source_ids and support arrays/i,
+    'the synthesis prompt reserves empty references for insufficient evidence');
 like($client->{calls}[2]{request}{system},qr/separate supported facts from your analysis/,'future election opinions remain separate from facts');
-$client->{calls}[2]{done}->({ok=>1,provider=>'openai',answer=>encode_json({answer=>'Grounded analysis.',source_ids=>[]})});
+$client->{calls}[2]{done}->({ok=>1,provider=>'openai',answer=>encode_json({answer=>'Grounded analysis.',source_ids=>[],
+    basis=>'supported',support=>[]})});
 is(scalar(@$results),0,'observed empty citation result is withheld before correction');
 is(scalar(@{$client->{calls}}),4,'empty citations cause exactly one additional synthesis request');
 is($client->{calls}[3]{request}{purpose},'meta_citation_repair','correction uses the strict citation purpose');
 is($client->{calls}[3]{request}{provider},'openai','correction stays on successful synthesis provider');
 is($$searches,1,'correction does not repeat search');
 is_deeply($client->{calls}[3]{request}{messages},$client->{calls}[2]{request}{messages},'correction preserves conversation context');
-like($client->{calls}[3]{request}{system},qr/selected from \[1, 2\]/,'correction states the exact supplied ID set');
+like($client->{calls}[3]{request}{system},qr/select one or two source_ids from \[1, 2\]/,'correction states the exact supplied ID set');
 $client->{calls}[3]{done}->({ok=>1,provider=>'openai',answer=>encode_json({answer=>'A supported analysis.',source_ids=>[2],basis=>'supported',support=>[{source_id=>2,quote=>'Independent context about institutions.'}]})});
 is(scalar(@$results),1,'corrected answer completes only once');
 ok($results->[0]{ok} && $results->[0]{web_used},'corrected answer is researched');
@@ -85,7 +87,7 @@ for my $model (qw(gpt-4o gpt-4o-mini gpt-6.1-sol)) {
         my $format=$p->{text}{format};
         is($format->{type},'json_schema',"$model $purpose uses Responses structured outputs");
         ok($format->{strict},'schema adherence is explicit');
-        is($format->{schema}{properties}{source_ids}{minItems},1,'researched schema prohibits an empty source array');
+        ok(!exists($format->{schema}{properties}{source_ids}{minItems}),'researched schema can represent insufficient evidence');
         is_deeply($format->{schema}{properties}{source_ids}{items}{enum},[1,2,3],'schema has only bounded evidence IDs');
         is_deeply($format->{schema}{required},[qw(answer source_ids basis support)],'answer, references, basis and quoted evidence are required');
         ok(!$format->{schema}{additionalProperties},'unexpected schema fields are prohibited');

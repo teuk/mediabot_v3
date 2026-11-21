@@ -151,11 +151,17 @@ like($out->[0]{answer},qr/^Informations partielles : /,'partial evidence is qual
 ok($out->[0]{citation_repair},'single format correction remains observable');
 ($client,$out,$queries)=fixture821();
 $client->{calls}[2]{done}->({ok=>1,answer=>encode_json(grounded821('An unsupported confident claim.',basis=>'insufficient'))});
-like($out->[0]{answer},qr/ne permettent pas d’établir/,'insufficient evidence replaces a confident draft with an honest limitation');
+is($out->[0]{answer},'Je n’ai rien trouvé de fiable sur ce point.','insufficient evidence gets a short explanation in French');
+is_deeply($out->[0]{sources},[],'an irrelevant but literal reference is withheld');
 unlike($out->[0]{answer},qr/confident claim/,'unsupported answer is not displayed under a cosmetic disclaimer');
 ($client,$out,$queries)=fixture821(language=>'en');
 $client->{calls}[2]{done}->({ok=>1,answer=>encode_json(grounded821('Unsupported.',basis=>'insufficient'))});
-like($out->[0]{answer},qr/do not establish the requested detail/,'evidence limit follows English channel language');
+is($out->[0]{answer},'I found nothing reliable on that point.','evidence limit follows English channel language');
+($client,$out,$queries)=fixture821();
+$client->{calls}[2]{done}->({ok=>1,answer=>encode_json({answer=>'',basis=>'insufficient',source_ids=>[],support=>[]})});
+ok($out->[0]{ok} && $out->[0]{web_used},'empty citations are accepted for a completed insufficient search');
+is($out->[0]{evidence_anchors},0,'no evidence anchor is recorded for insufficient evidence');
+is(scalar @{$client->{calls}},3,'honest insufficiency does not ask for a citation repair');
 ($client,$out,$queries)=fixture821();
 $client->{calls}[2]{done}->({ok=>1,answer=>encode_json({answer=>'Claim',source_ids=>[1]})});
 $client->{calls}[3]{done}->({ok=>1,answer=>encode_json({answer=>'Claim',source_ids=>[1]})});
@@ -183,6 +189,8 @@ for my $model (qw(gpt-4o gpt-4o-mini gpt-6.1-sol)) {
     my $payload=decode_json(Mediabot::AI::Provider::OpenAI::build_payload($request,{api_style=>'responses'}));
     my $schema=$payload->{text}{format}{schema};
     is($schema->{properties}{source_ids}{maxItems},2,'strict model contract cannot select an undisplayed third citation');
+    ok(!exists($schema->{properties}{source_ids}{minItems}) && !exists($schema->{properties}{support}{minItems}),
+        'provider schema permits empty citations and support for insufficient findings');
     is_deeply($schema->{properties}{basis}{enum},[qw(supported partial insufficient)],'evidence status is closed and explicit');
     is_deeply($schema->{properties}{support}{items}{required},[qw(source_id quote)],'every schema anchor has an ID and exact passage');
 }
