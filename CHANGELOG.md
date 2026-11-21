@@ -1,3 +1,8 @@
+## MB1391 — Apply the same minimum quote length across languages
+
+- Count characters when selecting a Quotegame prompt. UTF-8 accents, CJK characters and emoji can no longer make a quote shorter than 20 characters eligible.
+- Verify the 19- and 20-character boundaries in the existing native game scenario, including the public reply and timer state.
+
 ## MB1390 — Respect the poll deadline in pollstop
 
 - Report an overdue poll as expired and keep all ballots available to pollresult. Expiration leaves manual closure metrics and audit entries untouched.

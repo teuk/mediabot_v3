@@ -188,7 +188,7 @@ sub mbQuotegame_ctx {
             FROM QUOTES q
             JOIN CHANNEL c ON c.id_channel = q.id_channel
             JOIN USER    u ON u.id_user    = q.id_user
-            WHERE c.name = ? AND LENGTH(q.quotetext) >= 20
+            WHERE c.name = ? AND CHAR_LENGTH(q.quotetext) >= 20
             ORDER BY RAND()
             LIMIT 1
         }) or die "quotegame_prepare\n";

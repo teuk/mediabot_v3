@@ -50,7 +50,7 @@ return sub {
         'checkTrivia utilise des frontières byte-safe');
 
     # MB920: real game entry points, incoming decoder, DBI/SQLite and timers.
-    # The private SQL bridge supplies RAND and translates only the trivia upsert.
+    # The SQL bridge supplies RAND and maps MariaDB syntax to SQLite.
     require JSON::PP;
     my $probe = <<'MB920_NATIVE';
 use strict;
@@ -70,6 +70,9 @@ use Mediabot::UserCommands;
   push @{$st->{sql}},$sql if$st;
   $sql =~ s/ON DUPLICATE KEY UPDATE score = score \+ 1, last_correct = NOW\(\)/ON CONFLICT(id_channel,nick) DO UPDATE SET score = score + 1, last_correct = CURRENT_TIMESTAMP/;
   $sql =~ s/NOW\(\)/CURRENT_TIMESTAMP/g;
+  # MariaDB LENGTH counts bytes. SQLite length counts characters for TEXT.
+  $sql =~ s/\bLENGTH\(q\.quotetext\)/length(CAST(q.quotetext AS BLOB))/g;
+  $sql =~ s/\bCHAR_LENGTH\(q\.quotetext\)/length(q.quotetext)/g;
   my$sth=$s->SUPER::prepare($sql,@rest);$sth->{private_mb920}=$st if$sth&&$st;return$sth;
  }
  package MB920::DBI::st; our @ISA=('DBI::st');
@@ -162,6 +165,14 @@ my@valid=(['word','on','on'],['sentence','the answer is on!','on'],
  ['unicode_punctuation',"\x{2014}on\x{2014}",'on'],['emoji',"\x{1f31f}on\x{1f31f}",'on'],
  ['cyrillic_word',"\x{434}\x{430}","\x{434}\x{430}"],['marks_in_answer',"o\x{301}n","o\x{301}n"]);
 my%out;
+for my $text ('a', "\x{e9}", "\x{5b57}", "\x{1f31f}") {
+ for my $count (19, 20) {
+  my $result=run_mask($text x $count,'Author','characters');
+  my ($shown)=$result->{out}[0][1] =~ /Who said: "\x02(.*?)\x02"/s;
+  push @{$out{quote_length}{$count}},
+   [$result->{active} // 0, $result->{timer}, $result->{out}[0][0], $shown // $result->{out}[0][1]];
+ }
+}
 for my$mode(qw(characters wire bytes)){
  for my$group(['blocked',\@blocked],['valid',\@valid]){
   for my$v(@{$group->[1]}){my($label,$text,$answer)=@$v;
@@ -242,6 +253,12 @@ MB920_NATIVE
     $assert->is($? >> 8, 0, 'native Unicode game probe completes');
     my $r = JSON::PP::decode_json($output);
     my $json = JSON::PP->new->canonical;
+    $assert->is($json->encode($r->{quote_length}{19}), $json->encode([
+        map { [0,0,'#test','No quotes long enough for the game on this channel.'] } 1..4
+    ]), 'quotegame excludes 19-character quotes even if their UTF-8 occupies at least 20 bytes');
+    $assert->is($json->encode($r->{quote_length}{20}), $json->encode([
+        map { [1,1,'#test',$_ x 20] } ('a',"\x{e9}","\x{5b57}","\x{1f31f}")
+    ]), 'quotegame accepts exactly 20 characters and starts its round and timer');
     for my $prefix ('#','&','!','+') {
         $assert->is($json->encode($r->{quote_case}{$prefix}), $json->encode({
             opened=>[$prefix.'Test',1], duplicate=>[$prefix.'TEST',1,0], answered=>[$prefix.'tEsT',1,0],
