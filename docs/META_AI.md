@@ -599,6 +599,9 @@ oEmbed when no YouTube API key is available. Long metadata is clipped to fit a
 single IRC message. Preview lookup runs after the answer and citations are
 delivered. A missing preview leaves them in place. Preview text stays outside
 the conversation memory and uses the same channel delivery checks.
+Preview lookup does not occupy an answer slot. A newly admitted request or a
+successful `/forget` in the same channel cancels its pending preview, so an
+old result cannot appear during the new answer.
 
 Accidental literal line-break/bullet escape artifacts are flattened in provider
 prose before output and memory retention; incoming prompts and evidence are not

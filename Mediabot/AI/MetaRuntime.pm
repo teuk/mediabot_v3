@@ -25,7 +25,7 @@ use Mediabot::External::YouTube qw(_is_youtube_url youtube_preview_message);
 sub new {
     my ($class,%args)=@_;
     return bless {bot=>$args{bot},clock=>$args{clock}||sub {time},
-        jobs=>{},rate=>{},memories=>{},client_factory=>$args{client_factory},
+        jobs=>{},previews=>{},rate=>{},memories=>{},client_factory=>$args{client_factory},
         web_start=>$args{web_start},schedule_cb=>$args{schedule_cb},shorten_start=>$args{shorten_start}},$class;
 }
 sub _signature {
@@ -329,6 +329,31 @@ sub _preview_sources {
             },on_done=>$complete);
     };
     $complete->() unless $worker;
+    return $worker;
+}
+sub _cancel_preview {
+    my ($self,$key)=@_;
+    my $pending=delete $self->{previews}{$key} or return;
+    my $worker=delete $pending->{worker};
+    eval {$worker->cancel('MetaAI preview superseded')} if ref($worker);
+}
+sub _send_previews {
+    my ($self,$channel,$displayed,$cfg,$current)=@_;
+    my $key=fold($channel);
+    my $owner={};
+    $self->{previews}{$key}=$owner;
+    my $owns=sub {($self->{previews}{$key}//0)==$owner};
+    my $finish=sub {delete $self->{previews}{$key} if $owns->()};
+    my $alive=sub {$owns->() && $current->()};
+    my $worker=$self->_preview_sources($displayed,sub {
+        my ($previews)=@_;
+        return unless $owns->();
+        delete $owner->{worker};
+        return $finish->() unless @$previews;
+        $self->_emit($channel,$previews,$cfg,$alive,$finish);
+    });
+    # Worker setup may already have called completion inline.
+    $owner->{worker}=$worker if $worker && $owns->();
 }
 sub _log_event {
     my ($self,$event)=@_;
@@ -399,6 +424,7 @@ sub _ask {
         my $pending=$self->{jobs}{$key};
         delete $self->{jobs}{$key} if $ok && ref($pending) eq 'HASH'
             && ($pending->{kind}//'') eq 'conversation';
+        $self->_cancel_preview($key) if $ok;
         $self->_notice($nick,$lang,$ok?'forgotten':'memory');return 1;
     }
     my $generation=eval {$bot->{wit_runtime_state}->capture_generation($channel)};
@@ -424,12 +450,14 @@ sub _ask {
     push @{$self->{rate}{$key}},$now;push @{$self->{rate}{__global__}},$now;
     my $signature=$self->_signature($cfg);
     my $owner={kind=>'conversation'};$self->{jobs}{$key}=$owner;
+    $self->_cancel_preview($key);
     my $owns=sub {
         my $current=$self->{jobs}{$key};
         return ref($current) eq 'HASH' && $current==$owner;
     };
     my $release=sub {delete $self->{jobs}{$key} if $owns->()};
-    my $alive=sub {$owns->() && $self->_alive($channel,$generation,$signature,$memory,$ticket)};
+    my $current=sub {$self->_alive($channel,$generation,$signature,$memory,$ticket)};
+    my $alive=sub {$owns->() && $current->()};
     my $completed=0;
     my $done=sub {
         my ($result)=@_;return if $completed++;
@@ -464,16 +492,12 @@ sub _ask {
             $self->_emit($channel,$chunks,$cfg,$alive,sub {
                 my ($sent)=@_;
                 eval {$memory->commit_turn($ticket,$sent,\@displayed)} if defined($sent) && !$recall;
+                $release->();
                 my $shortened=grep {$urls->{$_} ne $_} keys %$urls;
                 my $anchors=defined($result->{evidence_anchors}) && !ref($result->{evidence_anchors})
                     && $result->{evidence_anchors}=~/^[0-2]$/?$result->{evidence_anchors}:0;
                 eval {$bot->{logger}->log(0,defined($sent)?'META_AI completed contributors='.scalar(@{$result->{contributors}||[]}).' web='.($result->{web_used}?1:0).' degraded='.($result->{degraded}?1:0).' citation_repair='.($result->{citation_repair}?1:0).' anchors='.$anchors.' shorturls='.$shortened:'[WARN] META_AI delivery_aborted')};
-                return $release->() unless defined($sent) && @displayed;
-                $self->_preview_sources(\@displayed,sub {
-                    my ($previews)=@_;
-                    return $release->() unless @$previews && $alive->();
-                    $self->_emit($channel,$previews,$cfg,$alive,$release);
-                });
+                $self->_send_previews($channel,\@displayed,$cfg,$current) if defined($sent) && @displayed;
             });
         };
         if (@$sources) {$self->_present_sources($sources,$deliver)}
@@ -555,6 +579,7 @@ sub _local {
     };
     my $chunks=format_ai_reply(clean_answer($result->{text}),max_lines=>2,wrap_bytes=>400,truncation_suffix=>' …');
     $self->{jobs}{$key}=1;
+    $self->_cancel_preview($key);
     my $sender=$result->{private} ? sub {Mediabot::Helpers::botNotice($bot,$nick,$_[0]);1}:undef;
     $self->_emit($channel,$chunks,$cfg,$alive,sub {
         delete $self->{jobs}{$key};

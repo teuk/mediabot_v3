@@ -25,6 +25,8 @@ use Mediabot::External ();
     sub submit {my ($s,$request,%args)=@_;push @{$s->{calls}},{request=>$request,done=>$args{on_done}};1}
     package MB818RuntimeYouTube;
     sub get {my ($self,$url)=@_;push @{$self->{calls}},$url;return $self->{response}}
+    package MB818RuntimePreviewWorker;
+    sub cancel {$_[0]{cancelled}++;1}
 }
 my (@sent,@notices,@timers,@opts,@queries);my $accepted=1;my $chanset=1;my $lang='fr';my $now=1791892800;
 no warnings 'redefine';
@@ -434,6 +436,9 @@ ok(!exists(history($dir)->[0]{source_urls}),'insufficient findings cannot be rec
     my $duplicate='https://youtu.be/AbCdEfGh123';
     my $alias='https://go.example.org/shorturl/ABCD2345';
     $bot->{conf}{'shorturl.PUBLIC_BASE_URL'}='https://go.example.org/shorturl/';
+    $bot->{conf}{'meta_ai.MAX_JOBS'}=1;
+    $bot->{conf}{'meta_ai.RATE_MAX'}=8;
+    $bot->{conf}{'meta_ai.GLOBAL_RATE_MAX'}=12;
     $runtime->{shorten_start}=sub {$_[1]->({mappings=>[{url=>$video,display_url=>$alias}]})};
     $runtime->{web_start}=sub {$_[1]->({ok=>1,sources=>[
         {id=>1,url=>$video,text=>'The official recording documents the question and its supporting facts.'},
@@ -441,7 +446,7 @@ ok(!exists(history($dir)->[0]{source_urls}),'insufficient findings cannot be rec
         {id=>3,url=>'https://www.youtube.com/shorts/ZyXwVuTs987',text=>'A third recording that will not be cited.'},
     ]});1};
     my (@workers,@http);
-    local *Mediabot::AsyncWorker::start=sub {my (undef,%args)=@_;push @workers,\%args;return 1};
+    local *Mediabot::AsyncWorker::start=sub {my (undef,%args)=@_;my $job=bless \%args,'MB818RuntimePreviewWorker';push @workers,$job;return $job};
     local *Mediabot::External::_make_http=sub {bless {calls=>\@http,response=>{success=>1,
         content=>encode_json({title=>'Émission '.('🎬'x145)."\x01ACTION",author_name=>'Studio '.('é'x90)})}},'MB818RuntimeYouTube'};
     ask($bot,'Alice','#test','Trouve la vidéo officielle de l’événement.');
@@ -452,9 +457,15 @@ ok(!exists(history($dir)->[0]{source_urls}),'insufficient findings cannot be rec
     is(scalar @sent,3,'a two-line answer and its source line are sent first');
     like($sent[2][1],qr/\Q$alias\E/,'citation visibly uses the verified short URL');
     is(scalar @workers,1,'one worker prepares previews for displayed sources');
+    ok(!keys %{$runtime->{jobs}},'delivered sources immediately free the answer slot');
     SKIP: {
-        skip 'source preview worker did not start', 13 unless @workers;
+        skip 'source preview worker did not start', 25 unless @workers;
         my $work=shift @workers;
+        my $other_start=@{$client->{calls}};
+        ask($bot,'Bob','#other','Traduis ce passage en anglais.');
+        my $other_started=@{$client->{calls}}==$other_start+3;
+        ok($other_started,'a pending preview does not consume the global answer slot');
+        ok(!$work->{cancelled},'a question in another channel leaves the preview current');
         my $preview=$work->{child}->();
         $work->{on_done}->({ok=>1,value=>$preview});
         $work->{on_done}->({ok=>1,value=>$preview});
@@ -468,16 +479,50 @@ ok(!exists(history($dir)->[0]{source_urls}),'insufficient findings cannot be rec
         cmp_ok(length(encode('UTF-8',$preview_line)),'<=',400,'long Unicode metadata fits a single IRC message');
         unlike(history($dir)->[0]{answer},qr/Émission/,'preview is not stored as conversation or evidence');
         is_deeply(history($dir)->[0]{source_urls},[$video,$duplicate],'memory keeps the displayed original destinations');
-        ok(!keys %{$runtime->{jobs}},'completed preview releases the job');
+        is(scalar keys %{$runtime->{jobs}},$other_started?1:0,'completing a preview leaves other channel jobs alone');
+        if ($other_started) {
+            drafts($client,$other_start,0);
+            final($client,$other_start+3,'A translated line.');
+            @sent=grep {$_->[0] ne '#other'} @sent;
+        }
+        my $turns=scalar @{history($dir)};
 
         ask($bot,'Alice','#test','Tes sources ?');
         is(scalar @workers,1,'source recall also adds a preview for the displayed video');
         my $before=@sent;
         $bot->{wit_runtime_state}{generation}++;
-        $workers[0]{on_done}->({ok=>1,value=>$preview});
+        (shift @workers)->{on_done}->({ok=>1,value=>$preview});
         is(scalar @sent,$before,'a stale connection cannot publish the late preview');
-        ok(!keys %{$runtime->{jobs}},'a stale preview still releases its job');
-        is(scalar @{history($dir)},1,'source recall leaves the original answer in memory');
+        is_deeply($runtime->{previews},{},'a stale preview releases its presentation slot');
+        is(scalar @{history($dir)},$turns,'source recall leaves the original answer in memory');
+
+        ask($bot,'Alice','#test','Tes sources ?');
+        my $old=shift @workers;
+        my $next_start=@{$client->{calls}};
+        ask($bot,'Alice','#test','Trouve la vidéo complète.');
+        my $next_started=@{$client->{calls}}==$next_start+3;
+        ok($next_started,'a new question is admitted during metadata lookup in the same channel');
+        is($old->{cancelled}//0,1,'new question cancels the superseded preview worker');
+        $before=@sent;
+        $old->{on_done}->({ok=>1,value=>$preview});
+        is(scalar @sent,$before,'obsolete callback cannot publish the previous preview');
+        is(scalar keys %{$runtime->{jobs}},1,'obsolete callback cannot release the new answer slot');
+        SKIP: {
+            skip 'follow-up was not admitted', 6 unless $next_started;
+            drafts($client,$next_start,1);
+            final($client,$next_start+3,'La vidéo complète est ici.',[1]);
+            while (my $timer=shift @timers) {$timer->[1]->()}
+            my $pending=shift @workers;
+            ok($pending,'the new reply starts its own preview');
+            ask($bot,'Alice','#test','/forget');
+            is($pending->{cancelled}//0,1,'forget cancels an outstanding preview');
+            $before=@sent;
+            $pending->{on_done}->({ok=>1,value=>$preview});
+            is(scalar @sent,$before,'late preview does not escape forget');
+            is_deeply($runtime->{previews},{},'forget clears the preview slot');
+            ok(!keys %{$runtime->{jobs}},'forget leaves no answer job behind');
+            ok(!grep($_->{name} eq 'Alice',@{history($dir)}),'forgotten turns remain erased');
+        }
     }
 }
 done_testing;

@@ -1,3 +1,8 @@
+## MB1415 — Keep MetaAI responsive while video previews load
+
+- Release the answer slot as soon as the answer and source links are delivered. Optional preview work can finish independently.
+- Cancel a pending preview when a newer question is admitted in the same channel or its conversation is forgotten. Keep late callbacks from affecting the new answer.
+
 ## MB1414 — Preview YouTube videos cited by MetaAI
 
 - Show a separate YouTube preview after the source line, including after a long IRC answer. Resolve shortened citations by their original video URL and preview duplicates once.
