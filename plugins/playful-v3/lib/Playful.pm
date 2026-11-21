@@ -3,6 +3,7 @@ package Mediabot::Plugin::Playful;
 use strict;
 use warnings;
 use utf8;
+use Encode qw(encode);
 
 sub new {
     my ($class, %args) = @_;
@@ -88,15 +89,29 @@ sub command_roll {
 
     if (@args && lc($args[0]) eq 'history') {
         my $history = $self->{roll_history}{$channel_key} || [];
-        return $context->reply($invocation,
-            @$history ? 'Last rolls: ' . join('  |  ', reverse @$history)
-                     : "$nick: no roll history on $channel.");
+        return $context->reply($invocation, "$nick: no roll history on $channel.")
+            unless @$history;
+
+        my ($latest, @older) = reverse @$history;
+        my $prefix = 'Last rolls: ';
+        my $line = $prefix . $latest;
+        for my $roll (@older) {
+            my $joined = "$line  |  $roll";
+            # PluginContext budgets each reply in UTF-8 bytes.
+            if (length(encode('UTF-8', $joined)) > 400) {
+                return 0 unless $context->reply($invocation, $line);
+                $line = $prefix . $roll;
+            } else {
+                $line = $joined;
+            }
+        }
+        return $context->reply($invocation, $line);
     }
 
     my ($number, $sides, $modifier, $mode) = (1, 6, 0, '');
     # Match numeric conversion's ASCII grammar, not Unicode \d.
     if (@args && $args[0] =~ /\A([0-9]+)d([0-9]+)\z/i) {
-        ($number, $sides) = ($1, $2);
+        ($number, $sides) = (int($1), int($2));
         $number = 1 if $number < 1;
         $number = 20 if $number > 20;
         $sides = 2 if $sides < 2;

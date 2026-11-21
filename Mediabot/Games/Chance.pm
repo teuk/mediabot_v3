@@ -188,7 +188,7 @@ sub mbRoll_ctx {
 
     # Numeric conversion accepts ASCII digits, unlike Perl's Unicode \d.
     if (@args && $args[0] =~ /^([0-9]+)d([0-9]+)$/i) {
-        ($num, $sides) = ($1, $2);
+        ($num, $sides) = (int($1), int($2));
         $num   = 1   if $num   < 1;  $num   = 20  if $num   > 20;
         $sides = 2   if $sides < 2;  $sides = 100 if $sides > 100;
         shift @args;

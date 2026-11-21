@@ -28,22 +28,23 @@ local *Mediabot::UserCommands::logBot=sub {push @audit,[@_[2..$#_]];1};
 my $authority=Mediabot::PluginContext->new(plugin=>'playful-v3',
     requested=>[qw(irc.reply irc.notice)],granted=>[qw(irc.reply irc.notice)]);
 sub run_1381 {
-    my ($kind,$command,$args,$draws,$channel,$bot,$plugin)=@_;
+    my ($kind,$command,$args,$draws,$channel,$bot,$plugin,$nick)=@_;
     $channel //= '#test';
+    $nick //= 'Alice';
     $bot //= Mediabot->new({});
     $plugin //= Mediabot::Plugin::Playful->new(context=>$authority);
     @wire=(); @audit=(); @LIMITS=(); @DRAWS=@$draws;
     my (@warnings,$input,$call);
     if ($kind eq 'native') {
-        $input=Mediabot::Context->new(bot=>$bot,nick=>'Alice',channel=>$channel,
+        $input=Mediabot::Context->new(bot=>$bot,nick=>$nick,channel=>$channel,
             command=>$command,args=>[@$args]);
         $call=sub {$bot->command_registry->handler_for($command,'public')->($input)};
     } else {
-        $input=Mediabot::Plugin::InvocationV3->new(nick=>'Alice',channel=>$channel,
+        $input=Mediabot::Plugin::InvocationV3->new(nick=>$nick,channel=>$channel,
             command=>$command,args=>$args,source=>'public',is_private=>0,
             authority=>$authority,activation=>'on',config=>{},
             reply_sink=>sub {push @wire,['public',$channel,$_[0]];1},
-            notice_sink=>sub {push @wire,['notice','Alice',$_[0]];1});
+            notice_sink=>sub {push @wire,['notice',$nick,$_[0]];1});
         my $method='command_'.$command;
         $call=sub {$plugin->$method($authority,$input)};
     }
@@ -143,6 +144,33 @@ is_deeply(\@all_actual,\@all_expected,
     is_deeply([map {run_1381($_,'flip',$args,[(.1)x10])} qw(native plugin)],
         [map {expected_1381($_,'flip',$args,[($_ eq 'native'?1:2)x10],$text,'HHHHHHHHHH',{'#test'=>{h=>10,t=>0}})} qw(native plugin)],
         'ASCII flip counts still clamp at ten and record each actual coin');
+}
+{
+    my $dice = ('0' x 110) . '2d' . ('0' x 120) . '8';
+    my $args = [$dice, '+3'];
+    my $text = 'Alice rolled 2d8: [1, 5] +3 = 9';
+    is_deeply([map {run_1381($_, 'roll', $args, [0,.5])} qw(native plugin)],
+        [map {expected_1381($_, 'roll', $args, [8,8], $text, '2d8',
+            {'#test'=>[$text]})} qw(native plugin)],
+        'padded dice notation stays compact in the reply, history and audit');
+}
+for my $sample (['ASCII', 'Alice', 3, 2], ['UTF-8', 'é' x 14, 2, 2, 1]) {
+    my ($encoding, $nick, @group_sizes) = @$sample;
+    my $plugin = Mediabot::Plugin::Playful->new(context=>$authority);
+    my @rolls;
+    for my $value (96..100) {
+        run_1381('plugin', 'roll', ['20d100'], [(($value - .5)/100) x 20],
+            '#test', undef, $plugin, $nick);
+        push @rolls, "$nick rolled 20d100: [" . join(', ', ($value) x 20)
+            . '] = ' . ($value * 20);
+    }
+    my $history = run_1381('plugin', 'roll', ['history'], [], '#TeSt', undef, $plugin, $nick);
+    my @recent = reverse @rolls;
+    my @expected = map {
+        ['public', '#TeSt', 'Last rolls: ' . join('  |  ', splice @recent, 0, $_)]
+    } @group_sizes;
+    is_deeply([@$history{qw(error wire limits record)}], ['', \@expected, [], {'#test'=>\@rolls}],
+        "$encoding plugin history replies preserve all five rolls without splitting an entry");
 }
 {
     my $args=['café:2','|','tea'];

@@ -1,3 +1,8 @@
+## MB1404 — Keep dice replies within their output budget
+
+- Normalize padded dice notation before displaying or recording a roll.
+- Split the Playful plugin's history replies between complete rolls when a single line exceeds the UTF-8 byte budget.
+
 ## MB1403 — Keep all remaining quotes eligible after a deletion
 
 - In the native q random command, exclude the previous pick only when it still exists in the channel and another quote is available.
