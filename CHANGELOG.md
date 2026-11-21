@@ -1,3 +1,8 @@
+## MB1403 — Keep all remaining quotes eligible after a deletion
+
+- In the native q random command, exclude the previous pick only when it still exists in the channel and another quote is available.
+- Verify that the highest remaining quote ID can be drawn after the previous pick is deleted. Preserve single-quote repeats and empty-channel replies.
+
 ## MB1402 — Validate stored dates before birthday observance
 
 - Share Gregorian validation between the upcoming birthday list and daily announcements. Malformed values and impossible full dates no longer trigger a birthday.

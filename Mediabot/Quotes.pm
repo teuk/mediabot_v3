@@ -648,7 +648,10 @@ sub mbQuoteSearch {
 sub mbQuoteRand {
     my ($self, $message, $sNick, $sChannel, @tArgs) = @_;
 
-    my $sql_count = "SELECT COUNT(*) FROM QUOTES q
+    my $channel_key = lc($sChannel // '');
+    my $last_id = $self->{_quote_last_rand}{$channel_key};
+    my $sql_count = "SELECT COUNT(*), COUNT(CASE WHEN q.id_quotes = ? THEN 1 END)
+         FROM QUOTES q
          JOIN CHANNEL c ON c.id_channel = q.id_channel
          WHERE c.name = ?";
 
@@ -661,7 +664,7 @@ sub mbQuoteRand {
         return;
     }
 
-    unless ($sth_count->execute($sChannel)) {
+    unless ($sth_count->execute($last_id, $sChannel)) {
         $self->{logger}->log(1, "mbQuoteRand count SQL execute error: $DBI::errstr Query: $sql_count")
             if $self->{logger};
         $sth_count->finish;
@@ -669,7 +672,7 @@ sub mbQuoteRand {
         return;
     }
 
-    my ($count) = $sth_count->fetchrow_array;
+    my ($count, $last_count) = $sth_count->fetchrow_array;
     $sth_count->finish;
 
     unless ($count && $count > 0) {
@@ -678,29 +681,10 @@ sub mbQuoteRand {
         return;
     }
 
-    # mb124-B1: anti-doublon corrige.
-    #
-    # Avant ce fix, le code generait $offset = int(rand($count)), puis essayait
-    # de "boucler tant qu'on retombe sur la meme quote" en comparant deux
-    # offsets random entre eux :
-    #
-    #     for (1..5) {
-    #         my $candidate_offset = int(rand($count));
-    #         last if $candidate_offset != $offset;   # WTF
-    #         $offset = $candidate_offset;
-    #     }
-    #
-    # Ce test compare random vs random sans aucun lien avec $last_id, donc
-    # la prevention "deux fois de suite la meme quote" ne fonctionnait pas.
-    # On exclut maintenant $last_id directement dans la requete SQL.
-    my $channel_key = lc($sChannel // '');
-    my $last_id = $self->{_quote_last_rand}{$channel_key};
-    my $exclude_last = (defined $last_id && $count > 1) ? 1 : 0;
-
-    # On utilise count - 1 pour le random si on exclut, sinon count.
-    my $effective_count = $exclude_last ? ($count - 1) : $count;
-    $effective_count = 1 if $effective_count < 1;   # garde-fou
-    my $offset = int(rand($effective_count));
+    # The remembered quote may have been deleted. Shrink the draw only when
+    # the query will actually exclude a row and another quote is available.
+    my $exclude_last = $count > 1 && $last_count;
+    my $offset = int(rand($count - ($exclude_last ? 1 : 0)));
 
     my $sql = $exclude_last
         ? "SELECT q.id_quotes, q.quotetext, q.id_user
@@ -738,8 +722,6 @@ sub mbQuoteRand {
     }
 
     if (my $ref = $sth->fetchrow_hashref) {
-        # mb124-B1: id_quotes ne peut plus etre egal a $last_id grace au
-        # filtre SQL, donc on memorise sans risque de doublon.
         $self->{_quote_last_rand}{$channel_key} = $ref->{id_quotes};
         my $id_q   = String::IRC->new($ref->{id_quotes})->bold;
         my $handle = getUserhandle($self, $ref->{id_user}) || 'Unknown';

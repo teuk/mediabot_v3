@@ -1,12 +1,8 @@
 # t/cases/385_mb124_quote_random_and_like_escape.t
 # =============================================================================
 # Tests des corrections mb124 :
-#   - B1 : mbQuoteRand anti-doublon casse. Avant ce fix, la boucle
-#          `for (1..5) { ... last if $candidate_offset != $offset; ... }`
-#          comparait deux randoms entre eux sans aucun lien avec $last_id,
-#          donc la prevention "deux fois de suite la meme quote" ne
-#          fonctionnait pas. Apres ce fix on exclut directement $last_id
-#          via WHERE q.id_quotes != ? dans la requete SQL.
+#   - B1 : le tirage sans répétition est testé via la commande native dans
+#          255_quotes_bynick.t, y compris après suppression du dernier tirage.
 #   - B2 : Les 5 LIKE de Quotes.pm n'echappaient pas les wildcards SQL
 #          (_ et %), alors que `_` est un caractere valide dans les nicks
 #          IRC (RFC 2812). Un nick `bob_` matchait `boba`, `bobx`, etc.
@@ -18,37 +14,6 @@ use warnings;
 
 return sub {
     my ($assert) = @_;
-
-    # -------------------------------------------------------------------------
-    # B1 : mbQuoteRand exclude_last decision
-    # -------------------------------------------------------------------------
-    my $rand_decision = sub {
-        my ($count, $last_id) = @_;
-        my $exclude_last    = (defined $last_id && $count > 1) ? 1 : 0;
-        my $effective_count = $exclude_last ? ($count - 1) : $count;
-        $effective_count = 1 if $effective_count < 1;
-        return ($exclude_last, $effective_count);
-    };
-
-    my @b1_cases = (
-        # count  last_id  exp_exclude  exp_effective_count
-        [10, undef, 0, 10],   # premier appel
-        [10, 5,     1, 9],    # 2e appel, on exclut 1 quote
-        [1,  undef, 0, 1],    # une seule quote, premier appel
-        [1,  3,     0, 1],    # une seule quote: NE PAS exclure (sinon 0 rows)
-        [2,  1,     1, 1],    # 2 quotes, last_id=1 -> 1 candidate restant
-        [100, 42,   1, 99],   # gros set
-    );
-    for my $c (@b1_cases) {
-        my ($count, $last_id, $exp_excl, $exp_eff) = @$c;
-        my ($got_excl, $got_eff) = $rand_decision->($count, $last_id);
-        my $tag = sprintf("count=%d last=%s",
-            $count, (defined $last_id ? $last_id : 'undef'));
-        $assert->($got_excl == $exp_excl,
-            "B1 $tag -> exclude=$exp_excl (got $got_excl)");
-        $assert->($got_eff == $exp_eff,
-            "B1 $tag -> effective_count=$exp_eff (got $got_eff)");
-    }
 
     # -------------------------------------------------------------------------
     # B2 : SQL LIKE wildcard escape

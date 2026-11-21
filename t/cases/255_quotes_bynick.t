@@ -113,7 +113,9 @@ sub run {
         : $a{entry} eq 'module' ? \&Mediabot::Quotes::mbQuoteByNick : \&Mediabot::mbQuoteByNick;
     my $ret;
     for my $call (@{$a{calls} // [['#test', $target]]}) {
-        my ($channel, $arg) = @$call;
+        my ($channel, $arg, $delete_id) = @$call;
+        $h->do('DELETE FROM QUOTES WHERE id_quotes = ?', undef, $delete_id)
+            if defined $delete_id;
         my $ctx = Mediabot::Context->new(bot=>$b,nick=>'Reader',channel=>$channel,command=>$command,args=>[$arg]);
         $ret = $method->($ctx);
     }
@@ -166,6 +168,11 @@ $out{case_aliases}{quote} = run(entry=>'registry',count=>2,calls=>[
 ]);
 $out{case_aliases}{q} = run(entry=>'registry',command=>'q',count=>2,calls=>[
     ['#test','random'], ['#TeSt','random'], ['#other','random'], ['#test','r'],
+]);
+$out{random_after_delete} = run(entry=>'registry',command=>'q',count=>2,
+    fractions=>[0,0.99], calls=>[['#test','random'], ['#test','r',10]]);
+$out{random_single} = run(entry=>'registry',command=>'q',count=>2,calls=>[
+    ['#other','random'], ['#other','random'], ['#other','random',200],
 ]);
 print JSON::PP->new->canonical->utf8->encode(\%out);
 MB924_NATIVE
@@ -255,4 +262,14 @@ MB924_NATIVE
         $assert->is($json->encode([\@wire, $v->{warnings}]), $json->encode([\@expected, []]),
             "$command shares the last draw across case variants while respecting channel and author scope");
     }
+    my $deleted = $r->{random_after_delete};
+    $assert->is($json->encode($deleted->{bounds}), '[3,2]',
+        'q random draws from both remaining quotes after the last pick is deleted');
+    $assert->like($deleted->{sent}[1][2], qr/\[id: \x02201\x0f\]/,
+        'q random can still select the highest quote ID after that deletion');
+    my $single = $r->{random_single};
+    $assert->is($json->encode($single->{bounds}), '[1,1]',
+        'q random repeats the only available quote and skips drawing from an empty channel');
+    $assert->is($single->{sent}[2][2], 'Quote database is empty for #other',
+        'q random reports an empty channel after its only quote is removed');
 };
