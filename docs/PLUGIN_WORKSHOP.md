@@ -10,14 +10,16 @@ Les deux formats de scripts utilisent le protocole `mediabot-script-v1`.
 perl tools/plugin_v3_workshop.pl --create hello-python-v3 \
   --language python --command hello_python
 perl tools/plugin_v3_workshop.pl --validate hello-python-v3 --grant irc.reply
+perl tools/plugin_v3_workshop.pl --test hello-python-v3 --grant irc.reply
 ```
 
-Le paquet contient `plugin.json`, `lib/greeting.py` et un README avec les
-commandes de chargement et de retrait. Pour Tcl, utilise `--language tcl` et
+Le paquet contient `plugin.json`, `lib/greeting.py`, `workshop.test.json` et un
+README avec les commandes de chargement et de retrait. Pour Tcl, utilise `--language tcl` et
 modifie `lib/greeting.tcl`. L’exemple Tcl utilise `tclsh` et les modules
 `json` et `json::write` de Tcllib. L’exemple Python utilise `python3` et sa
 bibliothèque standard. `--validate` vérifie le montage et les collisions hors
-ligne. Le script s’exécute quand la commande est appelée.
+ligne. `--test` lance la commande et vérifie ses réponses dans une instance
+isolée.
 
 Sur l’instance de développement, charge le paquet depuis la Partyline en tant
 qu’Owner et active-le sur le canal voulu.
@@ -32,6 +34,39 @@ Dans `#test`, `!hello_python Élodie` affiche `Bonjour, Élodie!`. Pour observer
 l’exécution sans publier de message, sélectionne `observe`. Les canaux sans
 politique restent à `off`. Le [contrat API v3](PLUGIN_API_V3.md#python-and-tcl-command-packages)
 décrit le contexte, la réponse et les limites du processus.
+
+## Tester une commande API v3 hors ligne
+
+`--test NAME` lit `workshop.test.json` dans le répertoire du paquet, ou le
+fichier fourni par `--fixture FILE`. Tu peux utiliser un fichier explicite pour
+tester un paquet Perl, Python ou Tcl déjà créé. Le test exécute le code local de
+confiance avec les permissions du compte qui lance l’atelier.
+
+```json
+{
+  "steps": [
+    {
+      "command": "hello_python",
+      "data": {"channel": "#atelier", "args": ["Élodie"]},
+      "config": {"greeting": "Salut"},
+      "replies": [["PRIVMSG", "#atelier", "Salut, Élodie!"]]
+    },
+    {"command": "hello_python", "mode": "observe", "replies": []},
+    {"command": "hello_python", "mode": "off", "replies": []}
+  ]
+}
+```
+
+Les commandes publiques de niveau 0 et leurs alias sont acceptés. Les valeurs
+par défaut sont `on`, `#workshop`, `Pablo` et aucun argument. Chaque étape
+applique sa propre politique et ses propres réglages typés. L’atelier compare
+les messages dans l’ordre par triplets `[verbe, cible, texte]`. Un `reply`
+donne un `PRIVMSG` vers le canal, un `notice` donne un `NOTICE` vers le nick.
+Accorde les capacités correspondantes avec `--grant irc.reply` ou
+`--grant irc.notice` si le paquet les déclare. Un échec indique l’étape et
+l’erreur d’exécution, ou les réponses attendues et capturées. Une étape
+`observe` doit exécuter la commande sans réponse et une étape `off` doit
+rester inactive.
 
 ## Écrire et tester un script API v2 en Perl, Python ou Tcl
 
@@ -123,8 +158,8 @@ Le répertoire doit être existant. Le générateur valide le manifeste avec les
 règles que le chargeur avant de créer le paquet. Le nom de commande ordinaire peut
 faire jusqu’à 24 caractères. Utiliser `--command` si le nom dérivé du paquet
 dépasse cette limite. Les parents symlinks et les destinations existantes sont
-refusés. Le générateur écrit plugin.json, README.md et
-lib/Greeting.pm. La seule capacité est irc.reply ; la configuration typée
+refusés. Le générateur écrit `plugin.json`, `README.md`, `lib/Greeting.pm`
+et `workshop.test.json`. La seule capacité est `irc.reply` et la configuration typée
 `greeting` limite le texte à 160 caractères. Aucun timer, événement, HTTP,
 stockage ou SQL n'est demandé. Remplacer le texte métier dans cette petite
 surface, puis ajouter un test de comportement avant d'étendre les capacités.

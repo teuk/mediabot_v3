@@ -1,3 +1,8 @@
+## MB1425 — Exercise API v3 plugin commands with offline fixtures
+
+- Generate an editable command fixture with Perl, Python and Tcl API v3 packages.
+- Compare captured replies and notices in the native registry and report runtime errors even in silent cases.
+
 ## MB1424 — Run Python and Tcl commands in API v3 packages
 
 - Generate default-off API v3 packages in Perl, Python or Tcl with the plugin workshop.

@@ -164,17 +164,21 @@ for my $args (
     ok(!-e "$tmp/$args->{name}", 'the rejected scaffold leaves no package directory');
 }
 
-sub validate_workshop_1322 {
+sub workshop_cli_1322 {
     my (@args) = @_;
     my $pid = open my $child, '-|';
     die "cannot fork workshop validator: $!" unless defined $pid;
     if (!$pid) {
         open STDERR, '>&STDOUT' or die $!;
-        exec $^X, 'tools/plugin_v3_workshop.pl', '--validate', @args or die $!;
+        exec $^X, 'tools/plugin_v3_workshop.pl', @args or die $!;
     }
     my $output = do { local $/; <$child> };
     my $ok = close $child;
     return ($ok, $output // '');
+}
+
+sub validate_workshop_1322 {
+    return workshop_cli_1322('--validate', @_);
 }
 
 my ($valid, $validation) = validate_workshop_1322('first-v3',
@@ -204,6 +208,51 @@ Mediabot::Plugin::ScaffoldV3::create(directory => $tmp, name => 'collision-v3', 
 ($valid, $validation) = validate_workshop_1322('collision-v3', '--directory', $tmp);
 ok(!$valid, 'a conflicting command is checked against the actual built-in registry');
 like($validation, qr/mounting API v3 command 'choose'/, 'the report identifies the conflicting command');
+
+sub write_fixture_1322 {
+    my ($path, $steps) = @_;
+    open my $fixture, '>:raw', $path or die $!;
+    print {$fixture} encode_json({steps => $steps}) or die $!;
+    close $fixture or die $!;
+}
+
+my ($tested, $test_report) = workshop_cli_1322('--test', 'first-v3',
+    '--directory', $tmp, '--grant', 'irc.reply');
+ok($tested, 'generated Perl package passes its editable default fixture');
+like($test_report, qr/passed 4 offline API v3 command step/, 'fixture exercises on, observe and off');
+
+my $python = Mediabot::Plugin::ScaffoldV3::create(
+    directory => $tmp, name => 'test-python', language => 'python');
+($tested, $test_report) = workshop_cli_1322('--test', 'test-python',
+    '--directory', $tmp, '--grant', 'irc.reply');
+ok($tested && $test_report =~ /passed 4 offline API v3 command step/,
+    'Python package runs its generated Unicode fixture through the subprocess runtime');
+
+my $custom_fixture = "$tmp/alternate.test.json";
+write_fixture_1322($custom_fixture, [{command => 'test_python',
+    data => {nick => 'Karo', channel => '#chosen'},
+    replies => [['PRIVMSG', '#chosen', 'Bonjour, Karo!']]}]);
+my @custom = ('--test', 'test-python', '--directory', $tmp, '--fixture', $custom_fixture);
+($tested, $test_report) = workshop_cli_1322(@custom, '--grant', 'irc.reply');
+ok($tested && $test_report =~ /passed 1 offline API v3 command step/,
+    'an existing Python plugin can use an explicit fixture with channel and nick');
+($tested, $test_report) = workshop_cli_1322(@custom);
+ok(!$tested && $test_report =~ /Step 1 failed:.*actions were refused/,
+    'an ungranted subprocess reply fails the fixture with the runtime error');
+
+write_fixture_1322($custom_fixture, [{command => 'test_python',
+    replies => [['PRIVMSG', '#workshop', 'wrong greeting']]}]);
+($tested, $test_report) = workshop_cli_1322(@custom, '--grant', 'irc.reply');
+ok(!$tested && $test_report =~ /Step 1 reply mismatch.*wrong greeting.*Bonjour, Pablo!/s,
+    'mismatches contain the expected and captured replies');
+
+open my $crashing_script, '>:raw', "$python->{directory}/lib/greeting.py" or die $!;
+print {$crashing_script} "raise SystemExit(1)\n" or die $!;
+close $crashing_script or die $!;
+write_fixture_1322($custom_fixture, [{command => 'test_python', mode => 'observe', replies => []}]);
+($tested, $test_report) = workshop_cli_1322(@custom, '--grant', 'irc.reply');
+ok(!$tested && $test_report =~ /Step 1 failed:.*script process failed/,
+    'a failed interpreter cannot pass a silent observe test');
 
 $manifest->{commands}{first_greeting}{handler} = 'command_missing';
 open my $edited_manifest, '>:raw', "$out->{directory}/plugin.json" or die $!;

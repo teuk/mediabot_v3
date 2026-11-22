@@ -8,6 +8,7 @@ use File::Spec;
 use File::Temp qw(tempdir);
 use JSON::PP ();
 use Mediabot::Plugin::ScaffoldFiles ();
+use Mediabot::Plugin::WorkshopFixture ();
 
 my %extension = (perl => 'pl', python => 'py', tcl => 'tcl');
 
@@ -120,18 +121,6 @@ README
     return "$name/$script";
 }
 
-sub _load_fixture {
-    my ($path) = @_;
-    open my $handle, '<:raw', $path or die "Cannot read test fixture '$path': $!\n";
-    my $bytes = do { local $/; <$handle> };
-    close $handle or die "Cannot close test fixture '$path': $!\n";
-    my $fixture = eval { JSON::PP->new->utf8->decode($bytes) };
-    die "Test fixture must be a JSON object with a non-empty steps array\n"
-        unless ref($fixture) eq 'HASH' && ref($fixture->{steps}) eq 'ARRAY'
-            && @{ $fixture->{steps} };
-    return $fixture->{steps};
-}
-
 sub test_script {
     my (%args) = @_;
     require Mediabot::Mediabot;
@@ -155,9 +144,8 @@ sub test_script {
 
     my $count = 0;
     my $tested = eval {
-        my $steps = _load_fixture($fixture_path);
+        my $steps = Mediabot::Plugin::WorkshopFixture::read_steps($fixture_path);
         $manager->enable($name);
-        my $json = JSON::PP->new->canonical->ascii;
         for my $step (@$steps) {
             $count++;
             die "Step $count must declare one command or event and a replies array\n"
@@ -196,10 +184,7 @@ sub test_script {
                 $detail .= "\nInterpreter stderr:\n" . substr($stderr, 0, 2048) if length $stderr;
                 die "Step $count failed: $detail\n";
             }
-            my $actual = $json->encode($irc->{replies});
-            my $expected = $json->encode($step->{replies});
-            die "Step $count reply mismatch\nExpected: $expected\nCaptured: $actual\n"
-                unless $actual eq $expected;
+            Mediabot::Plugin::WorkshopFixture::assert_replies($count, $step->{replies}, $irc->{replies});
         }
         1;
     };

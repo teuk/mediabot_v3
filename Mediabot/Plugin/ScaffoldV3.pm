@@ -1,6 +1,7 @@
 package Mediabot::Plugin::ScaffoldV3;
 use strict;
 use warnings;
+use utf8;
 use JSON::PP ();
 use Mediabot::Plugin::ManifestV3;
 use Mediabot::Plugin::ScaffoldFiles ();
@@ -38,7 +39,9 @@ sub create {
         ."No database, HTTP, events, jobs or automatic messages.\n\n"
         ."From the Mediabot checkout, verify your changes before installing the plugin:\n\n```bash\n"
         ."perl tools/plugin_v3_workshop.pl --validate $name --grant irc.reply --directory plugins\n"
+        ."perl tools/plugin_v3_workshop.pl --test $name --grant irc.reply --directory plugins\n"
         ."```\n\nUse the parent directory you passed to --create if it differs from plugins.\n\n"
+        ."Edit workshop.test.json alongside the plugin when its behavior changes.\n\n"
         ."Try first on development #test, as an Owner in Partyline:\n\n```text\n"
         .".plugins loadv3 $name irc.reply\n.plugins policy $name #test observe\n.plugins enable $name\n"
         ."```\n\nIn #test, invoke !$command: observe remains silent. Then explicitly choose\n"
@@ -49,11 +52,26 @@ sub create {
         ."For a complete checked walkthrough see docs/PLUGIN_WORKSHOP.md.\n";
     my %files = (
         'plugin.json' => JSON::PP->new->canonical->pretty->encode($manifest),
+        'workshop.test.json' => _greeting_fixture($command, $native),
         $entrypoint{$language} => $code,
         'README.md' => $readme,
     );
     my $dest = Mediabot::Plugin::ScaffoldFiles::write_package($parent, $name, \%files, 'lib');
     return {directory=>$dest,name=>$name,command=>$command};
+}
+
+sub _greeting_fixture {
+    my ($command, $native) = @_;
+    my $default = $native ? 'Hello from this channel.' : 'Bonjour, Pablo!';
+    my $configured = $native ? 'Salut' : 'Salut, Élodie!';
+    return JSON::PP->new->canonical->pretty->ascii->encode({steps => [
+        { command => $command, replies => [['PRIVMSG', '#workshop', $default]] },
+        { command => $command, config => { greeting => 'Salut' },
+            data => { channel => '#atelier', args => ['Élodie'] },
+            replies => [['PRIVMSG', '#atelier', $configured]] },
+        { command => $command, mode => 'observe', replies => [] },
+        { command => $command, mode => 'off', replies => [] },
+    ]});
 }
 
 sub _perl_source {

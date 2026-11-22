@@ -12,6 +12,11 @@ sub new {
     return bless { loop => $loop, active => {}, closing => 0 }, $class;
 }
 
+sub pending_count {
+    my ($self) = @_;
+    return scalar keys %{ $self->{active} };
+}
+
 # The ScriptRunner produces the argv and bounded input for this subprocess.
 # Consume both pipes as they become readable, and keep ownership until reap.
 sub start {

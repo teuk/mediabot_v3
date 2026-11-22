@@ -1929,4 +1929,16 @@ delivering replies and notices under the explicitly granted capabilities.
 The subprocess runtime is asynchronous. Policy changes cancel pending work
 for the affected channel, and disable, unload and shutdown retire delivery.
 Events, scheduled jobs and core service calls for external API v3 packages
-remain future increments. Host acceptance is pending.
+remain future increments. Commit `98cf0734d77745d14086938db1864d44bbb2dcdf`
+was pushed to `origin/master`. The Python package was generated and its
+disabled command mounted and unloaded on teuk.org.
+
+## MB1425 — Test an API v3 package's real command behavior offline
+
+The workshop generates editable JSON command fixtures in all three languages.
+Each step enters the native public command registry with a temporary channel
+policy and typed settings. The harness waits for external scripts, verifies
+whether the command ran, and compares the captured reply or notice destination
+and text. Interpreter and capability errors fail even steps expecting silence.
+Packs created before MB1425 can use the same runner with an explicit fixture.
+Target-host acceptance is pending.

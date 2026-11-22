@@ -11,21 +11,24 @@ Usage:
   perl tools/plugin_v3_workshop.pl --check
   perl tools/plugin_v3_workshop.pl --create NAME [--language perl|python|tcl] [--command NAME] [--directory DIR]
   perl tools/plugin_v3_workshop.pl --validate NAME [--grant CAPABILITY ...] [--directory DIR]
+  perl tools/plugin_v3_workshop.pl --test NAME [--fixture FILE] [--grant CAPABILITY ...] [--directory DIR]
   perl tools/plugin_v3_workshop.pl --create-script NAME [--language perl|python|tcl] [--command NAME] [--directory DIR]
   perl tools/plugin_v3_workshop.pl --test-script RELATIVE_PATH [--fixture FILE] [--directory DIR]
 
 --validate mounts a trusted API v3 package in a disposable, disabled runtime.
+--test runs trusted local API v3 commands against workshop.test.json or --fixture.
 --directory is the package root (plugins for API v3, plugins/scripts for API v2 scripts).
 --test-script runs trusted local code against the fixture beside the script by default.
 USAGE
 
 my ($check, $name, $package, $command, $help) = (0);
-my ($directory, $script_name, $test_script, $language, $fixture);
+my ($directory, $script_name, $test_script, $test_package, $language, $fixture);
 my @grants;
 GetOptions(
     'check'       => \$check,
     'create=s'    => \$name,
     'validate=s'  => \$package,
+    'test=s'      => \$test_package,
     'create-script=s' => \$script_name,
     'test-script=s'   => \$test_script,
     'language=s'  => \$language,
@@ -40,12 +43,12 @@ if ($help) {
     exit 0;
 }
 my $mode_count = $check + defined($name) + defined($package)
-    + defined($script_name) + defined($test_script);
+    + defined($script_name) + defined($test_script) + defined($test_package);
 die $usage if @ARGV || $mode_count != 1
     || (defined($command) && !defined($name) && !defined($script_name))
-    || (@grants && !defined($package))
+    || (@grants && !defined($package) && !defined($test_package))
     || (defined($language) && !defined($name) && !defined($script_name))
-    || (defined($fixture) && !defined($test_script));
+    || (defined($fixture) && !defined($test_script) && !defined($test_package));
 
 if (defined($script_name) || defined($test_script)) {
     require Mediabot::Plugin::ScriptWorkshop;
@@ -77,18 +80,18 @@ if (defined $package) {
     exit 0;
 }
 
+if (defined $test_package) {
+    require Mediabot::Plugin::WorkshopV3;
+    my $steps = Mediabot::Plugin::WorkshopV3::test_package(
+        name => $test_package, directory => $directory, grants => \@grants, fixture => $fixture);
+    print "[OK] $test_package passed $steps offline API v3 command step(s).\n";
+    exit 0;
+}
+
 sub validate_package {
     my ($name, $directory, $grants) = @_;
-    require Mediabot::Mediabot;
-    require IO::Async::Loop;
-    require Mediabot::Scheduler;
-
-    # Build the actual built-in registry, without opening any live services.
-    my $bot = Mediabot->new({});
-    my $loop = IO::Async::Loop->new;
-    $bot->setLoop($loop);
-    $bot->{scheduler} = Mediabot::Scheduler->new(loop => $loop);
-    my $manager = Mediabot::PluginManager->new(bot => $bot, plugin_dir => $directory);
+    require Mediabot::Plugin::WorkshopV3;
+    my ($bot, $manager) = Mediabot::Plugin::WorkshopV3::offline_runtime($directory);
     $manager->load_package_v3($name, grants => $grants);
 
     my $report = $manager->v3_diagnostic_report($name);
