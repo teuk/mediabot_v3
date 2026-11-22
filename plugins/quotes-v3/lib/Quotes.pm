@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 
 use Encode qw(encode);
+use Mediabot::IRC::Target qw(is_channel);
 
 sub new {
     my ($class, %args) = @_;
@@ -328,7 +329,7 @@ sub command_topquote {
     my $channel = $invocation->channel;
     return $context->notice($invocation,
         'Syntax: !topquote [n]  (use it in a channel)')
-        unless defined($channel) && $channel =~ /\A[#&]/;
+        unless is_channel($channel);
 
     my @args = @{ $invocation->args };
     my $limit = 5;

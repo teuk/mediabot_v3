@@ -69,14 +69,15 @@ local *Mediabot::Quotes::botPrivmsg=sub {push @wire,['public',$_[1],$_[2]];1};
 local $SIG{__WARN__}=sub {push @warnings,@_};
 
 sub setup_1353 {
-    my ($raise,$legacy,$faults)=@_;
+    my ($raise,$legacy,$faults,$channel)=@_;
+    $channel //= '#test';
     my $db=DBI->connect('dbi:SQLite:dbname=:memory:','','',{
         RootClass=>'MB977::DBI',RaiseError=>$raise,PrintError=>0});
     $db->do('CREATE TABLE CHANNEL(id_channel INTEGER PRIMARY KEY,name TEXT)');
     $db->do('CREATE TABLE USER(id_user INTEGER PRIMARY KEY,nickname TEXT)');
     $db->do('CREATE TABLE QUOTES(id_quotes INTEGER PRIMARY KEY,id_channel INTEGER,id_user INTEGER,quotetext TEXT'
         .($legacy?'':',hits INTEGER').')');
-    $db->do(q{INSERT INTO CHANNEL VALUES(1,'#test'),(2,'#other')});
+    $db->do(q{INSERT INTO CHANNEL VALUES(1,?),(2,'#other')},undef,$channel);
     $db->do(q{INSERT INTO USER VALUES(7,'Alice'),(8,'Bob')});
     my @rows=([1,1,7,'first',1],[2,1,8,'second',9],[3,1,undef,'anonymous',0],[50,2,7,'foreign',100]);
     for my $row (@rows) {
@@ -110,24 +111,41 @@ sub invoke_1353 {
     return ($ok?'':$@,$result);
 }
 sub expected_1353 {
-    my ($ranked,$limit)=@_;$limit//=5;
+    my ($ranked,$limit,$channel)=@_;
+    $limit //= 5;
+    $channel //= '#test';
     my @rows=$ranked
         ? ([2,'Bob','second',9],[1,'Alice','first',1],[3,'?','anonymous',0])
         : ([3,'?','anonymous',0],[2,'Bob','second',9],[1,'Alice','first',1]);
     splice @rows,$limit if @rows>$limit;
-    my @out=(['public','#test',$ranked
-        ? "\x02Hall of fame\x02 #test — most recalled quotes:"
-        : "\x02Quotes\x02 #test — latest:"]);
+    my @out=(['public',$channel,$ranked
+        ? "\x02Hall of fame\x02 $channel — most recalled quotes:"
+        : "\x02Quotes\x02 $channel — latest:"]);
     my $rank=0;
     for my $r (@rows) {
         my ($id,$author,$text,$hits)=@$r;
         my $suffix=$ranked?' ('.$hits.' recall'.($hits==1?'':'s').')':'';
-        push @out,['public','#test',sprintf('  %d. [id:%d] <%s> %s%s',++$rank,$id,$author,$text,$suffix)];
+        push @out,['public',$channel,sprintf('  %d. [id:%d] <%s> %s%s',++$rank,$id,$author,$text,$suffix)];
     }
     return \@out;
 }
 my @entries=qw(Mediabot::Quotes registry:topquote registry:halloffame);
 for my $entry (@entries) {
+    for my $channel ('&test','!ABCDEtest','+test') {
+        my ($bot,$db)=setup_1353(1,0,{},$channel);
+        my ($error,$result)=invoke_1353($entry,$bot,$channel,2);
+        is($error,'',"$entry accepts $channel without an exception");
+        is($result,1,"$entry completes for $channel");
+        is_deeply(\@wire,expected_1353(1,2,$channel),"$entry ranks quotes on $channel");
+        is_deeply($db->{private_binds},[[1,$channel,2]],"$entry reads only quotes on $channel");
+    }
+    {
+        my ($bot,$db)=setup_1353(1,0,{});
+        invoke_1353($entry,$bot,'Reader',undef);
+        is_deeply(\@wire,[['notice','Reader','Syntax: !topquote [n]  (use it in a channel)']],
+            "$entry keeps the private syntax notice outside a channel");
+        is($db->{private_queries},0,"$entry skips the database outside a channel");
+    }
     # Full fault coverage belongs to the implementation; facades get wiring checks.
     my $domain = $entry eq 'Mediabot::Quotes';
     for my $raise ($domain ? (0,1) : (1)) {

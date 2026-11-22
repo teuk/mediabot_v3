@@ -48,9 +48,10 @@ return sub {
     );
     my $plugin = Mediabot::Plugin::Quotes->new(context => $authority);
     my $invoke = sub {
-        my ($command, $args) = @_;
+        my ($command, $args, $channel) = @_;
+        $channel //= '#development';
         return Mediabot::Plugin::InvocationV3->new(
-            nick => 'Tangy', channel => '#development', command => $command,
+            nick => 'Tangy', channel => $channel, command => $command,
             args => $args, source => 'public', is_private => 0,
             authority => $authority, activation => 'on', config => {},
             reply_sink => sub { push @replies, $_[0]; 1 },
@@ -85,6 +86,21 @@ return sub {
         'topquote keeps plural recall rendering');
     $assert->ok(length(encode('UTF-8', $replies[-1])) <= 400,
         'long multibyte quote output remains inside the facade budget');
+
+    for my $example (['halloffame','!ABCDEdevelopment'], ['topquote','+development']) {
+        my ($command, $channel) = @$example;
+        my $calls_before = @calls;
+        @replies = ();
+        $plugin->command_topquote($authority, $invoke->($command, ['2'], $channel));
+        $assert->is(scalar(@calls), $calls_before + 1, "$command reads the ranking on $channel");
+        $assert->is($replies[0], "\x02Hall of fame\x02 $channel — most recalled quotes:",
+            "$command replies with the ranking for $channel");
+    }
+    my $calls_before = @calls;
+    $plugin->command_topquote($authority, $invoke->('topquote', [], 'Tangy'));
+    $assert->is(scalar(@calls), $calls_before, 'topquote skips the service outside a channel');
+    $assert->is($notices[-1], 'Syntax: !topquote [n]  (use it in a channel)',
+        'topquote retains its private syntax notice outside a channel');
 
     $mode = 'empty';
     $plugin->command_topquote(

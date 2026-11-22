@@ -1045,7 +1045,7 @@ sub mbQuoteCount_ctx {
 sub mbTopQuote_ctx {
     my ($self, $sNick, $sChannel, $arg) = @_;
 
-    unless (defined $sChannel && $sChannel =~ /^[#&]/) {
+    unless (isIrcChannelTarget($sChannel)) {
         botNotice($self, $sNick, 'Syntax: !topquote [n]  (use it in a channel)');
         return 1;
     }

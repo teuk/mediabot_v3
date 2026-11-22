@@ -1,3 +1,8 @@
+## MB1420 — Allow quote rankings on all supported IRC channel types
+
+- Make `!topquote` and `!halloffame` accept `!` and `+` channels in the built-in commands and Quotes v3 plugin.
+- Keep the private usage notice for non-channel targets.
+
 ## MB1419 — Pick the newest dated article for paced RSS announcements
 
 - When a paced poll discovers multiple new articles, use their publication timestamps with explicit timezones to select its candidate.
