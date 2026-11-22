@@ -30,9 +30,9 @@ sub offline_runtime {
 sub test_package {
     my (%args) = @_;
     my ($name, $directory, $grants) = @args{qw(name directory grants)};
-    my %allowed_grants = map { $_ => 1 } qw(irc.reply irc.notice events.subscribe);
+    my %allowed_grants = map { $_ => 1 } qw(irc.reply irc.notice irc.channel_message events.subscribe scheduler.jobs);
     for my $grant (@$grants) {
-        die "Fixtures support only irc.reply, irc.notice and events.subscribe grants\n"
+        die "Unsupported fixture grant '$grant'\n"
             unless $allowed_grants{$grant};
     }
     die "Invalid package name\n" unless $name =~ /\A[a-z0-9][a-z0-9-]{0,47}\z/;
@@ -48,20 +48,29 @@ sub test_package {
     $bot->{logger} = bless {}, 'Mediabot::Plugin::WorkshopV3::Log';
     $bot->{metrics} = Mediabot::Metrics->new(enabled => 1);
     $bot->{_user_level_cache} = { %role_level };
+    if (grep { $_ eq 'scheduler.jobs' } @$grants) {
+        # Job timers live on a loop the workshop never drives. Command children
+        # and deferred events keep using the normal offline bot loop.
+        $bot->{scheduler} = Mediabot::Plugin::WorkshopV3::JobScheduler->new(
+            loop => IO::Async::Loop->really_new, logger => $bot->{logger});
+    }
     my $entry = $manager->load_package_v3($name, grants => $grants);
     my $processes = $entry->{metadata}{external_commands}
         ? $manager->v3_runtime->script_processes : undef;
-    my ($count, $events) = (0, 0);
+    my ($count, $events, $jobs) = (0, 0, 0);
     my $ok = eval {
         $manager->enable($name) or die "Could not enable '$name' in the workshop\n";
         for my $step (@$steps) {
             $count++;
-            die "Step $count must declare one command or event and a replies array\n"
-                unless ref($step) eq 'HASH' && (exists($step->{command}) xor exists($step->{event}))
-                    && ref($step->{replies}) eq 'ARRAY';
+            my @kinds = ref($step) eq 'HASH' ? grep { exists $step->{$_} } qw(command event job) : ();
+            die "Step $count must declare one command, event or job and a replies array\n"
+                unless @kinds == 1 && ref($step->{replies}) eq 'ARRAY';
             $bot->{workshop_replies} = [];
             delete $bot->{logger}{error};
-            if (exists $step->{event}) {
+            if ($kinds[0] eq 'job') {
+                _test_job_step($bot, $manager, $entry, $count, $step);
+                $jobs++;
+            } elsif ($kinds[0] eq 'event') {
                 _test_event_step($bot, $manager, $loop, $entry, $count, $step);
                 $events++;
             } else {
@@ -79,7 +88,7 @@ sub test_package {
     die $error unless $ok;
     die($unload_error || "Could not unload '$name' in the workshop\n") unless $unloaded;
     die($@ || "Workshop script cleanup incomplete\n") unless $stopped;
-    return { steps => $count, event_steps => $events };
+    return { steps => $count, event_steps => $events, job_steps => $jobs };
 }
 
 sub _test_command_step {
@@ -207,6 +216,55 @@ sub _step_mode {
     return $mode;
 }
 
+sub _test_job_step {
+    my ($bot, $manager, $entry, $number, $step) = @_;
+    my %fields = map { $_ => 1 } qw(job channels replies);
+    die "Step $number: unknown job step field\n" if grep { !$fields{$_} } keys %$step;
+    my $job = $step->{job};
+    my $name = $entry->{name};
+    my $jobs = $entry->{manifest}{jobs} // {};
+    die "Step $number: job must be declared by '$name'\n"
+        unless defined($job) && !ref($job) && exists($jobs->{$job});
+    my ($mounted) = grep { $_->{name} eq $job } @{ $entry->{mounted_jobs} };
+    die "Step $number: job fixture requires --grant scheduler.jobs\n" unless $mounted;
+    my $channels = $step->{channels};
+    die "Step $number: job channels must be an object\n" unless ref($channels) eq 'HASH';
+
+    $manager->reset_v3_channel_policy($name, $_->{channel}) for $manager->v3_channel_policies($name);
+    my $expected = 0;
+    for my $channel (sort keys %$channels) {
+        my $policy = $channels->{$channel};
+        die "Step $number: expected a policy with mode or config for '$channel'\n"
+            unless is_channel($channel) && ref($policy) eq 'HASH'
+                && !grep { $_ ne 'mode' && $_ ne 'config' } keys %$policy;
+        my $mode = _step_mode($policy, $number);
+        $manager->set_v3_channel_policy($name, $channel, mode => $mode,
+            (exists($policy->{config}) ? (config => $policy->{config}) : ()));
+        $expected++ if $mode ne 'off';
+    }
+    my @configured = $manager->v3_channel_policies($name);
+    die "Step $number: duplicate IRC channel in job policies\n" if @configured != keys %$channels;
+
+    my $scheduler = $bot->{scheduler};
+    my $before = $manager->v3_failure_report($name);
+    my $task = $mounted->{task};
+    my $previous = $scheduler->task_info($task);
+    die "Step $number: job '$job' has no active scheduler registration\n"
+        unless $previous && $scheduler->tick_workshop_job($task, $mounted->{task_id});
+    my $current = $scheduler->task_info($task);
+    die "Step $number: job '$job' did not complete one scheduler tick\n"
+        unless $current && $current->{task_id} == $previous->{task_id}
+            && $current->{ticks} == $previous->{ticks} + 1;
+    if ($current->{callback_exceptions} != $previous->{callback_exceptions}) {
+        my $detail = $bot->{logger}{error} // 'scheduler callback failed';
+        die "Step $number failed: $detail\n";
+    }
+    my $ran = _completed_count($bot, $manager, $name, $number, $before, 'job');
+    die "Step $number: expected $expected execution(s) for job '$job', saw $ran\n"
+        unless $ran == $expected;
+    return;
+}
+
 sub _configure_policy {
     my ($manager, $name, $channel, $mode, $step) = @_;
     $manager->reset_v3_channel_policy($name, $channel);
@@ -273,5 +331,20 @@ sub getUserChannelLevel { return 0 } # No per-channel privileges in the offline 
 package Mediabot::Plugin::WorkshopV3::Log;
 
 sub log { $_[0]{error} = $_[2] if $_[1] == 1; return 1 }
+
+package Mediabot::Plugin::WorkshopV3::JobScheduler;
+
+our @ISA = ('Mediabot::Scheduler');
+
+sub tick_workshop_job {
+    my ($self, $name, $id) = @_;
+    my $task = $self->{_tasks}{$name};
+    return 0 unless $task && $task->{task_id} == $id && $task->{started}
+        && $task->{mode} eq 'periodic' && $task->{timer}->is_running;
+    # Invoke the native tick event so the Scheduler and PluginManager
+    # both apply their normal ownership, accounting and dispatch checks.
+    $task->{timer}->invoke_event('on_tick');
+    return 1;
+}
 
 1;

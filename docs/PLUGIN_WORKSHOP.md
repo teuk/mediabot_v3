@@ -134,6 +134,43 @@ perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
   --directory plugins/examples-v3 --grant events.subscribe --grant irc.reply
 ```
 
+## Tester une tâche planifiée API v3
+
+Une étape `job` déclenche une échéance de la tâche périodique déclarée
+dans le manifeste. Accorde `scheduler.jobs` pour enregistrer la tâche et
+`irc.channel_message` si elle publie un message. L’atelier pilote l’échéance
+hors ligne, sans attendre l’intervalle réel. Les étapes de commande et
+d’événement peuvent précéder ou suivre l’échéance dans la même instance.
+
+```json
+{
+  "steps": [
+    {
+      "job": "pulse",
+      "channels": {
+        "#atelier": {"mode": "on", "config": {"greeting": "Salut"}},
+        "#observation": {"mode": "observe"},
+        "#eteint": {"mode": "off"}
+      },
+      "replies": [["PRIVMSG", "#atelier", "Salut, passage 1"]]
+    }
+  ]
+}
+```
+
+`channels` remplace les politiques de canal pour cette étape. Le mode par
+défaut vaut `on`. Un objet vide vérifie une échéance sans canal actif. En
+`observe`, la tâche s’exécute sans publier de message. En `off`, le canal
+ne reçoit aucune exécution de cette tâche. L’atelier vérifie le passage par
+l’ordonnanceur, le nombre d’exécutions et les messages capturés dans l’ordre.
+
+```bash
+perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
+  --directory plugins/examples-v3 \
+  --fixture plugins/examples-v3/channel-observer-v3/jobs.test.json \
+  --grant events.subscribe --grant irc.reply --grant scheduler.jobs --grant irc.channel_message
+```
+
 ## Écrire et tester un script API v2 en Perl, Python ou Tcl
 
 Depuis le dépôt, choisis un langage et un nom de commande libre. Ce parcours

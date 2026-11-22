@@ -1,3 +1,8 @@
+## MB1428 — Test periodic API v3 jobs offline
+
+- Run one native scheduler tick per workshop job step, with explicit channel policies and captured output.
+- Check inactive channels, observe mode, grants, job errors and isolation from real timers in a mixed fixture.
+
 ## MB1427 — Test channel events in offline API v3 fixtures
 
 - Run versioned channel events through the native bus and deferred queue, alongside command steps in the same fixture.

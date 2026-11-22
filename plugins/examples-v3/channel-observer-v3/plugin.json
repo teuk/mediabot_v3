@@ -1,15 +1,15 @@
 {
   "api": 3,
   "name": "channel-observer-v3",
-  "version": "0.1.0",
-  "description": "Offline workshop example for channel joins and public words.",
+  "version": "0.2.0",
+  "description": "Offline workshop example for channel events and periodic jobs.",
   "runtime": {
     "kind": "perl",
     "entrypoint": "lib/Observer.pm",
     "class": "Mediabot::Plugin::V3::WorkshopObserver"
   },
   "activation": {"default": "off"},
-  "capabilities": ["events.subscribe", "irc.reply"],
+  "capabilities": ["events.subscribe", "irc.reply", "irc.channel_message", "scheduler.jobs"],
   "commands": {
     "last_workshop_join": {
       "source": "public",
@@ -22,6 +22,9 @@
     {"name": "irc.channel.join", "version": 1, "handler": "event_join"},
     {"name": "irc.channel.word", "version": 1, "handler": "event_word"}
   ],
+  "jobs": {
+    "pulse": {"handler": "job_pulse", "interval_seconds": 300, "first_delay_seconds": 0}
+  },
   "config_schema": {
     "greeting": {"type": "string", "default": "Bonjour", "min_length": 1, "max_length": 80}
   }

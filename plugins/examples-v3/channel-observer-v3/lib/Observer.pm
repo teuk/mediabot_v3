@@ -30,4 +30,10 @@ sub event_word {
     return $context->reply($invocation, 'Mot observé : ' . $event->get('word'));
 }
 
+sub job_pulse {
+    my ($self, $context, $job) = @_;
+    my $greeting = $job->config_value('greeting');
+    return $context->channel_message($job, "$greeting, passage " . $job->sequence);
+}
+
 1;

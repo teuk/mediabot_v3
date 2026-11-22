@@ -1963,4 +1963,15 @@ configuration and deferred queue. The workshop checks completion and failures
 even when the event should emit nothing. A native Perl example records joins
 per channel, then checks the recorded state and exercises scoped word replies
 under on, observe and off. This increment covers channel-scoped events
-declared by native packages. Target-host acceptance is pending.
+declared by native packages. Commit `734992815f9a788af10388fefb02ce9c49895dce`
+was pushed to `origin/master`; the full suite and all 13 example steps
+passed on teuk.org.
+
+## MB1428 — Verify periodic API v3 jobs in offline fixtures
+
+Job steps dispatch the real scheduler tick of a declared periodic job.
+An isolated timer loop prevents automatic ticks during other fixture steps.
+Each step replaces the package's in-memory channel policies and checks dispatch
+counts, hook failures and ordered output. A mixed fixture extends the native
+channel observer example with typed per-channel job settings and the on,
+observe and off modes. Target-host acceptance is pending.

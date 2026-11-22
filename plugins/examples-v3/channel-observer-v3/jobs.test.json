@@ -1,0 +1,33 @@
+{
+  "steps": [
+    {"event": "irc.channel.join", "data": {"channel": "#ancien", "nick": "Élodie"}, "replies": []},
+    {
+      "command": "last_workshop_join",
+      "data": {"channel": "#ancien"},
+      "replies": [["PRIVMSG", "#ancien", "Bonjour, Élodie [on]"]]
+    },
+    {
+      "job": "pulse",
+      "channels": {
+        "#alpha": {"mode": "on", "config": {"greeting": "Salut"}},
+        "#eteint": {"mode": "off"},
+        "#observe": {"mode": "observe"},
+        "#zeta": {"mode": "on"}
+      },
+      "replies": [["PRIVMSG", "#alpha", "Salut, passage 1"], ["PRIVMSG", "#zeta", "Bonjour, passage 1"]]
+    },
+    {"event": "irc.channel.join", "mode": "observe", "data": {"channel": "#second", "nick": "Sam"}, "replies": []},
+    {"job": "pulse", "channels": {}, "replies": []},
+    {
+      "job": "pulse",
+      "channels": {"#observe": {"config": {"greeting": "Coucou"}}},
+      "replies": [["PRIVMSG", "#observe", "Coucou, passage 3"]]
+    },
+    {"job": "pulse", "channels": {"#observe": {"mode": "off"}}, "replies": []},
+    {
+      "command": "last_workshop_join",
+      "data": {"channel": "#second"},
+      "replies": [["PRIVMSG", "#second", "Bonjour, Sam [observe]"]]
+    }
+  ]
+}

@@ -77,6 +77,7 @@ snap_mediabot*.sh
 # The checked-in API v3 workshop event example.
 !plugins/examples-v3/channel-observer-v3/plugin.json
 !plugins/examples-v3/channel-observer-v3/workshop.test.json
+!plugins/examples-v3/channel-observer-v3/jobs.test.json
 
 # MB696 - Node dependency hygiene
 node_modules/

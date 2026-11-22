@@ -348,6 +348,37 @@ write_fixture_1322($custom_fixture, [
 ok(!$tested && $test_report =~ /Step 1 failed:.*API v3 event.*capability 'irc\.reply' was not granted/,
     'a deferred handler failure is reported even for an observe step expecting silence');
 
+my @job_grants = ('--grant', 'scheduler.jobs', '--grant', 'irc.channel_message');
+($tested, $test_report) = workshop_cli_1322(@observer,
+    '--fixture', 'plugins/examples-v3/channel-observer-v3/jobs.test.json',
+    '--grant', 'events.subscribe', '--grant', 'irc.reply', @job_grants);
+ok($tested && $test_report =~ /passed 8 offline API v3 command\/event\/job step/,
+    'one fixture exercises native job ticks, cross-channel policies and suppression of real timers');
+
+write_fixture_1322($custom_fixture, [{job => 'pulse', channels => {}, replies => []}]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture);
+ok(!$tested && $test_report =~ /job fixture requires --grant scheduler\.jobs/,
+    'a missing registration cannot pass as a scheduled job with no eligible channels');
+
+write_fixture_1322($custom_fixture, [{job => 'undeclared', channels => {}, replies => []}]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, @job_grants);
+ok(!$tested && $test_report =~ /job must be declared by 'channel-observer-v3'/,
+    'workshop cannot tick an undeclared scheduler task');
+
+write_fixture_1322($custom_fixture, [
+    {job => 'pulse', channels => {'#a[1]' => {}, '#a{1}' => {}}, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, @job_grants);
+ok(!$tested && $test_report =~ /duplicate IRC channel in job policies/,
+    'RFC1459 equivalent channels may not specify two policies for one tick');
+
+write_fixture_1322($custom_fixture, [
+    {job => 'pulse', channels => {'#workshop' => {mode => 'observe'}}, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'scheduler.jobs');
+ok(!$tested && $test_report =~ /Step 1 failed:.*API v3 job.*capability 'irc\.channel_message' was not granted/,
+    'a job failure remains visible in observe even when replies are empty');
+
 $manifest->{commands}{first_greeting}{handler} = 'command_missing';
 open my $edited_manifest, '>:raw', "$out->{directory}/plugin.json" or die $!;
 print {$edited_manifest} encode_json($manifest) or die $!;
