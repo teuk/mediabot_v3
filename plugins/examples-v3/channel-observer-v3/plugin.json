@@ -1,0 +1,28 @@
+{
+  "api": 3,
+  "name": "channel-observer-v3",
+  "version": "0.1.0",
+  "description": "Offline workshop example for channel joins and public words.",
+  "runtime": {
+    "kind": "perl",
+    "entrypoint": "lib/Observer.pm",
+    "class": "Mediabot::Plugin::V3::WorkshopObserver"
+  },
+  "activation": {"default": "off"},
+  "capabilities": ["events.subscribe", "irc.reply"],
+  "commands": {
+    "last_workshop_join": {
+      "source": "public",
+      "level": 0,
+      "help": "Show the last observed join in this channel.",
+      "handler": "command_last_join"
+    }
+  },
+  "events": [
+    {"name": "irc.channel.join", "version": 1, "handler": "event_join"},
+    {"name": "irc.channel.word", "version": 1, "handler": "event_word"}
+  ],
+  "config_schema": {
+    "greeting": {"type": "string", "default": "Bonjour", "min_length": 1, "max_length": 80}
+  }
+}

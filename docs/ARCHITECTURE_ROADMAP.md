@@ -1952,4 +1952,15 @@ Each scenario can supply a synthetic caller and require an explicit denial.
 The in-memory denial metric and invocation ledger distinguish denied access
 from both silent observe execution and an inactive channel policy. Fixtures
 cover alias dispatch and reset the synthetic caller between steps.
-Target-host acceptance is pending.
+Commit `659b2d82a07235e9f22e856a1c98c1e07f4d9a9e` was pushed to
+`origin/master`. The seven access scenarios passed on teuk.org.
+
+## MB1427 — Verify channel events in offline API v3 fixtures
+
+One fixture can alternate public commands and versioned channel events in
+the same plugin instance. An event uses the normal bus subscription, scoped
+configuration and deferred queue. The workshop checks completion and failures
+even when the event should emit nothing. A native Perl example records joins
+per channel, then checks the recorded state and exercises scoped word replies
+under on, observe and off. This increment covers channel-scoped events
+declared by native packages. Target-host acceptance is pending.

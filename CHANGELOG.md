@@ -1,3 +1,8 @@
+## MB1427 — Test channel events in offline API v3 fixtures
+
+- Run versioned channel events through the native bus and deferred queue, alongside command steps in the same fixture.
+- Check subscriptions, activation and handler failures, and provide a Perl example for joins and public words.
+
 ## MB1426 — Assert access decisions in offline API v3 command fixtures
 
 - Test public commands and aliases with synthetic guest, signed-out and identified callers through the registry's regular authorization gate.

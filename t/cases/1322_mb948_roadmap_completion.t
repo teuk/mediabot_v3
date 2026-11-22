@@ -307,6 +307,47 @@ write_fixture_1322($custom_fixture, [
 ok(!$tested && $test_report =~ /caller must have a stock role and a JSON authenticated boolean/,
     'a string cannot stand in for a boolean authentication state');
 
+my @observer = ('--test', 'channel-observer-v3', '--directory', 'plugins/examples-v3');
+($tested, $test_report) = workshop_cli_1322(@observer, '--grant', 'events.subscribe', '--grant', 'irc.reply');
+ok($tested && $test_report =~ /passed 13 offline API v3 command\/event step/,
+    'one package observes joins, reports its state per channel and replies only to active word events');
+
+my @event_fixture = (@observer, '--fixture', $custom_fixture);
+write_fixture_1322($custom_fixture, [
+    {event => 'irc.channel.join', mode => 'off', replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture);
+ok(!$tested && $test_report =~ /requires --grant events\.subscribe/,
+    'no subscription cannot be mistaken for an off event that was ignored');
+
+write_fixture_1322($custom_fixture, [
+    {event => 'irc.channel.join', version => 2, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'events.subscribe');
+ok(!$tested && $test_report =~ /version 2 is not declared/,
+    'an unsupported version cannot enter the event bus');
+
+write_fixture_1322($custom_fixture, [
+    {event => 'irc.channel.join', data => {is_self => 'false'}, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'events.subscribe');
+ok(!$tested && $test_report =~ /invalid event data field 'is_self'/,
+    'ambiguous join booleans fail before emission');
+
+write_fixture_1322($custom_fixture, [
+    {event => 'irc.channel.word', data => {word => 'two words'}, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'events.subscribe');
+ok(!$tested && $test_report =~ /did not reach its bus listener/,
+    'the actual word producer rejects non-word input');
+
+write_fixture_1322($custom_fixture, [
+    {event => 'irc.channel.word', mode => 'observe', data => {word => 'salut'}, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'events.subscribe');
+ok(!$tested && $test_report =~ /Step 1 failed:.*API v3 event.*capability 'irc\.reply' was not granted/,
+    'a deferred handler failure is reported even for an observe step expecting silence');
+
 $manifest->{commands}{first_greeting}{handler} = 'command_missing';
 open my $edited_manifest, '>:raw', "$out->{directory}/plugin.json" or die $!;
 print {$edited_manifest} encode_json($manifest) or die $!;

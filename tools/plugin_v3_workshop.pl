@@ -16,7 +16,7 @@ Usage:
   perl tools/plugin_v3_workshop.pl --test-script RELATIVE_PATH [--fixture FILE] [--directory DIR]
 
 --validate mounts a trusted API v3 package in a disposable, disabled runtime.
---test runs trusted local API v3 commands against workshop.test.json or --fixture.
+--test runs trusted local API v3 commands and channel events against workshop.test.json or --fixture.
 --directory is the package root (plugins for API v3, plugins/scripts for API v2 scripts).
 --test-script runs trusted local code against the fixture beside the script by default.
 USAGE
@@ -82,9 +82,10 @@ if (defined $package) {
 
 if (defined $test_package) {
     require Mediabot::Plugin::WorkshopV3;
-    my $steps = Mediabot::Plugin::WorkshopV3::test_package(
+    my $report = Mediabot::Plugin::WorkshopV3::test_package(
         name => $test_package, directory => $directory, grants => \@grants, fixture => $fixture);
-    print "[OK] $test_package passed $steps offline API v3 command step(s).\n";
+    my $kind = $report->{event_steps} ? 'command/event' : 'command';
+    print "[OK] $test_package passed $report->{steps} offline API v3 $kind step(s).\n";
     exit 0;
 }
 

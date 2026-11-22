@@ -95,6 +95,45 @@ repart avec sa propre identité simulée. Le registre contrôle la permission et
 l’atelier vérifie le refus effectif, y compris en mode `observe`.
 Ces scénarios couvrent les rôles globaux avec des utilisateurs simulés.
 
+## Tester les événements API v3 d’un canal
+
+`--test` accepte une étape `event` entre deux étapes `command`. Le nom et
+la version de l’événement doivent figurer dans le manifeste du paquet.
+Accorde `--grant events.subscribe` pour monter l’abonnement. Le même
+paquet reçoit les événements et les commandes, ce qui permet de vérifier
+l’état observé après un événement.
+
+```json
+{
+  "steps": [
+    {
+      "event": "irc.channel.join",
+      "version": 1,
+      "data": {"nick": "Élodie", "is_self": false},
+      "replies": []
+    },
+    {
+      "command": "last_workshop_join",
+      "replies": [["PRIVMSG", "#workshop", "Bonjour, Élodie [on]"]]
+    }
+  ]
+}
+```
+
+La version par défaut vaut `1`, le canal `#workshop` et le nick `Pablo`.
+Les champs de `data` suivent le [catalogue des événements](../plugins/API_V3_EVENTS.json).
+L’atelier vérifie le passage par le bus, attend la fin du traitement, et
+compare les messages capturés. En `observe`, le gestionnaire s’exécute,
+avec les sorties filtrées par sa politique. En `off`, l’événement ne doit
+pas entrer dans la file. Une erreur de gestionnaire échoue même avec
+`"replies": []`. Cette recette couvre les événements rattachés à un canal
+dans les paquets Perl natifs.
+
+```bash
+perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
+  --directory plugins/examples-v3 --grant events.subscribe --grant irc.reply
+```
+
 ## Écrire et tester un script API v2 en Perl, Python ou Tcl
 
 Depuis le dépôt, choisis un langage et un nom de commande libre. Ce parcours

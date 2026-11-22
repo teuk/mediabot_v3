@@ -1,0 +1,27 @@
+{
+  "steps": [
+    {"command": "last_workshop_join", "replies": [["PRIVMSG", "#workshop", "Aucune arrivée observée."]]},
+    {
+      "event": "irc.channel.join",
+      "version": 1,
+      "config": {"greeting": "Salut"},
+      "data": {"nick": "Élodie", "is_self": false},
+      "replies": []
+    },
+    {"command": "last_workshop_join", "replies": [["PRIVMSG", "#workshop", "Salut, Élodie [on]"]]},
+    {"event": "irc.channel.join", "data": {"nick": "Mediabot", "is_self": true}, "replies": []},
+    {"command": "last_workshop_join", "replies": [["PRIVMSG", "#workshop", "Salut, Élodie [on]"]]},
+    {"event": "irc.channel.join", "mode": "observe", "data": {"nick": "Sam"}, "replies": []},
+    {"command": "last_workshop_join", "replies": [["PRIVMSG", "#workshop", "Bonjour, Sam [observe]"]]},
+    {"event": "irc.channel.join", "mode": "off", "data": {"nick": "Noa"}, "replies": []},
+    {"command": "last_workshop_join", "replies": [["PRIVMSG", "#workshop", "Bonjour, Sam [observe]"]]},
+    {
+      "command": "last_workshop_join",
+      "data": {"channel": "#ailleurs"},
+      "replies": [["PRIVMSG", "#ailleurs", "Aucune arrivée observée."]]
+    },
+    {"event": "irc.channel.word", "data": {"word": "salut"}, "replies": [["PRIVMSG", "#workshop", "Mot observé : salut"]]},
+    {"event": "irc.channel.word", "mode": "observe", "data": {"word": "salut"}, "replies": []},
+    {"event": "irc.channel.word", "mode": "off", "data": {"word": "salut"}, "replies": []}
+  ]
+}
