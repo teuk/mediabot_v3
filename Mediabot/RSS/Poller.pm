@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use utf8;
 
+use Mediabot::RSS qw(rss_publication_epoch);
 use Mediabot::RSS::Fetcher;
 
 sub new {
@@ -96,6 +97,17 @@ sub poll_feed {
 
     my $items = $res->{feed}{items};
     $items = [] unless ref($items) eq 'ARRAY';
+    if ($paced && !$baseline) {
+        # The first new linked entry gets the slot. Rank dated entries first
+        # without changing feed order among ties or undated entries.
+        my @published = map {
+            [$_, ref($_) eq 'HASH' ? rss_publication_epoch($_->{published}) : undef]
+        } @$items;
+        $items = [map { $_->[0] } sort {
+            defined($b->[1]) <=> defined($a->[1])
+                || ($b->[1] // 0) <=> ($a->[1] // 0)
+        } @published];
+    }
     my $new = 0;
     my $stored = 0;
 

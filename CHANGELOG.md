@@ -1,3 +1,8 @@
+## MB1419 — Pick the newest dated article for paced RSS announcements
+
+- When a paced poll discovers multiple new articles, use their publication timestamps with explicit timezones to select its candidate.
+- Preserve feed order for equal or unusable dates. Keep the first poll silent and preserve the usual order on unpaced channels.
+
 ## MB1418 — Keep linkless RSS entries out of announcement slots
 
 - Store entries without article URLs for deduplication while reserving announcement slots for linked articles.

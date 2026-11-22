@@ -55,6 +55,31 @@ return sub {
     my $response={ok=>1,status=>200,feed=>{items=>[item809(1),item809(2),item809(3)]}};
     my $poller=Mediabot::RSS::Poller->new(repo=>$repo,pacing=>$p,fetcher=>sub{$response});
     my $feed={id_rss_feed=>1,channel=>'#35+ans',url=>'https://example.org/rss',announce_limit=>10};
+    my $older = { %{item809(20)}, published => 'Sun, 22 Nov 2026 08:30:00 GMT' };
+    my $newer = { %{item809(21)}, published => '2026-11-22T11:00:00+01:00' };
+    my $tied = { %{item809(22)}, published => '2026-11-22T10:00:00Z' };
+    my $undated = { %{item809(23)}, published => '2026-11-22T23:00:00' };
+    my $known = { %{item809(24)}, published => '2026-11-22T12:00:00Z' };
+    my $malformed = { %{item809(25)}, published => 'not a date GMT' };
+    my $feed_id = 100;
+    for my $case (
+        ['#35+ans', [$older, $newer], 21, 'paced, older entry first'],
+        ['#35+ans', [$older, $known, $newer], 21, 'paced, most recent entry already known'],
+        ['#35+ans', [$tied, $newer], 22, 'paced, equal date in another timezone'],
+        ['#35+ans', [$undated, $newer], 21, 'paced, unzoned entry first'],
+        ['#35+ans', [$undated, $malformed], 23, 'paced, no usable dates'],
+        ['#plain', [$older, $newer], 20, 'unpaced, feed order'],
+    ) {
+        my ($channel, $items, $expected, $label) = @$case;
+        my $dated_feed = {%$feed, id_rss_feed => ++$feed_id, channel => $channel,
+            last_success_at => 'existing', announce_limit => 1};
+        $repo->insert_item($feed_id, $known, announced => 1);
+        my $dated_poller = Mediabot::RSS::Poller->new(repo => $repo, pacing => $p,
+            fetcher => sub { {ok => 1, feed => {items => $items}} });
+        my $result = $dated_poller->poll_feed($dated_feed);
+        $a->is(join(', ', map { $_->{title} } @{$result->{pending} // []}),
+            "Article $expected", "$label keeps exactly the expected candidate");
+    }
     my $res=$poller->poll_feed($feed);
     $a->ok($res->{ok} && $res->{baseline},'mb809: paced first poll is silent baseline');
     $a->is(scalar @{$res->{pending}},0,'mb809: historical articles do not appear at activation');

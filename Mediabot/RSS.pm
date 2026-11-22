@@ -27,6 +27,7 @@ our @EXPORT_OK = qw(
     is_public_ip_literal
     parse_feed_document
     rss_item_key
+    rss_publication_epoch
     latest_feed_item
     format_rss_announcement
     format_rss_feed_list
@@ -382,6 +383,14 @@ sub parse_feed_document {
     };
 }
 
+sub rss_publication_epoch {
+    my ($date) = @_;
+    return undef unless defined($date) && !ref($date) && length($date) <= 160;
+    # No local timezone guess: an unzoned date falls back to feed order.
+    return undef unless $date =~ /(?:Z|[+-]\d{2}:?\d{2}|GMT|UTC)\s*\z/i;
+    return eval { str2time($date) };
+}
+
 # Historical rss-synd.tcl display:
 # ACTION - news : [Source] Title - URL
 # source=13, title=6, separator=13+bold, URL=14.
@@ -398,11 +407,7 @@ sub latest_feed_item {
             && length(_clean_scalar($item->{title}, 350));
         next unless defined($item->{url}) && !ref($item->{url}) && length(_article_url($item->{url}));
         $first ||= $item;
-        my $date = $item->{published};
-        next unless defined($date) && !ref($date) && length($date) <= 160;
-        # No local timezone guess: an unzoned date falls back to feed order.
-        next unless $date =~ /(?:Z|[+-]\d{2}:?\d{2}|GMT|UTC)\s*\z/i;
-        my $epoch = eval { str2time($date) };
+        my $epoch = rss_publication_epoch($item->{published});
         next unless defined $epoch;
         if (!defined($latest_epoch) || $epoch > $latest_epoch) {
             ($latest, $latest_epoch) = ($item, $epoch);
