@@ -1,10 +1,65 @@
 # Du premier plugin à son retrait
 
-Cet atelier ajoute un paquet minimal et le fait passer par le véritable
-PluginManager API v3. Il ne modifie aucun des paquets déjà installés ni leur
-ledger. Le générateur ne charge rien dans un bot.
+L’atelier propose deux parcours. Un module Perl natif utilise le paquet API v3
+et `PluginContext`. Un script externe en Perl, Python ou Tcl utilise un manifeste
+adjacent API v2 et le protocole `mediabot-script-v1` sur stdin et stdout.
 
-## Vérifier sans serveur IRC ou base
+## Écrire et tester un script Perl, Python ou Tcl
+
+Depuis le dépôt, choisis un langage et un nom de commande libre. Ce parcours
+utilise `perl` et `JSON::PP`, `python3` et sa bibliothèque standard, ou `tclsh`
+avec les modules `json` et `json::write` de Tcllib.
+
+```bash
+perl tools/plugin_v3_workshop.pl --create-script welcome-python \
+  --language python --command welcome_python
+perl tools/plugin_v3_workshop.pl --test-script welcome-python/welcome-python.py
+```
+
+Le générateur crée le script, son manifeste `<script>.manifest.json`, son test
+`<script>.test.json` et un README dans `plugins/scripts/welcome-python/`. Pour
+une version Perl, utilise `--language perl` et l’extension `.pl`. Pour Tcl,
+utilise `--language tcl` et `.tcl`. `--directory DIR` choisit un autre répertoire
+racine pour la génération et le test.
+
+Modifie la logique du script, puis ajuste les étapes du test. `--fixture FILE`
+sélectionne un autre fichier de test. Chaque étape exécute une commande publique
+de niveau `0` ou émet un événement déclaré dans le manifeste. L’atelier compare
+les messages IRC capturés, dans l’ordre, par triplet `[verbe, cible, texte]`.
+
+```json
+{
+  "steps": [
+    {
+      "command": "welcome_python",
+      "data": {"args": ["Élodie"]},
+      "replies": [["PRIVMSG", "#workshop", "Bonjour, Élodie!"]]
+    }
+  ]
+}
+```
+
+Le nick de test est `Pablo` et le canal `#workshop` par défaut. Pour un événement,
+remplace `command` par `event` et ajoute les données utiles à `data`. Une étape
+qui doit rester silencieuse déclare `"replies": []`. Toutes les étapes d’un test
+partagent un stockage temporaire. Tu peux donc faire écrire une valeur par un
+événement et vérifier qu’une commande la relit. Chaque lancement repart avec
+un stockage vide.
+
+Le test exécute le script sous le compte qui lance l’atelier. Il utilise un
+registre, un bus d’événements et un transport IRC de test avec le moteur d’actions
+du bot. Réserve ce parcours au code local de confiance.
+
+Après validation, un Owner peut charger le script sur l’instance de développement
+avec `.plugins loadscript welcome-python/welcome-python.py` puis essayer
+`!welcome_python Élodie` dans un canal de test. Cette commande charge le script
+en actif. `.plugins unload welcome-python` le retire. Pour ajouter des événements
+ou utiliser l’état persistant, consulte le [guide des scripts](../plugins/scripts/README.md)
+et son [cookbook](../plugins/scripts/COOKBOOK.md).
+
+## Écrire un module Perl natif
+
+### Vérifier sans serveur IRC ou base
 
 Depuis le dépôt, comme mediabot :
 
@@ -22,7 +77,7 @@ stop, le démontage du registre et le refus d'un ancien callback après unload.
 Les réponses sont capturées ; aucune connexion IRC, DB ou service n'est créée.
 Ce résultat qualifie la mécanique locale, pas une activation en production.
 
-## Créer son paquet
+### Créer son paquet
 
 Sur le dépôt de développement, choisir un nom et une commande libres :
 
@@ -45,7 +100,7 @@ lib/Greeting.pm. La seule capacité est irc.reply ; la configuration typée
 stockage ou SQL n'est demandé. Remplacer le texte métier dans cette petite
 surface, puis ajouter un test de comportement avant d'étendre les capacités.
 
-## Valider le paquet après modification
+### Valider le paquet après modification
 
 Depuis le dépôt, avec les dépendances habituelles de Mediabot, indique le nom du
 paquet et son répertoire parent.
@@ -69,7 +124,7 @@ registre, un bus d’événements et un planificateur en mémoire. Aucun service
 n’est connecté par l’atelier et aucune commande de plugin n’est invoquée. Garde
 les tests de comportement du paquet pour vérifier ses réponses et ses traitements.
 
-## Première activation supervisée
+### Première activation supervisée
 
 Owner dans la partyline de développement :
 
@@ -87,7 +142,7 @@ salutation doit apparaître. Adapter le préfixe public réel de l'instance.
 Un autre salon sans politique reste off. Une commande déjà réservée provoque
 un refus du chargement ; le générateur n'écrase aucun handler.
 
-## Retrait et erreurs
+### Retrait et erreurs
 
 ```text
 .plugins policy welcome-v3 #test off

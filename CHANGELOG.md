@@ -1,3 +1,8 @@
+## MB1423 — Create and test Perl, Python and Tcl script plugins
+
+- Generate a script, API v2 sidecar and editable test fixture from the plugin workshop.
+- Run fixtures through the native registry, event bus and action runner with captured IRC output and disposable plugin storage.
+
 ## MB1422 — Validate author-edited API v3 packages offline
 
 - Add an offline workshop command that loads an edited package disabled through the native runtime and reports mounted resources under explicit test grants.

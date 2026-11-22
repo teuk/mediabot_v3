@@ -11,18 +11,25 @@ Usage:
   perl tools/plugin_v3_workshop.pl --check
   perl tools/plugin_v3_workshop.pl --create NAME [--command NAME] [--directory DIR]
   perl tools/plugin_v3_workshop.pl --validate NAME [--grant CAPABILITY ...] [--directory DIR]
+  perl tools/plugin_v3_workshop.pl --create-script NAME [--language perl|python|tcl] [--command NAME] [--directory DIR]
+  perl tools/plugin_v3_workshop.pl --test-script RELATIVE_PATH [--fixture FILE] [--directory DIR]
 
 --validate loads trusted local Perl code in a disposable, disabled runtime.
---directory is the parent of the package (default: plugins).
+--directory is the package root (plugins for native modules, plugins/scripts for scripts).
+--test-script runs trusted local code against the fixture beside the script by default.
 USAGE
 
 my ($check, $name, $package, $command, $help) = (0);
-my $directory = 'plugins';
+my ($directory, $script_name, $test_script, $language, $fixture);
 my @grants;
 GetOptions(
     'check'       => \$check,
     'create=s'    => \$name,
     'validate=s'  => \$package,
+    'create-script=s' => \$script_name,
+    'test-script=s'   => \$test_script,
+    'language=s'  => \$language,
+    'fixture=s'   => \$fixture,
     'command=s'   => \$command,
     'grant=s@'    => \@grants,
     'directory=s' => \$directory,
@@ -32,9 +39,30 @@ if ($help) {
     print $usage;
     exit 0;
 }
-my $mode_count = $check + defined($name) + defined($package);
+my $mode_count = $check + defined($name) + defined($package)
+    + defined($script_name) + defined($test_script);
 die $usage if @ARGV || $mode_count != 1
-    || (defined($command) && !defined($name)) || (@grants && !defined($package));
+    || (defined($command) && !defined($name) && !defined($script_name))
+    || (@grants && !defined($package)) || (defined($language) && !defined($script_name))
+    || (defined($fixture) && !defined($test_script));
+
+if (defined($script_name) || defined($test_script)) {
+    require Mediabot::Plugin::ScriptWorkshop;
+    $directory //= 'plugins/scripts';
+    if (defined $script_name) {
+        my $path = Mediabot::Plugin::ScriptWorkshop::create(
+            directory => $directory, name => $script_name, command => $command,
+            language => $language);
+        print "[OK] Created $path with its manifest and test fixture.\n";
+    } else {
+        my $steps = Mediabot::Plugin::ScriptWorkshop::test_script(
+            directory => $directory, script => $test_script, fixture => $fixture);
+        print "[OK] $test_script passed $steps offline test step(s).\n";
+    }
+    exit 0;
+}
+
+$directory //= 'plugins';
 
 if (defined $name) {
     my $r=Mediabot::Plugin::ScaffoldV3::create(directory=>$directory,name=>$name,command=>$command);

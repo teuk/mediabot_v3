@@ -14,6 +14,27 @@ use strict;
 use warnings;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 use JSON::PP ();
+use File::Temp qw(tempdir);
+
+sub workshop_775 {
+    my (@args) = @_;
+    my $pid = open my $child, '-|';
+    die "cannot fork script workshop: $!" unless defined $pid;
+    if (!$pid) {
+        open STDERR, '>&STDOUT' or die $!;
+        exec $^X, 'tools/plugin_v3_workshop.pl', @args or die $!;
+    }
+    my $output = do { local $/; <$child> };
+    my $status = close $child;
+    return ($status, $output // '');
+}
+
+sub write_json_775 {
+    my ($path, $document) = @_;
+    open my $file, '>:raw', $path or die $!;
+    print {$file} JSON::PP->new->ascii->encode($document) or die $!;
+    close $file or die $!;
+}
 
 {
     package Bot775;
@@ -118,4 +139,70 @@ return sub {
         'mb597-775: gates intrusives documentees fermees');
     $assert->like($cb, qr/examples-v2\/fortune\.pl.*examples-v2\/coin\.py|fortune\.pl.*coin\.py/s,
         'mb592-775: les exemples sont references');
+
+    my $root = tempdir(CLEANUP => 1);
+    my $tcl_json;
+    if (open my $tcl, '|-', 'tclsh') {
+        print {$tcl} "if {[catch {package require json; package require json::write}]} {exit 1}\nexit 0\n";
+        $tcl_json = close $tcl;
+    }
+    for my $language (['perl', 'pl'], ['python', 'py'], ['tcl', 'tcl']) {
+        my ($lang, $extension) = @$language;
+        my $name = "workshop-$lang";
+        my $path = "$name/$name.$extension";
+        my ($created, $generation) = workshop_775('--create-script', $name,
+            '--language', $lang, '--directory', $root);
+        $assert->ok($created && -f "$root/$path.manifest.json" && -f "$root/$path.test.json",
+            "workshop generates the $lang script, sidecar and fixture");
+        next unless $created;
+        if ($lang eq 'tcl' && !$tcl_json) {
+            print "Tcl scaffold execution skipped (optional Tcllib JSON packages unavailable)\n";
+            next;
+        }
+        my ($tested, $result) = workshop_775('--test-script', $path, '--directory', $root);
+        $assert->ok($tested && $result =~ /passed 2 offline test step/,
+            "generated $lang plugin returns the exact replies through its real interpreter and transport");
+    }
+
+    my $script = 'workshop-perl/workshop-perl.pl';
+    write_json_775("$root/mismatch.json", { steps => [{ command => 'workshop_perl', replies => [] }] });
+    my ($ok, $result) = workshop_775('--test-script', $script, '--directory', $root,
+        '--fixture', "$root/mismatch.json");
+    $assert->ok(!$ok && $result =~ /Step 1 reply mismatch.*Bonjour, Pablo!/s,
+        'fixture mismatches fail and show the captured reply');
+
+    my $manifest = {
+        api => 2, name => 'workshop-perl', version => '0.1.0',
+        commands => { workshop_perl => { help => 'Read the last join.', level => 0 } },
+        events => ['channel_join_observed'],
+    };
+    write_json_775("$root/$script.manifest.json", $manifest);
+    open my $source, '>:raw', "$root/$script" or die $!;
+    print {$source} <<'SCRIPT';
+use JSON::PP qw(decode_json encode_json);
+my $request = decode_json(do { local $/; <STDIN> });
+my $data = $request->{data};
+my $action = $request->{event} eq 'channel_join_observed'
+    ? { type => 'store', data => { visitor => $data->{nick} } }
+    : { type => 'reply', text => 'Last visitor: ' . ($data->{storage}{visitor} // 'none') };
+print encode_json({ protocol => 'mediabot-script-v1', ok => 1, actions => [$action] });
+SCRIPT
+    close $source or die $!;
+    my $fixture = { steps => [
+        { command => 'workshop_perl', replies => [['PRIVMSG', '#workshop', 'Last visitor: none']] },
+        { event => 'channel_join_observed', data => { nick => 'Alice' }, replies => [] },
+        { command => 'workshop_perl', replies => [['PRIVMSG', '#workshop', 'Last visitor: Alice']] },
+    ] };
+    write_json_775("$root/$script.test.json", $fixture);
+    for (1 .. 2) {
+        ($ok, $result) = workshop_775('--test-script', $script, '--directory', $root);
+        $assert->ok($ok && $result =~ /passed 3 offline test step/,
+            'an event stores data for the next command and a new invocation starts with empty state');
+    }
+
+    $manifest->{commands}{choose} = delete $manifest->{commands}{workshop_perl};
+    write_json_775("$root/$script.manifest.json", $manifest);
+    ($ok, $result) = workshop_775('--test-script', $script, '--directory', $root);
+    $assert->ok(!$ok && $result =~ /command 'choose' collides/,
+        'the actual built-in registry detects command name conflicts');
 };

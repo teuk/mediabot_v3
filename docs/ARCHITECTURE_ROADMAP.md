@@ -1902,3 +1902,18 @@ generator's command-length bound and the runtime's. See the
 [workshop](PLUGIN_WORKSHOP.md) for the create, edit, validate and activation path.
 The existing witness check remains a separate way to exercise activation and
 output behavior. Host acceptance is pending.
+
+## MB1423 — Exercise external plugin scripts through the workshop
+
+The authoring tool generates runnable Perl, Python and Tcl sidecars with an
+editable manifest and test fixture. Fixture steps enter the actual command
+registry or event bus. The existing script runner launches the interpreter and
+the existing action runner delivers to a captured IRC transport and a temporary
+plugin data directory. This exercises Unicode replies, manifest identity,
+command collisions and state shared across steps in a test process.
+
+The workshop uses the established sidecar API v2 contract for its external
+language path. Native Perl packages retain their API v3 authoring commands.
+Extending API v3 services to subprocess plugins remains a separate runtime
+increment. See the [workshop](PLUGIN_WORKSHOP.md) for both authoring paths.
+Host acceptance is pending.

@@ -2,10 +2,8 @@ package Mediabot::Plugin::ScaffoldV3;
 use strict;
 use warnings;
 use JSON::PP ();
-use File::Spec;
-use File::Path qw(remove_tree);
-use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
 use Mediabot::Plugin::ManifestV3;
+use Mediabot::Plugin::ScaffoldFiles ();
 
 sub create {
     my (%args)=@_;
@@ -14,14 +12,6 @@ sub create {
         && $name =~ /\A[a-z][a-z0-9]*(?:-[a-z0-9]+)*\z/ && length($name)<=48;
     $command //= $name =~ s/-/_/gr;
     die "Invalid command name\n" unless !ref($command) && $command =~ /\A[a-z][a-z0-9_]*\z/;
-    die "Existing directory required\n" unless defined($parent) && !ref($parent) && -d $parent;
-    $parent=File::Spec->rel2abs($parent);
-    my $walk=File::Spec->rootdir;
-    for my $part (File::Spec->splitdir($parent)) {
-        next unless length($part);die "Unsafe parent path\n" if $part eq '..';
-        $walk=File::Spec->catdir($walk,$part);die "Symlink parent refused\n" if -l $walk;
-    }
-    my $dest=File::Spec->catdir($parent,$name);
     my $class='Mediabot::Plugin::V3::'.join('',map {ucfirst($_)} split /-/,$name);
     my $manifest={api=>3,name=>$name,version=>'0.1.0',description=>'A small explicit channel greeting.',
         runtime=>{kind=>'perl',entrypoint=>'lib/Greeting.pm',class=>$class},activation=>{default=>'off'},
@@ -63,21 +53,12 @@ CODE
         ."Rollback: .plugins policy $name #test off, .plugins disable $name,\n"
         ."then .plugins unload $name. Existing core permissions still apply.\n"
         ."For a complete checked walkthrough see docs/PLUGIN_WORKSHOP.md.\n";
-    # mkdir is exclusive even for a racing creator or dangling symlink.
-    mkdir($dest,0700) or die "Destination exists or cannot be created\n";
-    my $ok=eval {
-        mkdir(File::Spec->catdir($dest,'lib'),0755) or die 'directory';
-        my %files=('plugin.json'=>JSON::PP->new->canonical->pretty->encode($manifest),
-            'lib/Greeting.pm'=>$code,'README.md'=>$readme);
-        for my $relative (sort keys %files) {
-            my $file=File::Spec->catfile($dest,$relative);
-            sysopen(my $fh,$file,O_WRONLY|O_CREAT|O_EXCL,0600) or die 'file';
-            print {$fh} $files{$relative} or die 'write';close($fh) or die 'close';
-            chmod(0644,$file) or die 'mode';
-        }
-        chmod(0755,$dest) or die 'mode';1;
-    };
-    unless ($ok) {remove_tree($dest);die "Package creation failed\n"}
+    my %files = (
+        'plugin.json' => JSON::PP->new->canonical->pretty->encode($manifest),
+        'lib/Greeting.pm' => $code,
+        'README.md' => $readme,
+    );
+    my $dest = Mediabot::Plugin::ScaffoldFiles::write_package($parent, $name, \%files, 'lib');
     return {directory=>$dest,name=>$name,command=>$command};
 }
 1;
