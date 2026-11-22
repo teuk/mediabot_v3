@@ -1,3 +1,8 @@
+## MB1416 — Enforce the 60-second Quotegame deadline
+
+- Measure the round from one fractional start time and reject answers at or after the deadline, even when the countdown callback is still pending.
+- Keep timely points and winner announcements. Close the round once and retire its timer on expiry.
+
 ## MB1415 — Keep MetaAI responsive while video previews load
 
 - Release the answer slot as soon as the answer and source links are delivered. Optional preview work can finish independently.

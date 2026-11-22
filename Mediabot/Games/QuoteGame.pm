@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use Exporter 'import';
 use Scalar::Util qw(refaddr weaken);
+use Time::HiRes ();
 use Mediabot::Helpers ();
 use Mediabot::IRC::Timer qw(countdown);
 use Mediabot::IRC::Target qw(is_channel);
@@ -209,14 +210,15 @@ sub mbQuotegame_ctx {
 
     # Préserver les scores cumulés
     my $prev_scores = ($qg && $qg->{scores}) ? $qg->{scores} : {};
+    my $started = Time::HiRes::time();
     $self->{_quotegame}{$key} = {
         active     => 1,
         id_quote   => $row->{id_quotes},
         author     => $row->{author},
         author_lc  => lc($row->{author}),
-        started    => time(),
-        deadline   => time() + 60,
-        token      => join(':', $channel, ($row->{id_quotes} // 0), time(), int(rand(1_000_000))),
+        started    => $started,
+        deadline   => $started + 60,
+        token      => join(':', $channel, ($row->{id_quotes} // 0), int($started), int(rand(1_000_000))),
         scores     => $prev_scores,
     };
 
@@ -253,8 +255,9 @@ sub checkQuotegameAnswer {
     my $qg = $self->{_quotegame}{lc $sChannel} or return;
     return unless $qg->{active};
 
-    # Timeout passé
-    if (time() > $qg->{deadline}) {
+    # The deadline applies even if the countdown callback is still pending.
+    my $now = Time::HiRes::time();
+    if ($now >= $qg->{deadline}) {
         Mediabot::UserCommands::_quotegame_cancel_timer($self, $sChannel);
         $qg->{active} = 0;
         Mediabot::Helpers::botPrivmsg($self, $sChannel,
@@ -277,7 +280,7 @@ sub checkQuotegameAnswer {
         $qg->{active} = 0;
         $qg->{scores} = _quotegame_scores($qg->{scores});
         my $score = ++$qg->{scores}{lc $sNick};
-        my $elapsed = time() - $qg->{started};
+        my $elapsed = $now - $qg->{started};
         Mediabot::Helpers::botPrivmsg($self, $sChannel,
             sprintf("\x{1F3AF} Correct, \x02%s\x02! It was \x02%s\x02 (in %ds, score: %d)",
                 $sNick, $qg->{author}, $elapsed, $score));

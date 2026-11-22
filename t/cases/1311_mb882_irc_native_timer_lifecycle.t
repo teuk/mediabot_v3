@@ -1,13 +1,21 @@
 use strict;
 use warnings;
+our $quote_wall_time;
+BEGIN {
+    *CORE::GLOBAL::time = sub () {
+        return defined($quote_wall_time) ? int($quote_wall_time) : CORE::time();
+    };
+}
 use Test::More;
 use Scalar::Util qw(weaken refaddr);
+use Time::HiRes ();
 use IO::Async::Loop;
 use IO::Async::Timer::Countdown;
 use Mediabot::IRC::Timer qw(countdown cancel_countdown);
 use Mediabot::IRC::PacedOutput qw(queue_notices queue_privmsg_chunks);
 use Mediabot::IRC::Output qw(privmsg action);
 use MB881OutputFixture;
+use Mediabot::Context ();
 use Mediabot::UserCommands ();
 use Mediabot::Mediabot ();
 
@@ -306,6 +314,44 @@ sub quotegame_fixture {
     Mediabot::UserCommands::checkQuotegameAnswer($bot, 'Player', '#test', 'late');
     is_deeply([$round->{active}, scalar @wire, timer_count($loop)], [0,1,0],
         'lazy quote expiry still works once after timer setup fails');
+}
+for my $case ([-0.25, 1, 'just before'], [0, 0, 'at'], [0.125, 0, 'just after']) {
+    my ($offset, $won, $label) = @$case;
+    my $bot = MB881OutputFixture::new_bot();
+    my $loop = $bot->{loop} = IO::Async::Loop->really_new;
+    $bot->{dbh} = bless {
+        mode => 'success', calls => [],
+        rows => [{ id_quotes => 1, quotetext => 'A quote long enough for this round.', author => 'Author' }],
+    }, 'MB1235::DB';
+
+    my @wire;
+    local *Mediabot::Helpers::botPrivmsg = sub { push @wire, $_[2]; 1 };
+    local *Mediabot::UserCommands::botPrivmsg = sub { goto &Mediabot::Helpers::botPrivmsg };
+    local *Mediabot::Helpers::chanset_enabled = sub { 1 };
+    local $quote_wall_time = 1000.75;
+    local *Time::HiRes::time = sub { $quote_wall_time };
+    my $ctx = Mediabot::Context->new(bot => $bot, nick => 'Player', channel => '#test', args => []);
+    Mediabot::UserCommands::mbQuotegame_ctx($ctx);
+    my $round = $bot->{_quotegame}{'#test'};
+    is_deeply([@$round{qw(started deadline)}], [1000.75, 1060.75],
+        "$label: round gets a full 60 seconds from one fractional start time");
+
+    my $expire = $round->{timer}{on_expire};
+    @wire = ();
+    $quote_wall_time = $round->{deadline} + $offset;
+    Mediabot::UserCommands::checkQuotegameAnswer($bot, 'Player', '#test', 'Author');
+    $expire->();
+    Mediabot::UserCommands::checkQuotegameAnswer($bot, 'Player', '#test', 'Author');
+
+    like($wire[0], $won ? qr/Correct, .*in 59s, score: 1/ : qr/Time's up!.*Author/,
+        "$label the deadline: deliver the right verdict");
+    is_deeply(
+        [$round->{active}, $round->{scores}{player} // 0,
+         $bot->{metrics}{counts}{mediabot_quotegame_correct_total} // 0,
+         timer_count($loop), scalar @wire],
+        [0, $won, $won, 0, 1],
+        "$label the deadline: close once, retire the timer and record only a timely win",
+    );
 }
 {
     my $loop=IO::Async::Loop->really_new;
