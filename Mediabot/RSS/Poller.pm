@@ -102,13 +102,16 @@ sub poll_feed {
     my $persist_ok = eval {
         for my $item (@$items) {
             next unless ref($item) eq 'HASH';
-            my $suppress = $baseline || $new >= $limit;
+            # Keep linkless items for deduplication without using a delivery slot.
+            my $url = $item->{url};
+            my $suppress = $baseline || $new >= $limit
+                || !defined($url) || ref($url) || !length($url);
             my $inserted = $self->repo->insert_item(
                 $id, $item, announced => ($suppress ? 1 : 0)
             );
             next unless $inserted;
             $stored++;
-            $new++ unless $baseline || $suppress;
+            $new++ unless $suppress;
         }
         $self->repo->record_poll_success(
             $id,

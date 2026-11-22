@@ -52,7 +52,7 @@ sub list_feeds {
                rf.enabled, rf.poll_interval, rf.announce_limit, rf.last_poll_at,
                rf.last_success_at, rf.last_error_at, rf.last_error,
                COUNT(ri.id_rss_item) AS item_count,
-               SUM(CASE WHEN ri.id_rss_item IS NOT NULL AND ri.announced_at IS NULL
+               SUM(CASE WHEN ri.announced_at IS NULL AND ri.url <> ''
                         THEN 1 ELSE 0 END) AS pending_count,
                MAX(CASE WHEN rf.last_poll_at IS NULL THEN 0
                         ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(),
@@ -80,7 +80,7 @@ sub get_feed {
                rf.last_error_at, rf.last_error, rf.created_by, rf.created_by_nick,
                rf.created_at, rf.updated_at,
                COUNT(ri.id_rss_item) AS item_count,
-               SUM(CASE WHEN ri.id_rss_item IS NOT NULL AND ri.announced_at IS NULL
+               SUM(CASE WHEN ri.announced_at IS NULL AND ri.url <> ''
                         THEN 1 ELSE 0 END) AS pending_count,
                MAX(CASE WHEN rf.last_poll_at IS NULL THEN 0
                         ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, NOW(),
@@ -246,7 +246,7 @@ sub pending_items {
     return $self->_read_rows('pending', q{
         SELECT id_rss_item, item_key, title, url, published_raw, seen_at
           FROM RSS_ITEM
-         WHERE id_rss_feed = ? AND announced_at IS NULL
+         WHERE id_rss_feed = ? AND announced_at IS NULL AND url <> ''
          ORDER BY id_rss_item ASC
          LIMIT ?
     }, $id_feed, $limit);
@@ -260,7 +260,7 @@ sub paced_pending_items {
     my $rows = $self->_read_rows('latest-pending', q{
         SELECT id_rss_item, item_key, title, url, published_raw, seen_at
           FROM RSS_ITEM
-         WHERE id_rss_feed = ? AND announced_at IS NULL
+         WHERE id_rss_feed = ? AND announced_at IS NULL AND url <> ''
          ORDER BY id_rss_item DESC LIMIT 1
     }, $id_feed);
     my $copy = $rows->[0];

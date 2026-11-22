@@ -4,6 +4,7 @@ use warnings;
 use utf8;
 BEGIN { use FindBin qw($Bin); unshift @INC, "$Bin/../lib", "$Bin/../.."; }
 
+use Mediabot::RSS qw(parse_feed_document);
 use Mediabot::RSS::Fetcher;
 use Mediabot::RSS::Repository;
 use Mediabot::RSS::Poller;
@@ -108,9 +109,12 @@ sub _fixture1080 {
                (2,1,'Bravo','https://two.example/rss',1,600,3,'2026-11-03 11:59:00','old'),
                (3,2,'Charlie','https://three.example/rss',0,600,3,NULL,'old'),
                (4,2,'Delta','https://four.example/rss',1,600,3,NULL,NULL)});
-    $db->do(q{INSERT INTO RSS_ITEM (id_rss_item,id_rss_feed,title,announced_at)
-        VALUES (1,1,'Old one',NULL),(2,1,'Old two',NULL),(3,1,'Latest',NULL),
-               (4,2,'Other feed',NULL),(5,1,'Acknowledged','old')});
+    $db->do(q{INSERT INTO RSS_ITEM (id_rss_item,id_rss_feed,title,url,announced_at)
+        VALUES (1,1,'Old one','https://one.example/1',NULL),
+               (2,1,'Old two','https://one.example/2',NULL),
+               (3,1,'Latest','https://one.example/3',NULL),
+               (4,2,'Other feed','https://two.example/4',NULL),
+               (5,1,'Acknowledged','https://one.example/5','old')});
     $db->{private_statements}=[];
     return (Mediabot::RSS::Repository->new(dbh=>$db),$db);
 }
@@ -218,6 +222,44 @@ return sub {
     );
     $assert->ok($nm->{ok} && $nm->{not_modified},
         'mb693-902: HTTP 304 succeeds without trying to parse an empty body');
+
+    for my $mode (qw(unpaced paced)) {
+        my ($repo, $db) = _fixture1080(1);
+        my $pacing = $mode eq 'paced' ? bless({}, 'Pacing1080') : undef;
+        my $body = parse_feed_document(q{
+            <rss><channel><title>News</title>
+                <item><guid>a</guid><title>Missing link</title></item>
+                <item><guid>b</guid><title>Ready</title><link>https://example.org/b</link></item>
+                <item><guid>c</guid><title>Overflow</title><link>https://example.org/c</link></item>
+            </channel></rss>
+        });
+        my $poller = Mediabot::RSS::Poller->new(repo => $repo, pacing => $pacing,
+            fetcher => sub { {ok => 1, feed => $body} });
+        my $feed = $repo->get_feed('#two', 'Delta');
+        $feed->{last_success_at} = 'old';
+        $feed->{announce_limit} = 1;
+        my $result = $poller->poll_feed($feed);
+        my $stored = $db->selectall_arrayref(q{
+            SELECT title, CASE WHEN announced_at IS NULL THEN 0 ELSE 1 END
+              FROM RSS_ITEM WHERE id_rss_feed = 4 ORDER BY id_rss_item
+        });
+        $assert->is($json902->encode([$result->{ok}, [map { $_->{title} } @{$result->{pending}}], $stored]),
+            $json902->encode([1, ['Ready'], [['Missing link',1],['Ready',0],['Overflow',1]]]),
+            "$mode poll keeps linkless articles for deduplication without consuming the only announcement");
+
+        $db->do('UPDATE RSS_ITEM SET url = NULL WHERE id_rss_item = 1');
+        $db->do(q{UPDATE RSS_ITEM SET url = '' WHERE id_rss_item = 3});
+        $poller = Mediabot::RSS::Poller->new(repo => $repo, pacing => $pacing,
+            fetcher => sub { {ok => 1, not_modified => 1} });
+        $feed = $repo->get_feed('#one', 'Alpha');
+        $feed->{announce_limit} = 1;
+        my ($alpha) = grep { $_->{label} eq 'Alpha' } @{$repo->list_feeds('#one')};
+        $result = $poller->poll_feed($feed);
+        $assert->is($json902->encode([0+$feed->{pending_count}, 0+$alpha->{pending_count},
+            [map { $_->{title} } @{$result->{pending}}]]),
+            $json902->encode([1, 1, ['Old two']]),
+            "$mode 304 returns the usable pending article despite legacy NULL and empty URLs");
+    }
 
     {
         my ($repo, $db) = _fixture1080(1);

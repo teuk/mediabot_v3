@@ -1,3 +1,8 @@
+## MB1418 — Keep linkless RSS entries out of announcement slots
+
+- Store entries without article URLs for deduplication while reserving announcement slots for linked articles.
+- Skip older linkless records in standard and paced queues, including on HTTP 304 responses. Count only linked pending entries in feed summaries.
+
 ## MB1417 — Exclude future-dated speech from monthstats
 
 - Bound the single-nickname and comparison charts to the database's current time.

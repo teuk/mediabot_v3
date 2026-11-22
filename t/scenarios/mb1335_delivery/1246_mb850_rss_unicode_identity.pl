@@ -47,7 +47,8 @@ is($fallback, sha256_hex(encode('UTF-8', join("\0", 'fallback', 'L’été 🧭'
 # Numeric XML entities produce real Unicode even in an all-ASCII HTTP body.
 my $rss = '<rss><channel><title>Feed</title>'
     . '<item><title>Legacy</title><guid>caf&#233;</guid></item>'
-    . '<item><title>New &#x1F9ED;</title><guid>news:&#x6771;&#x4EAC;</guid></item>'
+    . '<item><title>New &#x1F9ED;</title><guid>news:&#x6771;&#x4EAC;</guid>'
+    . '<link>https://example.invalid/new</link></item>'
     . '</channel></rss>';
 my $atom = '<feed><title>Feed</title><entry><title>New</title>'
     . '<id>tag:&#x1F9ED;</id></entry></feed>';
