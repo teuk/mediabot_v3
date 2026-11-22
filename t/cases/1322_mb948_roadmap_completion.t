@@ -254,6 +254,59 @@ write_fixture_1322($custom_fixture, [{command => 'test_python', mode => 'observe
 ok(!$tested && $test_report =~ /Step 1 failed:.*script process failed/,
     'a failed interpreter cannot pass a silent observe test');
 
+my $guard_dir = Mediabot::Plugin::ScaffoldV3::create(
+    directory => $tmp, name => 'guard-python', language => 'python')->{directory};
+my $guard_path = "$guard_dir/plugin.json";
+open my $guard_read, '<:raw', $guard_path or die $!;
+my $guard_manifest = decode_json(do { local $/; <$guard_read> });
+close $guard_read or die $!;
+$guard_manifest->{commands}{guard_python}{level} = 'Master';
+$guard_manifest->{commands}{guard_python}{aliases} = ['guard_alias'];
+open my $guard_write, '>:raw', $guard_path or die $!;
+print {$guard_write} encode_json($guard_manifest) or die $!;
+close $guard_write or die $!;
+
+my $master = {role => 'Master', authenticated => JSON::PP::true};
+my $owner = {role => 'Owner', authenticated => JSON::PP::true};
+my @access = ('--test', 'guard-python', '--directory', $tmp,
+    '--fixture', $custom_fixture, '--grant', 'irc.reply');
+write_fixture_1322($custom_fixture, [
+    {command => 'guard_python', expect => 'denied', replies => []},
+    {command => 'guard_alias', caller => {%$owner, authenticated => JSON::PP::false},
+        expect => 'denied', replies => []},
+    {command => 'guard_python', caller => {%$master, role => 'Administrator'},
+        expect => 'denied', replies => []},
+    {command => 'guard_alias', caller => $master,
+        replies => [['PRIVMSG', '#workshop', 'Bonjour, Pablo!']]},
+    {command => 'guard_python', caller => $owner, mode => 'observe', replies => []},
+    {command => 'guard_python', caller => $owner, mode => 'off', replies => []},
+    {command => 'guard_python', expect => 'denied', replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@access);
+ok($tested && $test_report =~ /passed 7 offline API v3 command step/,
+    'the registry enforces identification, role order and activation on commands and aliases');
+
+write_fixture_1322($custom_fixture, [
+    {command => 'guard_alias', mode => 'observe', replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@access);
+ok(!$tested && $test_report =~ /expected 'ran' in 'observe'.*1 access denial/,
+    'an unexpected access denial cannot pass as a silent observe result');
+
+write_fixture_1322($custom_fixture, [
+    {command => 'guard_python', caller => $master, mode => 'observe', expect => 'denied', replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@access);
+ok(!$tested && $test_report =~ /expected 'denied' but a script started/,
+    'a false denial expectation fails even if the command produces no reply');
+
+write_fixture_1322($custom_fixture, [
+    {command => 'guard_python', caller => {%$master, authenticated => 'false'}, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@access);
+ok(!$tested && $test_report =~ /caller must have a stock role and a JSON authenticated boolean/,
+    'a string cannot stand in for a boolean authentication state');
+
 $manifest->{commands}{first_greeting}{handler} = 'command_missing';
 open my $edited_manifest, '>:raw', "$out->{directory}/plugin.json" or die $!;
 print {$edited_manifest} encode_json($manifest) or die $!;

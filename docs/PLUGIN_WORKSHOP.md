@@ -57,8 +57,8 @@ confiance avec les permissions du compte qui lance l’atelier.
 }
 ```
 
-Les commandes publiques de niveau 0 et leurs alias sont acceptés. Les valeurs
-par défaut sont `on`, `#workshop`, `Pablo` et aucun argument. Chaque étape
+Les commandes publiques et leurs alias sont acceptés. Les valeurs par défaut
+sont `on`, `#workshop`, `Pablo` et aucun argument. Chaque étape
 applique sa propre politique et ses propres réglages typés. L’atelier compare
 les messages dans l’ordre par triplets `[verbe, cible, texte]`. Un `reply`
 donne un `PRIVMSG` vers le canal, un `notice` donne un `NOTICE` vers le nick.
@@ -67,6 +67,33 @@ Accorde les capacités correspondantes avec `--grant irc.reply` ou
 l’erreur d’exécution, ou les réponses attendues et capturées. Une étape
 `observe` doit exécuter la commande sans réponse et une étape `off` doit
 rester inactive.
+
+Pour une commande réservée à un rôle, ajoute `caller` et utilise
+`"expect": "denied"` dans les scénarios qui doivent être refusés.
+
+```json
+{
+  "steps": [
+    {
+      "command": "master_greet",
+      "caller": {"role": "Owner", "authenticated": false},
+      "expect": "denied",
+      "replies": []
+    },
+    {
+      "command": "master_greet",
+      "caller": {"role": "Master", "authenticated": true},
+      "replies": [["PRIVMSG", "#workshop", "Bonjour, Pablo!"]]
+    }
+  ]
+}
+```
+
+Sans `caller`, l’atelier simule un invité. Les rôles `Owner`, `Master`,
+`Administrator` et `User` suivent l’ordre de la base standard. Chaque étape
+repart avec sa propre identité simulée. Le registre contrôle la permission et
+l’atelier vérifie le refus effectif, y compris en mode `observe`.
+Ces scénarios couvrent les rôles globaux avec des utilisateurs simulés.
 
 ## Écrire et tester un script API v2 en Perl, Python ou Tcl
 

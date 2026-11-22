@@ -1,3 +1,8 @@
+## MB1426 — Assert access decisions in offline API v3 command fixtures
+
+- Test public commands and aliases with synthetic guest, signed-out and identified callers through the registry's regular authorization gate.
+- Assert explicit access denials separately from silent execution in observe mode and inactivity in off mode.
+
 ## MB1425 — Exercise API v3 plugin commands with offline fixtures
 
 - Generate an editable command fixture with Perl, Python and Tcl API v3 packages.

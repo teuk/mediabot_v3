@@ -1941,4 +1941,15 @@ policy and typed settings. The harness waits for external scripts, verifies
 whether the command ran, and compares the captured reply or notice destination
 and text. Interpreter and capability errors fail even steps expecting silence.
 Packs created before MB1425 can use the same runner with an explicit fixture.
+Commit `99d76197517c5a9dba77555cecf769829fac2b61` was pushed to
+`origin/master`. The four example command scenarios passed on teuk.org.
+
+## MB1426 — Verify access decisions in offline API v3 command fixtures
+
+The workshop can exercise stock role thresholds and identification through the
+same registry and authorization helper used by public plugin commands.
+Each scenario can supply a synthetic caller and require an explicit denial.
+The in-memory denial metric and invocation ledger distinguish denied access
+from both silent observe execution and an inactive channel policy. Fixtures
+cover alias dispatch and reset the synthetic caller between steps.
 Target-host acceptance is pending.
