@@ -1334,6 +1334,10 @@ sub clean_and_exit {
         };
     }
 
+    if ($self->{plugin_manager} && !eval { $self->{plugin_manager}->shutdown_v3_scripts }) {
+        eval { $self->{logger}->log(1, 'API v3 script final cleanup incomplete') };
+    }
+
     # mb701-B: revoke proactive-Wit authorization before final saves.
     # clean_and_exit() is the common final path, including admin-triggered exits.
     eval { $self->{wit_runtime_state}->mark_shutdown() if $self->{wit_runtime_state}; };

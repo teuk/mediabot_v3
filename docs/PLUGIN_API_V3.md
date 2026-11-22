@@ -94,11 +94,61 @@ schema catalogue.
 }
 ```
 
-Every field is validated fail-closed before plugin code is loaded. MB744 accepts
-Perl entrypoints only. Event name/version pairs must exist in the core catalogue
+Every field is validated fail-closed before plugin code is loaded.
+Event name/version pairs must exist in the core catalogue
 and job handlers, intervals and namespace lengths are checked before any
 registration. Configuration schemas are executable core contracts rather than
 plugin-owned parsing hints.
+
+## Python and Tcl command packages
+
+Set `runtime.kind` to `python` or `tcl` and point `runtime.entrypoint` to a
+relative `.py` or `.tcl` file inside the package. Omit `runtime.class`.
+Declare public commands with unique names and their normal levels and aliases.
+Leave `events` empty and omit `jobs` or use an empty object. The supported
+capabilities are `irc.reply` and `irc.notice`. Built-in command migration
+and access to core services are reserved for native modules.
+
+Each command sends one UTF-8 JSON object through stdin and reads one JSON
+response from stdout. A package with several commands can dispatch using
+`data.handler`, the manifest's handler identifier.
+
+```json
+{
+  "protocol": "mediabot-script-v1",
+  "event": "public_command",
+  "data": {
+    "channel": "#test",
+    "nick": "Pablo",
+    "command": "hello_python",
+    "handler": "command_greet",
+    "args": ["Élodie"],
+    "activation": "on",
+    "config": {"greeting": "Bonjour"}
+  }
+}
+```
+
+```json
+{
+  "protocol": "mediabot-script-v1",
+  "ok": true,
+  "actions": [{"type": "reply", "text": "Bonjour, Élodie!"}]
+}
+```
+
+The core delivers `reply` to the invoking channel and `notice` to the caller.
+Each action contains only `type` and `text`. All actions must pass validation
+and the corresponding grants before the first one can be delivered. In
+`observe`, the command runs and output is suppressed. A policy change for
+that channel, disable, unload or shutdown cancels pending work.
+
+The process has a 3-second deadline and separate 16 KiB limits on stdin, stdout
+and stderr. A response can contain up to eight actions, each with at most 400
+UTF-8 bytes of message text. There is one invocation in flight per loaded
+package and up to four process slots per bot; commands sent while those slots
+are busy are dropped. The interpreter runs trusted local code under the bot's
+OS account. Capability checks govern the API actions returned to Mediabot.
 
 ## Typed channel configuration
 

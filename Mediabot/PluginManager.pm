@@ -89,6 +89,11 @@ sub v3_runtime {
     return $self->{v3_runtime};
 }
 
+sub shutdown_v3_scripts {
+    my ($self) = @_;
+    return !$self->{v3_runtime} || $self->{v3_runtime}->shutdown_scripts;
+}
+
 # MB746: one core-owned outbound HTTP boundary is shared by every API v3
 # package. Plugins never receive a socket, HTTP client, resolver or event loop.
 sub v3_http_service {
@@ -2528,6 +2533,7 @@ sub _mount_v3_commands {
                 handler     => sub {
                     my ($ctx) = @_;
                     return unless $self->_v3_entry_is_current($key, $entry);
+                    return if $entry->{metadata}{external_commands} && eval { $ctx->is_private };
                     my $fallback = $migration && $fallback_handler
                         ? sub { $fallback_handler->($ctx) } : undef;
                     return $fallback ? $fallback->() : undef
@@ -2587,6 +2593,27 @@ sub _mount_v3_commands {
                     _pm_metric($self->{bot}, 'mediabot_plugin_v3_observe_total',
                         { plugin => $key, kind => 'command' })
                         if $policy->{mode} eq 'observe';
+                    if ($entry->{metadata}{external_commands}) {
+                        my $called = eval {
+                            $object->dispatch($self->v3_runtime->script_processes,
+                                $plugin_context, $invocation, $method, sub {
+                                    my ($error) = @_;
+                                    return unless $self->_v3_entry_is_current($key, $entry)
+                                        && $self->is_enabled($key);
+                                    if ($error) {
+                                        $self->_v3_command_failed($key, $command, $channel, $error);
+                                    } else {
+                                        $self->_record_v3_success($key,
+                                            kind => 'command', resource => $command,
+                                            channel => $channel);
+                                    }
+                                });
+                            1;
+                        };
+                        $self->_v3_command_failed($key, $command, $channel,
+                            _plugin_error_text($@, 'API v3 script dispatch failed')) unless $called;
+                        return;
+                    }
                     my ($called, $result);
                     $called = eval {
                         $result = $object->$method($plugin_context, $invocation);
@@ -2595,14 +2622,7 @@ sub _mount_v3_commands {
                     unless ($called) {
                         my $error = _plugin_error_text(
                             $@, 'API v3 command failed');
-                        $self->_record_v3_failure($key,
-                            kind => 'command', resource => $command,
-                            channel => $channel, error => $error);
-                        _pm_metric($self->{bot},
-                            'mediabot_plugin_v3_failure_total',
-                            { plugin => $key, kind => 'command' });
-                        eval { $self->{bot}{logger}->log(1,
-                            "plugin '$key' API v3 command '$command' failed: $error") };
+                        $self->_v3_command_failed($key, $command, $channel, $error);
                         return $fallback ? $fallback->() : undef
                             if $policy->{mode} eq 'observe';
                         return;
@@ -2632,6 +2652,16 @@ sub _mount_v3_commands {
     }
     $entry->{mounted_commands} = \@mounted;
     return 1;
+}
+
+sub _v3_command_failed {
+    my ($self, $key, $command, $channel, $error) = @_;
+    $self->_record_v3_failure($key, kind => 'command', resource => $command,
+        channel => $channel, error => $error);
+    _pm_metric($self->{bot}, 'mediabot_plugin_v3_failure_total',
+        { plugin => $key, kind => 'command' });
+    eval { $self->{bot}{logger}->log(1,
+        "plugin '$key' API v3 command '$command' failed: $error") };
 }
 
 # MB743: API v3 events are translated from the existing EventBus into a

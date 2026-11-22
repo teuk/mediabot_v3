@@ -1,3 +1,9 @@
+## MB1424 — Run Python and Tcl commands in API v3 packages
+
+- Generate default-off API v3 packages in Perl, Python or Tcl with the plugin workshop.
+- Run Python and Tcl public commands through the bounded asynchronous script runtime, with typed channel settings and capability-checked IRC replies and notices.
+- Cancel pending script commands on channel policy changes, disable, unload and shutdown.
+
 ## MB1423 — Create and test Perl, Python and Tcl script plugins
 
 - Generate a script, API v2 sidecar and editable test fixture from the plugin workshop.

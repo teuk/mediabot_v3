@@ -29,6 +29,20 @@ sub new {
 
 sub plugin_dir { $_[0]->{plugin_dir} }
 
+sub script_processes {
+    my ($self) = @_;
+    return $self->{script_processes} if $self->{script_processes};
+    my $loop = $self->{manager}->bot->getLoop
+        or die "Plugin API v3 runtime: script commands require an event loop\n";
+    require Mediabot::Plugin::ScriptProcessV3;
+    return $self->{script_processes} = Mediabot::Plugin::ScriptProcessV3->new($loop);
+}
+
+sub shutdown_scripts {
+    my ($self) = @_;
+    return !$self->{script_processes} || $self->{script_processes}->shutdown;
+}
+
 sub _root {
     my ($self) = @_;
     my $root = realpath($self->{plugin_dir});
@@ -132,12 +146,19 @@ sub load_package {
     die "Plugin API v3 runtime: entrypoint escapes package '$name'\n"
         unless defined($real_entrypoint) && index($real_entrypoint, "$dir/") == 0;
 
-    my $loaded = eval { require $real_entrypoint; 1 };
-    die "Plugin API v3 runtime: cannot load entrypoint for '$name'\n"
-        unless $loaded;
-    my $class = $manifest->{runtime}{class};
-    die "Plugin API v3 runtime: class '$class' has no constructor\n"
-        unless $class->can('new');
+    my $external = $manifest->{runtime}{kind} ne 'perl';
+    my $class;
+    if ($external) {
+        require Mediabot::Plugin::ScriptCommandV3;
+        $class = 'Mediabot::Plugin::ScriptCommandV3';
+    } else {
+        my $loaded = eval { require $real_entrypoint; 1 };
+        die "Plugin API v3 runtime: cannot load entrypoint for '$name'\n"
+            unless $loaded;
+        $class = $manifest->{runtime}{class};
+        die "Plugin API v3 runtime: class '$class' has no constructor\n"
+            unless $class->can('new');
+    }
 
     # Service grants belong to this registration. A retained context must not
     # borrow a same-name replacement's services; keep its entry reference weak
@@ -171,10 +192,15 @@ sub load_package {
     );
     # The plugin receives a detached manifest snapshot. It cannot rewrite the
     # already validated core-owned contract between validation and mounting.
-    my $plugin_manifest = JSON::PP->new->decode(
-        JSON::PP->new->canonical->encode($manifest));
     my $object = eval {
-        $class->new(context => $context, manifest => $plugin_manifest)
+        if ($external) {
+            $class->new(directory => $dir, resolved => $real_entrypoint,
+                entrypoint => $manifest->{runtime}{entrypoint});
+        } else {
+            my $plugin_manifest = JSON::PP->new->decode(
+                JSON::PP->new->canonical->encode($manifest));
+            $class->new(context => $context, manifest => $plugin_manifest);
+        }
     };
     die "Plugin API v3 runtime: constructor failed for '$name'\n"
         unless blessed($object);
@@ -182,7 +208,7 @@ sub load_package {
     for my $command (sort keys %{ $manifest->{commands} }) {
         my $method = $manifest->{commands}{$command}{handler};
         die "Plugin API v3 runtime: command '$command' has no handler '$method'\n"
-            unless $object->can($method);
+            unless $external || $object->can($method);
     }
     require Mediabot::Plugin::EventCatalogV3;
     for my $event (@{ $manifest->{events} }) {
@@ -209,6 +235,7 @@ sub load_package {
         metadata    => {
             api                    => 3,
             kind                   => 'package-v3',
+            external_commands      => $external ? 1 : 0,
             package_dir            => $dir,
             requested_capabilities => [ sort keys %requested ],
             granted_capabilities   => [ sort keys %seen_grant ],

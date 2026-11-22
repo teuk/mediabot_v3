@@ -1914,6 +1914,19 @@ command collisions and state shared across steps in a test process.
 
 The workshop uses the established sidecar API v2 contract for its external
 language path. Native Perl packages retain their API v3 authoring commands.
-Extending API v3 services to subprocess plugins remains a separate runtime
-increment. See the [workshop](PLUGIN_WORKSHOP.md) for both authoring paths.
-Host acceptance is pending.
+Accepted on teuk.org with 214 targeted and 45,626 full-suite assertions.
+Commit `37e44ffa207603e82dec6ced66f36f3ff5eb641f` was pushed to `origin/master`.
+
+## MB1424 — Run Python and Tcl public commands through API v3
+
+The API v3 workshop creates and validates packages in Perl, Python and Tcl.
+Python and Tcl packages mount public commands in the native registry and use
+the same per-channel activation modes, command levels and typed configuration
+as Perl packages. A bounded subprocess exchanges one request and response over
+the existing JSON protocol. The core validates the full action list before
+delivering replies and notices under the explicitly granted capabilities.
+
+The subprocess runtime is asynchronous. Policy changes cancel pending work
+for the affected channel, and disable, unload and shutdown retire delivery.
+Events, scheduled jobs and core service calls for external API v3 packages
+remain future increments. Host acceptance is pending.

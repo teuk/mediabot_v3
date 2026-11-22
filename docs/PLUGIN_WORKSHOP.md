@@ -1,10 +1,39 @@
 # Du premier plugin à son retrait
 
-L’atelier propose deux parcours. Un module Perl natif utilise le paquet API v3
-et `PluginContext`. Un script externe en Perl, Python ou Tcl utilise un manifeste
-adjacent API v2 et le protocole `mediabot-script-v1` sur stdin et stdout.
+L’atelier génère des paquets API v3 en Perl, Python et Tcl. Les scripts à
+manifeste adjacent API v2 en Perl, Python et Tcl gardent leur parcours de test.
+Les deux formats de scripts utilisent le protocole `mediabot-script-v1`.
 
-## Écrire et tester un script Perl, Python ou Tcl
+## Écrire une commande API v3 en Python ou Tcl
+
+```bash
+perl tools/plugin_v3_workshop.pl --create hello-python-v3 \
+  --language python --command hello_python
+perl tools/plugin_v3_workshop.pl --validate hello-python-v3 --grant irc.reply
+```
+
+Le paquet contient `plugin.json`, `lib/greeting.py` et un README avec les
+commandes de chargement et de retrait. Pour Tcl, utilise `--language tcl` et
+modifie `lib/greeting.tcl`. L’exemple Tcl utilise `tclsh` et les modules
+`json` et `json::write` de Tcllib. L’exemple Python utilise `python3` et sa
+bibliothèque standard. `--validate` vérifie le montage et les collisions hors
+ligne. Le script s’exécute quand la commande est appelée.
+
+Sur l’instance de développement, charge le paquet depuis la Partyline en tant
+qu’Owner et active-le sur le canal voulu.
+
+```text
+.plugins loadv3 hello-python-v3 irc.reply
+.plugins policy hello-python-v3 #test on
+.plugins enable hello-python-v3
+```
+
+Dans `#test`, `!hello_python Élodie` affiche `Bonjour, Élodie!`. Pour observer
+l’exécution sans publier de message, sélectionne `observe`. Les canaux sans
+politique restent à `off`. Le [contrat API v3](PLUGIN_API_V3.md#python-and-tcl-command-packages)
+décrit le contexte, la réponse et les limites du processus.
+
+## Écrire et tester un script API v2 en Perl, Python ou Tcl
 
 Depuis le dépôt, choisis un langage et un nom de commande libre. Ce parcours
 utilise `perl` et `JSON::PP`, `python3` et sa bibliothèque standard, ou `tclsh`

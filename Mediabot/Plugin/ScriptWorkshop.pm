@@ -67,6 +67,12 @@ puts [json::write object protocol [json::write string mediabot-script-v1] \
 TCL
 );
 
+sub greeting_source {
+    my ($language, $config_key) = @_;
+    die "Unknown greeting template\n" unless exists $source{$language};
+    return $source{$language} =~ s/GREETING/$config_key/gr;
+}
+
 sub create {
     my (%args) = @_;
     my ($name, $command, $language) = @args{qw(name command language)};
@@ -106,7 +112,7 @@ Tcllib's json and json::write packages.
 See docs/PLUGIN_WORKSHOP.md for the test format and installation procedure.
 README
     Mediabot::Plugin::ScaffoldFiles::write_package($args{directory}, $name, {
-        $script => $source{$language},
+        $script => greeting_source($language, 'GREETING'),
         "$script.manifest.json" => $json->encode($manifest),
         "$script.test.json" => $json->encode($fixture),
         'README.md' => $readme,

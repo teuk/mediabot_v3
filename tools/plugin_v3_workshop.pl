@@ -9,13 +9,13 @@ use Mediabot::Plugin::ScaffoldV3;
 my $usage = <<'USAGE';
 Usage:
   perl tools/plugin_v3_workshop.pl --check
-  perl tools/plugin_v3_workshop.pl --create NAME [--command NAME] [--directory DIR]
+  perl tools/plugin_v3_workshop.pl --create NAME [--language perl|python|tcl] [--command NAME] [--directory DIR]
   perl tools/plugin_v3_workshop.pl --validate NAME [--grant CAPABILITY ...] [--directory DIR]
   perl tools/plugin_v3_workshop.pl --create-script NAME [--language perl|python|tcl] [--command NAME] [--directory DIR]
   perl tools/plugin_v3_workshop.pl --test-script RELATIVE_PATH [--fixture FILE] [--directory DIR]
 
---validate loads trusted local Perl code in a disposable, disabled runtime.
---directory is the package root (plugins for native modules, plugins/scripts for scripts).
+--validate mounts a trusted API v3 package in a disposable, disabled runtime.
+--directory is the package root (plugins for API v3, plugins/scripts for API v2 scripts).
 --test-script runs trusted local code against the fixture beside the script by default.
 USAGE
 
@@ -43,7 +43,8 @@ my $mode_count = $check + defined($name) + defined($package)
     + defined($script_name) + defined($test_script);
 die $usage if @ARGV || $mode_count != 1
     || (defined($command) && !defined($name) && !defined($script_name))
-    || (@grants && !defined($package)) || (defined($language) && !defined($script_name))
+    || (@grants && !defined($package))
+    || (defined($language) && !defined($name) && !defined($script_name))
     || (defined($fixture) && !defined($test_script));
 
 if (defined($script_name) || defined($test_script)) {
@@ -65,7 +66,8 @@ if (defined($script_name) || defined($test_script)) {
 $directory //= 'plugins';
 
 if (defined $name) {
-    my $r=Mediabot::Plugin::ScaffoldV3::create(directory=>$directory,name=>$name,command=>$command);
+    my $r = Mediabot::Plugin::ScaffoldV3::create(
+        directory => $directory, name => $name, command => $command, language => $language);
     print "[OK] Created default-off package $r->{name}; command $r->{command}. No bot was loaded or changed.\n";
     exit 0;
 }

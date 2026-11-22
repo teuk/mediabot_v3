@@ -7,8 +7,15 @@
   "manifest_file": "plugin.json",
   "manifest_max_bytes": 16384,
   "runtime_kinds": [
-    "perl"
+    "perl",
+    "python",
+    "tcl"
   ],
+  "external_commands": {
+    "protocol": "mediabot-script-v1",
+    "source": "public",
+    "capabilities": ["irc.reply", "irc.notice"]
+  },
   "capability_model": "requested intersection granted",
   "channel_policy": {
     "modes": [

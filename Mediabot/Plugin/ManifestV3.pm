@@ -76,15 +76,23 @@ sub validate {
     die "Plugin API v3: runtime must be an object\n"
         unless ref($runtime) eq 'HASH';
     _keys_are_known($runtime, \%RUNTIME_LEVEL, 'runtime');
-    die "Plugin API v3: runtime.kind must be 'perl'\n"
-        unless _plain_scalar($runtime->{kind}) && $runtime->{kind} eq 'perl';
-    die "Plugin API v3: runtime.entrypoint must be a relative .pm path\n"
+    my %suffix = (perl => 'pm', python => 'py', tcl => 'tcl');
+    my $kind = $runtime->{kind};
+    die "Plugin API v3: runtime.kind must be perl, python or tcl\n"
+        unless _plain_scalar($kind) && exists $suffix{$kind};
+    my $external = $kind ne 'perl';
+    my $extension = $suffix{$kind};
+    die "Plugin API v3: runtime.entrypoint must be a relative .$extension path\n"
         unless _plain_scalar($runtime->{entrypoint})
-            && $runtime->{entrypoint} =~ /\A(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.pm\z/
-            && $runtime->{entrypoint} !~ /(?:\A|\/)\.\.?\//;
-    die "Plugin API v3: runtime.class must be a Perl package name\n"
-        unless _plain_scalar($runtime->{class})
-            && $runtime->{class} =~ /\A[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*\z/;
+            && $runtime->{entrypoint} =~ /\A(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.\Q$extension\E\z/;
+    if ($external) {
+        die "Plugin API v3: external scripts do not declare a runtime.class\n"
+            if exists $runtime->{class};
+    } else {
+        die "Plugin API v3: runtime.class must be a Perl package name\n"
+            unless _plain_scalar($runtime->{class})
+                && $runtime->{class} =~ /\A[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*\z/;
+    }
 
     my $activation = $manifest->{activation};
     die "Plugin API v3: activation must be an object\n"
@@ -105,6 +113,8 @@ sub validate {
             unless _valid_capability($capability);
         die "Plugin API v3: capability '$capability' is duplicated\n"
             if $seen_capability{$capability}++;
+        die "Plugin API v3: external scripts support only irc.reply and irc.notice\n"
+            if $external && $capability ne 'irc.reply' && $capability ne 'irc.notice';
     }
 
     my $commands = $manifest->{commands};
@@ -123,6 +133,8 @@ sub validate {
         die "Plugin API v3: command '$command' source must be public or private\n"
             unless _plain_scalar($spec->{source})
                 && $spec->{source} =~ /\A(?:public|private)\z/;
+        die "Plugin API v3: external scripts require public commands without a migration\n"
+            if $external && ($spec->{source} ne 'public' || exists $spec->{migration});
         die "Plugin API v3: command '$command' needs a short help string\n"
             unless _plain_scalar($spec->{help})
                 && length($spec->{help}) >= 1 && length($spec->{help}) <= 200;
@@ -162,6 +174,7 @@ sub validate {
     my $events = $manifest->{events};
     die "Plugin API v3: events must be an array\n"
         unless ref($events) eq 'ARRAY';
+    die "Plugin API v3: external scripts support commands only\n" if $external && @$events;
     die "Plugin API v3: at most 32 events may be declared\n"
         if @$events > 32;
     my %seen_event;
@@ -188,6 +201,7 @@ sub validate {
     my $jobs = exists($manifest->{jobs}) ? $manifest->{jobs} : {};
     die "Plugin API v3: jobs must be an object\n"
         unless ref($jobs) eq 'HASH';
+    die "Plugin API v3: external scripts support commands only\n" if $external && keys %$jobs;
     die "Plugin API v3: at most 8 jobs may be declared\n"
         if keys(%$jobs) > 8;
     for my $job (sort keys %$jobs) {
