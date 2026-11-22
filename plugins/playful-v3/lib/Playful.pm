@@ -3,7 +3,7 @@ package Mediabot::Plugin::Playful;
 use strict;
 use warnings;
 use utf8;
-use Encode qw(encode);
+use Mediabot::IRC::TextBudget qw(_split_text_for_irc _utf8_text_bytes);
 
 sub new {
     my ($class, %args) = @_;
@@ -29,6 +29,35 @@ sub _rand_index {
 
 sub _reply  { $_[0]{context}->reply($_[1], $_[2]) }
 sub _notice { $_[0]{context}->notice($_[1], $_[2]) }
+
+sub _reply_text {
+    my ($context, $invocation, $text) = @_;
+    # PluginContext counts all arguments as character text, including strings
+    # that Perl can store as unflagged Latin-1.
+    utf8::upgrade($text);
+    my @lines = _split_text_for_irc($text, 400);
+    my $last = pop @lines;
+    for my $line (@lines) {
+        return 0 unless $context->reply($invocation, $line);
+    }
+    return $context->reply($invocation, $last);
+}
+
+sub _reply_history {
+    my ($context, $invocation, $history, $prefix, $separator) = @_;
+    my ($latest, @older) = reverse @$history;
+    my $line = $prefix . $latest;
+    for my $entry (@older) {
+        my $joined = $line . $separator . $entry;
+        if (_utf8_text_bytes($joined) > 400) {
+            return 0 unless _reply_text($context, $invocation, $line);
+            $line = $prefix . $entry;
+        } else {
+            $line = $joined;
+        }
+    }
+    return _reply_text($context, $invocation, $line);
+}
 
 sub command_8ball {
     my ($self, $context, $invocation) = @_;
@@ -92,20 +121,7 @@ sub command_roll {
         return $context->reply($invocation, "$nick: no roll history on $channel.")
             unless @$history;
 
-        my ($latest, @older) = reverse @$history;
-        my $prefix = 'Last rolls: ';
-        my $line = $prefix . $latest;
-        for my $roll (@older) {
-            my $joined = "$line  |  $roll";
-            # PluginContext budgets each reply in UTF-8 bytes.
-            if (length(encode('UTF-8', $joined)) > 400) {
-                return 0 unless $context->reply($invocation, $line);
-                $line = $prefix . $roll;
-            } else {
-                $line = $joined;
-            }
-        }
-        return $context->reply($invocation, $line);
+        return _reply_history($context, $invocation, $history, 'Last rolls: ', '  |  ');
     }
 
     my ($number, $sides, $modifier, $mode) = (1, 6, 0, '');
@@ -205,13 +221,13 @@ sub command_choose {
     my $channel_key = lc($channel // '');
     if (@args == 1 && lc($args[0]) eq 'history') {
         my $history = $self->{choose_history}{$channel_key} || [];
-        return $context->reply($invocation,
-            @$history ? 'Last choices: ' . join(' | ', reverse @$history)
-                     : "$nick: no choice history on $channel.");
+        return $context->reply($invocation, "$nick: no choice history on $channel.")
+            unless @$history;
+        return _reply_history($context, $invocation, $history, 'Last choices: ', ' | ');
     }
     if (@args == 1 && lc($args[0]) eq 'last') {
         my $last = $self->{choose_last}{$channel_key};
-        return $context->reply($invocation, defined($last)
+        return _reply_text($context, $invocation, defined($last)
             ? "$nick: last choice was: $last"
             : "$nick: no previous choice on this channel.");
     }
@@ -245,7 +261,7 @@ sub command_choose {
     my $history = $self->{choose_history}{$channel_key} ||= [];
     push @$history, $choice;
     splice @$history, 0, @$history - 5 if @$history > 5;
-    return $context->reply($invocation,
+    return _reply_text($context, $invocation,
         "$nick: I choose... $choice!"
             . (@pool > 2 ? ' (1 of ' . scalar(@pool) . ' options)' : ''));
 }

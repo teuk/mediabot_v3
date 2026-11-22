@@ -1,3 +1,8 @@
+## MB1421 — Deliver long choices and choice history in Playful v3
+
+- Keep `!choose`, `!choose last` and `!choose history` replies within the plugin's 400-byte UTF-8 budget.
+- Preserve the five most recent choices in order and group complete labels when they fit.
+
 ## MB1420 — Allow quote rankings on all supported IRC channel types
 
 - Make `!topquote` and `!halloffame` accept `!` and `+` channels in the built-in commands and Quotes v3 plugin.

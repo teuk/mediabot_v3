@@ -1,6 +1,7 @@
 use strict;
 use warnings;
 use utf8;
+use Encode qw(encode);
 use Test::More;
 use Storable qw(dclone);
 our (@DRAWS,@LIMITS,$DRAWING);
@@ -201,6 +202,46 @@ sub expected_step_1074 {
     return {error=>'',wire=>[['public',$channel,$text]],limits=>$limits,remaining=>[],
         warnings=>[],args=>$args,audit=>$kind eq 'native' && defined($value)
             ? [[$channel,$command,$value]] : []};
+}
+{
+    my $plugin = Mediabot::Plugin::Playful->new(context => $authority);
+    # Each choice fits, but the full history exceeds the reply budget.
+    my @choices = map { 'candidate-' . $_ . ' ' . (chr(233) x 89) } 1 .. 6;
+    for my $choice (@choices) {
+        my $draw = run_1381('plugin', 'choose', [$choice, '|', 'tea'], [0],
+            '#Test', undef, $plugin);
+        is($draw->{error}, '', 'the individual choice fits in a reply');
+    }
+    my $history = run_1381('plugin', 'choose', ['history'], [], '#TEST', undef, $plugin);
+    my @latest_first = reverse @choices[1 .. 5];
+    my @expected_lines = (
+        'Last choices: ' . join(' | ', @latest_first[0, 1]),
+        'Last choices: ' . join(' | ', @latest_first[2, 3]),
+        'Last choices: ' . $latest_first[4],
+    );
+    is($history->{error}, '', 'long choice history reaches the reply sink');
+    is_deeply($history->{wire}, [map { ['public', '#TEST', $_] } @expected_lines],
+        'history emits all five choices newest first and keeps each choice intact');
+    ok(!grep(length(encode('UTF-8', $_->[2])) > 400, @{$history->{wire}}),
+        'history replies fit the UTF-8 byte budget');
+    is_deeply([@$history{qw(limits record)}],
+        [[], [{'#test' => $choices[-1]}, {'#test' => [@choices[1 .. 5]]}]],
+        'recall leaves the channel history and last choice untouched');
+}
+{
+    my $plugin = Mediabot::Plugin::Playful->new(context => $authority);
+    my $choice = chr(233) x 199;
+    for my $case (
+        [[$choice, '|', 'tea'], [0], "Alice: I choose... $choice!"],
+        [['last'], [], "Alice: last choice was: $choice"],
+        [['history'], [], "Last choices: $choice"],
+    ) {
+        my ($args, $draws, $text) = @$case;
+        my $reply = run_1381('plugin', 'choose', $args, $draws, '#test', undef, $plugin);
+        is($reply->{error}, '', 'a single long Latin-1 choice is delivered in UTF-8 chunks');
+        is(join('', map { $_->[2] } @{$reply->{wire}}), $text,
+            'the complete choice survives a byte-budget cut inside the label');
+    }
 }
 {
     my (@actual,@expected);
