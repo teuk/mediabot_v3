@@ -111,6 +111,7 @@ sub setup_1402 {
         sqlite_unicode=>1,
     });
     $db->sqlite_create_function('DATE_FORMAT', 2, sub {substr($_[0], 0, 7)});
+    $db->sqlite_create_function('NOW', 0, sub {'2026-10-30 12:00:00'});
     # The stats projection now asks SQL for the epoch paired with its date.
     # This private fixture's SQL calendar is UTC, independent of host TZ.
     $db->sqlite_create_function('UNIX_TIMESTAMP', 1, sub {
@@ -198,6 +199,29 @@ sub bars_1402 {chr(0x2588) x $_[0] . chr(0x2591) x (4-$_[0])}
         'a genuinely empty comparison keeps its absence response');
     is_deeply($db->selectall_arrayref('SELECT * FROM CHANNEL_LOG'), $before,
         'monthly statistics remain read-only');
+}
+{
+    my ($bot, $db) = setup_1402();
+    $db->do(q{
+        INSERT INTO CHANNEL_LOG (id_channel, nick, ts, event_type) VALUES
+            (1, 'Alice', '2026-10-30 11:59:59', 'public'),
+            (1, 'ALICE', '2026-10-30 12:00:00', 'action'),
+            (1, 'Alice', '2026-10-30 12:00:01', 'public'),
+            (1, 'Bob',   '2026-10-01 12:00:00', 'public'),
+            (1, 'Bob',   '2026-11-01 12:00:00', 'action'),
+            (1, 'Future','2026-11-01 12:00:00', 'public')
+    });
+    is_deeply(invoke_1402($bot, 'monthstats', 'Alice'), [
+        ['public', '#test', 'alice on #test (last 12 months):'],
+        ['public', '#test', '  2026-10 '.chr(0x2588)x5 .' 2'],
+    ], 'single chart includes the exact database cutoff and excludes later rows in the same month');
+    is_deeply(invoke_1402($bot, 'monthstats', 'Caller', 'Alice', 'vs', 'Bob'), [
+        ['public', '#test', 'alice vs bob on #test (last 12 months):'],
+        ['public', '#test', '  alice//bob — 2026-10 '.bars_1402(4).'/'.bars_1402(2)],
+    ], 'comparison neither creates a future month nor scales bars against later messages');
+    is_deeply(invoke_1402($bot, 'monthstats', 'Future'), [
+        ['public', '#test', 'future: no data in last 12 months on #test.'],
+    ], 'future-only speech does not create monthly data');
 }
 {
     my ($bot, $db) = setup_1402();

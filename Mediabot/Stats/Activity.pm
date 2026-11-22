@@ -822,6 +822,7 @@ sub mbMonthStats_ctx {
             . ' WHERE cl.nick IN (?,?) AND c.name = ?'
             . "   AND cl.event_type IN ('public','action')"
             . '   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)'
+            . '   AND cl.ts <= NOW()'
             . ' GROUP BY ym, cl.nick ORDER BY ym', $t1, $t2, $channel
         );
         unless ($rows) {
@@ -869,6 +870,7 @@ sub mbMonthStats_ctx {
         . ' WHERE cl.nick = ? AND c.name = ?'
         . "   AND cl.event_type IN ('public','action')"
         . '   AND cl.ts >= DATE_SUB(NOW(), INTERVAL 12 MONTH)'
+        . '   AND cl.ts <= NOW()'
         . ' GROUP BY ym ORDER BY ym', $target, $channel
     );
     unless ($rows) {

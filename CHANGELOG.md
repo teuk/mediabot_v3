@@ -1,3 +1,8 @@
+## MB1417 — Exclude future-dated speech from monthstats
+
+- Bound the single-nickname and comparison charts to the database's current time.
+- Keep messages and actions logged at the exact cutoff eligible.
+
 ## MB1416 — Enforce the 60-second Quotegame deadline
 
 - Measure the round from one fractional start time and reject answers at or after the deadline, even when the countdown callback is still pending.
