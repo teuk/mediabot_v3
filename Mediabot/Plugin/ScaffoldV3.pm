@@ -5,6 +5,7 @@ use JSON::PP ();
 use File::Spec;
 use File::Path qw(remove_tree);
 use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
+use Mediabot::Plugin::ManifestV3;
 
 sub create {
     my (%args)=@_;
@@ -12,7 +13,7 @@ sub create {
     die "Invalid package name\n" unless defined($name) && !ref($name)
         && $name =~ /\A[a-z][a-z0-9]*(?:-[a-z0-9]+)*\z/ && length($name)<=48;
     $command //= $name =~ s/-/_/gr;
-    die "Invalid command name\n" unless !ref($command) && $command =~ /\A[a-z][a-z0-9_]{0,47}\z/;
+    die "Invalid command name\n" unless !ref($command) && $command =~ /\A[a-z][a-z0-9_]*\z/;
     die "Existing directory required\n" unless defined($parent) && !ref($parent) && -d $parent;
     $parent=File::Spec->rel2abs($parent);
     my $walk=File::Spec->rootdir;
@@ -21,14 +22,13 @@ sub create {
         $walk=File::Spec->catdir($walk,$part);die "Symlink parent refused\n" if -l $walk;
     }
     my $dest=File::Spec->catdir($parent,$name);
-    # mkdir is exclusive even for a racing creator or dangling symlink.
-    mkdir($dest,0700) or die "Destination exists or cannot be created\n";
     my $class='Mediabot::Plugin::V3::'.join('',map {ucfirst($_)} split /-/,$name);
     my $manifest={api=>3,name=>$name,version=>'0.1.0',description=>'A small explicit channel greeting.',
         runtime=>{kind=>'perl',entrypoint=>'lib/Greeting.pm',class=>$class},activation=>{default=>'off'},
         capabilities=>['irc.reply'],events=>[],jobs=>{},commands=>{$command=>{source=>'public',level=>0,
             help=>'Show the configured channel greeting.',handler=>'command_greet',aliases=>[]}},
         config_schema=>{greeting=>{type=>'string',default=>'Hello from this channel.',min_length=>1,max_length=>160}}};
+    Mediabot::Plugin::ManifestV3->validate($manifest, expected_name => $name);
     my $code=<<'CODE';
 package __CLASS__;
 use strict;
@@ -52,6 +52,9 @@ CODE
     $code =~ s/__CLASS__/$class/g;
     my $readme="# $name\n\nDefault-off API v3 example; capability: irc.reply only.\n"
         ."No database, HTTP, events, jobs or automatic messages.\n\n"
+        ."From the Mediabot checkout, verify your changes before installing the plugin:\n\n```bash\n"
+        ."perl tools/plugin_v3_workshop.pl --validate $name --grant irc.reply --directory plugins\n"
+        ."```\n\nUse the parent directory you passed to --create if it differs from plugins.\n\n"
         ."Try first on development #test, as an Owner in Partyline:\n\n```text\n"
         .".plugins loadv3 $name irc.reply\n.plugins policy $name #test observe\n.plugins enable $name\n"
         ."```\n\nIn #test, invoke !$command: observe remains silent. Then explicitly choose\n"
@@ -60,6 +63,8 @@ CODE
         ."Rollback: .plugins policy $name #test off, .plugins disable $name,\n"
         ."then .plugins unload $name. Existing core permissions still apply.\n"
         ."For a complete checked walkthrough see docs/PLUGIN_WORKSHOP.md.\n";
+    # mkdir is exclusive even for a racing creator or dangling symlink.
+    mkdir($dest,0700) or die "Destination exists or cannot be created\n";
     my $ok=eval {
         mkdir(File::Spec->catdir($dest,'lib'),0755) or die 'directory';
         my %files=('plugin.json'=>JSON::PP->new->canonical->pretty->encode($manifest),

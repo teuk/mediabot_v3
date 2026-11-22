@@ -1,3 +1,8 @@
+## MB1422 — Validate author-edited API v3 packages offline
+
+- Add an offline workshop command that loads an edited package disabled through the native runtime and reports mounted resources under explicit test grants.
+- Validate scaffold manifests with the runtime validator before creating a package directory.
+
 ## MB1421 — Deliver long choices and choice history in Playful v3
 
 - Keep `!choose`, `!choose last` and `!choose history` replies within the plugin's 400-byte UTF-8 budget.

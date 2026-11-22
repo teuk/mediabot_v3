@@ -149,4 +149,68 @@ open my $workshop,'-|',$^X,'tools/plugin_v3_workshop.pl','--check' or die $!;
 my $report=do {local $/;<$workshop>};my $closed=close $workshop;
 ok($closed,'generated package completes its real native runtime lifecycle');
 like($report,qr/observe\/on\/off.*unload and stale-handler refusal/,'workshop verifies activation, isolation, unload and stale callbacks');
+
+my $accepted_command = 'g' x 24;
+my $boundary = Mediabot::Plugin::ScaffoldV3::create(
+    directory => $tmp, name => 'limit-v3', command => $accepted_command);
+ok(-f "$boundary->{directory}/plugin.json", 'scaffold accepts the runtime command length limit');
+for my $args (
+    { name => 'over-limit-v3', command => 'g' x 25 },
+    { name => 'a' x 25 },
+) {
+    my $created = eval { Mediabot::Plugin::ScaffoldV3::create(directory => $tmp, %$args); 1 };
+    ok(!$created && $@ =~ /invalid command name/,
+        'scaffold rejects an overlong explicit or derived command through ManifestV3');
+    ok(!-e "$tmp/$args->{name}", 'the rejected scaffold leaves no package directory');
+}
+
+sub validate_workshop_1322 {
+    my (@args) = @_;
+    my $pid = open my $child, '-|';
+    die "cannot fork workshop validator: $!" unless defined $pid;
+    if (!$pid) {
+        open STDERR, '>&STDOUT' or die $!;
+        exec $^X, 'tools/plugin_v3_workshop.pl', '--validate', @args or die $!;
+    }
+    my $output = do { local $/; <$child> };
+    my $ok = close $child;
+    return ($ok, $output // '');
+}
+
+my ($valid, $validation) = validate_workshop_1322('first-v3',
+    '--directory', $tmp, '--grant', 'irc.reply');
+ok($valid, 'the author can validate their generated package in a custom directory');
+like($validation, qr/first-v3 0\.1\.0 loaded disabled and unloaded.*commands: 1\/1 mounted/s,
+    'the validator exercises the real command registration');
+
+($valid, $validation) = validate_workshop_1322('hello-v3');
+ok($valid, 'an existing package validates without any test grants');
+like($validation, qr/events: 0\/1 mounted.*jobs: 0\/1 mounted.*grants: none/s,
+    'declared resources without a test grant remain unmounted');
+
+($valid, $validation) = validate_workshop_1322('hello-v3',
+    '--grant', 'events.subscribe', '--grant', 'scheduler.jobs');
+ok($valid, 'the validator mounts and unloads real listeners and jobs with requested grants');
+like($validation, qr/events: 1\/1 mounted.*jobs: 1\/1 mounted/s,
+    'the report shows mounted listener and job counts');
+
+($valid, $validation) = validate_workshop_1322('first-v3',
+    '--directory', $tmp, '--grant', 'http.fetch');
+ok(!$valid, 'the offline runtime rejects an unrequested test grant');
+like($validation, qr/capability 'http\.fetch' was not requested/,
+    'the validator returns the runtime grant error');
+
+Mediabot::Plugin::ScaffoldV3::create(directory => $tmp, name => 'collision-v3', command => 'choose');
+($valid, $validation) = validate_workshop_1322('collision-v3', '--directory', $tmp);
+ok(!$valid, 'a conflicting command is checked against the actual built-in registry');
+like($validation, qr/mounting API v3 command 'choose'/, 'the report identifies the conflicting command');
+
+$manifest->{commands}{first_greeting}{handler} = 'command_missing';
+open my $edited_manifest, '>:raw', "$out->{directory}/plugin.json" or die $!;
+print {$edited_manifest} encode_json($manifest) or die $!;
+close $edited_manifest or die $!;
+($valid, $validation) = validate_workshop_1322('first-v3', '--directory', $tmp);
+ok(!$valid, 'the validator reads the author-edited package instead of the witness');
+like($validation, qr/command 'first_greeting' has no handler 'command_missing'/,
+    'the report identifies the missing method');
 done_testing;

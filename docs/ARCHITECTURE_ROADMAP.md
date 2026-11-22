@@ -1887,3 +1887,18 @@ failures have explicit regression coverage. The existing four-case client lane
 passes 294 assertions locally; installed-host AI behavior/full acceptance remains
 mandatory. See [the operational baseline](OPERATIONS_BASELINE.md) for limits and
 measurement-based next steps. No additional extraction is planned for this chapter.
+
+## MB1422 — Validate author-edited API v3 packages offline
+
+The workshop can now load a selected local package through the same API v3
+runtime as Mediabot. It supplies an isolated native command registry, event
+bus and scheduler. The manifest defines the requested capabilities and the
+author supplies any grants for the check. The plugin manager owns mounting and
+unloading. The validator does not enable the package or exercise its handlers.
+
+The scaffold now delegates manifest validation to `Plugin::ManifestV3` before
+creating the package directory. This eliminates the discrepancy between the
+generator's command-length bound and the runtime's. See the
+[workshop](PLUGIN_WORKSHOP.md) for the create, edit, validate and activation path.
+The existing witness check remains a separate way to exercise activation and
+output behavior. Host acceptance is pending.

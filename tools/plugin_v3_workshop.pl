@@ -6,15 +6,77 @@ use lib "$Bin/..";
 use Getopt::Long qw(GetOptions);
 use File::Temp qw(tempdir);
 use Mediabot::Plugin::ScaffoldV3;
-my ($check,$name,$command,$directory)=(0,undef,undef,'plugins');
-GetOptions('check'=>\$check,'create=s'=>\$name,'command=s'=>\$command,'directory=s'=>\$directory)
-    or die "Use --check or --create NAME [--command NAME] [--directory EXISTING_DIR]\n";
-die "Use exactly --check or --create NAME\n" if @ARGV || ($check ? defined($name) || defined($command) : !defined($name));
-if (!$check) {
+my $usage = <<'USAGE';
+Usage:
+  perl tools/plugin_v3_workshop.pl --check
+  perl tools/plugin_v3_workshop.pl --create NAME [--command NAME] [--directory DIR]
+  perl tools/plugin_v3_workshop.pl --validate NAME [--grant CAPABILITY ...] [--directory DIR]
+
+--validate loads trusted local Perl code in a disposable, disabled runtime.
+--directory is the parent of the package (default: plugins).
+USAGE
+
+my ($check, $name, $package, $command, $help) = (0);
+my $directory = 'plugins';
+my @grants;
+GetOptions(
+    'check'       => \$check,
+    'create=s'    => \$name,
+    'validate=s'  => \$package,
+    'command=s'   => \$command,
+    'grant=s@'    => \@grants,
+    'directory=s' => \$directory,
+    'help'        => \$help,
+) or die $usage;
+if ($help) {
+    print $usage;
+    exit 0;
+}
+my $mode_count = $check + defined($name) + defined($package);
+die $usage if @ARGV || $mode_count != 1
+    || (defined($command) && !defined($name)) || (@grants && !defined($package));
+
+if (defined $name) {
     my $r=Mediabot::Plugin::ScaffoldV3::create(directory=>$directory,name=>$name,command=>$command);
     print "[OK] Created default-off package $r->{name}; command $r->{command}. No bot was loaded or changed.\n";
     exit 0;
 }
+
+if (defined $package) {
+    validate_package($package, $directory, \@grants);
+    exit 0;
+}
+
+sub validate_package {
+    my ($name, $directory, $grants) = @_;
+    require Mediabot::Mediabot;
+    require IO::Async::Loop;
+    require Mediabot::Scheduler;
+
+    # Build the actual built-in registry, without opening any live services.
+    my $bot = Mediabot->new({});
+    my $loop = IO::Async::Loop->new;
+    $bot->setLoop($loop);
+    $bot->{scheduler} = Mediabot::Scheduler->new(loop => $loop);
+    my $manager = Mediabot::PluginManager->new(bot => $bot, plugin_dir => $directory);
+    $manager->load_package_v3($name, grants => $grants);
+
+    my $report = $manager->v3_diagnostic_report($name);
+    my ($declared, $mounted) = @{$report->{runtime}}{qw(declared mounted)};
+    die "Package was unexpectedly enabled\n" unless $report->{lifecycle} eq 'disabled';
+
+    $manager->unregister_plugin($name) or die "Package could not be unloaded\n";
+    die "Package left runtime registrations after unload\n"
+        if $manager->count || $bot->{scheduler}->task_names || $bot->events->events
+        || grep { ($_->{plugin} // '') eq $name } $bot->command_registry->list;
+
+    print "[OK] $report->{plugin} $report->{version} loaded disabled and unloaded.\n";
+    for my $kind (qw(commands events jobs)) {
+        print "  $kind: $mounted->{$kind}/$declared->{$kind} mounted\n";
+    }
+    print "  grants: ", (@$grants ? join(', ', sort @$grants) : 'none'), "\n";
+}
+
 {
     package Workshop::Bot;
     sub command_registry {$_[0]{registry}}

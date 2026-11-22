@@ -35,12 +35,39 @@ Sur le dépôt de développement, choisir un nom et une commande libres :
 )
 ```
 
-Le répertoire doit être existant. Noms invalides, parents symlinks et destination
-existante sont refusés. Le générateur écrit plugin.json, README.md et
+Le répertoire doit être existant. Le générateur valide le manifeste avec les mêmes
+règles que le chargeur avant de créer le paquet. Le nom de commande ordinaire peut
+faire jusqu’à 24 caractères. Utiliser `--command` si le nom dérivé du paquet
+dépasse cette limite. Les parents symlinks et les destinations existantes sont
+refusés. Le générateur écrit plugin.json, README.md et
 lib/Greeting.pm. La seule capacité est irc.reply ; la configuration typée
 `greeting` limite le texte à 160 caractères. Aucun timer, événement, HTTP,
 stockage ou SQL n'est demandé. Remplacer le texte métier dans cette petite
 surface, puis ajouter un test de comportement avant d'étendre les capacités.
+
+## Valider le paquet après modification
+
+Depuis le dépôt, avec les dépendances habituelles de Mediabot, indique le nom du
+paquet et son répertoire parent.
+
+```bash
+perl tools/plugin_v3_workshop.pl --validate welcome-v3 \
+  --directory plugins --grant irc.reply
+```
+
+Le chargeur API v3 vérifie le manifeste, instancie le paquet, vérifie les méthodes
+déclarées et essaie de monter les commandes et alias dans le registre natif. Une
+collision avec une commande intégrée ou une méthode manquante rend le contrôle
+en échec. Le paquet reste désactivé et le contrôle le décharge à la fin. Le rapport
+indique les ressources montées parmi celles déclarées. Pour tester le montage des
+abonnements et des tâches, ajoute respectivement `--grant events.subscribe` et
+`--grant scheduler.jobs` si le manifeste les demande.
+
+Utilise cette commande avec du code Perl local de confiance. Le chargement
+exécute le code du module et son constructeur dans un processus de test, avec un
+registre, un bus d’événements et un planificateur en mémoire. Aucun service live
+n’est connecté par l’atelier et aucune commande de plugin n’est invoquée. Garde
+les tests de comportement du paquet pour vérifier ses réponses et ses traitements.
 
 ## Première activation supervisée
 
