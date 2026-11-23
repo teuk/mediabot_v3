@@ -261,5 +261,6 @@ Pour terminer, décharge les scripts essayés.
 
 ## Pour aller plus loin
 
+- [Cinq commandes à essayer et à adapter](https://github.com/teuk/mediabot_v3/blob/master/docs/MEDIABOT_COMMAND_RECIPES.md) pour analyser du texte, tenir un mémo de canal et envoyer un lien en NOTICE.
 - [Cookbook des scripts API v2](https://github.com/teuk/mediabot_v3/blob/master/plugins/scripts/COOKBOOK.md) pour ajouter des événements et du stockage.
 - [Atelier des plugins API v3](https://github.com/teuk/mediabot_v3/blob/master/docs/PLUGIN_WORKSHOP.md) pour créer un paquet avec des droits explicites et une activation par canal. Le paquet Perl v3 utilise un module natif. Les paquets Python et Tcl v3 exécutent leurs commandes dans un processus séparé.

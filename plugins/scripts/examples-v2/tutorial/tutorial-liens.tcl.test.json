@@ -1,0 +1,24 @@
+{
+  "steps": [
+    {
+      "command": "plien",
+      "data": {"channel": "#atelier", "nick": "Mina", "args": ["wiki"]},
+      "replies": [["NOTICE", "Mina", "https://github.com/teuk/mediabot_v3/wiki"]]
+    },
+    {
+      "command": "plien",
+      "data": {"args": ["ISSUES"]},
+      "replies": [["NOTICE", "Pablo", "https://github.com/teuk/mediabot_v3/issues"]]
+    },
+    {
+      "command": "plien",
+      "data": {"args": ["wiki", "issues"]},
+      "replies": [["NOTICE", "Pablo", "Usage : plien <docs|wiki|issues>"]]
+    },
+    {
+      "command": "plien",
+      "data": {"args": ["un-lien-inconnu"]},
+      "replies": [["NOTICE", "Pablo", "Usage : plien <docs|wiki|issues>"]]
+    }
+  ]
+}

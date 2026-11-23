@@ -1,0 +1,11 @@
+{
+  "api": 2,
+  "name": "tutorial-note",
+  "version": "0.1.0",
+  "description": "Write, read or clear a shared IRC channel note.",
+  "commands": {
+    "pnote": {"help": "pnote <texte> - écrit la note du canal.", "level": 0},
+    "plirenote": {"help": "plirenote - affiche la note du canal.", "level": 0},
+    "peffacenote": {"help": "peffacenote - efface la note du canal.", "level": 0}
+  }
+}

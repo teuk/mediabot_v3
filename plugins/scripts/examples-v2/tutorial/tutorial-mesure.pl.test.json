@@ -1,0 +1,18 @@
+{
+  "steps": [
+    {
+      "command": "pmesure",
+      "replies": [["PRIVMSG", "#workshop", "Usage : pmesure <texte>"]]
+    },
+    {
+      "command": "pmesure",
+      "data": {"channel": "#atelier", "args": ["Élodie", "Martin"]},
+      "replies": [["PRIVMSG", "#atelier", "Mots : 2 | Caractères : 13"]]
+    },
+    {
+      "command": "pmesure",
+      "data": {"args": ["un  deux", "☕"]},
+      "replies": [["PRIVMSG", "#workshop", "Mots : 3 | Caractères : 10"]]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "api": 2,
+  "name": "tutorial-mesure",
+  "version": "0.1.0",
+  "description": "Count words and characters in an IRC command.",
+  "commands": {
+    "pmesure": {"help": "pmesure <texte> - compte les mots et les caractères.", "level": 0}
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "api": 2,
+  "name": "tutorial-liens",
+  "version": "0.1.0",
+  "description": "Send useful Mediabot links in an IRC notice.",
+  "commands": {
+    "plien": {"help": "plien <docs|wiki|issues> - envoie un lien en NOTICE.", "level": 0}
+  }
+}

@@ -69,6 +69,7 @@ snap_mediabot*.sh
 
 # Public plugin v2 sidecar manifests are versioned project artifacts.
 !plugins/scripts/**/*.manifest.json
+!plugins/scripts/examples-v2/tutorial/*.test.json
 !plugins/API_V2_CONTRACT.json
 !plugins/API_V3_CONTRACT.json
 !plugins/API_V3_EVENTS.json

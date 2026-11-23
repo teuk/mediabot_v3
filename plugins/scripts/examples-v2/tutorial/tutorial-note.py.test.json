@@ -1,0 +1,53 @@
+{
+  "steps": [
+    {
+      "command": "plirenote",
+      "replies": [["PRIVMSG", "#workshop", "Aucune note pour ce canal."]]
+    },
+    {
+      "command": "pnote",
+      "data": {"channel": "#atelier[1]", "args": ["Démo", "jeudi", "à", "20", "h."]},
+      "replies": []
+    },
+    {
+      "command": "pnote",
+      "data": {"channel": "#ailleurs", "args": ["Atelier", "vendredi."]},
+      "replies": []
+    },
+    {
+      "command": "plirenote",
+      "data": {"channel": "#Atelier{1}", "nick": "Élodie"},
+      "replies": [["PRIVMSG", "#Atelier{1}", "Note du canal : Démo jeudi à 20 h."]]
+    },
+    {
+      "command": "pnote",
+      "data": {"channel": "#atelier[1]"},
+      "replies": [["PRIVMSG", "#atelier[1]", "Usage : pnote <texte de 1 à 120 octets UTF-8>"]]
+    },
+    {
+      "command": "pnote",
+      "data": {"channel": "#atelier[1]", "args": ["Nouvelle", "date."]},
+      "replies": []
+    },
+    {
+      "command": "plirenote",
+      "data": {"channel": "#atelier[1]"},
+      "replies": [["PRIVMSG", "#atelier[1]", "Note du canal : Nouvelle date."]]
+    },
+    {
+      "command": "peffacenote",
+      "data": {"channel": "#atelier[1]"},
+      "replies": []
+    },
+    {
+      "command": "plirenote",
+      "data": {"channel": "#atelier[1]"},
+      "replies": [["PRIVMSG", "#atelier[1]", "Aucune note pour ce canal."]]
+    },
+    {
+      "command": "plirenote",
+      "data": {"channel": "#ailleurs"},
+      "replies": [["PRIVMSG", "#ailleurs", "Note du canal : Atelier vendredi."]]
+    }
+  ]
+}

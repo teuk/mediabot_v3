@@ -1,5 +1,9 @@
 # Mediabot script cookbook — patterns by task and language
 
+For a runnable walkthrough, see [five IRC commands in Perl, Python and Tcl
+(French)](../../docs/MEDIABOT_COMMAND_RECIPES.md). It covers text input, a
+channel memo, private notices and offline fixtures.
+
 Practical recipes for writing `mediabot-script-v1` plugin scripts. The
 [README](README.md) is the reference (protocol, keys, guardrails); this page
 is the "how do I do X" companion. Every snippet below is distilled from a
