@@ -301,6 +301,9 @@ perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
 
 ## Écrire et tester un script API v2 en Perl, Python ou Tcl
 
+Le [tutoriel du premier script](WRITE_A_MEDIABOT_SCRIPT.md) présente le
+code complet dans les trois langages, de la génération à l’essai sur IRC.
+
 Depuis le dépôt, choisis un langage et un nom de commande libre. Ce parcours
 utilise `perl` et `JSON::PP`, `python3` et sa bibliothèque standard, ou `tclsh`
 avec les modules `json` et `json::write` de Tcllib.

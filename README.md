@@ -357,6 +357,7 @@ Install optional components only after the IRC bot is healthy:
 | Prometheus and Grafana | [Monitoring guide](https://github.com/teuk/mediabot_v3/wiki/Monitoring-with-Prometheus-and-Grafana) · [Grafana dashboard for one instance](contrib/grafana/INSTANCE_MINUTE.md) |
 | TCP/DCC Partyline | [Partyline guide](https://github.com/teuk/mediabot_v3/wiki/Partyline) |
 | Plugins and external scripts | [Developing plugins](https://github.com/teuk/mediabot_v3/wiki/Developing-plugins) |
+| First script in Perl, Python or Tcl | [Step-by-step tutorial (French)](docs/WRITE_A_MEDIABOT_SCRIPT.md) |
 
 The shared radio service was delivered during the completed 3.6dev cycle. Stable operators should follow the documentation shipped with their selected release.
 

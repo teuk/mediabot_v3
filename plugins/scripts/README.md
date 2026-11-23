@@ -1,5 +1,8 @@
 # Mediabot external script plugins
 
+Start with the [first-script tutorial (French)](../../docs/WRITE_A_MEDIABOT_SCRIPT.md)
+to write and test a sidecar in Perl, Python or Tcl.
+
 > **API status:** sidecar API v2 is frozen at the MB740 baseline. Existing
 > plugins remain supported and continue to receive security and regression
 > fixes, but new privileged capabilities and first-party plugins target API v3.
