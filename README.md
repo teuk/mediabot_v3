@@ -33,6 +33,16 @@ Network history and public dashboards: [NETWORK_STATS.md](docs/NETWORK_STATS.md)
 
 Undernet X authentication and recovery: [XAUTH_UNDERNET.md](docs/XAUTH_UNDERNET.md).
 
+## Write scripts in Perl, Python or Tcl
+
+Start with a greeting command, then try five examples that cover text,
+channel notes and IRC notices. Both guides include offline tests.
+
+| Wiki guide | English | Français |
+| --- | --- | --- |
+| Write your first script | [English](https://github.com/teuk/mediabot_v3/wiki/Writing-a-Mediabot-script-EN) | [Français](https://github.com/teuk/mediabot_v3/wiki/Writing-a-Mediabot-script) |
+| Five commands to try and adapt | [English](https://github.com/teuk/mediabot_v3/wiki/Mediabot-script-recipes-EN) | [Français](https://github.com/teuk/mediabot_v3/wiki/Mediabot-script-recipes) |
+
 ## Clone and contribute
 
 Explore the development branch in your own checkout:
