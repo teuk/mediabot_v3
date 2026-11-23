@@ -209,6 +209,36 @@ perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
   --grant storage.kv
 ```
 
+## Simuler le redémarrage d’un plugin API v3
+
+Ajoute une étape `"restart": true` après avoir produit l’état à tester.
+L’atelier sauvegarde sur disque l’activation du plugin, ses capacités
+accordées et ses politiques de canal, puis le décharge et le restaure via
+le mécanisme normal de démarrage. Il compare l’état restauré à l’état
+sauvegardé. Les étapes suivantes s’exécutent dans l’instance rechargée et
+gardent le même répertoire temporaire.
+
+```json
+{
+  "restart": true,
+  "replies": [],
+  "storage": {"global": {"revision": 1, "values": {"note": "Café"}}}
+}
+```
+
+`storage` reste facultatif et utilise les mêmes assertions que pour les
+autres étapes. L’exemple vérifie que les données globales et par canal
+traversent le redémarrage, que la mémoire du plugin repart à vide et que
+les commandes, événements et tâches fonctionnent après restauration.
+
+```bash
+perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
+  --directory plugins/examples-v3 \
+  --fixture plugins/examples-v3/channel-observer-v3/restart.test.json \
+  --grant events.subscribe --grant irc.reply --grant scheduler.jobs \
+  --grant irc.channel_message --grant storage.kv
+```
+
 ## Écrire et tester un script API v2 en Perl, Python ou Tcl
 
 Depuis le dépôt, choisis un langage et un nom de commande libre. Ce parcours

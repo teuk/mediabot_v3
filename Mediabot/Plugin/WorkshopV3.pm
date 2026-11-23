@@ -57,13 +57,13 @@ sub test_package {
     my $entry = $manager->load_package_v3($name, grants => $grants);
     my $processes = $entry->{metadata}{external_commands}
         ? $manager->v3_runtime->script_processes : undef;
-    my ($count, $events, $jobs) = (0, 0, 0);
+    my ($count, $events, $jobs, $restarts) = (0, 0, 0, 0);
     my $ok = eval {
         $manager->enable($name) or die "Could not enable '$name' in the workshop\n";
         for my $step (@$steps) {
             $count++;
-            my @kinds = ref($step) eq 'HASH' ? grep { exists $step->{$_} } qw(command event job) : ();
-            die "Step $count must declare one command, event or job and a replies array\n"
+            my @kinds = ref($step) eq 'HASH' ? grep { exists $step->{$_} } qw(command event job restart) : ();
+            die "Step $count must declare one command, event, job or restart and a replies array\n"
                 unless @kinds == 1 && ref($step->{replies}) eq 'ARRAY';
             my $storage;
             if (exists $step->{storage}) {
@@ -74,7 +74,12 @@ sub test_package {
             }
             $bot->{workshop_replies} = [];
             delete $bot->{logger}{error};
-            if ($kinds[0] eq 'job') {
+            if ($kinds[0] eq 'restart') {
+                $entry = _test_restart_step($manager, $name, $count, $step);
+                $processes = $entry->{metadata}{external_commands}
+                    ? $manager->v3_runtime->script_processes : undef;
+                $restarts++;
+            } elsif ($kinds[0] eq 'job') {
                 _test_job_step($bot, $manager, $entry, $count, $step);
                 $jobs++;
             } elsif ($kinds[0] eq 'event') {
@@ -96,7 +101,40 @@ sub test_package {
     die $error unless $ok;
     die($unload_error || "Could not unload '$name' in the workshop\n") unless $unloaded;
     die($@ || "Workshop script cleanup incomplete\n") unless $stopped;
-    return { steps => $count, event_steps => $events, job_steps => $jobs };
+    return { steps => $count, event_steps => $events, job_steps => $jobs, restart_steps => $restarts };
+}
+
+sub _test_restart_step {
+    my ($manager, $name, $number, $step) = @_;
+    die "Step $number: unknown restart step field\n"
+        if grep { $_ ne 'restart' && $_ ne 'replies' } keys %$step;
+    die "Step $number: restart must be JSON true\n"
+        unless JSON::PP::is_bool($step->{restart}) && $step->{restart};
+
+    my $before = $manager->v3_runtime_state_snapshot;
+    my ($saved, $error) = $manager->store_v3_runtime_state;
+    die "Step $number: cannot save runtime state: $error\n" unless $saved;
+
+    # Save before stopping so the persisted enabled flag is kept. Disable
+    # explicitly so a failing stop hook is surfaced by the workshop.
+    my $removed = eval {
+        $manager->disable($name) && $manager->unregister_plugin($name);
+    };
+    my $detail = $@;
+    die "Step $number: cannot stop or unload '$name': " . ($detail || "operation refused\n")
+        unless $removed;
+
+    my $report = $manager->restore_v3_runtime_state;
+    if (@{ $report->{errors} }) {
+        my $error = $report->{errors}[0]{error};
+        die "Step $number: cannot restore '$name': $error\n";
+    }
+    my $entry = $manager->plugin($name);
+    die "Step $number: restore did not load '$name'\n"
+        unless $entry && @{ $report->{loaded} } == 1 && $report->{loaded}[0]{package} eq $name;
+    Mediabot::Plugin::WorkshopFixture::assert_json(
+        $number, 'restored runtime state', $before, $manager->v3_runtime_state_snapshot);
+    return $entry;
 }
 
 sub _storage_expectations {

@@ -1,3 +1,8 @@
+## MB1430 — Exercise simulated plugin restarts in API v3 fixtures
+
+- Save and restore the native runtime state around a plugin unload, then continue with a new instance in the same scenario.
+- Verify persisted policy, grants and data across restart and exercise the remounted commands, events and jobs.
+
 ## MB1429 — Assert plugin storage in offline API v3 fixtures
 
 - Give every workshop run a fresh temporary data directory and let fixtures request the native storage capability.

@@ -422,6 +422,39 @@ write_fixture_1322($custom_fixture, [
 ok($tested && $test_report =~ /passed 2 offline API v3 command\/event\/job step/,
     'the same read-only storage assertions work on event and job steps');
 
+($tested, $test_report) = workshop_cli_1322(@observer,
+    '--fixture', 'plugins/examples-v3/channel-observer-v3/restart.test.json',
+    '--grant', 'events.subscribe', '--grant', 'irc.reply', @job_grants, @storage_grant);
+ok($tested && $test_report =~ /passed 10 offline API v3 command\/event\/job\/restart step/,
+    'restart restores persisted policy and storage, renews jobs and resumes event and command dispatch');
+
+write_fixture_1322($custom_fixture, [
+    {restart => JSON::PP::false, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture);
+ok(!$tested && $test_report =~ /restart must be JSON true/,
+    'restart requires an explicit JSON true');
+
+write_fixture_1322($custom_fixture, [
+    {restart => JSON::PP::true, command => 'last_workshop_join', replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture);
+ok(!$tested && $test_report =~ /declare one command, event, job or restart/,
+    'restart is a distinct fixture step');
+
+Mediabot::Plugin::ScaffoldV3::create(
+    directory => $tmp, name => 'restart-python', language => 'python');
+write_fixture_1322($custom_fixture, [
+    {command => 'restart_python', replies => [['PRIVMSG', '#workshop', 'Bonjour, Pablo!']]},
+    {restart => JSON::PP::true, replies => []},
+    {command => 'restart_python', data => {args => ['Élodie']},
+        replies => [['PRIVMSG', '#workshop', 'Bonjour, Élodie!']]},
+]);
+($tested, $test_report) = workshop_cli_1322('--test', 'restart-python', '--directory', $tmp,
+    '--fixture', $custom_fixture, '--grant', 'irc.reply');
+ok($tested && $test_report =~ /passed 3 offline API v3 command\/restart step/,
+    'external command scripts still run after the old instance is unloaded');
+
 $manifest->{commands}{first_greeting}{handler} = 'command_missing';
 open my $edited_manifest, '>:raw', "$out->{directory}/plugin.json" or die $!;
 print {$edited_manifest} encode_json($manifest) or die $!;

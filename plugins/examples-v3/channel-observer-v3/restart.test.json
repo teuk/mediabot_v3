@@ -1,0 +1,59 @@
+{
+  "steps": [
+    {"command": "workshop_remember", "data": {"args": ["global", "Café"]}, "replies": []},
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#relance", "args": ["channel", "Thé"]},
+      "replies": []
+    },
+    {
+      "event": "irc.channel.join",
+      "config": {"greeting": "Salut"},
+      "data": {"channel": "#relance", "nick": "Sam"},
+      "replies": []
+    },
+    {
+      "command": "last_workshop_join",
+      "data": {"channel": "#relance"},
+      "replies": [["PRIVMSG", "#relance", "Salut, Sam [on]"]]
+    },
+    {
+      "job": "pulse",
+      "channels": {
+        "#relance": {"mode": "on", "config": {"greeting": "Salut"}},
+        "#ailleurs": {"mode": "observe"}
+      },
+      "replies": [["PRIVMSG", "#relance", "Salut, passage 1"]]
+    },
+    {
+      "restart": true,
+      "replies": [],
+      "storage": {
+        "global": {"revision": 1, "values": {"note": "Café"}},
+        "channels": {"#relance": {"revision": 1, "values": {"note": "Thé"}}}
+      }
+    },
+    {
+      "command": "last_workshop_join",
+      "data": {"channel": "#relance"},
+      "replies": [["PRIVMSG", "#relance", "Aucune arrivée observée."]]
+    },
+    {
+      "job": "pulse",
+      "channels": {"#relance": {"config": {"greeting": "Salut"}}},
+      "replies": [["PRIVMSG", "#relance", "Salut, passage 1"]]
+    },
+    {"event": "irc.channel.word", "data": {"channel": "#relance", "word": "salut"}, "replies": [
+      ["PRIVMSG", "#relance", "Mot observé : salut"]
+    ]},
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#relance", "args": ["global", "Maté"]},
+      "replies": [],
+      "storage": {
+        "global": {"revision": 2, "values": {"note": "Maté"}},
+        "channels": {"#relance": {"revision": 1, "values": {"note": "Thé"}}}
+      }
+    }
+  ]
+}

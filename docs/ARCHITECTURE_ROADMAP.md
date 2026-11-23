@@ -1983,4 +1983,16 @@ Workshop scenes get fresh file-backed storage per run through the ordinary
 plugin repositories. Steps may request exact read-only assertions of revision
 and values in the package-wide document and any selected channel document.
 The example exercises Unicode, channel isolation, RFC1459 channel equivalence
-and suppression of writes in observe and off. Target-host acceptance is pending.
+and suppression of writes in observe and off. Commit
+`20669b334bdfc852fdc033f30d2fce209bd6f521` was pushed to `origin/master`
+and matches the subsequent teuk.org snapshot.
+
+## MB1430 — Verify simulated API v3 plugin restarts in offline fixtures
+
+A restart step uses the native runtime state file to save the enabled flag,
+capability grants and channel policies before unload. The normal restore
+path remounts the package. The workshop compares the restored state with the
+saved state, then can assert persistent plugin data and exercise the new
+command, event and job registrations. The example also checks that its
+transient observer state and job sequence restart. Target-host acceptance is
+pending.
