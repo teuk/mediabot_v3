@@ -1,0 +1,44 @@
+{
+  "steps": [
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#atelier", "args": ["channel", "Thé"]},
+      "replies": []
+    },
+    {"event": "irc.channel.join", "data": {"channel": "#atelier", "nick": "Sam"}, "replies": []},
+    {
+      "job": "pulse",
+      "channels": {"#atelier": {"mode": "on"}},
+      "replies": [["PRIVMSG", "#atelier", "Bonjour, passage 1"]]
+    },
+    {"lifecycle": "disable", "replies": []},
+    {
+      "command": "last_workshop_join",
+      "data": {"channel": "#atelier"},
+      "expect": "disabled",
+      "replies": []
+    },
+    {"event": "irc.channel.join", "data": {"channel": "#atelier", "nick": "Lou"}, "replies": []},
+    {"job": "pulse", "channels": {"#atelier": {"mode": "on"}}, "replies": []},
+    {
+      "lifecycle": "enable",
+      "replies": [],
+      "storage": {"channels": {"#atelier": {"revision": 1, "values": {"note": "Thé"}}}}
+    },
+    {
+      "command": "last_workshop_join",
+      "data": {"channel": "#atelier"},
+      "replies": [["PRIVMSG", "#atelier", "Bonjour, Sam [on]"]]
+    },
+    {
+      "event": "irc.channel.word",
+      "data": {"channel": "#atelier", "word": "salut"},
+      "replies": [["PRIVMSG", "#atelier", "Mot observé : salut"]]
+    },
+    {
+      "job": "pulse",
+      "channels": {"#atelier": {"mode": "on"}},
+      "replies": [["PRIVMSG", "#atelier", "Bonjour, passage 2"]]
+    }
+  ]
+}

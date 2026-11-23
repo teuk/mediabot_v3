@@ -57,13 +57,14 @@ sub test_package {
     my $entry = $manager->load_package_v3($name, grants => $grants);
     my $processes = $entry->{metadata}{external_commands}
         ? $manager->v3_runtime->script_processes : undef;
-    my ($count, $events, $jobs, $restarts) = (0, 0, 0, 0);
+    my ($count, $events, $jobs, $restarts, $lifecycle) = (0, 0, 0, 0, 0);
     my $ok = eval {
         $manager->enable($name) or die "Could not enable '$name' in the workshop\n";
         for my $step (@$steps) {
             $count++;
-            my @kinds = ref($step) eq 'HASH' ? grep { exists $step->{$_} } qw(command event job restart) : ();
-            die "Step $count must declare one command, event, job or restart and a replies array\n"
+            my @kinds = ref($step) eq 'HASH'
+                ? grep { exists $step->{$_} } qw(command event job restart lifecycle) : ();
+            die "Step $count must declare one command, event, job, restart or lifecycle and a replies array\n"
                 unless @kinds == 1 && ref($step->{replies}) eq 'ARRAY';
             my $storage;
             if (exists $step->{storage}) {
@@ -79,6 +80,9 @@ sub test_package {
                 $processes = $entry->{metadata}{external_commands}
                     ? $manager->v3_runtime->script_processes : undef;
                 $restarts++;
+            } elsif ($kinds[0] eq 'lifecycle') {
+                _test_lifecycle_step($manager, $entry, $count, $step);
+                $lifecycle++;
             } elsif ($kinds[0] eq 'job') {
                 _test_job_step($bot, $manager, $entry, $count, $step);
                 $jobs++;
@@ -101,7 +105,29 @@ sub test_package {
     die $error unless $ok;
     die($unload_error || "Could not unload '$name' in the workshop\n") unless $unloaded;
     die($@ || "Workshop script cleanup incomplete\n") unless $stopped;
-    return { steps => $count, event_steps => $events, job_steps => $jobs, restart_steps => $restarts };
+    return {
+        steps => $count, event_steps => $events, job_steps => $jobs,
+        restart_steps => $restarts, lifecycle_steps => $lifecycle,
+    };
+}
+
+sub _test_lifecycle_step {
+    my ($manager, $entry, $number, $step) = @_;
+    die "Step $number: unknown lifecycle step field\n"
+        if grep { $_ ne 'lifecycle' && $_ ne 'replies' } keys %$step;
+    my $action = $step->{lifecycle};
+    die "Step $number: lifecycle must be enable or disable\n"
+        unless defined($action) && !ref($action) && $action =~ /\A(?:enable|disable)\z/;
+
+    my $name = $entry->{name};
+    my $changed = eval { $manager->$action($name) };
+    my $error = $@;
+    die "Step $number: cannot $action '$name': " . ($error || "operation refused\n")
+        unless $changed;
+    die "Step $number: $action did not leave '$name' loaded in the expected state\n"
+        unless ($manager->plugin($name) // 0) == $entry
+            && $manager->is_enabled($name) == ($action eq 'enable' ? 1 : 0);
+    return;
 }
 
 sub _test_restart_step {
@@ -206,11 +232,13 @@ sub _test_command_step {
             && defined($nick) && !ref($nick) && $nick =~ /\A[^\s\x00,:]+\z/
             && ref($arguments) eq 'ARRAY' && !grep { !defined($_) || ref($_) } @$arguments;
     my $mode = _step_mode($step, $number);
-    my $expect = $mode eq 'off' ? 'off' : 'ran';
-    $expect = $step->{expect} if exists $step->{expect};
-    die "Step $number: expect must be ran or denied for on/observe, or off for off\n"
-        unless defined($expect) && !ref($expect)
-            && ($mode eq 'off' ? $expect eq 'off' : $expect =~ /\A(?:ran|denied)\z/);
+    my $default_expect = $mode eq 'off' ? 'off' : 'ran';
+    $default_expect = 'disabled' unless $manager->is_enabled($name);
+    my $expect = exists($step->{expect}) ? $step->{expect} : $default_expect;
+    my @valid_expectations = ($default_expect);
+    push @valid_expectations, 'denied' if $default_expect eq 'ran';
+    die "Step $number: expect must be " . join(' or ', @valid_expectations) . "\n"
+        unless defined($expect) && !ref($expect) && grep { $_ eq $expect } @valid_expectations;
 
     local $bot->{_user_cache} = {};
     local $bot->{_user_cache_ts} = {};
@@ -277,6 +305,8 @@ sub _test_event_step {
     my $mode = _step_mode($step, $number);
     _configure_policy($manager, $name, $channel, $mode, $step);
     my $before = $manager->v3_failure_report($name);
+    my $gate = $manager->is_enabled($name) ? $mode : 'disabled';
+    my $expected = $gate eq 'off' || $gate eq 'disabled' ? 0 : 1;
     my $report;
     if ($event eq 'irc.channel.word') {
         $report = $bot->observe_public_word(undef, $channel, $raw{nick}, $raw{word}, 0);
@@ -291,12 +321,12 @@ sub _test_event_step {
     if (@{ $report->{errors} }) {
         die "Step $number failed: $report->{errors}[0]{error}\n";
     }
-    die "Step $number: an off event entered the queue\n" if $mode eq 'off' && $queue->pending_count;
+    die "Step $number: event '$event' entered the queue in '$gate'\n"
+        if !$expected && $queue->pending_count;
     _wait_pending($loop, $queue, $number, 'event queue');
     my $ran = _completed_count($bot, $manager, $name, $number, $before, 'event');
-    die "Step $number: expected " . ($mode eq 'off' ? '0' : '1')
-        . " execution(s) for event '$event' in '$mode', saw $ran\n"
-        unless $ran == ($mode eq 'off' ? 0 : 1);
+    die "Step $number: expected $expected execution(s) for event '$event' in '$gate', saw $ran\n"
+        unless $ran == $expected;
     return;
 }
 
@@ -341,12 +371,19 @@ sub _test_job_step {
     my $before = $manager->v3_failure_report($name);
     my $task = $mounted->{task};
     my $previous = $scheduler->task_info($task);
-    die "Step $number: job '$job' has no active scheduler registration\n"
-        unless $previous && $scheduler->tick_workshop_job($task, $mounted->{task_id});
+    die "Step $number: job '$job' has no matching scheduler registration\n"
+        unless $previous && $previous->{task_id} == $mounted->{task_id};
+    my $enabled = $manager->is_enabled($name);
+    my $ticked = $scheduler->tick_workshop_job($task, $mounted->{task_id});
+    die "Step $number: enabled job '$job' has no active scheduler registration\n"
+        if $enabled && !$ticked;
+    die "Step $number: disabled job '$job' is still active\n"
+        if !$enabled && ($previous->{started} || $ticked);
+    $expected = 0 unless $enabled;
     my $current = $scheduler->task_info($task);
-    die "Step $number: job '$job' did not complete one scheduler tick\n"
+    die "Step $number: unexpected scheduler tick count for job '$job'\n"
         unless $current && $current->{task_id} == $previous->{task_id}
-            && $current->{ticks} == $previous->{ticks} + 1;
+            && $current->{ticks} == $previous->{ticks} + $enabled;
     if ($current->{callback_exceptions} != $previous->{callback_exceptions}) {
         my $detail = $bot->{logger}{error} // 'scheduler callback failed';
         die "Step $number failed: $detail\n";

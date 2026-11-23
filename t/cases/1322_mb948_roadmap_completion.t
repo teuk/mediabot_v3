@@ -439,21 +439,47 @@ write_fixture_1322($custom_fixture, [
     {restart => JSON::PP::true, command => 'last_workshop_join', replies => []},
 ]);
 ($tested, $test_report) = workshop_cli_1322(@event_fixture);
-ok(!$tested && $test_report =~ /declare one command, event, job or restart/,
+ok(!$tested && $test_report =~ /declare one command, event, job, restart or lifecycle/,
     'restart is a distinct fixture step');
+
+($tested, $test_report) = workshop_cli_1322(@observer,
+    '--fixture', 'plugins/examples-v3/channel-observer-v3/lifecycle.test.json',
+    '--grant', 'events.subscribe', '--grant', 'irc.reply', @job_grants, @storage_grant);
+ok($tested && $test_report =~ /passed 11 offline API v3 command\/event\/job\/lifecycle step/,
+    'disable blocks dispatch and ticks; enable retains observer state, the job sequence and storage')
+    or diag($test_report);
+
+write_fixture_1322($custom_fixture, [
+    {lifecycle => 'pause', replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture);
+ok(!$tested && $test_report =~ /Step 1: lifecycle must be enable or disable/,
+    'lifecycle accepts only the two activation actions');
+
+write_fixture_1322($custom_fixture, [
+    {command => 'last_workshop_join', expect => 'disabled', replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture);
+ok(!$tested && $test_report =~ /Step 1: expect must be ran or denied/,
+    'an enabled package cannot satisfy an explicit disabled expectation');
 
 Mediabot::Plugin::ScaffoldV3::create(
     directory => $tmp, name => 'restart-python', language => 'python');
 write_fixture_1322($custom_fixture, [
     {command => 'restart_python', replies => [['PRIVMSG', '#workshop', 'Bonjour, Pablo!']]},
+    {lifecycle => 'disable', replies => []},
+    {command => 'restart_python', expect => 'disabled', replies => []},
     {restart => JSON::PP::true, replies => []},
+    {command => 'restart_python', mode => 'observe', expect => 'disabled', replies => []},
+    {lifecycle => 'enable', replies => []},
     {command => 'restart_python', data => {args => ['Élodie']},
         replies => [['PRIVMSG', '#workshop', 'Bonjour, Élodie!']]},
 ]);
 ($tested, $test_report) = workshop_cli_1322('--test', 'restart-python', '--directory', $tmp,
     '--fixture', $custom_fixture, '--grant', 'irc.reply');
-ok($tested && $test_report =~ /passed 3 offline API v3 command\/restart step/,
-    'external command scripts still run after the old instance is unloaded');
+ok($tested && $test_report =~ /passed 7 offline API v3 command\/restart\/lifecycle step/,
+    'a disabled external command stays blocked after restart and runs once re-enabled')
+    or diag($test_report);
 
 $manifest->{commands}{first_greeting}{handler} = 'command_missing';
 open my $edited_manifest, '>:raw', "$out->{directory}/plugin.json" or die $!;

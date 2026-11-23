@@ -1994,5 +1994,16 @@ capability grants and channel policies before unload. The normal restore
 path remounts the package. The workshop compares the restored state with the
 saved state, then can assert persistent plugin data and exercise the new
 command, event and job registrations. The example also checks that its
-transient observer state and job sequence restart. Target-host acceptance is
-pending.
+transient observer state and job sequence restart. Commit
+`56b52e94aa4f208885f38fee6cc88596a584a6df` was pushed to `origin/master` and
+matches the subsequent teuk.org snapshot.
+
+## MB1431 — Exercise API v3 plugin enable and disable steps offline
+
+The workshop uses PluginManager to disable and enable a loaded package
+inside one fixture. Subsequent steps assert that a disabled package cannot
+dispatch commands, queue channel events or tick periodic jobs. The Perl
+observer example verifies in-memory state, storage and job sequence after
+reactivation. A Python command fixture also checks that a simulated restart
+restores a disabled package and that its command runs again after reactivation.
+Target-host acceptance is pending.

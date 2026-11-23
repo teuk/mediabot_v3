@@ -64,9 +64,9 @@ les messages dans l’ordre par triplets `[verbe, cible, texte]`. Un `reply`
 donne un `PRIVMSG` vers le canal, un `notice` donne un `NOTICE` vers le nick.
 Accorde les capacités correspondantes avec `--grant irc.reply` ou
 `--grant irc.notice` si le paquet les déclare. Un échec indique l’étape et
-l’erreur d’exécution, ou les réponses attendues et capturées. Une étape
-`observe` doit exécuter la commande sans réponse et une étape `off` doit
-rester inactive.
+l’erreur d’exécution, ou les réponses attendues et capturées. Quand le plugin
+est activé, une étape `observe` exécute la commande sans réponse et une étape
+`off` reste inactive.
 
 Pour une commande réservée à un rôle, ajoute `caller` et utilise
 `"expect": "denied"` dans les scénarios qui doivent être refusés.
@@ -235,6 +235,34 @@ les commandes, événements et tâches fonctionnent après restauration.
 perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
   --directory plugins/examples-v3 \
   --fixture plugins/examples-v3/channel-observer-v3/restart.test.json \
+  --grant events.subscribe --grant irc.reply --grant scheduler.jobs \
+  --grant irc.channel_message --grant storage.kv
+```
+
+## Désactiver et réactiver un plugin API v3
+
+Insère une étape `lifecycle` avec l’action `disable` ou `enable` pour
+exercer le cycle de vie du paquet chargé dans le scénario.
+
+```json
+{"lifecycle": "disable", "replies": []}
+```
+
+Le gestionnaire appelle les hooks `stop` et `start` lorsque le paquet les
+définit et que son état change. Pendant la désactivation, l’atelier vérifie
+que les commandes ne s’exécutent pas, que les événements n’entrent pas en
+file et que la tâche testée reste arrêtée, même sur un canal en mode `on`.
+Une commande peut déclarer explicitement `"expect": "disabled"`. La réactivation
+reprend avec la même instance du plugin. Une étape `restart` propage aussi
+l’état désactivé à l’instance rechargée.
+
+L’exemple vérifie la mémoire des arrivées, le stockage par canal, la reprise
+des événements et la continuité de la séquence de la tâche périodique.
+
+```bash
+perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
+  --directory plugins/examples-v3 \
+  --fixture plugins/examples-v3/channel-observer-v3/lifecycle.test.json \
   --grant events.subscribe --grant irc.reply --grant scheduler.jobs \
   --grant irc.channel_message --grant storage.kv
 ```

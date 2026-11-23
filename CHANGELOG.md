@@ -1,3 +1,8 @@
+## MB1431 — Exercise API v3 plugin activation and deactivation offline
+
+- Add fixture steps that disable and re-enable a loaded package with the native lifecycle hooks.
+- Verify that commands, queued events and periodic ticks are suppressed while disabled, then exercise their recovery in the same instance.
+
 ## MB1430 — Exercise simulated plugin restarts in API v3 fixtures
 
 - Save and restore the native runtime state around a plugin unload, then continue with a new instance in the same scenario.
