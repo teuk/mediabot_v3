@@ -35,13 +35,15 @@ Undernet X authentication and recovery: [XAUTH_UNDERNET.md](docs/XAUTH_UNDERNET.
 
 ## Write scripts in Perl, Python or Tcl
 
-Start with a greeting command, then try five examples that cover text,
-channel notes and IRC notices. Both guides include offline tests.
+Follow the scripting tutorials from your first greeting command to offline
+diagnostics. [All tutorials in English](https://github.com/teuk/mediabot_v3/wiki/Tutorials)
+· [Tous les tutoriels en français](https://github.com/teuk/mediabot_v3/wiki/Tutorials-FR)
 
 | Wiki guide | English | Français |
 | --- | --- | --- |
 | Write your first script | [English](https://github.com/teuk/mediabot_v3/wiki/Writing-a-Mediabot-script-EN) | [Français](https://github.com/teuk/mediabot_v3/wiki/Writing-a-Mediabot-script) |
 | Five commands to try and adapt | [English](https://github.com/teuk/mediabot_v3/wiki/Mediabot-script-recipes-EN) | [Français](https://github.com/teuk/mediabot_v3/wiki/Mediabot-script-recipes) |
+| Diagnose a script offline | [English](https://github.com/teuk/mediabot_v3/wiki/Debug-a-script-offline) | [Français](https://github.com/teuk/mediabot_v3/wiki/Debug-a-script-offline-FR) |
 
 ## Clone and contribute
 
