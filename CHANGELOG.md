@@ -1,3 +1,8 @@
+## MB1432 — Verify expected plugin failures in offline API v3 fixtures
+
+- Match one new command, event or job failure by resource, channel and literal diagnostic fragment.
+- Continue matched steps through the usual reply and storage checks so fixtures can demonstrate recovery.
+
 ## MB1431 — Exercise API v3 plugin activation and deactivation offline
 
 - Add fixture steps that disable and re-enable a loaded package with the native lifecycle hooks.

@@ -2006,4 +2006,14 @@ dispatch commands, queue channel events or tick periodic jobs. The Perl
 observer example verifies in-memory state, storage and job sequence after
 reactivation. A Python command fixture also checks that a simulated restart
 restores a disabled package and that its command runs again after reactivation.
-Target-host acceptance is pending.
+Commit `31bd67984f324eb406862cc5f60123eed7c68266` was pushed to
+`origin/master` and matches the subsequent teuk.org snapshot.
+
+## MB1432 — Verify expected API v3 failures in offline fixtures
+
+An explicit assertion can match one new failure from the runtime ledger for
+a command, event or periodic job. It checks the resource, channel and a literal
+fragment of the diagnostic. The fixture still checks successful job deliveries
+on other channels and compares replies and storage. The observer example
+keeps a stored note through an invalid command, then verifies a successful
+write to that same channel. Target-host acceptance is pending.

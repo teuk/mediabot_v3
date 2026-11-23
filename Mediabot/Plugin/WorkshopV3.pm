@@ -5,6 +5,7 @@ use warnings;
 use File::Spec;
 use JSON::PP ();
 use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC);
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 use Mediabot::IRC::Target qw(is_channel);
 use Mediabot::Plugin::WorkshopFixture ();
 
@@ -213,7 +214,7 @@ sub _test_command_step {
     my ($bot, $manager, $loop, $processes, $name, $number, $step) = @_;
     my $command = $step->{command};
     die "Step $number: command must be a scalar\n" unless defined($command) && !ref($command);
-    my %fields = map { $_ => 1 } qw(command mode config data caller expect replies);
+    my %fields = map { $_ => 1 } qw(command mode config data caller expect replies failure);
     die "Step $number: unknown field\n" if grep { !$fields{$_} } keys %$step;
     my $registration = $bot->command_registry->command_for($command, 'public');
     die "Step $number: command is not registered by '$name'\n"
@@ -239,6 +240,9 @@ sub _test_command_step {
     push @valid_expectations, 'denied' if $default_expect eq 'ran';
     die "Step $number: expect must be " . join(' or ', @valid_expectations) . "\n"
         unless defined($expect) && !ref($expect) && grep { $_ eq $expect } @valid_expectations;
+    my $failure = _expected_failure($step, $number, $channel);
+    die "Step $number: failure requires an active command expected to run\n"
+        if $failure && $expect ne 'ran';
 
     local $bot->{_user_cache} = {};
     local $bot->{_user_cache_ts} = {};
@@ -253,16 +257,18 @@ sub _test_command_step {
     die "Step $number: expected '$expect' but a script started\n"
         if $expect ne 'ran' && $processes && $processes->pending_count;
     _wait_pending($loop, $processes, $number, 'interpreter') if $processes;
-    my $ran = _completed_count($bot, $manager, $name, $number, $before, 'command');
+    my $ran = _completed_count($bot, $manager, $name, $number, $before,
+        kind => 'command', resource => $registration->{name}, failure => $failure);
     my $denied = ($bot->{metrics}->get($denied_metric, $labels) // 0) - $before_denied;
     die "Step $number: expected '$expect' in '$mode', saw $ran execution(s) and $denied access denial(s)\n"
-        unless $ran == ($expect eq 'ran' ? 1 : 0) && $denied == ($expect eq 'denied' ? 1 : 0);
+        unless $ran == ($expect eq 'ran' && !$failure ? 1 : 0)
+            && $denied == ($expect eq 'denied' ? 1 : 0);
     return;
 }
 
 sub _test_event_step {
     my ($bot, $manager, $loop, $entry, $number, $step) = @_;
-    my %fields = map { $_ => 1 } qw(event version mode config data replies);
+    my %fields = map { $_ => 1 } qw(event version mode config data replies failure);
     die "Step $number: unknown event step field\n" if grep { !$fields{$_} } keys %$step;
     my $name = $entry->{name};
     my $event = $step->{event};
@@ -307,6 +313,8 @@ sub _test_event_step {
     my $before = $manager->v3_failure_report($name);
     my $gate = $manager->is_enabled($name) ? $mode : 'disabled';
     my $expected = $gate eq 'off' || $gate eq 'disabled' ? 0 : 1;
+    my $failure = _expected_failure($step, $number, $channel);
+    die "Step $number: failure requires an active event handler\n" if $failure && !$expected;
     my $report;
     if ($event eq 'irc.channel.word') {
         $report = $bot->observe_public_word(undef, $channel, $raw{nick}, $raw{word}, 0);
@@ -324,7 +332,9 @@ sub _test_event_step {
     die "Step $number: event '$event' entered the queue in '$gate'\n"
         if !$expected && $queue->pending_count;
     _wait_pending($loop, $queue, $number, 'event queue');
-    my $ran = _completed_count($bot, $manager, $name, $number, $before, 'event');
+    my $ran = _completed_count($bot, $manager, $name, $number, $before,
+        kind => 'event', resource => $event, failure => $failure);
+    $expected-- if $failure;
     die "Step $number: expected $expected execution(s) for event '$event' in '$gate', saw $ran\n"
         unless $ran == $expected;
     return;
@@ -340,7 +350,7 @@ sub _step_mode {
 
 sub _test_job_step {
     my ($bot, $manager, $entry, $number, $step) = @_;
-    my %fields = map { $_ => 1 } qw(job channels replies);
+    my %fields = map { $_ => 1 } qw(job channels replies failure);
     die "Step $number: unknown job step field\n" if grep { !$fields{$_} } keys %$step;
     my $job = $step->{job};
     my $name = $entry->{name};
@@ -351,6 +361,7 @@ sub _test_job_step {
     die "Step $number: job fixture requires --grant scheduler.jobs\n" unless $mounted;
     my $channels = $step->{channels};
     die "Step $number: job channels must be an object\n" unless ref($channels) eq 'HASH';
+    my $failure = _expected_failure($step, $number, undef);
 
     $manager->reset_v3_channel_policy($name, $_->{channel}) for $manager->v3_channel_policies($name);
     my $expected = 0;
@@ -366,6 +377,9 @@ sub _test_job_step {
     }
     my @configured = $manager->v3_channel_policies($name);
     die "Step $number: duplicate IRC channel in job policies\n" if @configured != keys %$channels;
+    my $enabled = $manager->is_enabled($name);
+    die "Step $number: failure requires an active job channel\n"
+        if $failure && (!$enabled || $manager->v3_channel_policy($name, $failure->{channel})->{mode} eq 'off');
 
     my $scheduler = $bot->{scheduler};
     my $before = $manager->v3_failure_report($name);
@@ -373,7 +387,6 @@ sub _test_job_step {
     my $previous = $scheduler->task_info($task);
     die "Step $number: job '$job' has no matching scheduler registration\n"
         unless $previous && $previous->{task_id} == $mounted->{task_id};
-    my $enabled = $manager->is_enabled($name);
     my $ticked = $scheduler->tick_workshop_job($task, $mounted->{task_id});
     die "Step $number: enabled job '$job' has no active scheduler registration\n"
         if $enabled && !$ticked;
@@ -388,7 +401,9 @@ sub _test_job_step {
         my $detail = $bot->{logger}{error} // 'scheduler callback failed';
         die "Step $number failed: $detail\n";
     }
-    my $ran = _completed_count($bot, $manager, $name, $number, $before, 'job');
+    my $ran = _completed_count($bot, $manager, $name, $number, $before,
+        kind => 'job', resource => $job, failure => $failure);
+    $expected-- if $failure;
     die "Step $number: expected $expected execution(s) for job '$job', saw $ran\n"
         unless $ran == $expected;
     return;
@@ -413,11 +428,38 @@ sub _wait_pending {
     return;
 }
 
+sub _expected_failure {
+    my ($step, $number, $channel) = @_;
+    return unless exists $step->{failure};
+    my $failure = $step->{failure};
+    my $job = !defined($channel);
+    my $description = $job ? 'contains and a job channel' : 'only contains';
+    die "Step $number: failure must specify $description with a non-empty error fragment\n"
+        unless ref($failure) eq 'HASH' && keys(%$failure) == ($job ? 2 : 1)
+            && defined($failure->{contains}) && !ref($failure->{contains})
+            && $failure->{contains} =~ /\S/ && $failure->{contains} !~ /[\0\r\n]/
+            && length($failure->{contains}) <= 240
+            && (!$job || (defined($failure->{channel}) && !ref($failure->{channel})
+                && is_channel($failure->{channel})));
+    return { contains => $failure->{contains}, channel => $job ? $failure->{channel} : $channel };
+}
+
 sub _completed_count {
-    my ($bot, $manager, $name, $number, $before, $kind) = @_;
+    my ($bot, $manager, $name, $number, $before, %run) = @_;
     my $after = $manager->v3_failure_report($name);
-    if ($after->{total_failures} != $before->{total_failures}) {
-        my $detail = $bot->{logger}{error} // "API v3 $kind failed";
+    my $failures = $after->{total_failures} - $before->{total_failures};
+    my $detail = $bot->{logger}{error} // "API v3 $run{kind} failed";
+    if (my $expected = $run{failure}) {
+        die "Step $number: expected one $run{kind} failure, saw $failures\n"
+            unless $failures == 1;
+        my $record = $after->{recent}[-1];
+        die "Step $number: failure did not match $run{kind} '$run{resource}' in '$expected->{channel}'\n"
+            unless $record && $record->{kind} eq $run{kind}
+                && $record->{resource} eq $run{resource}
+                && fold_irc($record->{channel}) eq fold_irc($expected->{channel});
+        die "Step $number: expected failure containing '$expected->{contains}', got: $detail\n"
+            if index($bot->{logger}{error} // '', $expected->{contains}) < 0;
+    } elsif ($failures) {
         die "Step $number failed: $detail\n";
     }
     return $after->{total_successes} - $before->{total_successes};

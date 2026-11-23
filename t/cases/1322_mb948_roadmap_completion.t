@@ -254,6 +254,12 @@ write_fixture_1322($custom_fixture, [{command => 'test_python', mode => 'observe
 ok(!$tested && $test_report =~ /Step 1 failed:.*script process failed/,
     'a failed interpreter cannot pass a silent observe test');
 
+write_fixture_1322($custom_fixture, [{command => 'test_python', mode => 'observe',
+    failure => {contains => 'script process failed'}, replies => []}]);
+($tested, $test_report) = workshop_cli_1322(@custom, '--grant', 'irc.reply');
+ok($tested, 'an expected asynchronous interpreter failure is recorded before the step completes')
+    or diag($test_report);
+
 my $guard_dir = Mediabot::Plugin::ScaffoldV3::create(
     directory => $tmp, name => 'guard-python', language => 'python')->{directory};
 my $guard_path = "$guard_dir/plugin.json";
@@ -348,6 +354,15 @@ write_fixture_1322($custom_fixture, [
 ok(!$tested && $test_report =~ /Step 1 failed:.*API v3 event.*capability 'irc\.reply' was not granted/,
     'a deferred handler failure is reported even for an observe step expecting silence');
 
+write_fixture_1322($custom_fixture, [
+    {event => 'irc.channel.word', mode => 'observe', data => {word => 'salut'},
+        failure => {contains => "capability 'irc.reply' was not granted"}, replies => []},
+    {event => 'irc.channel.join', replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'events.subscribe');
+ok($tested, 'a matched deferred handler failure allows the next event to run')
+    or diag($test_report);
+
 my @job_grants = ('--grant', 'scheduler.jobs', '--grant', 'irc.channel_message');
 ($tested, $test_report) = workshop_cli_1322(@observer,
     '--fixture', 'plugins/examples-v3/channel-observer-v3/jobs.test.json',
@@ -378,6 +393,22 @@ write_fixture_1322($custom_fixture, [
 ($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'scheduler.jobs');
 ok(!$tested && $test_report =~ /Step 1 failed:.*API v3 job.*capability 'irc\.channel_message' was not granted/,
     'a job failure remains visible in observe even when replies are empty');
+
+my $job_failure = {channel => '#Atelier{1}', contains => "capability 'irc.channel_message' was not granted"};
+write_fixture_1322($custom_fixture, [
+    {job => 'pulse', channels => {'#atelier[1]' => {}}, failure => $job_failure, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'scheduler.jobs');
+ok($tested, 'job failures can target a single channel using RFC1459 identity')
+    or diag($test_report);
+
+write_fixture_1322($custom_fixture, [
+    {job => 'pulse', channels => {'#atelier[1]' => {}, '#other' => {}},
+        failure => $job_failure, replies => []},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'scheduler.jobs');
+ok(!$tested && $test_report =~ /Step 1: expected one job failure, saw 2/,
+    'an expected job failure does not mask an additional channel failure');
 
 my @storage_grant = ('--grant', 'storage.kv');
 {
@@ -412,6 +443,34 @@ write_fixture_1322($custom_fixture, [
 ($tested, $test_report) = workshop_cli_1322(@event_fixture, @storage_grant);
 ok(!$tested && $test_report =~ /Step 1 channel storage '#workshop' mismatch.*autre.*reel/s,
     'a storage mismatch identifies the channel and shows expected and captured documents');
+
+($tested, $test_report) = workshop_cli_1322(@observer,
+    '--fixture', 'plugins/examples-v3/channel-observer-v3/failures.test.json', @storage_grant);
+ok($tested && $test_report =~ /passed 3 offline API v3 command step/,
+    'an expected command failure preserves storage and the next write succeeds')
+    or diag($test_report);
+
+my $failing_command = {command => 'workshop_remember', data => {args => ['unknown', 'value']},
+    failure => {contains => 'Expected a global or channel value'}, replies => []};
+write_fixture_1322($custom_fixture, [
+    $failing_command,
+    {%$failing_command, data => {args => ['global', 'value']}},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, @storage_grant);
+ok(!$tested && $test_report =~ /Step 2: expected one command failure, saw 0/,
+    'failure history from a previous step cannot satisfy a missing new failure');
+
+write_fixture_1322($custom_fixture, [
+    {%$failing_command, failure => {contains => 'Expected .* channel value'}},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, @storage_grant);
+ok(!$tested && $test_report =~ /Step 1: expected failure containing .*got: .*Expected a global or channel value/,
+    'a different diagnostic fails and the expected fragment is literal');
+
+write_fixture_1322($custom_fixture, [{%$failing_command, mode => 'off'}]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture);
+ok(!$tested && $test_report =~ /Step 1: failure requires an active command/,
+    'a suppressed invocation cannot be declared as a failure');
 
 write_fixture_1322($custom_fixture, [
     {event => 'irc.channel.join', replies => [], storage => $empty_storage},

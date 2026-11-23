@@ -267,6 +267,38 @@ perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
   --grant irc.channel_message --grant storage.kv
 ```
 
+## Vérifier une erreur attendue et la reprise du plugin
+
+Ajoute `failure.contains` à une étape de commande, d’événement ou de tâche.
+L’atelier exige exactement un nouvel échec inscrit dans le registre du
+plugin pour la ressource et le canal de l’étape. Il cherche le fragment
+littéral dans le diagnostic de cet échec.
+
+```json
+{
+  "command": "workshop_remember",
+  "data": {"channel": "#atelier", "args": ["unknown", "Café"]},
+  "failure": {"contains": "Expected a global or channel value"},
+  "replies": []
+}
+```
+
+Pour une tâche, indique aussi `failure.channel` pour identifier le canal en
+échec. Les autres canaux actifs de ce même passage doivent réussir. L’erreur
+doit provenir d’une exécution en mode `on` ou `observe`. Une erreur absente,
+différente ou supplémentaire fait échouer le scénario. L’atelier vérifie
+toujours les réponses et les assertions de stockage de l’étape.
+
+Le scénario fourni enregistre une note, vérifie qu’une commande invalide
+la laisse intacte, puis enregistre une nouvelle valeur sur le même canal.
+
+```bash
+perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
+  --directory plugins/examples-v3 \
+  --fixture plugins/examples-v3/channel-observer-v3/failures.test.json \
+  --grant storage.kv
+```
+
 ## Écrire et tester un script API v2 en Perl, Python ou Tcl
 
 Depuis le dépôt, choisis un langage et un nom de commande libre. Ce parcours

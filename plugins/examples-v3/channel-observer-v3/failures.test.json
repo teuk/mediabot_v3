@@ -1,0 +1,23 @@
+{
+  "steps": [
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#atelier", "args": ["channel", "Thé"]},
+      "replies": [],
+      "storage": {"channels": {"#atelier": {"revision": 1, "values": {"note": "Thé"}}}}
+    },
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#atelier", "args": ["unknown", "Café"]},
+      "failure": {"contains": "Expected a global or channel value"},
+      "replies": [],
+      "storage": {"channels": {"#atelier": {"revision": 1, "values": {"note": "Thé"}}}}
+    },
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#atelier", "args": ["channel", "Maté"]},
+      "replies": [],
+      "storage": {"channels": {"#atelier": {"revision": 2, "values": {"note": "Maté"}}}}
+    }
+  ]
+}
