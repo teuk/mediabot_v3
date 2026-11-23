@@ -1,0 +1,68 @@
+{
+  "steps": [
+    {
+      "command": "workshop_remember",
+      "mode": "off",
+      "data": {"args": ["global", "Ignoré"]},
+      "replies": [],
+      "storage": {"global": {"revision": 0, "values": {}}}
+    },
+    {
+      "command": "workshop_remember",
+      "data": {"args": ["global", "Élodie"]},
+      "replies": [],
+      "storage": {"global": {"revision": 1, "values": {"note": "Élodie"}}}
+    },
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#Essai[1]", "args": ["channel", "Café"]},
+      "replies": [],
+      "storage": {
+        "global": {"revision": 1, "values": {"note": "Élodie"}},
+        "channels": {
+          "#essai{1}": {"revision": 1, "values": {"note": "Café"}},
+          "#ailleurs": {"revision": 0, "values": {}}
+        }
+      }
+    },
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#ailleurs", "args": ["channel", "Thé"]},
+      "replies": [],
+      "storage": {"channels": {
+        "#essai{1}": {"revision": 1, "values": {"note": "Café"}},
+        "#ailleurs": {"revision": 1, "values": {"note": "Thé"}}
+      }}
+    },
+    {
+      "command": "workshop_remember",
+      "mode": "observe",
+      "data": {"channel": "#essai{1}", "args": ["channel", "Ignoré"]},
+      "replies": [],
+      "storage": {"channels": {"#Essai[1]": {"revision": 1, "values": {"note": "Café"}}}}
+    },
+    {
+      "command": "workshop_remember",
+      "mode": "observe",
+      "data": {"channel": "#ailleurs", "args": ["global", "Ignoré"]},
+      "replies": [],
+      "storage": {"global": {"revision": 1, "values": {"note": "Élodie"}}}
+    },
+    {
+      "command": "workshop_remember",
+      "data": {"channel": "#essai{1}", "args": ["channel", "Maté"]},
+      "replies": [],
+      "storage": {"channels": {
+        "#Essai[1]": {"revision": 2, "values": {"note": "Maté"}},
+        "#ailleurs": {"revision": 1, "values": {"note": "Thé"}}
+      }}
+    },
+    {
+      "command": "workshop_remember",
+      "mode": "off",
+      "data": {"channel": "#ailleurs", "args": ["channel", "Ignoré"]},
+      "replies": [],
+      "storage": {"channels": {"#ailleurs": {"revision": 1, "values": {"note": "Thé"}}}}
+    }
+  ]
+}

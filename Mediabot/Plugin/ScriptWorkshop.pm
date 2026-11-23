@@ -5,7 +5,6 @@ use warnings;
 use utf8;
 use Encode qw(decode FB_CROAK);
 use File::Spec;
-use File::Temp qw(tempdir);
 use JSON::PP ();
 use Mediabot::Plugin::ScaffoldFiles ();
 use Mediabot::Plugin::WorkshopFixture ();
@@ -126,8 +125,7 @@ sub test_script {
     require Mediabot::Mediabot;
 
     my $directory = $args{directory};
-    my $data_dir = tempdir('mediabot-script-workshop-XXXXXX', TMPDIR => 1, CLEANUP => 1);
-    my $config = bless { data_dir => $data_dir }, 'Mediabot::Plugin::ScriptWorkshop::Config';
+    my $config = Mediabot::Plugin::WorkshopFixture::offline_config();
     my $bot = Mediabot->new({ conf => $config });
     my $irc = $bot->{irc} = bless { replies => [] }, 'Mediabot::Plugin::ScriptWorkshop::IRC';
     my $log = $bot->{logger} = bless { errors => [] }, 'Mediabot::Plugin::ScriptWorkshop::Log';
@@ -192,10 +190,6 @@ sub test_script {
     $manager->unregister_plugin($name);
     die $error unless $tested;
     return $count;
-}
-
-sub Mediabot::Plugin::ScriptWorkshop::Config::get {
-    return $_[1] eq 'plugins.DATA_DIR' ? $_[0]{data_dir} : undef;
 }
 
 sub Mediabot::Plugin::ScriptWorkshop::Log::log {

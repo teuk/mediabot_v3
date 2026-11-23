@@ -2,7 +2,15 @@ package Mediabot::Plugin::WorkshopFixture;
 
 use strict;
 use warnings;
+use Cwd qw(realpath);
+use File::Temp qw(tempdir);
 use JSON::PP ();
+
+sub offline_config {
+    my $directory = realpath(tempdir('mediabot-workshop-XXXXXX', TMPDIR => 1, CLEANUP => 1))
+        or die "Cannot resolve temporary workshop data directory\n";
+    return bless { data_dir => $directory }, 'Mediabot::Plugin::WorkshopFixture::Config';
+}
 
 sub read_steps {
     my ($path, %limits) = @_;
@@ -29,11 +37,20 @@ sub read_steps {
 
 sub assert_replies {
     my ($step, $expected, $actual) = @_;
+    return assert_json($step, 'reply', $expected, $actual);
+}
+
+sub assert_json {
+    my ($step, $label, $expected, $actual) = @_;
     my $json = JSON::PP->new->canonical->ascii;
     my $want = $json->encode($expected);
     my $got = $json->encode($actual);
-    die "Step $step reply mismatch\nExpected: $want\nCaptured: $got\n" unless $got eq $want;
+    die "Step $step $label mismatch\nExpected: $want\nCaptured: $got\n" unless $got eq $want;
     return;
+}
+
+sub Mediabot::Plugin::WorkshopFixture::Config::get {
+    return $_[1] eq 'plugins.DATA_DIR' ? $_[0]{data_dir} : undef;
 }
 
 1;

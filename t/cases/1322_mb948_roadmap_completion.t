@@ -379,6 +379,49 @@ write_fixture_1322($custom_fixture, [
 ok(!$tested && $test_report =~ /Step 1 failed:.*API v3 job.*capability 'irc\.channel_message' was not granted/,
     'a job failure remains visible in observe even when replies are empty');
 
+my @storage_grant = ('--grant', 'storage.kv');
+{
+    my $storage_tmp = "$tmp/storage-run";
+    mkdir $storage_tmp or die $!;
+    local $ENV{TMPDIR} = $storage_tmp;
+    my @storage_fixture = (@observer,
+        '--fixture', 'plugins/examples-v3/channel-observer-v3/storage.test.json', @storage_grant);
+    for (1 .. 2) {
+        ($tested, $test_report) = workshop_cli_1322(@storage_fixture);
+        ok($tested && $test_report =~ /passed 8 offline API v3 command step/,
+            'each storage run starts empty and checks writes, RFC1459 channel scopes and suppression');
+    }
+    opendir my $temp_entries, $storage_tmp or die $!;
+    my @leftovers = grep { $_ ne '.' && $_ ne '..' } readdir $temp_entries;
+    closedir $temp_entries or die $!;
+    is_deeply(\@leftovers, [], 'workshop removes both run directories and their storage files');
+}
+
+my $empty_storage = {global => {revision => 0, values => {}}};
+write_fixture_1322($custom_fixture, [
+    {command => 'workshop_remember', mode => 'off', replies => [], storage => $empty_storage},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture);
+ok(!$tested && $test_report =~ /storage assertions require --grant storage\.kv/,
+    'a silent command does not allow assertions without the explicit storage grant');
+
+write_fixture_1322($custom_fixture, [
+    {command => 'workshop_remember', data => {args => ['channel', 'reel']}, replies => [],
+        storage => {channels => {'#workshop' => {revision => 1, values => {note => 'autre'}}}}},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, @storage_grant);
+ok(!$tested && $test_report =~ /Step 1 channel storage '#workshop' mismatch.*autre.*reel/s,
+    'a storage mismatch identifies the channel and shows expected and captured documents');
+
+write_fixture_1322($custom_fixture, [
+    {event => 'irc.channel.join', replies => [], storage => $empty_storage},
+    {job => 'pulse', channels => {}, replies => [], storage => $empty_storage},
+]);
+($tested, $test_report) = workshop_cli_1322(@event_fixture, '--grant', 'events.subscribe',
+    '--grant', 'scheduler.jobs', @storage_grant);
+ok($tested && $test_report =~ /passed 2 offline API v3 command\/event\/job step/,
+    'the same read-only storage assertions work on event and job steps');
+
 $manifest->{commands}{first_greeting}{handler} = 'command_missing';
 open my $edited_manifest, '>:raw', "$out->{directory}/plugin.json" or die $!;
 print {$edited_manifest} encode_json($manifest) or die $!;

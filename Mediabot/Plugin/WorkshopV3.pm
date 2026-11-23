@@ -18,7 +18,7 @@ sub offline_runtime {
     require IO::Async::Loop;
     require Mediabot::Scheduler;
 
-    my $bot = Mediabot->new({});
+    my $bot = Mediabot->new({ conf => Mediabot::Plugin::WorkshopFixture::offline_config() });
     my $loop = IO::Async::Loop->new;
     $bot->setLoop($loop);
     $bot->{scheduler} = Mediabot::Scheduler->new(loop => $loop);
@@ -30,7 +30,7 @@ sub offline_runtime {
 sub test_package {
     my (%args) = @_;
     my ($name, $directory, $grants) = @args{qw(name directory grants)};
-    my %allowed_grants = map { $_ => 1 } qw(irc.reply irc.notice irc.channel_message events.subscribe scheduler.jobs);
+    my %allowed_grants = map { $_ => 1 } qw(irc.reply irc.notice irc.channel_message events.subscribe scheduler.jobs storage.kv);
     for my $grant (@$grants) {
         die "Unsupported fixture grant '$grant'\n"
             unless $allowed_grants{$grant};
@@ -65,6 +65,13 @@ sub test_package {
             my @kinds = ref($step) eq 'HASH' ? grep { exists $step->{$_} } qw(command event job) : ();
             die "Step $count must declare one command, event or job and a replies array\n"
                 unless @kinds == 1 && ref($step->{replies}) eq 'ARRAY';
+            my $storage;
+            if (exists $step->{storage}) {
+                die "Step $count: storage assertions require --grant storage.kv\n"
+                    unless $entry->{metadata}{plugin_context}->has_capability('storage.kv');
+                $step = { %$step };
+                $storage = _storage_expectations(delete $step->{storage}, $count);
+            }
             $bot->{workshop_replies} = [];
             delete $bot->{logger}{error};
             if ($kinds[0] eq 'job') {
@@ -78,6 +85,7 @@ sub test_package {
             }
             Mediabot::Plugin::WorkshopFixture::assert_replies(
                 $count, $step->{replies}, $bot->{workshop_replies});
+            _assert_storage($manager, $name, $count, $storage) if $storage;
         }
         1;
     };
@@ -89,6 +97,52 @@ sub test_package {
     die($unload_error || "Could not unload '$name' in the workshop\n") unless $unloaded;
     die($@ || "Workshop script cleanup incomplete\n") unless $stopped;
     return { steps => $count, event_steps => $events, job_steps => $jobs };
+}
+
+sub _storage_expectations {
+    my ($storage, $number) = @_;
+    die "Step $number: storage must contain global or channel snapshots\n"
+        unless ref($storage) eq 'HASH' && keys(%$storage)
+            && !grep { $_ ne 'global' && $_ ne 'channels' } keys %$storage;
+    my @checks;
+    push @checks, [undef, $storage->{global}] if exists $storage->{global};
+    if (exists $storage->{channels}) {
+        my $channels = $storage->{channels};
+        die "Step $number: storage channels must be a non-empty object\n"
+            unless ref($channels) eq 'HASH' && keys %$channels;
+        for my $channel (sort keys %$channels) {
+            die "Step $number: invalid storage channel '$channel'\n" unless is_channel($channel);
+            push @checks, [$channel, $channels->{$channel}];
+        }
+    }
+    for my $check (@checks) {
+        my ($channel, $snapshot) = @$check;
+        my $label = defined($channel) ? "channel storage '$channel'" : 'global storage';
+        die "Step $number: $label expects a revision and a values object\n"
+            unless ref($snapshot) eq 'HASH' && keys(%$snapshot) == 2
+                && defined($snapshot->{revision}) && !ref($snapshot->{revision})
+                && "$snapshot->{revision}" =~ /\A(?:0|[1-9][0-9]{0,14})\z/
+                && ref($snapshot->{values}) eq 'HASH'
+                && !grep { !defined($_) || ref($_) } values %{ $snapshot->{values} };
+    }
+    return \@checks;
+}
+
+sub _assert_storage {
+    my ($manager, $name, $number, $checks) = @_;
+    for my $check (@$checks) {
+        my ($channel, $expected) = @$check;
+        my $label = defined($channel) ? "channel storage '$channel'" : 'global storage';
+        my $actual = eval {
+            my $repository = defined($channel)
+                ? $manager->_v3_channel_repository($name, { channel => $channel })
+                : $manager->_v3_repository_for($name);
+            $repository->snapshot;
+        };
+        die "Step $number: cannot read $label: $@" unless $actual;
+        Mediabot::Plugin::WorkshopFixture::assert_json($number, $label, $expected, $actual);
+    }
+    return;
 }
 
 sub _test_command_step {

@@ -1,3 +1,8 @@
+## MB1429 — Assert plugin storage in offline API v3 fixtures
+
+- Give every workshop run a fresh temporary data directory and let fixtures request the native storage capability.
+- Compare revisions and values after command, event and job steps for global and channel repositories.
+
 ## MB1428 — Test periodic API v3 jobs offline
 
 - Run one native scheduler tick per workshop job step, with explicit channel policies and captured output.

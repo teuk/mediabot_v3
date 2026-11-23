@@ -1,21 +1,27 @@
 {
   "api": 3,
   "name": "channel-observer-v3",
-  "version": "0.2.0",
-  "description": "Offline workshop example for channel events and periodic jobs.",
+  "version": "0.3.0",
+  "description": "Offline workshop example for channel events, periodic jobs and storage.",
   "runtime": {
     "kind": "perl",
     "entrypoint": "lib/Observer.pm",
     "class": "Mediabot::Plugin::V3::WorkshopObserver"
   },
   "activation": {"default": "off"},
-  "capabilities": ["events.subscribe", "irc.reply", "irc.channel_message", "scheduler.jobs"],
+  "capabilities": ["events.subscribe", "irc.reply", "irc.channel_message", "scheduler.jobs", "storage.kv"],
   "commands": {
     "last_workshop_join": {
       "source": "public",
       "level": 0,
       "help": "Show the last observed join in this channel.",
       "handler": "command_last_join"
+    },
+    "workshop_remember": {
+      "source": "public",
+      "level": 0,
+      "help": "Remember a value in global or channel storage.",
+      "handler": "command_remember"
     }
   },
   "events": [

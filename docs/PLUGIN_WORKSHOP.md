@@ -171,6 +171,44 @@ perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
   --grant events.subscribe --grant irc.reply --grant scheduler.jobs --grant irc.channel_message
 ```
 
+## Vérifier le stockage d’un plugin API v3
+
+Accorde `--grant storage.kv` si le plugin déclare cette capacité. Chaque
+lancement de l’atelier part d’un répertoire temporaire vide. Les étapes d’un
+même scénario partagent ce répertoire et passent par les dépôts habituels.
+
+Le champ facultatif `storage` vérifie l’état sur disque après une commande,
+un événement ou une tâche. `global` désigne les données du plugin,
+`channels` les données de chaque canal indiqué. Chaque état contient la
+révision entière et toutes les valeurs attendues, sous forme de chaînes.
+Un état absent correspond à la révision `0` et à un objet `values` vide.
+
+```json
+{
+  "steps": [
+    {
+      "command": "workshop_remember",
+      "data": {"args": ["channel", "Café"]},
+      "replies": [],
+      "storage": {
+        "channels": {"#workshop": {"revision": 1, "values": {"note": "Café"}}},
+        "global": {"revision": 0, "values": {}}
+      }
+    }
+  ]
+}
+```
+
+Le scénario fourni vérifie aussi deux canaux indépendants, les noms
+équivalents en IRC et l’absence de modification en mode `observe` ou `off`.
+
+```bash
+perl tools/plugin_v3_workshop.pl --test channel-observer-v3 \
+  --directory plugins/examples-v3 \
+  --fixture plugins/examples-v3/channel-observer-v3/storage.test.json \
+  --grant storage.kv
+```
+
 ## Écrire et tester un script API v2 en Perl, Python ou Tcl
 
 Depuis le dépôt, choisis un langage et un nom de commande libre. Ce parcours

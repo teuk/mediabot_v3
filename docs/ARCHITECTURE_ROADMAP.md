@@ -1974,4 +1974,13 @@ An isolated timer loop prevents automatic ticks during other fixture steps.
 Each step replaces the package's in-memory channel policies and checks dispatch
 counts, hook failures and ordered output. A mixed fixture extends the native
 channel observer example with typed per-channel job settings and the on,
-observe and off modes. Target-host acceptance is pending.
+observe and off modes. Commit `435335ac10a09d8890e9bef90792ba27a97bfc91`
+was pushed to `origin/master` and matches the subsequent teuk.org snapshot.
+
+## MB1429 — Verify plugin storage in offline API v3 fixtures
+
+Workshop scenes get fresh file-backed storage per run through the ordinary
+plugin repositories. Steps may request exact read-only assertions of revision
+and values in the package-wide document and any selected channel document.
+The example exercises Unicode, channel isolation, RFC1459 channel equivalence
+and suppression of writes in observe and off. Target-host acceptance is pending.
