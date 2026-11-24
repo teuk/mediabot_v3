@@ -4,6 +4,10 @@ L’atelier génère des paquets API v3 en Perl, Python et Tcl. Les scripts à
 manifeste adjacent API v2 en Perl, Python et Tcl gardent leur parcours de test.
 Les deux formats de scripts utilisent le protocole `mediabot-script-v1`.
 
+Les [exemples API v3](../plugins/examples-v3/README.md) montrent un compteur
+persistant en Perl, un calcul configuré par canal en Python et un NOTICE en
+Tcl. Chaque paquet comprend un scénario hors ligne.
+
 ## Écrire une commande API v3 en Python ou Tcl
 
 ```bash

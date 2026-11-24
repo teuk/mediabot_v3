@@ -2016,4 +2016,14 @@ a command, event or periodic job. It checks the resource, channel and a literal
 fragment of the diagnostic. The fixture still checks successful job deliveries
 on other channels and compares replies and storage. The observer example
 keeps a stored note through an invalid command, then verifies a successful
-write to that same channel. Target-host acceptance is pending.
+write to that same channel. Commit `41de77bb522da254f9a2493bc164d70eed9df3c8`
+was pushed to `origin/master`.
+
+## MB1433 — Ship runnable API v3 examples in all three languages
+
+Three example packages show the areas covered by the existing contracts.
+The native Perl counter uses channel-scoped storage and revision checks.
+The Python estimator uses a typed per-channel integer. The Tcl help desk
+command returns a caller-targeted notice through its explicit capability.
+Their workshop fixtures verify stored state across restart, typed inputs
+and output behavior in on, observe and off. Target-host acceptance is pending.

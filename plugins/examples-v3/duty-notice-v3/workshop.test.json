@@ -1,0 +1,32 @@
+{
+  "steps": [
+    {
+      "command": "v3permanence",
+      "replies": [["NOTICE", "Pablo", "Permanence : Équipe du canal. Horaires : lun-ven, 9 h à 18 h."]]
+    },
+    {
+      "command": "v3permanence",
+      "config": {"contact": "Élodie", "hours": "le jeudi, 20 h"},
+      "data": {"channel": "#atelier", "nick": "Mina", "args": ["contact"]},
+      "replies": [["NOTICE", "Mina", "Contact : Élodie."]]
+    },
+    {
+      "command": "v3permanence",
+      "config": {"hours": "le jeudi, 20 h"},
+      "data": {"channel": "#atelier", "nick": "Mina", "args": ["horaires"]},
+      "replies": [["NOTICE", "Mina", "Horaires : le jeudi, 20 h."]]
+    },
+    {
+      "command": "v3permanence",
+      "data": {"args": ["inconnu"]},
+      "replies": [["NOTICE", "Pablo", "Usage : v3permanence [contact|horaires]"]]
+    },
+    {
+      "command": "v3permanence",
+      "data": {"args": ["contact", "horaires"]},
+      "replies": [["NOTICE", "Pablo", "Usage : v3permanence [contact|horaires]"]]
+    },
+    {"command": "v3permanence", "mode": "observe", "replies": []},
+    {"command": "v3permanence", "mode": "off", "replies": []}
+  ]
+}

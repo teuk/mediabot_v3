@@ -1,0 +1,24 @@
+{
+  "api": 3,
+  "name": "counter-v3",
+  "version": "0.1.0",
+  "description": "A persistent counter scoped to one IRC channel.",
+  "runtime": {
+    "kind": "perl",
+    "entrypoint": "lib/Counter.pm",
+    "class": "Mediabot::Plugin::V3::TutorialCounter"
+  },
+  "activation": {"default": "off"},
+  "capabilities": ["irc.reply", "storage.kv"],
+  "commands": {
+    "v3compteur": {
+      "source": "public",
+      "level": 0,
+      "handler": "command_count",
+      "help": "v3compteur [+1] - read or increment the channel counter."
+    }
+  },
+  "events": [],
+  "jobs": {},
+  "config_schema": {}
+}

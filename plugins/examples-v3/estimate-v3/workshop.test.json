@@ -1,0 +1,38 @@
+{
+  "steps": [
+    {
+      "command": "v3estime",
+      "data": {"args": ["7"]},
+      "replies": [["PRIVMSG", "#workshop", "7 tâches : 35 min (5 min par tâche)."]]
+    },
+    {
+      "command": "v3estime",
+      "config": {"minutes_per_task": 20},
+      "data": {"channel": "#atelier", "args": ["3"]},
+      "replies": [["PRIVMSG", "#atelier", "3 tâches : 60 min (20 min par tâche)."]]
+    },
+    {
+      "command": "v3estime",
+      "data": {"args": ["1"]},
+      "replies": [["PRIVMSG", "#workshop", "1 tâche : 5 min (5 min par tâche)."]]
+    },
+    {
+      "command": "v3estime",
+      "config": {"minutes_per_task": 120},
+      "data": {"args": ["100"]},
+      "replies": [["PRIVMSG", "#workshop", "100 tâches : 12000 min (120 min par tâche)."]]
+    },
+    {
+      "command": "v3estime",
+      "data": {"args": ["101"]},
+      "replies": [["PRIVMSG", "#workshop", "Usage : v3estime <1 à 100 tâches>"]]
+    },
+    {
+      "command": "v3estime",
+      "data": {"args": ["2.5"]},
+      "replies": [["PRIVMSG", "#workshop", "Usage : v3estime <1 à 100 tâches>"]]
+    },
+    {"command": "v3estime", "mode": "observe", "data": {"args": ["7"]}, "replies": []},
+    {"command": "v3estime", "mode": "off", "data": {"args": ["7"]}, "replies": []}
+  ]
+}

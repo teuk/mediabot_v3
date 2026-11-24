@@ -1,3 +1,8 @@
+## MB1433 — Add runnable Perl, Python and Tcl API v3 examples
+
+- Provide a native channel counter, a Python estimator with typed configuration and a Tcl help desk notice.
+- Demonstrate scoped storage, simulated restart and the on, observe and off modes with offline fixtures.
+
 ## MB1432 — Verify expected plugin failures in offline API v3 fixtures
 
 - Match one new command, event or job failure by resource, channel and literal diagnostic fragment.

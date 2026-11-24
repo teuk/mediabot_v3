@@ -1,0 +1,55 @@
+{
+  "steps": [
+    {
+      "command": "v3compteur",
+      "replies": [["PRIVMSG", "#workshop", "Compteur du canal : 0."]],
+      "storage": {"channels": {"#workshop": {"revision": 0, "values": {}}}}
+    },
+    {
+      "command": "v3compteur",
+      "data": {"args": ["+2"]},
+      "replies": [["PRIVMSG", "#workshop", "Usage : v3compteur [+1]"]],
+      "storage": {"channels": {"#workshop": {"revision": 0, "values": {}}}}
+    },
+    {
+      "command": "v3compteur",
+      "data": {"channel": "#Atelier[1]", "args": ["+1"]},
+      "replies": [["PRIVMSG", "#Atelier[1]", "Compteur du canal : 1."]],
+      "storage": {"channels": {"#atelier{1}": {"revision": 1, "values": {"count": "1"}}}}
+    },
+    {
+      "command": "v3compteur",
+      "data": {"channel": "#ailleurs"},
+      "replies": [["PRIVMSG", "#ailleurs", "Compteur du canal : 0."]]
+    },
+    {
+      "command": "v3compteur",
+      "mode": "observe",
+      "data": {"channel": "#atelier{1}", "args": ["+1"]},
+      "replies": [],
+      "storage": {"channels": {"#atelier{1}": {"revision": 1, "values": {"count": "1"}}}}
+    },
+    {
+      "command": "v3compteur",
+      "mode": "off",
+      "data": {"channel": "#atelier{1}", "args": ["+1"]},
+      "replies": [],
+      "storage": {"channels": {"#atelier{1}": {"revision": 1, "values": {"count": "1"}}}}
+    },
+    {"restart": true, "replies": []},
+    {
+      "command": "v3compteur",
+      "data": {"channel": "#atelier{1}", "nick": "Mina"},
+      "replies": [["PRIVMSG", "#atelier{1}", "Compteur du canal : 1."]]
+    },
+    {
+      "command": "v3compteur",
+      "data": {"channel": "#atelier{1}", "args": ["+1"]},
+      "replies": [["PRIVMSG", "#atelier{1}", "Compteur du canal : 2."]],
+      "storage": {"channels": {
+        "#Atelier[1]": {"revision": 2, "values": {"count": "2"}},
+        "#ailleurs": {"revision": 0, "values": {}}
+      }}
+    }
+  ]
+}

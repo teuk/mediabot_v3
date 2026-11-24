@@ -75,7 +75,13 @@ snap_mediabot*.sh
 !plugins/API_V3_EVENTS.json
 !plugins/*/plugin.json
 
-# The checked-in API v3 workshop event example.
+# The checked-in API v3 workshop examples.
+!plugins/examples-v3/counter-v3/plugin.json
+!plugins/examples-v3/counter-v3/workshop.test.json
+!plugins/examples-v3/estimate-v3/plugin.json
+!plugins/examples-v3/estimate-v3/workshop.test.json
+!plugins/examples-v3/duty-notice-v3/plugin.json
+!plugins/examples-v3/duty-notice-v3/workshop.test.json
 !plugins/examples-v3/channel-observer-v3/plugin.json
 !plugins/examples-v3/channel-observer-v3/workshop.test.json
 !plugins/examples-v3/channel-observer-v3/jobs.test.json

@@ -1,0 +1,23 @@
+{
+  "api": 3,
+  "name": "duty-notice-v3",
+  "version": "0.1.0",
+  "description": "Send the channel help desk contact and hours to the caller.",
+  "runtime": {"kind": "tcl", "entrypoint": "lib/duty.tcl"},
+  "activation": {"default": "off"},
+  "capabilities": ["irc.notice"],
+  "commands": {
+    "v3permanence": {
+      "source": "public",
+      "level": 0,
+      "handler": "command_duty",
+      "help": "v3permanence [contact|horaires] - send the channel help desk details."
+    }
+  },
+  "events": [],
+  "jobs": {},
+  "config_schema": {
+    "contact": {"type": "string", "default": "Équipe du canal", "min_length": 1, "max_length": 80},
+    "hours": {"type": "string", "default": "lun-ven, 9 h à 18 h", "min_length": 1, "max_length": 100}
+  }
+}
