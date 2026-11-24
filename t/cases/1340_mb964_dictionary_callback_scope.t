@@ -24,6 +24,7 @@ use Mediabot::PluginManager;
     sub getLoop { $_[0]{loop} }
     sub get_user_from_message { undef }
     sub getUserChannelLevel { 0 }
+    sub plugin_channel_message { push @{$_[0]{replies}}, [$_[1], $_[2]]; 1 }
     package MB964::Dictionary;
     sub solve {
         my ($self, $plugin, $channel, $letters, $callback) = @_;
@@ -76,6 +77,7 @@ sub _submit {
     $launch->{result} = $context->dictionary_solve($invocation, 'AEEINORSTT', sub {
         die "private callback detail\n" if $self->{fail_callback};
         push @{$self->{completed}}, [$kind, $invocation->channel];
+        $context->reply($invocation, 'Dictionary result.') if $kind eq 'event';
     });
     return 1;
 }
@@ -89,12 +91,13 @@ close $pf or die $!;
 my $loop = IO::Async::Loop->new;
 my $bot = bless { loop => $loop, registry => Mediabot::CommandRegistry->new,
     event_bus => Mediabot::EventBus->new, logger => bless({}, 'MB964::Log'),
-    conf => bless({ 'plugins.DATA_DIR' => "$tmp/data" }, 'MB964::Conf') }, 'MB964::Bot';
+    conf => bless({ 'plugins.DATA_DIR' => "$tmp/data" }, 'MB964::Conf'), replies => [] }, 'MB964::Bot';
 $bot->{scheduler} = Mediabot::Scheduler->new(loop => $loop, logger => $bot->{logger});
 my $service = bless { calls => [] }, 'MB964::Dictionary';
 my $manager = Mediabot::PluginManager->new(bot => $bot, plugin_dir => "$tmp/plugins",
     v3_dictionary_service => $service);
-my $entry = $manager->load_package_v3($name, grants => \@caps);
+my $entry = $manager->load_package_v3($name, grants => \@caps,
+    channel_policies => { '#restored' => { mode => 'on' } });
 for my $channel ('#test', '#other') {
     $manager->set_v3_channel_policy($name, $channel, mode => 'on');
 }
@@ -138,6 +141,35 @@ sub streak_1340 {
     return [grep { $_->{kind} eq $kind && $_->{resource} eq $resource{$kind}
         && $_->{channel} eq $channel } @{$manager->v3_failure_report($name)->{active_streaks}}];
 }
+
+my $first_event = launch_1340('event', '#restored');
+is($first_event->{result}{accepted}, 1, 'first word event on a restored channel starts its lookup');
+$service->complete(last_call_1340('#restored'));
+is_deeply($bot->{replies}, [['#restored', 'Dictionary result.']],
+    'first dictionary completion can reply on a restored channel');
+$manager->reset_v3_channel_policy($name, '#restored');
+
+$first_event = launch_1340('event', '#test');
+is($first_event->{result}{accepted}, 1, 'first word event on a newly configured channel starts its lookup');
+$service->complete(last_call_1340('#test'));
+is_deeply($bot->{replies}[-1], ['#test', 'Dictionary result.'],
+    'first dictionary completion can reply on a newly configured channel');
+
+$manager->set_v3_channel_policy($name, '#fresh', mode => 'on');
+for my $channel ('#fresh', '#other') {
+    $bot->observe_public_word({}, $channel, 'Alice', 'ORIENTATES', 0);
+}
+is($entry->{event_queue}->pending_count, 2, 'both channels have deferred word events');
+my $calls_before_change = @{$service->{calls}};
+$manager->set_v3_channel_policy($name, '#FRESH', mode => 'on');
+for (1 .. 10) {
+    last unless $entry->{event_queue}->pending_count;
+    $loop->loop_once(0);
+}
+is_deeply([map { $_->{channel} } @{$service->{calls}}[$calls_before_change .. $#{$service->{calls}}]],
+    ['#other'], 'updating one channel policy leaves only the other channel word queued for lookup');
+$service->complete(last_call_1340('#other'));
+$manager->reset_v3_channel_policy($name, '#fresh');
 
 for my $kind (qw(command event job)) {
     my $launch = launch_1340($kind, '#test');

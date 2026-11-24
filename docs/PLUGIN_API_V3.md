@@ -792,6 +792,11 @@ See [the operator and API details](LONGEST_WORD_PLUGIN.md) and the
 core conversation exclusion barrier. Its handler receives `(context, event,
 invocation)`; the extra scoped invocation exposes the authenticated principal,
 `observed_at` monotonic receipt time, notices and revocable output authority.
+The invocation captures the channel policy generation before it enters the
+queue. A first dictionary lookup on that channel uses the same generation,
+including after runtime-state restore. Changing the channel policy revokes
+older word-event replies and stops older queued words from reaching an
+`on` handler in that channel.
 Other event handler signatures remain compatible. The event envelope never
 contains credentials, a database handle, raw message or hostmask.
 

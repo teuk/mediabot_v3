@@ -1,3 +1,8 @@
+## MB1434 — Keep the API v3 word-event policy epoch stable through lookup
+
+- Let the first dictionary completion send its reply on newly configured and restored channels.
+- Invalidate queued word events for the channel whose policy changes.
+
 ## MB1433 — Add runnable Perl, Python and Tcl API v3 examples
 
 - Provide a native channel counter, a Python estimator with typed configuration and a Tcl help desk notice.

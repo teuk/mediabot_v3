@@ -2026,4 +2026,16 @@ The native Perl counter uses channel-scoped storage and revision checks.
 The Python estimator uses a typed per-channel integer. The Tcl help desk
 command returns a caller-targeted notice through its explicit capability.
 Their workshop fixtures verify stored state across restart, typed inputs
-and output behavior in on, observe and off. Target-host acceptance is pending.
+and output behavior in on, observe and off. Commit
+`29db8108e9033f787204ab6f71e78d5e33b22e9a` was pushed to `origin/master`
+and matches the subsequent teuk.org snapshot.
+
+## MB1434 — Preserve the policy generation of the first API v3 word lookup
+
+Word-event invocations capture the channel policy generation when queued.
+The dictionary callback uses that same generation on the first lookup,
+including when the channel policy was restored at startup. Policy edits
+advance the generation for that channel, while reset removes its entry.
+The native callback fixture verifies first replies and isolates the affected
+channel when a policy changes while words are queued. Target-host acceptance
+is pending.

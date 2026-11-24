@@ -5,6 +5,7 @@ use warnings;
 use Mediabot::Plugin::RuntimeStateFile ();
 use File::Spec;
 use JSON::PP ();
+use Mediabot::IRC::CaseMapping qw(fold_irc);
 
 our $V3_RUNTIME_STATE_SCHEMA       = 1;
 our $V3_RUNTIME_STATE_MAX_BYTES    = 1_048_576;
@@ -328,8 +329,8 @@ sub _cancel_v3_dictionary {
 
 sub _v3_notify_policy_change {
     my ($self, $entry, $channel) = @_;
-    my $policy = $self->_v3_policy_for_entry($entry, $channel);
-    my $key = lc $policy->{channel}; $key =~ tr/[]\\^/{}|~/;
+    my $policy = $self->_v3_policy_object($entry)->observation_for($channel);
+    my $key = fold_irc($policy->{channel});
     if ($policy->{configured}) {
         $entry->{metadata}{dictionary_policy_epoch}{$key} = ++$entry->{metadata}{dictionary_epoch_serial};
     }
@@ -364,7 +365,7 @@ sub _v3_dictionary_solve {
     return { accepted => 0, error => 'disabled' } unless $entry->{enabled};
     my $policy = $self->_v3_invocation_policy($entry, $invocation);
     return { accepted => 0, error => 'channel_off' } if $policy->{mode} eq 'off';
-    my $key = lc $policy->{channel}; $key =~ tr/[]\\^/{}|~/;
+    my $key = fold_irc($policy->{channel});
     my $epoch = $entry->{metadata}{dictionary_policy_epoch}{$key}
         //= ++$entry->{metadata}{dictionary_epoch_serial};
     # Word events share InvocationV3 with commands. Its command accessor also
@@ -2791,8 +2792,11 @@ sub _mount_v3_events {
                     if ($name eq 'irc.channel.word') {
                         # Only this event receives a scoped reply/principal facade.
                         # Authentication comes from the native Context, never data fields.
-                        my $channel_key = lc $policy->{channel}; $channel_key =~ tr/[]\\^/{}|~/;
-                        my $serial = $entry->{metadata}{dictionary_policy_epoch}{$channel_key} // 0;
+                        my $channel_key = fold_irc($policy->{channel});
+                        # A first lookup must reuse the epoch already captured by
+                        # this invocation, including on a restored channel.
+                        my $serial = $entry->{metadata}{dictionary_policy_epoch}{$channel_key}
+                            //= ++$entry->{metadata}{dictionary_epoch_serial};
                         $word_invocation = Mediabot::Plugin::InvocationV3->new(
                             nick => $envelope->get('nick'), channel => $policy->{channel},
                             command => $name, source => 'event', args => [],
