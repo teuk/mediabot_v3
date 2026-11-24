@@ -1,3 +1,8 @@
+## MB1435 — Keep API v3 channel work active when policy saving fails
+
+- Apply persistent channel policy changes and resets after the boot ledger is saved.
+- Preserve the active channel policy, dictionary requests and plugin state when the save fails.
+
 ## MB1434 — Keep the API v3 word-event policy epoch stable through lookup
 
 - Let the first dictionary completion send its reply on newly configured and restored channels.

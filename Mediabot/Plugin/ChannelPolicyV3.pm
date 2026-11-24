@@ -66,6 +66,14 @@ sub new {
     return $self;
 }
 
+sub copy {
+    my ($self) = @_;
+    return bless {
+        schema => $self->{schema},
+        policies => _clone($self->{policies}),
+    }, ref($self);
+}
+
 sub set {
     my ($self, $channel, %args) = @_;
     my $key = _channel_key($channel, 1);

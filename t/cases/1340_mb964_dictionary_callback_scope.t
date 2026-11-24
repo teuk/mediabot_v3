@@ -38,7 +38,7 @@ use Mediabot::PluginManager;
         die 'completion already consumed' unless $callback;
         $callback->({ ok => 1, longest => 10, words => ['ORIENTATES'] });
     }
-    sub cancel_scope { 1 }
+    sub cancel_scope { push @{$_[0]{cancelled}}, [$_[1], $_[2]]; 1 }
     sub cancel_plugin { 1 }
 }
 
@@ -69,6 +69,11 @@ use warnings;
 sub new { bless { launches => [], completed => [] }, shift }
 sub start { 1 }
 sub stop { 1 }
+sub policy_changed {
+    my ($self, %args) = @_;
+    push @{$self->{policy_changes}}, [$args{channel}, $args{mode}];
+    return 1;
+}
 sub _submit {
     my ($self, $context, $invocation, $kind) = @_;
     my $launch = { invocation => $invocation, context => $context,
@@ -170,6 +175,47 @@ is_deeply([map { $_->{channel} } @{$service->{calls}}[$calls_before_change .. $#
     ['#other'], 'updating one channel policy leaves only the other channel word queued for lookup');
 $service->complete(last_call_1340('#other'));
 $manager->reset_v3_channel_policy($name, '#fresh');
+
+for my $operation ('set', 'reset') {
+    my $method = "${operation}_v3_channel_policy_persistent";
+    my @args = $operation eq 'set' ? (mode => 'observe') : ();
+    my $channel = '#persist';
+    $manager->set_v3_channel_policy_persistent($name, $channel, mode => 'on');
+    launch_1340('event', $channel);
+    my $pending = last_call_1340($channel);
+    my $notifications = @{$object->{policy_changes}};
+    my $cancelled = @{$service->{cancelled}};
+    my $replies = @{$bot->{replies}};
+    {
+        local $Mediabot::PluginManager::V3_RUNTIME_STATE_MAX_BYTES = 1;
+        my $ok = eval { $manager->$method($name, $channel, @args); 1 };
+        ok(!$ok && $@ =~ /was not persisted: API v3 state exceeds the byte limit/,
+            "$operation: rejected persistence reports the file error");
+    }
+    is($manager->v3_channel_policy($name, $channel)->{mode}, 'on',
+        "$operation: rejected persistence keeps the original policy");
+    is(scalar @{$object->{policy_changes}}, $notifications,
+        "$operation: rejected persistence does not call the policy hook");
+    is(scalar @{$service->{cancelled}}, $cancelled,
+        "$operation: rejected persistence leaves the dictionary request active");
+    $service->complete($pending);
+    is(scalar @{$bot->{replies}}, $replies + 1,
+        "$operation: dictionary reply still arrives under the original policy");
+
+    launch_1340('event', $channel);
+    $pending = last_call_1340($channel);
+    $cancelled = @{$service->{cancelled}};
+    $replies = @{$bot->{replies}};
+    $manager->$method($name, $channel, @args);
+    my $mode = $operation eq 'set' ? 'observe' : 'off';
+    is_deeply($object->{policy_changes}[-1], [$channel, $mode],
+        "$operation: successful persistence notifies the package of its new mode");
+    is(scalar @{$service->{cancelled}}, $cancelled + 1,
+        "$operation: successful persistence cancels the stale dictionary request");
+    $service->complete($pending);
+    is(scalar @{$bot->{replies}}, $replies,
+        "$operation: successful persistence drops the old dictionary reply");
+}
 
 for my $kind (qw(command event job)) {
     my $launch = launch_1340($kind, '#test');

@@ -917,26 +917,39 @@ sub _v3_policy_object {
     return $policy;
 }
 
-sub set_v3_channel_policy {
-    my ($self, $name, $channel, %args) = @_;
+sub _change_v3_channel_policy {
+    my ($self, $name, $channel, $operation, $persist, %args) = @_;
     my $entry = $self->plugin($name)
         or die "PluginManager: plugin '$name' is not registered\n";
     my $policy = $self->_v3_policy_object($entry)
         or die "PluginManager: plugin '$name' is not an API v3 package\n";
-    my $result = $policy->set($channel, %args);
+    $policy = $policy->copy if $persist;
+    my $result = $policy->$operation($channel, %args);
+    if ($persist) {
+        # Serialize the candidate with the regular snapshot path before any
+        # hook, epoch change or cancellation can affect the live package.
+        my ($stored, $error) = do {
+            local $entry->{metadata}{channel_policy} = $policy;
+            $self->store_v3_runtime_state;
+        };
+        unless ($stored) {
+            my $change = $operation eq 'reset' ? 'policy reset' : 'policy';
+            die "PluginManager: API v3 $change was not persisted: $error\n";
+        }
+        $entry->{metadata}{channel_policy} = $policy;
+    }
     $self->_v3_notify_policy_change($entry, $channel);
     return $result;
 }
 
+sub set_v3_channel_policy {
+    my ($self, $name, $channel, %args) = @_;
+    return $self->_change_v3_channel_policy($name, $channel, 'set', 0, %args);
+}
+
 sub reset_v3_channel_policy {
     my ($self, $name, $channel) = @_;
-    my $entry = $self->plugin($name)
-        or die "PluginManager: plugin '$name' is not registered\n";
-    my $policy = $self->_v3_policy_object($entry)
-        or die "PluginManager: plugin '$name' is not an API v3 package\n";
-    my $result = $policy->reset($channel);
-    $self->_v3_notify_policy_change($entry, $channel);
-    return $result;
+    return $self->_change_v3_channel_policy($name, $channel, 'reset', 0);
 }
 
 sub v3_channel_policy {
@@ -1134,26 +1147,6 @@ sub restore_v3_runtime_state {
     };
 }
 
-sub _v3_policy_map {
-    my ($self, $name) = @_;
-    my %map = map {
-        $_->{channel} => {
-            mode => "$_->{mode}", config => { %{ $_->{config} || {} } },
-        }
-    } $self->v3_channel_policies($name);
-    return \%map;
-}
-
-sub _replace_v3_policy_map {
-    my ($self, $name, $map) = @_;
-    my $entry = $self->_v3_diagnostic_entry($name);
-    require Mediabot::Plugin::ChannelPolicyV3;
-    $entry->{metadata}{channel_policy} =
-        Mediabot::Plugin::ChannelPolicyV3->new(
-            schema => $entry->{metadata}{config_schema}, policies => $map);
-    return 1;
-}
-
 sub load_package_v3_persistent {
     my ($self, $name, %opts) = @_;
     my $entry = $self->load_package_v3($name, %opts);
@@ -1167,26 +1160,12 @@ sub load_package_v3_persistent {
 
 sub set_v3_channel_policy_persistent {
     my ($self, $name, $channel, %args) = @_;
-    my $before = $self->_v3_policy_map($name);
-    my $policy = $self->set_v3_channel_policy($name, $channel, %args);
-    my ($stored, $error) = $self->store_v3_runtime_state;
-    unless ($stored) {
-        $self->_replace_v3_policy_map($name, $before);
-        die "PluginManager: API v3 policy was not persisted: $error\n";
-    }
-    return $policy;
+    return $self->_change_v3_channel_policy($name, $channel, 'set', 1, %args);
 }
 
 sub reset_v3_channel_policy_persistent {
     my ($self, $name, $channel) = @_;
-    my $before = $self->_v3_policy_map($name);
-    my $removed = $self->reset_v3_channel_policy($name, $channel);
-    my ($stored, $error) = $self->store_v3_runtime_state;
-    unless ($stored) {
-        $self->_replace_v3_policy_map($name, $before);
-        die "PluginManager: API v3 policy reset was not persisted: $error\n";
-    }
-    return $removed;
+    return $self->_change_v3_channel_policy($name, $channel, 'reset', 1);
 }
 
 sub set_v3_enabled_persistent {

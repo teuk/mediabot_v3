@@ -2037,5 +2037,15 @@ The dictionary callback uses that same generation on the first lookup,
 including when the channel policy was restored at startup. Policy edits
 advance the generation for that channel, while reset removes its entry.
 The native callback fixture verifies first replies and isolates the affected
-channel when a policy changes while words are queued. Target-host acceptance
-is pending.
+channel when a policy changes while words are queued. Commit
+`76c417482d50f52518ec1060090a911806b1e012` matches the subsequent teuk.org
+snapshot.
+
+## MB1435 — Save API v3 channel policy before notifying the package
+
+Persistent policy changes and resets serialize the candidate configuration
+before changing the live policy. A failed write preserves the previous
+policy generation and leaves in-flight dictionary work active. A successful
+write goes through the usual hook and cancellation path. The native callback
+fixture exercises both outcomes for setting and resetting a policy.
+Target-host acceptance is pending.

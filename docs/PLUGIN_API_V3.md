@@ -672,7 +672,9 @@ in a core-owned boot ledger containing only package names, exact grants, typed
 policies and enabled state. The ledger is bounded to 64 packages and 1 MiB,
 written atomically with mode `0600`, and restored from local packages only.
 Programmatic manager calls remain instance-local unless they use the explicit
-`*_persistent` operations.
+`*_persistent` operations. A persistent channel policy change or reset
+updates the live policy and calls the package hook after the ledger is saved.
+If saving fails, the current policy and its in-flight dictionary work stay active.
 
 The programmatic development flow is:
 
