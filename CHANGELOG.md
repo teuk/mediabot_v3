@@ -1,3 +1,8 @@
+## MB1437 — Start Longest Word games on Unicode IRC channels
+
+- Encode the game identifier as UTF-8 before hashing it.
+- Verify opening draws, scores and records on a Unicode channel through the IRC command registry.
+
 ## MB1436 — Restore API v3 packages with unconfigured off channels
 
 - Allow an off channel to retain an incomplete configuration across restart.

@@ -100,6 +100,7 @@ draw uses weighted vowel and consonant pools. Up to six draws are attempted
 to find a rack with a word of at least five letters; this is a minimum quality
 filter, not a guarantee of uniform rack difficulty. The clock begins after
 the complete dictionary result is available, when the draw is enqueued for IRC.
+Channel names with Unicode characters are supported for games and their scores.
 The shared five-second scheduler closes overdue rounds; guesses are refused
 at the exact monotonic deadline even before the next scheduler tick.
 

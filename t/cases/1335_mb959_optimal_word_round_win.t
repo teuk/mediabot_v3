@@ -143,5 +143,25 @@ $clock=251;$start=@{$bot->{wire}};$call->('Alice',1,'POUFFAS');
 is($custom->{engine}{players}{'u.7'}{score},12,'configured five-point bonus replaces the default instead of adding a second bonus');
 like(join(' ',map {$_->[2]} @{$bot->{wire}}[$start..$#{$bot->{wire}}]),qr/7 points \+ 5 de bonus = 12 points/,'command-route public win reports the configured bonus');
 ok(!exists($entry->{object}{games}{'#test'}),'custom-bonus final round also finishes immediately');
+
+my $unicode_channel = '#夜航🦉';
+$manager->set_v3_channel_policy('longest-word-v3', $unicode_channel, mode => 'on',
+    config => { rounds => 1 });
+my $handler = $bot->{registry}->handler_for('motlong', 'public');
+$clock = 300;
+$before = @{$bot->{wire}};
+$handler->($ctx->('Alice', $unicode_channel, 1, 'start'));
+is(scalar @{$bot->{wire}}, $before + 1, 'Unicode channel receives its opening draw');
+is($bot->{wire}[-1][1], $unicode_channel, 'opening draw keeps the exact IRC channel name');
+like($bot->{wire}[-1][2], qr/Manche 1\/1/, 'Unicode channel starts a real round');
+$clock = 301;
+$word->('Alice', 'POUFFAS', 1, $unicode_channel);
+$handler->($ctx->('Alice', $unicode_channel, 1, 'score'));
+like($bot->{wire}[-1][2], qr/Total : 10 pts/, 'winning a Unicode channel round persists the score');
+$handler->($ctx->('Alice', $unicode_channel, 1, 'records'));
+like($bot->{wire}[-1][2], qr/Alice 10 pts/, 'Unicode channel records are readable after the match');
+$call->('Alice', 1, 'score');
+like($bot->{wire}[-1][2], qr/Total : 12 pts/, 'Unicode channel scores do not affect the ASCII channel');
+
 $manager->unregister_plugin('longest-word-v3');
 done_testing;

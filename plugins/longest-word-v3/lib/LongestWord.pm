@@ -419,8 +419,9 @@ sub command_motlong {
             1;
         };
         return $self->_notice($context, $inv, 'Stockage des scores ou fuseau indisponible : partie non démarrée.') unless $ready;
+        my $seed = join('|', $key, $$, $self->{wall_clock}->(), ++$self->{serial}, rand());
         $game = { channel => $key, starter => _identity($inv),
-            id => sha256_hex(join('|', $key, $$, $self->{wall_clock}->(), ++$self->{serial}, rand())),
+            id => sha256_hex(encode('UTF-8', $seed)),
             letters => $inv->config_value('letters') // 10,
             vowels => $inv->config_value('vowels') // 4,
             attempts => {}, request => 0,
