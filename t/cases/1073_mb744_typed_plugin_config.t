@@ -61,6 +61,23 @@ return sub {
     $assert->like($@ // '', qr/required channel config 'room' is missing/,
         'required typed values cannot silently disappear');
 
+    require Mediabot::Plugin::ChannelPolicyV3;
+    my $optional_off = Mediabot::Plugin::ChannelPolicyV3->new(schema => $required);
+    my $off = eval { $optional_off->set('#test', mode => 'off', config => {}) };
+    $assert->ok($off && $off->{mode} eq 'off' && !exists($off->{config}{room}),
+        'an explicit off policy can carry an incomplete configuration');
+    for my $mode (qw(on observe)) {
+        $ok = eval { $optional_off->set('#test', mode => $mode); 1 };
+        $assert->like($@ // '', qr/required channel config 'room' is missing/,
+            "$mode still requires room before a handler can run");
+    }
+    $ok = eval { $optional_off->set('#test', mode => 'off', config => { room => 'x' }); 1 };
+    $assert->like($@ // '', qr/config 'room' is shorter than 2/,
+        'off mode still validates any value supplied by the operator');
+    $ok = eval { $optional_off->set('#test', mode => 'off', config => { wrong => 'value' }); 1 };
+    $assert->like($@ // '', qr/unknown channel config field 'wrong'/,
+        'off mode still rejects unknown configuration fields');
+
     my $copy = $schema->definition;
     $copy->{greeting}{default} = 'changed';
     $assert->like($schema->normalize({})->{greeting}, qr/capability-scoped/,
@@ -113,7 +130,6 @@ return sub {
     my $accepted = eval { Mediabot::Plugin::ManifestV3->validate($bad_manifest); 1 };
     push @invalid_errors, 'manifest validation did not reject an infinite bound'
         if $accepted || $@ !~ /invalid maximum/;
-    require Mediabot::Plugin::ChannelPolicyV3;
     my $policy = Mediabot::Plugin::ChannelPolicyV3->new(schema=>$integers);
     $policy->set('#test',mode=>'observe',config=>{count=>7});
     $accepted = eval { $policy->set('#test',mode=>'on',config=>{count=>'9'x400}); 1 };

@@ -197,7 +197,7 @@ sub defaults {
 }
 
 sub normalize {
-    my ($self, $config) = @_;
+    my ($self, $config, %options) = @_;
     $config = {} unless defined $config;
     die "Plugin API v3: channel config must be an object\n"
         unless ref($config) eq 'HASH';
@@ -217,7 +217,7 @@ sub normalize {
         elsif (exists $spec->{default}) {
             $effective{$name} = _clone($spec->{default});
         }
-        elsif ($spec->{required}) {
+        elsif ($spec->{required} && !$options{allow_missing_required}) {
             die "Plugin API v3: required channel config '$name' is missing\n";
         }
     }

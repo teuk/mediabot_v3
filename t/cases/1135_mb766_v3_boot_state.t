@@ -104,6 +104,28 @@ return sub {
     $assert->is($third->count, 0,
         'persistent unload leaves a cold manager empty');
 
+    {
+        my $data_dir = tempdir(CLEANUP => 1);
+        my $name = 'short-content-v3';
+        my $writer = manager_1135($data_dir);
+        $writer->load_package_v3_persistent($name, grants => [qw(irc.reply http.fetch storage.kv)]);
+        $writer->set_v3_channel_policy_persistent($name, '#active',
+            mode => 'on', config => \%config);
+        my $parked = $writer->set_v3_channel_policy_persistent($name, '#inactive', mode => 'off');
+        $writer->set_v3_enabled_persistent($name, 1);
+        $assert->ok(!exists($parked->{config}{endpoint}),
+            'an explicit off policy can be saved before its required endpoint is configured');
+
+        my $reader = manager_1135($data_dir);
+        my $restored = $reader->restore_v3_runtime_state;
+        $assert->ok(!@{$restored->{errors}} && $reader->is_enabled($name),
+            'an unconfigured off channel does not prevent the package restoring enabled');
+        my $json = JSON::PP->new->canonical;
+        $assert->is($json->encode($reader->v3_runtime_state_snapshot),
+            $json->encode($writer->v3_runtime_state_snapshot),
+            'restart keeps both the active channel and the explicit off channel with their exact settings');
+    }
+
     # MB912: real disk and cold restores must retain Unicode config/channel keys.
     for my $vector (
         ['ascii', '#test', 'ASCII prefix', 'on'],

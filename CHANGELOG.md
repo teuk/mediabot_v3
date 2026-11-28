@@ -1,3 +1,8 @@
+## MB1436 — Restore API v3 packages with unconfigured off channels
+
+- Allow an off channel to retain an incomplete configuration across restart.
+- Continue validating supplied values in all modes and require complete configuration in on and observe.
+
 ## MB1435 — Keep API v3 channel work active when policy saving fails
 
 - Apply persistent channel policy changes and resets after the boot ledger is saved.

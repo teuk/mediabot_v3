@@ -81,7 +81,9 @@ sub set {
     my $existing = $self->{policies}{$key};
     my $effective;
     if (exists $args{config}) {
-        $effective = $self->{schema}->normalize($args{config});
+        # Restoring an explicit off policy may supply only the saved defaults.
+        $effective = $self->{schema}->normalize($args{config},
+            allow_missing_required => $mode eq 'off');
     }
     elsif ($existing) {
         $effective = $mode eq 'off'

@@ -167,6 +167,9 @@ and `-0` normalizes to zero. This avoids non-finite or rounded JSON values.
 Defaults and operator overrides are normalized by the core. Every invocation
 receives a detached snapshot through `config()` and `config_value($name)`; a
 plugin cannot mutate the stored policy by changing that snapshot.
+`off` policies can be saved and restored before required values are filled in.
+Supplied values are validated in every mode. Switching to `on` or `observe`
+requires all mandatory values.
 
 ## Runtime boundary
 
